@@ -1,3 +1,9 @@
 [2026-07-11 01:12:23] INFO  | Atlas is online.
 [2026-07-11 01:12:50] INFO  | Atlas is online.
 [2026-07-11 01:20:39] INFO  | Atlas is online.
+[2026-07-11 01:29:04] INFO  | Running dependency checks...
+[2026-07-11 01:29:04] INFO  | Found: logs
+[2026-07-11 01:29:04] INFO  | Found: docs
+[2026-07-11 01:29:04] INFO  | Found: atlas
+[2026-07-11 01:29:04] INFO  | Dependency check passed.
+[2026-07-11 01:29:04] INFO  | Atlas is online.
