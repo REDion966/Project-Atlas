@@ -12,6 +12,9 @@ from atlas.config.settings import (
     WELCOME_MESSAGE,
 )
 
+from atlas.utils.logger import Logger
+
+
 def start():
     """Start Atlas."""
 
@@ -23,5 +26,5 @@ def start():
     print(f"Author: {AUTHOR}")
     print()
 
-    print(WELCOME_MESSAGE)
+    Logger.info(WELCOME_MESSAGE)
     print()
