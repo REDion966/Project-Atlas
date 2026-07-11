@@ -1,29 +1,23 @@
 """
 Atlas Startup Module
 
-Responsible for starting Atlas and displaying
-basic startup information.
+Responsible for starting Atlas.
 """
 
 from atlas.config.settings import Settings
 from atlas.utils.logger import Logger
-from atlas.core.dependency_checker import DependencyChecker
+from atlas.core.boot_manager import BootManager
+from atlas.core.boot_screen import BootScreen
 
 
 def start():
     """Start Atlas."""
 
-    print("=" * 40)
-    print(Settings.PROJECT_NAME)
-    print("=" * 40)
+    # Display the Atlas boot screen
+    BootScreen.show()
 
-    print(f"Version: {Settings.VERSION}")
-    print(f"Author: {Settings.AUTHOR}")
-    print()
+    # Execute the Atlas boot sequence
+    if BootManager.boot():
+        Logger.info(Settings.WELCOME_MESSAGE)
 
-    # Run Atlas health check
-    DependencyChecker.run()
-
-    # Startup message
-    Logger.info(Settings.WELCOME_MESSAGE)
     print()
