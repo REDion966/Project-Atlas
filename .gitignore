@@ -4,3 +4,9 @@ __pycache__/
 
 # Virtual Environment
 .venv/
+
+# Atlas Runtime Data
+memory.json
+
+# Logs
+logs/
