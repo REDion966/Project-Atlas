@@ -13,7 +13,11 @@ from atlas.memory.constants import MemorySections
 class Storage:
     """Handles persistent memory storage."""
 
-    MEMORY_FILE = Path("memory.json")
+    # Directory for Atlas runtime data
+    DATA_DIR = Path("data")
+
+    # Memory file location
+    MEMORY_FILE = DATA_DIR / "memory.json"
 
     DEFAULT_MEMORY = {
         MemorySections.IDENTITY: {},
@@ -28,6 +32,10 @@ class Storage:
     def load():
         """Load memory from disk."""
 
+        # Ensure the data directory exists
+        Storage.DATA_DIR.mkdir(exist_ok=True)
+
+        # Create the memory file if it doesn't exist
         if not Storage.MEMORY_FILE.exists():
             Storage.save(Storage.DEFAULT_MEMORY)
 
@@ -37,6 +45,9 @@ class Storage:
     @staticmethod
     def save(data):
         """Save memory to disk."""
+
+        # Ensure the data directory exists
+        Storage.DATA_DIR.mkdir(exist_ok=True)
 
         with open(Storage.MEMORY_FILE, "w", encoding="utf-8") as file:
             json.dump(data, file, indent=4)

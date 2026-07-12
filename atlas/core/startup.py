@@ -6,7 +6,7 @@ Responsible for starting Atlas.
 
 from atlas.config.settings import Settings
 from atlas.utils.logger import Logger
-from atlas.core.boot_manager import BootManager
+from atlas.core.application import Application
 from atlas.core.boot_screen import BootScreen
 
 
@@ -16,8 +16,11 @@ def start():
     # Display the Atlas boot screen
     BootScreen.show()
 
-    # Execute the Atlas boot sequence
-    if BootManager.boot():
+    # Create Atlas application
+    app = Application()
+
+    # Run Atlas
+    if app.run():
         Logger.info(Settings.WELCOME_MESSAGE)
 
     print()
