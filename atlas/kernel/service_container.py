@@ -1,7 +1,7 @@
 """
 Atlas Service Container
 
-Central registry for Atlas services.
+Central registry and lifecycle manager for Atlas services.
 """
 
 from typing import Any
@@ -9,7 +9,7 @@ from typing import Any
 
 class ServiceContainer:
     """
-    Stores and retrieves Atlas services.
+    Stores, retrieves, starts, and stops Atlas services.
     """
 
     def __init__(self):
@@ -71,3 +71,27 @@ class ServiceContainer:
         """
 
         return sorted(self._services.keys())
+
+    def start_all(self) -> None:
+        """
+        Start every registered service.
+        """
+
+        for service in self._services.values():
+            start = getattr(service, "start", None)
+
+            if callable(start):
+                start()
+
+    def stop_all(self) -> None:
+        """
+        Stop every registered service.
+        """
+
+        services = list(self._services.values())
+
+        for service in reversed(services):
+            stop = getattr(service, "stop", None)
+
+            if callable(stop):
+                stop()

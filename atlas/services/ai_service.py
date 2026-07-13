@@ -12,24 +12,30 @@ class AIService(Service):
     """Atlas AI service."""
 
     def __init__(self, router: AIRouter):
+        super().__init__("AI Service")
         self._router = router
 
     def start(self):
         """Start the AI service."""
-        pass
+
+        self.mark_running()
 
     def stop(self):
         """Stop the AI service."""
-        pass
+
+        super().stop()
 
     def chat(self, messages):
         """Chat with the active AI provider."""
+
         return self._router.chat(messages)
 
     def complete(self, prompt):
         """Generate a completion."""
+
         return self._router.complete(prompt)
 
     def models(self):
         """Return available models."""
+
         return self._router.models()
