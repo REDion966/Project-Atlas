@@ -1,14 +1,13 @@
 """
-Project Atlas
-Main Entry Point
+Atlas Entry Point.
 """
 
-from atlas.core.startup import start
+from atlas.cli.cli import AtlasCLI
 
 
 def main():
-    """Launch Atlas."""
-    start()
+    cli = AtlasCLI()
+    cli.run()
 
 
 if __name__ == "__main__":
