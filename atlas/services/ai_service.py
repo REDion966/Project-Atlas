@@ -6,20 +6,17 @@ Provides the public interface for Atlas AI.
 
 from atlas.services.service import Service
 from atlas.ai.router.ai_router import AIRouter
-from atlas.ai.providers.mock_provider import MockProvider
 
 
 class AIService(Service):
     """Atlas AI service."""
 
-    def __init__(self):
-        self._router = AIRouter()
+    def __init__(self, router: AIRouter):
+        self._router = router
 
     def start(self):
         """Start the AI service."""
-
-        self._router.registry.register(MockProvider())
-        self._router.use("Mock Provider")
+        pass
 
     def stop(self):
         """Stop the AI service."""
