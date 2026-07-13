@@ -6,7 +6,7 @@ The format is inspired by Keep a Changelog and follows Semantic Versioning.
 
 ---
 
-# v0.3.0
+# v0.3.0-alpha
 Release Date: 13 July 2026
 
 ## Added
@@ -14,24 +14,26 @@ Release Date: 13 July 2026
 ### AI System
 - Integrated Ollama as Atlas's first local AI provider.
 - Added support for the Qwen3 8B local language model.
-- Added AIResponse support for real provider responses.
+- Added AIResponse support for standardized AI responses.
 - Added integration tests for the Ollama provider.
 
+### Kernel
+- Added Atlas Service Container.
+
 ### Testing
-- Expanded automated test suite to 16 passing tests.
+- Expanded automated test suite to 30 passing tests.
 
 ## Improved
 
 - Established the foundation for local AI inference.
 - Prepared Atlas architecture for future conversation management.
+- Introduced the first building block of the Atlas Kernel.
 
 ## Status
 
-✅ Milestone 3 Completed
+🚧 Milestone VII (Kernel) – Phase 1 Completed
 
-**First Local Intelligence**
-
-Atlas is now capable of communicating with a real locally hosted Large Language Model (LLM) through Ollama, removing the dependency on mock AI responses and establishing the foundation for future conversational intelligence.
+Atlas now includes a centralized Service Container that will manage future services including AI, Conversation, Memory, Planning, Vision, Voice, Automation, and Plugins.
 
 ---
 
