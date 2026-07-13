@@ -21,13 +21,20 @@ class ConversationService:
         Args:
             ai_service: A configured AIService instance.
         """
+
         self._history = History()
         self._context = ContextManager()
         self._prompt_builder = PromptBuilder()
         self._ai = ai_service
 
-        # Start with one conversation
+        # Create the initial conversation.
         self._conversation = self._history.create()
+
+    @property
+    def conversation(self):
+        """Return the active conversation."""
+
+        return self._conversation
 
     def send(self, text: str) -> Message:
         """
