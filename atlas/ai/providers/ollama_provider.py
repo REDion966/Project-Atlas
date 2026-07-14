@@ -4,6 +4,9 @@ Atlas Ollama Provider
 Provides local AI access through Ollama.
 """
 
+import json
+from collections.abc import Iterator
+
 import requests
 
 from atlas.ai.provider import AIProvider
@@ -28,7 +31,7 @@ class OllamaProvider(AIProvider):
         return "Ollama"
 
     def chat(self, messages):
-        """Generate a chat response."""
+        """Generate a complete chat response."""
 
         payload = {
             "model": self._model,
@@ -51,6 +54,42 @@ class OllamaProvider(AIProvider):
             provider=self.name(),
             model=self._model,
         )
+
+    def stream_chat(
+        self,
+        messages,
+    ) -> Iterator[str]:
+        """Stream chat response from Ollama."""
+
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "stream": True,
+        }
+
+        response = requests.post(
+            f"{self.BASE_URL}/api/chat",
+            json=payload,
+            stream=True,
+            timeout=self._timeout,
+        )
+
+        response.raise_for_status()
+
+        for line in response.iter_lines():
+
+            if not line:
+                continue
+
+            data = line.decode("utf-8")
+
+            chunk = json.loads(data)
+
+            if "message" in chunk:
+                yield chunk["message"]["content"]
+
+            if chunk.get("done", False):
+                break
 
     def complete(self, prompt):
         """Generate a completion."""

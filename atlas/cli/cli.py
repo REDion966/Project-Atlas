@@ -32,9 +32,12 @@ class AtlasCLI:
                     print("\nGoodbye!")
                     break
 
-                response = self._atlas.chat(user_input)
+                print("\nAtlas > ", end="", flush=True)
 
-                print(f"\nAtlas > {response.content}\n")
+                for chunk in self._atlas.stream(user_input):
+                    print(chunk, end="", flush=True)
+
+                print("\n")
 
         finally:
             self._atlas.shutdown()

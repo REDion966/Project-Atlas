@@ -4,6 +4,8 @@ Atlas Kernel
 The root application object.
 """
 
+from collections.abc import Iterator
+
 from atlas.ai.ai_manager import AIManager
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
@@ -39,31 +41,27 @@ class Atlas:
         return self._started
 
     def start(self):
-        """
-        Start Atlas.
-        """
+        """Start Atlas."""
 
         if self._started:
             return
 
-        # Load configuration
         self._config.load()
 
-        settings = self._config.settings
+        provider = self._config.get("ai", "provider")
+        model = self._config.get("ai", "model")
+        timeout = self._config.get("ai", "timeout")
 
-        # Initialize AI
         self._ai_manager.initialize(
-            provider=settings.ai.provider,
-            model=settings.ai.model,
-            timeout=settings.ai.timeout,
+            provider,
+            model,
+            timeout,
         )
 
-        # Create conversation service
         self._conversation = ConversationService(
             self._ai_manager.service
         )
 
-        # Register services
         self._container.register(
             "ai",
             self._ai_manager.service,
@@ -74,15 +72,12 @@ class Atlas:
             self._conversation,
         )
 
-        # Start registered services
         self._container.start_all()
 
         self._started = True
 
     def chat(self, text: str):
-        """
-        Send a message to Atlas.
-        """
+        """Send a message to Atlas."""
 
         if not self._started:
             raise RuntimeError(
@@ -91,10 +86,21 @@ class Atlas:
 
         return self._conversation.send(text)
 
+    def stream(
+        self,
+        text: str,
+    ) -> Iterator[str]:
+        """Stream a response from Atlas."""
+
+        if not self._started:
+            raise RuntimeError(
+                "Atlas has not been started."
+            )
+
+        yield from self._conversation.stream(text)
+
     def shutdown(self):
-        """
-        Shutdown Atlas.
-        """
+        """Shutdown Atlas."""
 
         if not self._started:
             return

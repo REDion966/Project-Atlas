@@ -5,6 +5,7 @@ Every AI provider must inherit from this interface.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 
 
 class AIProvider(ABC):
@@ -17,7 +18,15 @@ class AIProvider(ABC):
 
     @abstractmethod
     def chat(self, messages):
-        """Generate a chat response."""
+        """Generate a complete chat response."""
+        pass
+
+    @abstractmethod
+    def stream_chat(
+        self,
+        messages,
+    ) -> Iterator[str]:
+        """Stream chat response chunks."""
         pass
 
     @abstractmethod

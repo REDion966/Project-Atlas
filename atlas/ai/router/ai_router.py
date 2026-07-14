@@ -4,6 +4,8 @@ Atlas AI Router
 Routes AI requests through the Provider Registry.
 """
 
+from collections.abc import Iterator
+
 from atlas.ai.registry import AIProviderRegistry
 
 
@@ -25,7 +27,9 @@ class AIRouter:
         provider = self._registry.get(provider_name)
 
         if provider is None:
-            raise RuntimeError(f"Provider '{provider_name}' is not registered.")
+            raise RuntimeError(
+                f"Provider '{provider_name}' is not registered."
+            )
 
         self._active_provider = provider
 
@@ -35,21 +39,47 @@ class AIRouter:
 
     def chat(self, messages):
         """Route chat requests."""
+
         if self._active_provider is None:
-            raise RuntimeError("No active AI provider selected.")
+            raise RuntimeError(
+                "No active AI provider selected."
+            )
 
         return self._active_provider.chat(messages)
 
+    def stream_chat(
+        self,
+        messages,
+    ) -> Iterator[str]:
+        """Route streaming chat requests."""
+
+        if self._active_provider is None:
+            raise RuntimeError(
+                "No active AI provider selected."
+            )
+
+        return self._active_provider.stream_chat(
+            messages
+        )
+
     def complete(self, prompt):
         """Route completion requests."""
-        if self._active_provider is None:
-            raise RuntimeError("No active AI provider selected.")
 
-        return self._active_provider.complete(prompt)
+        if self._active_provider is None:
+            raise RuntimeError(
+                "No active AI provider selected."
+            )
+
+        return self._active_provider.complete(
+            prompt
+        )
 
     def models(self):
         """Return models from the active provider."""
+
         if self._active_provider is None:
-            raise RuntimeError("No active AI provider selected.")
+            raise RuntimeError(
+                "No active AI provider selected."
+            )
 
         return self._active_provider.models()
