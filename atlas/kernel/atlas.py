@@ -5,6 +5,7 @@ The root application object.
 """
 
 from atlas.ai.ai_manager import AIManager
+from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
 from atlas.kernel.service_container import ServiceContainer
 
@@ -19,6 +20,8 @@ class Atlas:
 
     def __init__(self):
         self._container = ServiceContainer()
+
+        self._config = Configuration()
 
         self._ai_manager = AIManager()
         self._conversation: ConversationService | None = None
@@ -43,8 +46,16 @@ class Atlas:
         if self._started:
             return
 
+        # Load configuration
+        self._config.load()
+
+        provider = self._config.get(
+            "ai",
+            "provider",
+        )
+
         # Initialize AI
-        self._ai_manager.initialize()
+        self._ai_manager.initialize(provider)
 
         # Create conversation service
         self._conversation = ConversationService(

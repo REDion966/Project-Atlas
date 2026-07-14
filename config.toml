@@ -1,0 +1,17 @@
+# Atlas Configuration
+
+[application]
+name = "Atlas"
+version = "0.5.0-alpha"
+
+[ai]
+provider = "Mock Provider"
+model = "atlas-mock-v1"
+temperature = 0.7
+timeout = 300
+
+[conversation]
+history_limit = 20
+
+[logging]
+level = "INFO"
