@@ -40,6 +40,16 @@ class Atlas:
         """Return whether Atlas has been started."""
         return self._started
 
+    @property
+    def provider(self):
+        """Return the active AI provider."""
+        return self._ai_manager.provider
+
+    def models(self):
+        """Return available AI models."""
+
+        return self._ai_manager.service.models()
+
     def start(self):
         """Start Atlas."""
 
