@@ -1,0 +1,25 @@
+{
+    "version": 1,
+    "id": "e566e400-d170-46a1-99bb-57ff74c68cff",
+    "title": "New Conversation",
+    "created_at": "2026-07-14T17:16:52.815970+00:00",
+    "updated_at": "2026-07-14T17:17:34.981428+00:00",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Hello"
+        },
+        {
+            "role": "assistant",
+            "content": "Hello! How can I assist you today? 😊"
+        },
+        {
+            "role": "user",
+            "content": "Tell me a joke"
+        },
+        {
+            "role": "assistant",
+            "content": "Here's a light-hearted joke for you:  \n\n**\"Why don’t scientists trust atoms? Because they make up everything!\"** 😄  \n\nLet me know if you'd like another!"
+        }
+    ]
+}

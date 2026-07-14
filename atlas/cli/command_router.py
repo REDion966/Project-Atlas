@@ -44,6 +44,14 @@ class CommandRouter:
             self._show_models()
             return True
 
+        if command == "/save":
+            self._save_conversation()
+            return True
+
+        if command == "/load":
+            self._load_conversation()
+            return True
+
         return False
 
     def _show_help(self):
@@ -51,9 +59,11 @@ class CommandRouter:
 
         print("\nAvailable Commands\n")
         print("  /help      Show this help menu")
-        print("  /models    Show installed AI models")
-        print("  /provider  Show active AI provider")
         print("  /version   Show Atlas version")
+        print("  /provider  Show active AI provider")
+        print("  /models    Show installed AI models")
+        print("  /save      Save current conversation")
+        print("  /load      Load a saved conversation")
         print("  /clear     Clear the screen")
         print("  /exit      Exit Atlas")
         print()
@@ -87,3 +97,49 @@ class CommandRouter:
             print(f"{index}. {model}")
 
         print()
+
+    def _save_conversation(self):
+        """Save the current conversation."""
+
+        filepath = self._atlas.save_conversation()
+
+        print("\nConversation Saved\n")
+        print(filepath)
+        print()
+
+    def _load_conversation(self):
+        """Load a saved conversation."""
+
+        files = self._atlas.saved_conversations()
+
+        if not files:
+            print("\nNo saved conversations found.\n")
+            return
+
+        print("\nSaved Conversations\n")
+
+        for index, file in enumerate(files, start=1):
+            print(f"{index}. {file.name}")
+
+        print()
+
+        try:
+            choice = int(
+                input("Select conversation: ")
+            )
+
+            if choice < 1 or choice > len(files):
+                print("\nInvalid selection.\n")
+                return
+
+        except ValueError:
+            print("\nInvalid selection.\n")
+            return
+
+        filepath = files[choice - 1]
+
+        self._atlas.load_conversation(
+            filepath
+        )
+
+        print("\nConversation Loaded\n")

@@ -5,6 +5,7 @@ The root application object.
 """
 
 from collections.abc import Iterator
+from pathlib import Path
 
 from atlas.ai.ai_manager import AIManager
 from atlas.config.configuration import Configuration
@@ -108,6 +109,47 @@ class Atlas:
             )
 
         yield from self._conversation.stream(text)
+
+    def save_conversation(self) -> Path:
+        """
+        Save the active conversation.
+        """
+
+        if not self._started:
+            raise RuntimeError(
+                "Atlas has not been started."
+            )
+
+        return self._conversation.save()
+
+    def load_conversation(
+        self,
+        filepath: Path,
+    ):
+        """
+        Load a saved conversation.
+        """
+
+        if not self._started:
+            raise RuntimeError(
+                "Atlas has not been started."
+            )
+
+        return self._conversation.load(
+            filepath
+        )
+
+    def saved_conversations(self):
+        """
+        Return saved conversations.
+        """
+
+        if not self._started:
+            raise RuntimeError(
+                "Atlas has not been started."
+            )
+
+        return self._conversation.saved_conversations()
 
     def shutdown(self):
         """Shutdown Atlas."""
