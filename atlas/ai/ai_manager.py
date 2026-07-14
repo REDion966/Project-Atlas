@@ -17,14 +17,30 @@ class AIManager:
         self._router = AIRouter()
         self._service = AIService(self._router)
 
-    def initialize(self, provider: str):
+    def initialize(
+        self,
+        provider: str,
+        model: str,
+        timeout: int,
+    ):
         """Initialize Atlas AI."""
 
-        self._router.registry.register(MockProvider())
-        self._router.registry.register(OllamaProvider())
+        # Register providers
+        self._router.registry.register(
+            MockProvider()
+        )
 
+        self._router.registry.register(
+            OllamaProvider(
+                model=model,
+                timeout=timeout,
+            )
+        )
+
+        # Select active provider
         self._router.use(provider)
 
+        # Start AI service
         self._service.start()
 
     @property

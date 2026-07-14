@@ -5,8 +5,8 @@ name = "Atlas"
 version = "0.5.0-alpha"
 
 [ai]
-provider = "Mock Provider"
-model = "atlas-mock-v1"
+provider = "Ollama"
+model = "qwen3:8b"
 temperature = 0.7
 timeout = 300
 

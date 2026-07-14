@@ -15,8 +15,13 @@ class OllamaProvider(AIProvider):
 
     BASE_URL = "http://localhost:11434"
 
-    def __init__(self, model="qwen3:8b"):
+    def __init__(
+        self,
+        model: str,
+        timeout: int,
+    ):
         self._model = model
+        self._timeout = timeout
 
     def name(self) -> str:
         """Return provider name."""
@@ -34,7 +39,7 @@ class OllamaProvider(AIProvider):
         response = requests.post(
             f"{self.BASE_URL}/api/chat",
             json=payload,
-            timeout=300,
+            timeout=self._timeout,
         )
 
         response.raise_for_status()
@@ -59,7 +64,7 @@ class OllamaProvider(AIProvider):
         response = requests.post(
             f"{self.BASE_URL}/api/generate",
             json=payload,
-            timeout=300,
+            timeout=self._timeout,
         )
 
         response.raise_for_status()
@@ -77,7 +82,7 @@ class OllamaProvider(AIProvider):
 
         response = requests.get(
             f"{self.BASE_URL}/api/tags",
-            timeout=30,
+            timeout=self._timeout,
         )
 
         response.raise_for_status()

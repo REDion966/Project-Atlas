@@ -49,13 +49,14 @@ class Atlas:
         # Load configuration
         self._config.load()
 
-        provider = self._config.get(
-            "ai",
-            "provider",
-        )
+        settings = self._config.settings
 
         # Initialize AI
-        self._ai_manager.initialize(provider)
+        self._ai_manager.initialize(
+            provider=settings.ai.provider,
+            model=settings.ai.model,
+            timeout=settings.ai.timeout,
+        )
 
         # Create conversation service
         self._conversation = ConversationService(

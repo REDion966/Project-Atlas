@@ -1,3 +1,7 @@
+"""
+Tests for Atlas Ollama Provider.
+"""
+
 import unittest
 
 from atlas.ai.providers.ollama_provider import OllamaProvider
@@ -6,12 +10,15 @@ from atlas.ai.providers.ollama_provider import OllamaProvider
 class TestOllamaProvider(unittest.TestCase):
 
     def setUp(self):
-        self.provider = OllamaProvider()
+        self.provider = OllamaProvider(
+            model="qwen3:8b",
+            timeout=300,
+        )
 
     def test_name(self):
         self.assertEqual(
             self.provider.name(),
-            "Ollama"
+            "Ollama",
         )
 
     def test_models(self):
@@ -19,21 +26,21 @@ class TestOllamaProvider(unittest.TestCase):
 
         self.assertIn(
             "qwen3:8b",
-            models
+            models,
         )
 
     def test_complete(self):
         response = self.provider.complete(
-            "Say hello."
+            "Say hello.",
         )
 
         self.assertTrue(
-            len(response.text) > 0
+            len(response.text) > 0,
         )
 
         self.assertEqual(
             response.provider,
-            "Ollama"
+            "Ollama",
         )
 
 
