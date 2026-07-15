@@ -5,6 +5,7 @@ Tests for Atlas Memory Manager.
 import unittest
 from uuid import uuid4
 
+from atlas.memory.enums import MemoryImportance
 from atlas.memory.manager import MemoryManager
 from atlas.memory.models.memory import Memory
 
@@ -72,6 +73,41 @@ class TestMemoryManager(unittest.TestCase):
         results = self.manager.search("python")
 
         self.assertGreaterEqual(len(results), 1)
+
+    def test_filter_by_tag(self):
+        memory = Memory(
+            id=str(uuid4()),
+            title="Python",
+            content="Atlas Memory",
+            tags=["python", "atlas"],
+        )
+
+        self.manager.add_memory(memory)
+
+        results = self.manager.filter_by_tag("python")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].id, memory.id)
+
+    def test_filter_by_importance(self):
+        memory = Memory(
+            id=str(uuid4()),
+            title="Critical",
+            content="Important memory",
+            importance=MemoryImportance.HIGH,
+        )
+
+        self.manager.add_memory(memory)
+
+        results = self.manager.filter_by_importance(
+            MemoryImportance.HIGH
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            results[0].importance,
+            MemoryImportance.HIGH,
+        )
 
 
 if __name__ == "__main__":

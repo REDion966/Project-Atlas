@@ -53,3 +53,34 @@ class MemoryManager:
                 results.append(memory)
 
         return results
+
+    def filter_by_tag(self, tag: str) -> list[Memory]:
+        """
+        Return all memories containing the given tag.
+        """
+
+        tag = tag.lower()
+
+        return [
+            memory
+            for memory in self.list_memories()
+            if any(
+                existing.lower() == tag
+                for existing in memory.tags
+            )
+        ]
+
+    def filter_by_importance(
+        self,
+        minimum_importance: int,
+    ) -> list[Memory]:
+        """
+        Return memories whose importance is
+        greater than or equal to the given value.
+        """
+
+        return [
+            memory
+            for memory in self.list_memories()
+            if memory.importance >= minimum_importance
+        ]
