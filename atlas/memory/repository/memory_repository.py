@@ -11,38 +11,63 @@ from atlas.memory.storage.json_storage import Storage
 class MemoryRepository:
     """Repository for Memory objects."""
 
+    MEMORY_KEY = "memories"
+
     def __init__(self):
         self._storage = Storage()
 
-    def load(self) -> dict:
+    def _load_data(self) -> dict:
+        """Load the complete storage file."""
         return self._storage.load()
 
-    def save(self, data: dict):
+    def _save_data(self, data: dict) -> None:
+        """Save the complete storage file."""
         self._storage.save(data)
 
-    def get(self, memory_id: str) -> Memory | None:
-        data = self.load()
+    def _memory_section(self) -> dict:
+        """Return the memories section."""
 
-        if memory_id not in data:
+        data = self._load_data()
+
+        if self.MEMORY_KEY not in data:
+            data[self.MEMORY_KEY] = {}
+            self._save_data(data)
+
+        return data[self.MEMORY_KEY]
+
+    def load(self) -> dict:
+        """Return only the memories section."""
+        return self._memory_section()
+
+    def get(self, memory_id: str) -> Memory | None:
+        memories = self._memory_section()
+
+        data = memories.get(memory_id)
+
+        if data is None:
             return None
 
-        return Memory.from_dict(data[memory_id])
+        return Memory.from_dict(data)
 
-    def add(self, memory: Memory):
-        data = self.load()
+    def add(self, memory: Memory) -> None:
+        data = self._load_data()
 
-        data[memory.id] = memory.to_dict()
+        memories = data.setdefault(self.MEMORY_KEY, {})
 
-        self.save(data)
+        memories[memory.id] = memory.to_dict()
+
+        self._save_data(data)
 
     def delete(self, memory_id: str) -> bool:
-        data = self.load()
+        data = self._load_data()
 
-        if memory_id not in data:
+        memories = data.setdefault(self.MEMORY_KEY, {})
+
+        if memory_id not in memories:
             return False
 
-        del data[memory_id]
+        del memories[memory_id]
 
-        self.save(data)
+        self._save_data(data)
 
         return True

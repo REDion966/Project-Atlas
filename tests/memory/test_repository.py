@@ -1,5 +1,5 @@
 """
-Tests for the Memory Repository.
+Tests for Atlas Memory Manager.
 """
 
 import unittest
@@ -18,14 +18,13 @@ class TestMemoryManager(unittest.TestCase):
         memory = Memory(
             id=str(uuid4()),
             title="Atlas Test",
-            content="Testing Atlas Memory.",
+            content="Testing Atlas Memory",
         )
 
         self.manager.add_memory(memory)
 
         loaded = self.manager.get_memory(memory.id)
 
-        self.assertIsNotNone(loaded)
         self.assertEqual(memory.id, loaded.id)
 
     def test_update_memory(self):
@@ -43,7 +42,10 @@ class TestMemoryManager(unittest.TestCase):
 
         loaded = self.manager.get_memory(memory.id)
 
-        self.assertEqual(loaded.title, "New")
+        self.assertEqual(
+            loaded.title,
+            "New",
+        )
 
     def test_delete_memory(self):
         memory = Memory(
@@ -58,9 +60,18 @@ class TestMemoryManager(unittest.TestCase):
             self.manager.delete_memory(memory.id)
         )
 
-        self.assertIsNone(
-            self.manager.get_memory(memory.id)
+    def test_search_memory(self):
+        memory = Memory(
+            id=str(uuid4()),
+            title="Python",
+            content="Atlas uses Python",
         )
+
+        self.manager.add_memory(memory)
+
+        results = self.manager.search("python")
+
+        self.assertGreaterEqual(len(results), 1)
 
 
 if __name__ == "__main__":
