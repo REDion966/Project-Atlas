@@ -11,6 +11,7 @@ from pathlib import Path
 from atlas.workspace.models.workspace import Workspace
 from atlas.workspace.storage import WorkspaceStorage
 from atlas.workspace.models.project import Project
+from atlas.workspace.models.resource import Resource
 
 
 class WorkspaceManager:
@@ -116,4 +117,69 @@ class WorkspaceManager:
 
         return self._workspace.remove_project(
             project_id
-        )    
+        )
+    
+    def create_resource(
+        self,
+        project_id: str,
+        resource: Resource,
+    ) -> Resource:
+        """Add a resource to a project."""
+
+        project = self.get_project(project_id)
+
+        if project is None:
+            raise ValueError(
+                "Project not found."
+            )
+
+        project.add_resource(resource)
+
+        return resource
+
+    def get_resource(
+        self,
+        project_id: str,
+        resource_id: str,
+    ) -> Resource | None:
+        """Return a resource."""
+
+        project = self.get_project(project_id)
+
+        if project is None:
+            raise ValueError(
+                "Project not found."
+            )
+
+        return project.get_resource(resource_id)
+
+    def list_resources(
+        self,
+        project_id: str,
+    ) -> list[Resource]:
+        """Return all resources."""
+
+        project = self.get_project(project_id)
+
+        if project is None:
+            raise ValueError(
+                "Project not found."
+            )
+
+        return project.resources
+
+    def delete_resource(
+        self,
+        project_id: str,
+        resource_id: str,
+    ) -> bool:
+        """Delete a resource."""
+
+        project = self.get_project(project_id)
+
+        if project is None:
+            raise ValueError(
+                "Project not found."
+            )
+
+        return project.remove_resource(resource_id)

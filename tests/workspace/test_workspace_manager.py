@@ -126,7 +126,116 @@ class TestWorkspaceManager(unittest.TestCase):
         self.assertEqual(
             len(manager.list_projects()),
             0,
-        )            
+        )
+
+    def test_create_resource(self):
+        from atlas.workspace.models.resource import Resource
+
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project("Project A")
+
+        resource = Resource(
+            name="README.md"
+        )
+
+        manager.create_resource(
+            project.id,
+            resource,
+        )
+
+        self.assertEqual(
+            len(project.resources),
+            1,
+        )
+
+    def test_get_resource(self):
+        from atlas.workspace.models.resource import Resource
+
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project("Project A")
+
+        resource = Resource(
+            name="README.md"
+        )
+
+        manager.create_resource(
+            project.id,
+            resource,
+        )
+
+        loaded = manager.get_resource(
+            project.id,
+            resource.id,
+        )
+
+        self.assertEqual(
+            loaded.id,
+            resource.id,
+        )
+
+    def test_list_resources(self):
+        from atlas.workspace.models.resource import Resource
+
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project("Project A")
+
+        manager.create_resource(
+            project.id,
+            Resource(name="A"),
+        )
+
+        manager.create_resource(
+            project.id,
+            Resource(name="B"),
+        )
+
+        self.assertEqual(
+            len(
+                manager.list_resources(
+                    project.id
+                )
+            ),
+            2,
+        )
+
+    def test_delete_resource(self):
+        from atlas.workspace.models.resource import Resource
+
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project("Project A")
+
+        resource = Resource(
+            name="README.md"
+        )
+
+        manager.create_resource(
+            project.id,
+            resource,
+        )
+
+        self.assertTrue(
+            manager.delete_resource(
+                project.id,
+                resource.id,
+            )
+        )
+
+        self.assertEqual(
+            len(project.resources),
+            0,
+        )    
 
 
 if __name__ == "__main__":
