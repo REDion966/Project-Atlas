@@ -47,47 +47,7 @@ class Workspace:
         """Add a project."""
 
         self.projects.append(project)
-        self.touch()
-
-    def add_member(
-        self,
-        member: Permission,
-    ) -> None:
-        """Add a member."""
-
-        self.members.append(member)
-        self.touch()
-
-    def get_member(
-        self,
-        member_id: str,
-    ) -> Permission | None:
-        """Return a member."""
-
-        for member in self.members:
-            if member.id == member_id:
-                return member
-
-        return None
-
-    def remove_member(
-        self,
-        member_id: str,
-    ) -> bool:
-        """Remove a member."""
-
-        for member in self.members:
-            if member.id == member_id:
-                self.members.remove(member)
-                self.touch()
-                return True
-
-        return False
-
-    def list_members(self) -> list[Permission]:
-        """Return all members."""
-
-        return self.members.copy()    
+        self.touch()    
 
     def remove_project(
         self,
