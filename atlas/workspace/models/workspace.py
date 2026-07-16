@@ -69,6 +69,11 @@ class Workspace:
                 return project
 
         return None
+    
+    def list_projects(self) -> list[Project]:
+        """Return all projects."""
+
+        return self.projects.copy()
 
     def touch(self) -> None:
         """Update modification time."""

@@ -65,6 +65,29 @@ class TestWorkspace(unittest.TestCase):
             workspace.id,
         )
 
+    def test_list_projects(self):
+        workspace = Workspace()
+
+        workspace.add_project(
+            Project(name="Project A")
+        )
+
+        workspace.add_project(
+            Project(name="Project B")
+        )
+
+        projects = workspace.list_projects()
+
+        self.assertEqual(
+            len(projects),
+            2,
+        )
+
+        self.assertIsNot(
+            projects,
+            workspace.projects,
+        )    
+
 
 if __name__ == "__main__":
     unittest.main()
