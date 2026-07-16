@@ -60,46 +60,6 @@ class Project:
         self.archived = False
         self.touch()
 
-    def add_resource(
-        self,
-        resource: Resource,
-    ) -> None:
-        """Add a resource to the project."""
-
-        self.resources.append(resource)
-        self.touch()
-
-    def get_resource(
-        self,
-        resource_id: str,
-    ) -> Resource | None:
-        """Return a resource by ID."""
-
-        for resource in self.resources:
-            if resource.id == resource_id:
-                return resource
-
-        return None
-
-    def remove_resource(
-        self,
-        resource_id: str,
-    ) -> bool:
-        """Remove a resource."""
-
-        for resource in self.resources:
-            if resource.id == resource_id:
-                self.resources.remove(resource)
-                self.touch()
-                return True
-
-        return False
-
-    def list_resources(self) -> list[Resource]:
-        """Return all resources."""
-
-        return self.resources.copy()    
-
     def touch(self) -> None:
         """Update the modification timestamp."""
 
