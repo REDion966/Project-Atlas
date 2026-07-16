@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import uuid
 
 from atlas.workspace.models.project import Project
+from atlas.workspace.models.permission import Permission
 
 
 @dataclass(slots=True)
@@ -25,6 +26,10 @@ class Workspace:
 
     projects: list[Project] = field(
         default_factory=list
+    )
+
+    members: list[Permission] = field(
+    default_factory=list
     )
 
     created_at: datetime = field(
@@ -43,6 +48,46 @@ class Workspace:
 
         self.projects.append(project)
         self.touch()
+
+    def add_member(
+        self,
+        member: Permission,
+    ) -> None:
+        """Add a member."""
+
+        self.members.append(member)
+        self.touch()
+
+    def get_member(
+        self,
+        member_id: str,
+    ) -> Permission | None:
+        """Return a member."""
+
+        for member in self.members:
+            if member.id == member_id:
+                return member
+
+        return None
+
+    def remove_member(
+        self,
+        member_id: str,
+    ) -> bool:
+        """Remove a member."""
+
+        for member in self.members:
+            if member.id == member_id:
+                self.members.remove(member)
+                self.touch()
+                return True
+
+        return False
+
+    def list_members(self) -> list[Permission]:
+        """Return all members."""
+
+        return self.members.copy()    
 
     def remove_project(
         self,
@@ -90,6 +135,10 @@ class Workspace:
                 project.to_dict()
                 for project in self.projects
             ],
+            "members": [
+                member.to_dict()
+                for member in self.members
+            ],
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -107,6 +156,10 @@ class Workspace:
             projects=[
                 Project.from_dict(project)
                 for project in data["projects"]
+            ],
+            members=[
+                Permission.from_dict(member)
+                for member in data.get("members", [])
             ],
             created_at=datetime.fromisoformat(
                 data["created_at"]

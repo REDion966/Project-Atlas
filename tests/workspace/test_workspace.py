@@ -1,5 +1,7 @@
 import unittest
 
+from atlas.workspace.enums import PermissionLevel
+from atlas.workspace.models.permission import Permission
 from atlas.workspace.models.project import Project
 from atlas.workspace.models.workspace import Workspace
 
@@ -86,7 +88,78 @@ class TestWorkspace(unittest.TestCase):
         self.assertIsNot(
             projects,
             workspace.projects,
-        )    
+        )
+
+    def test_add_member(self):
+        workspace = Workspace()
+
+        member = Permission(
+            name="user1",
+            level=PermissionLevel.FULL,
+        )
+
+        workspace.add_member(member)
+
+        self.assertEqual(
+            len(workspace.members),
+            1,
+        )
+
+    def test_get_member(self):
+        workspace = Workspace()
+
+        member = Permission(
+            name="user1",
+            level=PermissionLevel.FULL,
+        )
+
+        workspace.add_member(member)
+
+        self.assertEqual(
+            workspace.get_member(member.id),
+            member,
+        )
+
+    def test_remove_member(self):
+        workspace = Workspace()
+
+        member = Permission(
+            name="user1",
+            level=PermissionLevel.FULL,
+        )
+
+        workspace.add_member(member)
+
+        self.assertTrue(
+            workspace.remove_member(member.id)
+        )
+
+        self.assertEqual(
+            len(workspace.members),
+            0,
+        )
+
+    def test_list_members(self):
+        workspace = Workspace()
+
+        workspace.add_member(
+            Permission(
+                name="user1",
+                level=PermissionLevel.FULL,
+            )
+        )
+
+        workspace.add_member(
+            Permission(
+                name="user2",
+                level=PermissionLevel.WRITE,
+            )
+        )
+
+        self.assertEqual(
+            len(workspace.list_members()),
+            2,
+        )
 
 
 if __name__ == "__main__":
