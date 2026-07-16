@@ -42,17 +42,14 @@ class MemoryManager:
 
         query = query.lower()
 
-        results = []
-
-        for memory in self.list_memories():
-
+        return [
+            memory
+            for memory in self.list_memories()
             if (
                 query in memory.title.lower()
                 or query in memory.content.lower()
-            ):
-                results.append(memory)
-
-        return results
+            )
+        ]
 
     def filter_by_tag(self, tag: str) -> list[Memory]:
         """
@@ -84,3 +81,35 @@ class MemoryManager:
             for memory in self.list_memories()
             if memory.importance >= minimum_importance
         ]
+
+    def sort_by_newest(self) -> list[Memory]:
+        """
+        Return memories sorted by newest first.
+        """
+
+        return sorted(
+            self.list_memories(),
+            key=lambda memory: memory.created_at,
+            reverse=True,
+        )
+
+    def sort_by_oldest(self) -> list[Memory]:
+        """
+        Return memories sorted by oldest first.
+        """
+
+        return sorted(
+            self.list_memories(),
+            key=lambda memory: memory.created_at,
+        )
+
+    def sort_by_importance(self) -> list[Memory]:
+        """
+        Return memories sorted by highest importance.
+        """
+
+        return sorted(
+            self.list_memories(),
+            key=lambda memory: memory.importance,
+            reverse=True,
+        )

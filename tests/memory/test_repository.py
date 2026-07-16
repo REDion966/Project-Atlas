@@ -100,7 +100,7 @@ class TestMemoryManager(unittest.TestCase):
         self.manager.add_memory(memory)
 
         results = self.manager.filter_by_importance(
-            MemoryImportance.HIGH
+            MemoryImportance.HIGH,
         )
 
         self.assertEqual(len(results), 1)
@@ -108,6 +108,41 @@ class TestMemoryManager(unittest.TestCase):
             results[0].importance,
             MemoryImportance.HIGH,
         )
+
+    def test_sort_by_importance(self):
+        low = Memory(
+            id=str(uuid4()),
+            title="Low",
+            content="Low",
+            importance=MemoryImportance.LOW,
+        )
+
+        high = Memory(
+            id=str(uuid4()),
+            title="High",
+            content="High",
+            importance=MemoryImportance.CRITICAL,
+        )
+
+        self.manager.add_memory(low)
+        self.manager.add_memory(high)
+
+        results = self.manager.sort_by_importance()
+
+        self.assertEqual(
+            results[0].importance,
+            MemoryImportance.CRITICAL,
+        )
+
+    def test_sort_by_newest(self):
+        results = self.manager.sort_by_newest()
+
+        self.assertIsInstance(results, list)
+
+    def test_sort_by_oldest(self):
+        results = self.manager.sort_by_oldest()
+
+        self.assertIsInstance(results, list)
 
 
 if __name__ == "__main__":
