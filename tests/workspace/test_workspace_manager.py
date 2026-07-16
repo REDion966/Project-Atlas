@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from atlas.workspace.services.workspace_service import WorkspaceManager
+from atlas.workspace.workspace_manager import WorkspaceManager
 
 
 class TestWorkspaceManager(unittest.TestCase):
@@ -62,6 +62,71 @@ class TestWorkspaceManager(unittest.TestCase):
 
             with self.assertRaises(RuntimeError):
                 manager.save(path)
+
+    def test_create_project(self):
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project(
+            "Project A"
+        )
+
+        self.assertEqual(
+            project.name,
+            "Project A",
+        )
+
+    def test_get_project(self):
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project(
+            "Project A"
+        )
+
+        loaded = manager.get_project(
+            project.id
+        )
+
+        self.assertEqual(
+            loaded.id,
+            project.id,
+        )
+
+    def test_list_projects(self):
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        manager.create_project("A")
+        manager.create_project("B")
+
+        self.assertEqual(
+            len(manager.list_projects()),
+            2,
+        )
+
+    def test_delete_project(self):
+        manager = WorkspaceManager()
+
+        manager.create("Atlas")
+
+        project = manager.create_project(
+            "Project A"
+        )
+
+        self.assertTrue(
+            manager.delete_project(
+                project.id
+            )
+        )
+
+        self.assertEqual(
+            len(manager.list_projects()),
+            0,
+        )            
 
 
 if __name__ == "__main__":
