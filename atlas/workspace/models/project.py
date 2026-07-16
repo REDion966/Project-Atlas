@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import uuid
+from atlas.workspace.models.resource import Resource
 
 
 @dataclass(slots=True)
@@ -24,6 +25,10 @@ class Project:
     description: str = ""
 
     tags: list[str] = field(
+        default_factory=list
+    )
+
+    resources: list[Resource] = field(
         default_factory=list
     )
 
@@ -55,6 +60,46 @@ class Project:
         self.archived = False
         self.touch()
 
+    def add_resource(
+        self,
+        resource: Resource,
+    ) -> None:
+        """Add a resource to the project."""
+
+        self.resources.append(resource)
+        self.touch()
+
+    def get_resource(
+        self,
+        resource_id: str,
+    ) -> Resource | None:
+        """Return a resource by ID."""
+
+        for resource in self.resources:
+            if resource.id == resource_id:
+                return resource
+
+        return None
+
+    def remove_resource(
+        self,
+        resource_id: str,
+    ) -> bool:
+        """Remove a resource."""
+
+        for resource in self.resources:
+            if resource.id == resource_id:
+                self.resources.remove(resource)
+                self.touch()
+                return True
+
+        return False
+
+    def list_resources(self) -> list[Resource]:
+        """Return all resources."""
+
+        return self.resources.copy()    
+
     def touch(self) -> None:
         """Update the modification timestamp."""
 
@@ -68,6 +113,10 @@ class Project:
             "name": self.name,
             "description": self.description,
             "tags": self.tags,
+            "resources": [
+                resource.to_dict()
+                for resource in self.resources
+            ],
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "archived": self.archived,
@@ -85,6 +134,13 @@ class Project:
             name=data["name"],
             description=data["description"],
             tags=data.get("tags", []),
+            resources=[
+                Resource.from_dict(resource)
+                for resource in data.get(
+                    "resources",
+                    [],
+                )
+            ],
             created_at=datetime.fromisoformat(
                 data["created_at"]
             ),
