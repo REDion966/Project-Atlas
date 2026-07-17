@@ -52,10 +52,67 @@ class WorkspaceManager:
             path,
         )
 
+    def export_workspace(
+        self,
+        path: str | Path,
+    ) -> None:
+        """Export the current workspace to a file."""
+
+        self.save(path)
+
+    def import_workspace(
+        self,
+        path: str | Path,
+    ) -> Workspace:
+        """Import a workspace from a file,
+        replacing the current workspace.
+        """
+
+        self._workspace = WorkspaceStorage.load(path)
+
+        return self._workspace
+
     def close(self) -> None:
         """Close the current workspace."""
 
         self._workspace = None
+
+    def rename_workspace(
+        self,
+        name: str,
+    ) -> None:
+        """Rename the workspace."""
+
+        if self._workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self._workspace.rename(name)
+
+    def archive_workspace(
+        self,
+    ) -> None:
+        """Archive the workspace."""
+
+        if self._workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self._workspace.archive()
+
+    def restore_workspace(
+        self,
+    ) -> None:
+        """Restore the workspace."""
+
+        if self._workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self._workspace.restore()
     
     def create_resource(
         self,

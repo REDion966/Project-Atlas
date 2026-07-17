@@ -109,6 +109,44 @@ class WorkspaceService:
 
         self.workspace_manager.save(path)
 
+    def export_workspace(
+        self,
+        path: Path,
+    ) -> None:
+        """Export the current workspace to a file."""
+
+        self.workspace_manager.export_workspace(path)
+
+    def import_workspace(
+        self,
+        path: Path,
+    ) -> Workspace:
+        """Import a workspace from a file,
+        replacing the current workspace.
+        """
+
+        workspace = self.workspace_manager.import_workspace(
+            path,
+        )
+
+        self.project_manager = ProjectManager(
+            workspace,
+        )
+
+        self.permission_manager = PermissionManager(
+            workspace,
+        )
+
+        self.member_manager = MemberManager(
+            workspace,
+        )
+
+        self.tag_manager = TagManager(
+            workspace,
+        )
+
+        return workspace
+
     # ------------------------------------------------------------------
     # Projects
     # ------------------------------------------------------------------
@@ -479,6 +517,45 @@ class WorkspaceService:
             tag_id,
         )
     
+    def rename_workspace(
+        self,
+        name: str,
+    ) -> None:
+        """Rename the workspace."""
+
+        if self.workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self.workspace_manager.rename_workspace(
+            name,
+        )
+
+    def archive_workspace(
+        self,
+    ) -> None:
+        """Archive the workspace."""
+
+        if self.workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self.workspace_manager.archive_workspace()
+
+    def restore_workspace(
+        self,
+    ) -> None:
+        """Restore the workspace."""
+
+        if self.workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self.workspace_manager.restore_workspace()
+
     def close_workspace(
         self,
     ) -> None:

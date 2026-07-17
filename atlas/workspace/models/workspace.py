@@ -34,6 +34,12 @@ class Workspace:
         default_factory=list
     )
 
+    description: str = ""
+
+    owner: str = ""
+
+    created_by: str = ""
+
     tags: list[Tag] = field(
         default_factory=list
     )
@@ -49,6 +55,37 @@ class Workspace:
     updated_at: datetime = field(
         default_factory=lambda: datetime.now(UTC)
     )
+
+    last_opened_at: datetime = field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+    archived: bool = False
+
+    def rename(
+        self,
+        name: str,
+    ) -> None:
+        """Rename the workspace."""
+
+        self.name = name
+        self.touch()
+
+    def archive(
+        self,
+    ) -> None:
+        """Archive the workspace."""
+
+        self.archived = True
+        self.touch()
+
+    def restore(
+        self,
+    ) -> None:
+        """Restore the workspace."""
+
+        self.archived = False
+        self.touch()
 
     def add_project(
         self,
@@ -115,6 +152,9 @@ class Workspace:
                 member.to_dict()
                 for member in self.members
             ],
+            "description": self.description,
+            "owner": self.owner,
+            "created_by": self.created_by,
             "tags": [
                 tag.to_dict()
                 for tag in self.tags
@@ -122,6 +162,8 @@ class Workspace:
             "settings": self.settings.to_dict(),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "last_opened_at": self.last_opened_at.isoformat(),
+            "archived": self.archived,
         }
 
     @classmethod
@@ -148,6 +190,18 @@ class Workspace:
                     [],
                 )
             ],
+            description=data.get(
+                "description",
+                "",
+            ),
+            owner=data.get(
+                "owner",
+                "",
+            ),
+            created_by=data.get(
+                "created_by",
+                "",
+            ),
             tags=[
                 Tag.from_dict(tag)
                 for tag in data.get(
@@ -163,5 +217,15 @@ class Workspace:
             ),
             updated_at=datetime.fromisoformat(
                 data["updated_at"]
+            ),
+            last_opened_at=datetime.fromisoformat(
+                data.get(
+                    "last_opened_at",
+                    data["updated_at"],
+                )
+            ),
+            archived=data.get(
+                "archived",
+                False,
             ),
         )

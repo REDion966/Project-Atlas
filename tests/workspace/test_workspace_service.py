@@ -309,6 +309,157 @@ class TestWorkspaceService(unittest.TestCase):
                 WorkspaceSettings()
             )
 
+    def test_rename_workspace(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Old")
+
+        service.rename_workspace("New")
+
+        self.assertEqual(
+            service.workspace.name,
+            "New",
+        )
+
+    def test_rename_workspace_no_workspace(self):
+        service = WorkspaceService()
+
+        with self.assertRaises(RuntimeError):
+            service.rename_workspace("New")
+
+    def test_archive_workspace(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Test")
+
+        service.archive_workspace()
+
+        self.assertTrue(
+            service.workspace.archived,
+        )
+
+    def test_archive_workspace_no_workspace(self):
+        service = WorkspaceService()
+
+        with self.assertRaises(RuntimeError):
+            service.archive_workspace()
+
+    def test_restore_workspace(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Test")
+
+        service.archive_workspace()
+
+        self.assertTrue(
+            service.workspace.archived,
+        )
+
+        service.restore_workspace()
+
+        self.assertFalse(
+            service.workspace.archived,
+        )
+
+    def test_restore_workspace_no_workspace(self):
+        service = WorkspaceService()
+
+        with self.assertRaises(RuntimeError):
+            service.restore_workspace()
+
+    # ------------------------------------------------------------------
+    # Export / Import
+    # ------------------------------------------------------------------
+
+    def test_export_workspace_creates_file(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "export.json"
+
+            service.export_workspace(path)
+
+            self.assertTrue(path.exists())
+
+    def test_export_without_workspace_raises(self):
+        service = WorkspaceService()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "export.json"
+
+            with self.assertRaises(RuntimeError):
+                service.export_workspace(path)
+
+    def test_import_workspace_restores_workspace(self):
+        service = WorkspaceService()
+
+        workspace = service.create_workspace("Atlas")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workspace.json"
+
+            service.save_workspace(path)
+
+            service.close_workspace()
+
+            loaded = service.import_workspace(path)
+
+            self.assertEqual(
+                loaded.id,
+                workspace.id,
+            )
+
+            self.assertEqual(
+                loaded.name,
+                "Atlas",
+            )
+
+    def test_imported_workspace_matches_exported(self):
+        service = WorkspaceService()
+
+        workspace = service.create_workspace("Atlas")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "export.json"
+
+            service.export_workspace(export_path)
+
+            service.close_workspace()
+
+            imported = service.import_workspace(export_path)
+
+            self.assertEqual(
+                imported.to_dict(),
+                workspace.to_dict(),
+            )
+
+    def test_import_workspace_reinitialises_managers(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "workspace.json"
+
+            service.export_workspace(path)
+
+            service.close_workspace()
+
+            service.import_workspace(path)
+
+            self.assertIsNotNone(
+                service.project_manager,
+            )
+
+            self.assertIsNotNone(
+                service.permission_manager,
+            )
+
+            self.assertIsNotNone(
+                service.member_manager,
+            )
 
 if __name__ == "__main__":
     unittest.main()
