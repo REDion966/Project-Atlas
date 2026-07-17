@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from atlas.workspace.models.settings import WorkspaceSettings
 from atlas.workspace.workspace_service import WorkspaceService
 
 
@@ -240,7 +241,73 @@ class TestWorkspaceService(unittest.TestCase):
 
         self.assertIsNone(
             service.workspace
-        )    
+        )
+
+    def test_get_settings(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        settings = service.get_settings()
+
+        self.assertIsInstance(
+            settings,
+            WorkspaceSettings,
+        )
+
+        self.assertEqual(
+            settings.version,
+            "1.0",
+        )
+
+    def test_update_settings(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        new_settings = WorkspaceSettings(
+            version="2.0",
+            autosave=False,
+        )
+
+        service.update_settings(new_settings)
+
+        self.assertIs(
+            service.get_settings(),
+            new_settings,
+        )
+
+    def test_update_settings_updates_timestamp(self):
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        original_updated = service.workspace.updated_at
+
+        new_settings = WorkspaceSettings(
+            version="2.0",
+        )
+
+        service.update_settings(new_settings)
+
+        self.assertGreater(
+            service.workspace.updated_at,
+            original_updated,
+        )
+
+    def test_get_settings_no_workspace(self):
+        service = WorkspaceService()
+
+        with self.assertRaises(RuntimeError):
+            service.get_settings()
+
+    def test_update_settings_no_workspace(self):
+        service = WorkspaceService()
+
+        with self.assertRaises(RuntimeError):
+            service.update_settings(
+                WorkspaceSettings()
+            )
 
 
 if __name__ == "__main__":

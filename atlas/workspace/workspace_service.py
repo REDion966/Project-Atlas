@@ -22,6 +22,7 @@ from atlas.workspace.resource_manager import ResourceManager
 from atlas.workspace.workspace_manager import WorkspaceManager
 from atlas.workspace.member_manager import MemberManager
 from atlas.workspace.models.member import Member
+from atlas.workspace.models.settings import WorkspaceSettings
 from atlas.workspace.tag_manager import TagManager
 from atlas.workspace.models.tag import Tag
 
@@ -386,6 +387,32 @@ class WorkspaceService:
         return self.member_manager.delete_member(
             member_id,
         )
+
+    def get_settings(
+        self,
+    ) -> WorkspaceSettings:
+        """Return workspace settings."""
+
+        if self.workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.workspace.settings
+
+    def update_settings(
+        self,
+        settings: WorkspaceSettings,
+    ) -> None:
+        """Replace workspace settings."""
+
+        if self.workspace is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        self.workspace.settings = settings
+        self.workspace.touch()
     
     # ------------------------------------------------------------------
     # Tags

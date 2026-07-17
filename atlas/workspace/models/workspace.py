@@ -12,6 +12,7 @@ import uuid
 
 from atlas.workspace.models.member import Member
 from atlas.workspace.models.project import Project
+from atlas.workspace.models.settings import WorkspaceSettings
 from atlas.workspace.models.tag import Tag
 
 
@@ -35,6 +36,10 @@ class Workspace:
 
     tags: list[Tag] = field(
         default_factory=list
+    )
+
+    settings: WorkspaceSettings = field(
+        default_factory=WorkspaceSettings,
     )
 
     created_at: datetime = field(
@@ -114,6 +119,7 @@ class Workspace:
                 tag.to_dict()
                 for tag in self.tags
             ],
+            "settings": self.settings.to_dict(),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -149,6 +155,9 @@ class Workspace:
                     [],
                 )
             ],
+            settings=WorkspaceSettings.from_dict(
+                data.get("settings", {})
+            ),
             created_at=datetime.fromisoformat(
                 data["created_at"]
             ),
