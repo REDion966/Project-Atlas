@@ -1,57 +1,72 @@
 """
 Atlas Tag Manager
 
-High-level interface for managing project tags.
+Handles workspace tags.
 """
 
 from __future__ import annotations
 
-from atlas.workspace.models.project import Project
+from atlas.workspace.models.tag import Tag
+from atlas.workspace.models.workspace import Workspace
 
 
 class TagManager:
-    """Manages project tags."""
+    """Manage workspace tags."""
 
     def __init__(
         self,
-        project: Project,
+        workspace: Workspace,
     ) -> None:
-        self._project = project
+        self.workspace = workspace
 
     def create_tag(
         self,
-        tag: str,
-    ) -> None:
+        name: str,
+        color: str = "#4F46E5",
+    ) -> Tag:
         """Create a tag."""
 
-        if tag not in self._project.tags:
-            self._project.tags.append(tag)
-            self._project.touch()
+        tag = Tag(
+            name=name,
+            color=color,
+        )
 
-    def delete_tag(
+        self.workspace.tags.append(tag)
+        self.workspace.touch()
+
+        return tag
+
+    def get_tag(
         self,
-        tag: str,
-    ) -> bool:
-        """Delete a tag."""
+        tag_id: str,
+    ) -> Tag | None:
+        """Return a tag."""
 
-        if tag in self._project.tags:
-            self._project.tags.remove(tag)
-            self._project.touch()
-            return True
+        for tag in self.workspace.tags:
+            if tag.id == tag_id:
+                return tag
 
-        return False
+        return None
 
     def list_tags(
         self,
-    ) -> list[str]:
+    ) -> list[Tag]:
         """Return all tags."""
 
-        return self._project.tags.copy()
+        return self.workspace.tags.copy()
 
-    def has_tag(
+    def delete_tag(
         self,
-        tag: str,
+        tag_id: str,
     ) -> bool:
-        """Return whether a tag exists."""
+        """Delete a tag."""
 
-        return tag in self._project.tags
+        tag = self.get_tag(tag_id)
+
+        if tag is None:
+            return False
+
+        self.workspace.tags.remove(tag)
+        self.workspace.touch()
+
+        return True

@@ -17,6 +17,9 @@ from atlas.cli.commands import (
     resource_add,
     resource_list,
     resource_remove,
+    tag_add,
+    tag_list,
+    tag_remove,
     workspace_create,
 )
 from atlas.workspace.loader import (
@@ -150,6 +153,29 @@ def main() -> None:
         nargs="?",
     )
 
+    # -------------------------
+    # Tag Commands
+    # -------------------------
+
+    tag_parser = subparsers.add_parser(
+        "tag",
+        help="Tag commands",
+    )
+
+    tag_parser.add_argument(
+        "action",
+        choices=[
+            "add",
+            "list",
+            "remove",
+        ],
+    )
+
+    tag_parser.add_argument(
+        "name",
+        nargs="?",
+    )
+
     args = parser.parse_args()
 
     service = load_workspace_service()
@@ -256,6 +282,32 @@ def main() -> None:
 
         if args.action == "remove":
             member_remove(
+                service,
+                args.name,
+            )
+            return
+
+    # -------------------------
+    # Tag
+    # -------------------------
+
+    if args.command == "tag":
+
+        if args.action == "add":
+            tag_add(
+                service,
+                args.name,
+            )
+            return
+
+        if args.action == "list":
+            tag_list(
+                service,
+            )
+            return
+
+        if args.action == "remove":
+            tag_remove(
                 service,
                 args.name,
             )

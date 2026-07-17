@@ -294,4 +294,86 @@ def member_remove(
 
     print(
         "Member removed."
-    )    
+    )
+
+def tag_add(
+    service: WorkspaceService,
+    name: str,
+) -> None:
+    """Add a tag."""
+
+    try:
+        tag = service.create_tag(
+            name,
+        )
+    except RuntimeError as error:
+        print(error)
+        return
+
+    service.save_workspace(
+        DEFAULT_WORKSPACE,
+    )
+
+    print(
+        f"Tag '{tag.name}' added."
+    )
+
+
+def tag_list(
+    service: WorkspaceService,
+) -> None:
+    """List all tags."""
+
+    try:
+        tags = service.list_tags()
+    except RuntimeError as error:
+        print(error)
+        return
+
+    if not tags:
+        print(
+            "No tags found."
+        )
+        return
+
+    print("\nTags\n")
+
+    for index, tag in enumerate(
+        tags,
+        start=1,
+    ):
+        print(
+            f"{index}. "
+            f"{tag.name}"
+        )
+
+    print()
+
+
+def tag_remove(
+    service: WorkspaceService,
+    tag_id: str,
+) -> None:
+    """Remove a tag."""
+
+    try:
+        deleted = service.delete_tag(
+            tag_id,
+        )
+    except RuntimeError as error:
+        print(error)
+        return
+
+    if not deleted:
+        print(
+            "Tag not found."
+        )
+        return
+
+    service.save_workspace(
+        DEFAULT_WORKSPACE,
+    )
+
+    print(
+        "Tag removed."
+    )

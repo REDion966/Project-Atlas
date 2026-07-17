@@ -22,6 +22,8 @@ from atlas.workspace.resource_manager import ResourceManager
 from atlas.workspace.workspace_manager import WorkspaceManager
 from atlas.workspace.member_manager import MemberManager
 from atlas.workspace.models.member import Member
+from atlas.workspace.tag_manager import TagManager
+from atlas.workspace.models.tag import Tag
 
 
 class WorkspaceService:
@@ -34,6 +36,7 @@ class WorkspaceService:
         self.resource_manager: ResourceManager | None = None
         self.permission_manager: PermissionManager | None = None
         self.member_manager: MemberManager | None = None
+        self.tag_manager: TagManager | None = None
 
     @property
     def workspace(self) -> Workspace | None:
@@ -63,6 +66,10 @@ class WorkspaceService:
             workspace,
         )
 
+        self.tag_manager = TagManager(
+            workspace,
+        )
+
         return workspace
 
     def load_workspace(
@@ -84,6 +91,10 @@ class WorkspaceService:
         )
 
         self.member_manager = MemberManager(
+            workspace,
+        )
+
+        self.tag_manager = TagManager(
             workspace,
         )
 
@@ -122,6 +133,10 @@ class WorkspaceService:
             project,
         )
 
+        self.tag_manager = TagManager(
+            project,
+        )
+
         return project
 
     def get_project(
@@ -141,6 +156,9 @@ class WorkspaceService:
 
         if project is not None:
             self.resource_manager = ResourceManager(
+                project,
+            )
+            self.tag_manager = TagManager(
                 project,
             )
 
@@ -175,7 +193,7 @@ class WorkspaceService:
 
         if deleted:
             self.resource_manager = None
-
+            self.tag_manager = None
         return deleted
 
     # ------------------------------------------------------------------
@@ -367,6 +385,71 @@ class WorkspaceService:
 
         return self.member_manager.delete_member(
             member_id,
+        )
+    
+    # ------------------------------------------------------------------
+    # Tags
+    # ------------------------------------------------------------------
+
+    def create_tag(
+        self,
+        name: str,
+        color: str = "#4F46E5",
+    ) -> Tag:
+        """Create a tag."""
+
+        if self.tag_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.tag_manager.create_tag(
+            name,
+            color,
+        )
+
+
+    def get_tag(
+        self,
+        tag_id: str,
+    ) -> Tag | None:
+        """Return a tag."""
+
+        if self.tag_manager is None:
+            raise RuntimeError(
+            "No workspace loaded."
+        )
+
+        return self.tag_manager.get_tag(
+            tag_id,
+        )
+
+    def list_tags(
+        self,
+    ) -> list[Tag]:
+        """Return all tags."""
+
+        if self.tag_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.tag_manager.list_tags()
+
+
+    def delete_tag(
+        self,
+        tag_id: str,
+    ) -> bool:
+        """Delete a tag."""
+
+        if self.tag_manager is None:
+            raise RuntimeError(
+            "No workspace loaded."
+        )
+
+        return self.tag_manager.delete_tag(
+            tag_id,
         )
     
     def close_workspace(

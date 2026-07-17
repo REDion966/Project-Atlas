@@ -4,75 +4,68 @@ Tests for TagManager.
 
 import unittest
 
-from atlas.workspace.models.project import Project
+from atlas.workspace.models.tag import Tag
+from atlas.workspace.models.workspace import Workspace
 from atlas.workspace.tag_manager import TagManager
 
 
 class TestTagManager(unittest.TestCase):
 
     def test_create_tag(self):
-        project = Project()
-        manager = TagManager(project)
+        workspace = Workspace()
+        manager = TagManager(workspace)
 
-        manager.create_tag("python")
+        tag = manager.create_tag("python")
 
-        self.assertEqual(
-            len(project.tags),
-            1,
-        )
+        self.assertIsInstance(tag, Tag)
+        self.assertEqual(tag.name, "python")
+        self.assertEqual(len(workspace.tags), 1)
+        self.assertIs(workspace.tags[0], tag)
 
-        self.assertEqual(
-            project.tags[0],
-            "python",
-        )
+    def test_get_tag(self):
+        workspace = Workspace()
+        manager = TagManager(workspace)
 
-    def test_delete_tag(self):
-        project = Project()
-        manager = TagManager(project)
+        created = manager.create_tag("python")
+        found = manager.get_tag(created.id)
 
-        manager.create_tag("python")
+        self.assertIs(found, created)
 
-        self.assertTrue(
-            manager.delete_tag("python")
-        )
+    def test_get_tag_missing(self):
+        workspace = Workspace()
+        manager = TagManager(workspace)
 
-        self.assertEqual(
-            len(project.tags),
-            0,
-        )
+        found = manager.get_tag("non-existent")
+        self.assertIsNone(found)
 
     def test_list_tags(self):
-        project = Project()
-        manager = TagManager(project)
+        workspace = Workspace()
+        manager = TagManager(workspace)
 
-        manager.create_tag("python")
-        manager.create_tag("atlas")
+        tag1 = manager.create_tag("python")
+        tag2 = manager.create_tag("atlas")
 
         tags = manager.list_tags()
 
-        self.assertEqual(
-            len(tags),
-            2,
-        )
+        self.assertEqual(len(tags), 2)
+        self.assertIn(tag1, tags)
+        self.assertIn(tag2, tags)
+        self.assertIsNot(tags, workspace.tags)
 
-        self.assertIsNot(
-            tags,
-            project.tags,
-        )
+    def test_delete_tag(self):
+        workspace = Workspace()
+        manager = TagManager(workspace)
 
-    def test_has_tag(self):
-        project = Project()
-        manager = TagManager(project)
+        tag = manager.create_tag("python")
 
-        manager.create_tag("python")
+        self.assertTrue(manager.delete_tag(tag.id))
+        self.assertEqual(len(workspace.tags), 0)
 
-        self.assertTrue(
-            manager.has_tag("python")
-        )
+    def test_delete_tag_missing(self):
+        workspace = Workspace()
+        manager = TagManager(workspace)
 
-        self.assertFalse(
-            manager.has_tag("java")
-        )
+        self.assertFalse(manager.delete_tag("non-existent"))
 
 
 if __name__ == "__main__":

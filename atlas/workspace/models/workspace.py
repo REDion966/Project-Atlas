@@ -12,6 +12,7 @@ import uuid
 
 from atlas.workspace.models.member import Member
 from atlas.workspace.models.project import Project
+from atlas.workspace.models.tag import Tag
 
 
 @dataclass(slots=True)
@@ -29,6 +30,10 @@ class Workspace:
     )
 
     members: list[Member] = field(
+        default_factory=list
+    )
+
+    tags: list[Tag] = field(
         default_factory=list
     )
 
@@ -105,6 +110,10 @@ class Workspace:
                 member.to_dict()
                 for member in self.members
             ],
+            "tags": [
+                tag.to_dict()
+                for tag in self.tags
+            ],
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -130,6 +139,13 @@ class Workspace:
                 Member.from_dict(member)
                 for member in data.get(
                     "members",
+                    [],
+                )
+            ],
+            tags=[
+                Tag.from_dict(tag)
+                for tag in data.get(
+                    "tags",
                     [],
                 )
             ],
