@@ -1,54 +1,91 @@
 # Atlas Roadmap
 
-## Phase 1 — Foundation
-
-### Sprint 1
-- ✅ Project Structure
-- ✅ Configuration Manager
-- ✅ Logger
-- ✅ Persistent Logging
-- ✅ Error Handler
-- ✅ Dependency Checker
-- ✅ Boot Manager
-- ✅ Boot Screen
-- 🔄 Documentation
-- 🔄 v0.1.0-alpha Release
+**Status:** Active  
+**Version:** 1.1  
+**Project:** Atlas
 
 ---
 
-## Phase 2 — Core Intelligence
+## Phase 1 — Foundation ✅
 
-### Sprint 2
-- Memory Foundation
-- Service Registry
-- Boot Improvements
-- Startup Timing
+The platform core, workspace layer, and CLI — all complete.
+
+| Component | Status |
+|-----------|--------|
+| Project Structure | ✅ Complete |
+| Configuration Manager | ✅ Complete |
+| Logger | ✅ Complete |
+| Persistent Logging | ✅ Complete |
+| Error Handler | ✅ Complete |
+| Dependency Checker | ✅ Complete |
+| Boot Manager | ✅ Complete |
+| Boot Screen | ✅ Complete |
+| CLI & Command Routing | ✅ Complete |
+| Workspace System | ✅ Complete |
+| Workspace Projects | ✅ Complete |
+| Workspace Resources | ✅ Complete |
+| Workspace Permissions | ✅ Complete |
+| Workspace Members | ✅ Complete |
+| Workspace Tags | ✅ Complete |
+| Workspace Settings | ✅ Complete |
+| Workspace Export/Import | ✅ Complete |
 
 ---
 
-## Phase 3 — Intelligence
+## Phase 2 — Memory Intelligence 🔄
 
-### Sprint 3
+Adding intelligence to the memory layer — search, ranking, context, and AI coordination.
 
-- AI Router
-- Planner
-- Skill Manager
-- Knowledge Engine
+| Component | Status |
+|-----------|--------|
+| Memory Model | ✅ Complete |
+| Memory Repository | ✅ Complete |
+| Memory Storage (JSON) | ✅ Complete |
+| Ranking Engine | ✅ Complete |
+| Search Engine | ✅ Complete |
+| Context Engine | 🔄 In Progress |
+| AI Orchestration | 🔄 In Progress |
+| Memory Service | 📋 Planned |
+
+---
+
+## Phase 3 — Core Intelligence
+
+AI routing, planning, skills, and knowledge management.
+
+| Component | Status |
+|-----------|--------|
+| AI Provider Abstraction | ✅ Complete |
+| AI Router | 🔄 In Progress |
+| Planner | 📋 Planned |
+| Skill Manager | 📋 Planned |
+| Knowledge Engine | 📋 Planned |
 
 ---
 
 ## Phase 4 — Productivity
 
-- Coding Assistant
-- Research Engine
-- File Management
-- Automation
+Tools that make Atlas useful for real work.
+
+| Component | Status |
+|-----------|--------|
+| Coding Assistant | 📋 Planned |
+| Research Engine | 📋 Planned |
+| File Management | 📋 Planned |
+| Automation Engine | 📋 Planned |
 
 ---
 
 ## Phase 5 — Self-Sustaining Atlas
 
-- Plugin System
-- Self Diagnostics
-- Self Maintenance
-- Local AI Integration
+Plugin ecosystem, diagnostics, and local AI.
+
+| Component | Status |
+|-----------|--------|
+| Plugin System | 📋 Planned |
+| GUI | 📋 Planned |
+| Self Diagnostics | 📋 Planned |
+| Self Maintenance | 📋 Planned |
+| Local AI Integration | 📋 Planned |
+| Cloud Sync | 📋 Planned |
+| Multi-Agent Capabilities | 📋 Planned |
