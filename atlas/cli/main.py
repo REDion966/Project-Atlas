@@ -7,10 +7,15 @@ from __future__ import annotations
 import argparse
 
 from atlas.cli.commands import (
-    workspace_create,
     project_create,
+    resource_add,
+    resource_list,
+    resource_remove,
+    workspace_create,
 )
-from atlas.workspace.workspace_service import WorkspaceService
+from atlas.workspace.loader import (
+    load_workspace_service,
+)
 
 
 def main() -> None:
@@ -25,9 +30,9 @@ def main() -> None:
         dest="command",
     )
 
-    # -----------------------------
+    # -------------------------
     # Workspace Commands
-    # -----------------------------
+    # -------------------------
 
     workspace_parser = subparsers.add_parser(
         "workspace",
@@ -45,9 +50,9 @@ def main() -> None:
         "name",
     )
 
-    # -----------------------------
+    # -------------------------
     # Project Commands
-    # -----------------------------
+    # -------------------------
 
     project_parser = subparsers.add_parser(
         "project",
@@ -65,9 +70,36 @@ def main() -> None:
         "name",
     )
 
+    # -------------------------
+    # Resource Commands
+    # -------------------------
+
+    resource_parser = subparsers.add_parser(
+        "resource",
+        help="Resource commands",
+    )
+
+    resource_parser.add_argument(
+        "action",
+        choices=[
+            "add",
+            "list",
+            "remove",
+        ],
+    )
+
+    resource_parser.add_argument(
+        "name",
+        nargs="?",
+    )
+
     args = parser.parse_args()
 
-    service = WorkspaceService()
+    service = load_workspace_service()
+
+    # -------------------------
+    # Workspace
+    # -------------------------
 
     if (
         args.command == "workspace"
@@ -77,8 +109,13 @@ def main() -> None:
             service,
             args.name,
         )
+        return
 
-    elif (
+    # -------------------------
+    # Project
+    # -------------------------
+
+    if (
         args.command == "project"
         and args.action == "create"
     ):
@@ -86,7 +123,33 @@ def main() -> None:
             service,
             args.name,
         )
+        return
 
+    # -------------------------
+    # Resource
+    # -------------------------
 
+    if args.command == "resource":
+
+        if args.action == "add":
+            resource_add(
+                service,
+                args.name,
+            )
+            return
+
+        if args.action == "list":
+            resource_list(
+                service,
+            )
+            return
+
+        if args.action == "remove":
+            resource_remove(
+                service,
+                args.name,
+            )
+            return
+        
 if __name__ == "__main__":
     main()
