@@ -10,6 +10,9 @@ from io import StringIO
 from unittest.mock import patch
 
 from atlas.cli.commands import (
+    permission_add,
+    permission_list,
+    permission_remove,
     project_create,
     resource_add,
     resource_list,
@@ -155,6 +158,86 @@ class TestCLICommands(unittest.TestCase):
             output,
         )
 
+    @patch("atlas.cli.commands.DEFAULT_WORKSPACE")
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_permission_add(
+        self,
+        stdout: StringIO,
+        workspace_path,
+    ) -> None:
+        workspace_path.exists.return_value = False
+
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        permission_add(
+            service,
+            "admin",
+            "FULL",
+        )
+
+        output = stdout.getvalue()
+
+        self.assertIn(
+            "Permission 'admin' added.",
+            output,
+        )
+
+    @patch("atlas.cli.commands.DEFAULT_WORKSPACE")
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_permission_list(
+        self,
+        stdout: StringIO,
+        workspace_path,
+    ) -> None:
+        workspace_path.exists.return_value = False
+
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        service.create_permission(
+            "admin",
+        )
+
+        permission_list(service)
+
+        output = stdout.getvalue()
+
+        self.assertIn(
+            "admin",
+            output,
+        )
+
+    @patch("atlas.cli.commands.DEFAULT_WORKSPACE")
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_permission_remove(
+        self,
+        stdout: StringIO,
+        workspace_path,
+    ) -> None:
+        workspace_path.exists.return_value = False
+
+        service = WorkspaceService()
+
+        service.create_workspace("Atlas")
+
+        permission = service.create_permission(
+            "admin",
+        )
+
+        permission_remove(
+            service,
+            permission.id,
+        )
+
+        output = stdout.getvalue()
+
+        self.assertIn(
+            "Permission removed.",
+            output,
+        )
 
 if __name__ == "__main__":
     unittest.main()

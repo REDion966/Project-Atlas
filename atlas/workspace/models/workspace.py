@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import uuid
 
+from atlas.workspace.models.member import Member
 from atlas.workspace.models.project import Project
-from atlas.workspace.models.permission import Permission
 
 
 @dataclass(slots=True)
@@ -28,8 +28,8 @@ class Workspace:
         default_factory=list
     )
 
-    members: list[Permission] = field(
-    default_factory=list
+    members: list[Member] = field(
+        default_factory=list
     )
 
     created_at: datetime = field(
@@ -47,7 +47,7 @@ class Workspace:
         """Add a project."""
 
         self.projects.append(project)
-        self.touch()    
+        self.touch()
 
     def remove_project(
         self,
@@ -74,18 +74,24 @@ class Workspace:
                 return project
 
         return None
-    
-    def list_projects(self) -> list[Project]:
+
+    def list_projects(
+        self,
+    ) -> list[Project]:
         """Return all projects."""
 
         return self.projects.copy()
 
-    def touch(self) -> None:
+    def touch(
+        self,
+    ) -> None:
         """Update modification time."""
 
         self.updated_at = datetime.now(UTC)
 
-    def to_dict(self) -> dict:
+    def to_dict(
+        self,
+    ) -> dict:
         """Serialize workspace."""
 
         return {
@@ -115,11 +121,17 @@ class Workspace:
             name=data["name"],
             projects=[
                 Project.from_dict(project)
-                for project in data["projects"]
+                for project in data.get(
+                    "projects",
+                    [],
+                )
             ],
             members=[
-                Permission.from_dict(member)
-                for member in data.get("members", [])
+                Member.from_dict(member)
+                for member in data.get(
+                    "members",
+                    [],
+                )
             ],
             created_at=datetime.fromisoformat(
                 data["created_at"]

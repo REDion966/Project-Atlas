@@ -7,6 +7,12 @@ from __future__ import annotations
 import argparse
 
 from atlas.cli.commands import (
+    member_add,
+    member_list,
+    member_remove,
+    permission_add,
+    permission_list,
+    permission_remove,
     project_create,
     resource_add,
     resource_list,
@@ -93,6 +99,57 @@ def main() -> None:
         nargs="?",
     )
 
+    # -------------------------
+    # Permission Commands
+    # -------------------------
+
+    permission_parser = subparsers.add_parser(
+        "permission",
+        help="Permission commands",
+    )
+
+    permission_parser.add_argument(
+        "action",
+        choices=[
+            "add",
+            "list",
+            "remove",
+        ],
+    )
+
+    permission_parser.add_argument(
+        "name",
+        nargs="?",
+    )
+
+    permission_parser.add_argument(
+        "level",
+        nargs="?",
+    )
+
+    # -------------------------
+    # Member Commands
+    # -------------------------
+
+    member_parser = subparsers.add_parser(
+        "member",
+        help="Member commands",
+    )
+
+    member_parser.add_argument(
+        "action",
+        choices=[
+            "add",
+            "list",
+            "remove",
+        ],
+    )
+
+    member_parser.add_argument(
+        "name",
+        nargs="?",
+    )
+
     args = parser.parse_args()
 
     service = load_workspace_service()
@@ -150,6 +207,60 @@ def main() -> None:
                 args.name,
             )
             return
-        
+
+    # -------------------------
+    # Permission
+    # -------------------------
+
+    if args.command == "permission":
+
+        if args.action == "add":
+            permission_add(
+                service,
+                args.name,
+                args.level,
+            )
+            return
+
+        if args.action == "list":
+            permission_list(
+                service,
+            )
+            return
+
+        if args.action == "remove":
+            permission_remove(
+                service,
+                args.name,
+            )
+            return
+
+    # -------------------------
+    # Member
+    # -------------------------
+
+    if args.command == "member":
+
+        if args.action == "add":
+            member_add(
+                service,
+                args.name,
+            )
+            return
+
+        if args.action == "list":
+            member_list(
+                service,
+            )
+            return
+
+        if args.action == "remove":
+            member_remove(
+                service,
+                args.name,
+            )
+            return
+
+
 if __name__ == "__main__":
     main()

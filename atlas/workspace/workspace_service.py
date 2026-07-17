@@ -8,13 +8,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from atlas.workspace.enums import ResourceType
-from atlas.workspace.models.workspace import Workspace
+from atlas.workspace.enums import (
+    PermissionLevel,
+    ResourceType,
+)
+from atlas.workspace.models.permission import Permission
 from atlas.workspace.models.project import Project
 from atlas.workspace.models.resource import Resource
-from atlas.workspace.workspace_manager import WorkspaceManager
+from atlas.workspace.models.workspace import Workspace
+from atlas.workspace.permission_manager import PermissionManager
 from atlas.workspace.project_manager import ProjectManager
 from atlas.workspace.resource_manager import ResourceManager
+from atlas.workspace.workspace_manager import WorkspaceManager
+from atlas.workspace.member_manager import MemberManager
+from atlas.workspace.models.member import Member
 
 
 class WorkspaceService:
@@ -22,8 +29,11 @@ class WorkspaceService:
 
     def __init__(self) -> None:
         self.workspace_manager = WorkspaceManager()
+
         self.project_manager: ProjectManager | None = None
         self.resource_manager: ResourceManager | None = None
+        self.permission_manager: PermissionManager | None = None
+        self.member_manager: MemberManager | None = None
 
     @property
     def workspace(self) -> Workspace | None:
@@ -37,8 +47,21 @@ class WorkspaceService:
     ) -> Workspace:
         """Create a workspace."""
 
-        workspace = self.workspace_manager.create(name)
-        self.project_manager = ProjectManager(workspace)
+        workspace = self.workspace_manager.create(
+            name,
+        )
+
+        self.project_manager = ProjectManager(
+            workspace,
+        )
+
+        self.permission_manager = PermissionManager(
+            workspace,
+        )
+
+        self.member_manager = MemberManager(
+            workspace,
+        )
 
         return workspace
 
@@ -48,8 +71,21 @@ class WorkspaceService:
     ) -> Workspace:
         """Load a workspace."""
 
-        workspace = self.workspace_manager.load(path)
-        self.project_manager = ProjectManager(workspace)
+        workspace = self.workspace_manager.load(
+            path,
+        )
+
+        self.project_manager = ProjectManager(
+            workspace,
+        )
+
+        self.permission_manager = PermissionManager(
+            workspace,
+        )
+
+        self.member_manager = MemberManager(
+            workspace,
+        )
 
         return workspace
 
@@ -60,6 +96,10 @@ class WorkspaceService:
         """Save current workspace."""
 
         self.workspace_manager.save(path)
+
+    # ------------------------------------------------------------------
+    # Projects
+    # ------------------------------------------------------------------
 
     def create_project(
         self,
@@ -78,7 +118,9 @@ class WorkspaceService:
             description,
         )
 
-        self.resource_manager = ResourceManager(project)
+        self.resource_manager = ResourceManager(
+            project,
+        )
 
         return project
 
@@ -94,11 +136,13 @@ class WorkspaceService:
             )
 
         project = self.project_manager.get_project(
-            project_id
+            project_id,
         )
 
         if project is not None:
-            self.resource_manager = ResourceManager(project)
+            self.resource_manager = ResourceManager(
+                project,
+            )
 
         return project
 
@@ -126,13 +170,17 @@ class WorkspaceService:
             )
 
         deleted = self.project_manager.delete_project(
-            project_id
+            project_id,
         )
 
         if deleted:
             self.resource_manager = None
 
         return deleted
+
+    # ------------------------------------------------------------------
+    # Resources
+    # ------------------------------------------------------------------
 
     def create_resource(
         self,
@@ -167,7 +215,7 @@ class WorkspaceService:
             )
 
         return self.resource_manager.get_resource(
-            resource_id
+            resource_id,
         )
 
     def list_resources(
@@ -194,12 +242,141 @@ class WorkspaceService:
             )
 
         return self.resource_manager.delete_resource(
-            resource_id
+            resource_id,
         )
 
-    def close_workspace(self) -> None:
+    # ------------------------------------------------------------------
+    # Permissions
+    # ------------------------------------------------------------------
+
+    def create_permission(
+        self,
+        name: str,
+        level: PermissionLevel = PermissionLevel.READ,
+    ) -> Permission:
+        """Create a permission."""
+
+        if self.permission_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.permission_manager.create_permission(
+            name,
+            level,
+        )
+
+    def get_permission(
+        self,
+        permission_id: str,
+    ) -> Permission | None:
+        """Return a permission."""
+
+        if self.permission_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.permission_manager.get_permission(
+            permission_id,
+        )
+
+    def list_permissions(
+        self,
+    ) -> list[Permission]:
+        """Return all permissions."""
+
+        if self.permission_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.permission_manager.list_permissions()
+
+    def delete_permission(
+        self,
+        permission_id: str,
+    ) -> bool:
+        """Delete a permission."""
+
+        if self.permission_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.permission_manager.delete_permission(
+            permission_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Workspace
+    # ------------------------------------------------------------------
+
+    def create_member(
+        self,
+        name: str,
+    ) -> Member:
+        """Create a member."""
+
+        if self.member_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.member_manager.create_member(
+            name,
+        )
+
+    def get_member(
+        self,
+        member_id: str,
+    ) -> Member | None:
+        """Return a member."""
+
+        if self.member_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.member_manager.get_member(
+            member_id,
+        )
+
+    def list_members(
+        self,
+    ) -> list[Member]:
+        """Return all members."""
+
+        if self.member_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.member_manager.list_members()
+
+    def delete_member(
+        self,
+        member_id: str,
+    ) -> bool:
+        """Delete a member."""
+
+        if self.member_manager is None:
+            raise RuntimeError(
+                "No workspace loaded."
+            )
+
+        return self.member_manager.delete_member(
+            member_id,
+        )
+    
+    def close_workspace(
+        self,
+    ) -> None:
         """Close current workspace."""
 
         self.workspace_manager.close()
+
         self.project_manager = None
         self.resource_manager = None
+        self.permission_manager = None
+        self.member_manager = None
