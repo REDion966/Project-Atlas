@@ -11,6 +11,10 @@ from atlas.ai.ai_manager import AIManager
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
 from atlas.kernel.service_container import ServiceContainer
+from atlas.memory.ranking.ranking_engine import RankingEngine
+from atlas.memory.repository.memory_repository import MemoryRepository
+from atlas.memory.search.search_engine import MemorySearchEngine
+from atlas.memory.service.memory_manager_service import MemoryManagerService
 
 
 class Atlas:
@@ -28,6 +32,7 @@ class Atlas:
 
         self._ai_manager = AIManager()
         self._conversation: ConversationService | None = None
+        self._memory_service: MemoryManagerService | None = None
 
         self._started = False
 
@@ -81,6 +86,21 @@ class Atlas:
         self._container.register(
             "conversation",
             self._conversation,
+        )
+
+        # Assemble MemoryService with dependency injection
+        repository = MemoryRepository()
+        ranking_engine = RankingEngine()
+        search_engine = MemorySearchEngine(repository, ranking_engine)
+        self._memory_service = MemoryManagerService(
+            repository=repository,
+            ranking_engine=ranking_engine,
+            search_engine=search_engine,
+        )
+
+        self._container.register(
+            "memory",
+            self._memory_service,
         )
 
         self._container.start_all()
@@ -161,5 +181,6 @@ class Atlas:
         self._container.clear()
 
         self._conversation = None
+        self._memory_service = None
 
         self._started = False

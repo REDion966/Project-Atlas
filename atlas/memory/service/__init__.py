@@ -1,9 +1,9 @@
 """
-Atlas Memory Service Package
+Atlas Memory Manager Service Package
 """
 
-from .memory_service import MemoryService
+from .memory_manager_service import MemoryManagerService
 
 __all__ = [
-    "MemoryService",
+    "MemoryManagerService",
 ]
