@@ -1,0 +1,30 @@
+{
+    "id": "83e95b25-8732-44ce-bcee-913b7aa428f8",
+    "name": "Atlas",
+    "projects": [],
+    "members": [
+        {
+            "id": "c23f08a6-4a0c-4f5b-b002-81f62f40f1a8",
+            "name": "admin",
+            "level": "full",
+            "created_at": "2026-07-18T18:04:31.710948+00:00",
+            "updated_at": "2026-07-18T18:04:31.710949+00:00"
+        }
+    ],
+    "description": "",
+    "owner": "",
+    "created_by": "",
+    "tags": [],
+    "settings": {
+        "version": "1.0",
+        "autosave": true,
+        "default_project_id": "",
+        "ai_provider": "",
+        "created_at": "2026-07-18T18:04:31.710925+00:00",
+        "updated_at": "2026-07-18T18:04:31.710928+00:00"
+    },
+    "created_at": "2026-07-18T18:04:31.710928+00:00",
+    "updated_at": "2026-07-18T18:04:31.710950+00:00",
+    "last_opened_at": "2026-07-18T18:04:31.710930+00:00",
+    "archived": false
+}

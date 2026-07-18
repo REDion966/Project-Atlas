@@ -6,27 +6,66 @@ initializing and running Atlas.
 """
 
 from atlas.core.boot_manager import BootManager
+from atlas.kernel.atlas import Atlas
+from atlas.runtime.runtime import AtlasRuntime
 
 
 class Application:
-    """Main Atlas application."""
+    """
+    Main Atlas application.
+    """
 
     def __init__(self):
-        """Create the application."""
-        self.boot_manager = BootManager()
+
+        # Main Atlas kernel
+        self.kernel = Atlas()
+
+
+        # Runtime environment
+        self.runtime = AtlasRuntime(
+            self.kernel.container,
+            self.kernel.state,
+            self.kernel.events,
+        )
+
+
+        # Startup manager
+        self.boot_manager = BootManager(
+            self.kernel
+        )
+
 
     def initialize(self):
-        """Initialize Atlas."""
+        """
+        Initialize Atlas.
+        """
+
         return self.boot_manager.boot()
 
+
     def run(self):
-        """Run Atlas."""
+        """
+        Run Atlas.
+        """
 
         if self.initialize():
+
+            self.runtime.start()
+
             return True
 
         return False
 
+
     def shutdown(self):
-        """Shutdown Atlas."""
-        print("Atlas shutdown requested.")
+        """
+        Shutdown Atlas.
+        """
+
+        self.runtime.stop()
+
+        self.kernel.shutdown()
+
+        print(
+            "Atlas shutdown requested."
+        )

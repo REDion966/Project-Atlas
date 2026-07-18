@@ -7,6 +7,8 @@ The root application object.
 from collections.abc import Iterator
 from pathlib import Path
 
+from atlas.state.state_manager import StateManager
+from atlas.events.event_bus import EventBus
 from atlas.ai.ai_manager import AIManager
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
@@ -27,7 +29,16 @@ class Atlas:
     """
 
     def __init__(self):
+
         self._container = ServiceContainer()
+
+        # Central communication system
+        self._event_bus = EventBus()
+
+        # Reactive state system
+        self._state_manager = StateManager(
+            self._event_bus
+        )
 
         self._config = Configuration()
 
@@ -38,33 +49,71 @@ class Atlas:
 
         self._started = False
 
+
     @property
     def container(self) -> ServiceContainer:
-        """Return the application's service container."""
+        """
+        Return the application's service container.
+        """
+
         return self._container
+
+
+    @property
+    def events(self) -> EventBus:
+        """
+        Return Atlas event bus.
+        """
+
+        return self._event_bus
+
+
+    @property
+    def state(self) -> StateManager:
+        """
+        Return Atlas state manager.
+        """
+
+        return self._state_manager
+
 
     @property
     def started(self) -> bool:
-        """Return whether Atlas has been started."""
+        """
+        Return whether Atlas has been started.
+        """
+
         return self._started
+
 
     @property
     def provider(self):
-        """Return the active AI provider."""
+        """
+        Return the active AI provider.
+        """
+
         return self._ai_manager.provider
 
+
     def models(self):
-        """Return available AI models."""
+        """
+        Return available AI models.
+        """
 
         return self._ai_manager.service.models()
 
+
     def start(self):
-        """Start Atlas."""
+        """
+        Start Atlas.
+        """
 
         if self._started:
             return
 
+
         self._config.load()
+
 
         provider = self._config.get(
             "ai",
@@ -81,11 +130,13 @@ class Atlas:
             "timeout",
         )
 
+
         self._ai_manager.initialize(
             provider,
             model,
             timeout,
         )
+
 
         # --------------------------------------------------
         # Memory subsystem
@@ -100,11 +151,13 @@ class Atlas:
             ranking_engine,
         )
 
+
         self._memory_service = MemoryManagerService(
             repository=repository,
             ranking_engine=ranking_engine,
             search_engine=search_engine,
         )
+
 
         # --------------------------------------------------
         # Memory-aware context system
@@ -114,6 +167,7 @@ class Atlas:
             memory_service=self._memory_service,
         )
 
+
         # --------------------------------------------------
         # Conversation subsystem
         # --------------------------------------------------
@@ -122,6 +176,7 @@ class Atlas:
             self._ai_manager.service,
             context_engine=context_engine,
         )
+
 
         # --------------------------------------------------
         # Register services
@@ -142,12 +197,33 @@ class Atlas:
             self._memory_service,
         )
 
+
         self._container.start_all()
+
 
         self._started = True
 
+
+        self._state_manager.update(
+            {
+                "status": "running",
+                "health": "healthy",
+            }
+        )
+
+
+        self._event_bus.publish(
+            "atlas.started",
+            {
+                "status": "running"
+            }
+        )
+
+
     def chat(self, text: str):
-        """Send a message to Atlas."""
+        """
+        Send a message to Atlas.
+        """
 
         if not self._started:
             raise RuntimeError(
@@ -156,11 +232,14 @@ class Atlas:
 
         return self._conversation.send(text)
 
+
     def stream(
         self,
         text: str,
     ) -> Iterator[str]:
-        """Stream a response from Atlas."""
+        """
+        Stream a response from Atlas.
+        """
 
         if not self._started:
             raise RuntimeError(
@@ -168,6 +247,7 @@ class Atlas:
             )
 
         yield from self._conversation.stream(text)
+
 
     def save_conversation(self) -> Path:
         """
@@ -180,6 +260,7 @@ class Atlas:
             )
 
         return self._conversation.save()
+
 
     def load_conversation(
         self,
@@ -198,6 +279,7 @@ class Atlas:
             filepath
         )
 
+
     def saved_conversations(self):
         """
         Return saved conversations.
@@ -210,16 +292,40 @@ class Atlas:
 
         return self._conversation.saved_conversations()
 
+
     def shutdown(self):
-        """Shutdown Atlas."""
+        """
+        Shutdown Atlas.
+        """
 
         if not self._started:
             return
 
+
         self._container.stop_all()
+
         self._container.clear()
 
+
         self._conversation = None
+
         self._memory_service = None
 
+
         self._started = False
+
+
+        self._state_manager.update(
+            {
+                "status": "stopped",
+                "health": "offline",
+            }
+        )
+
+
+        self._event_bus.publish(
+            "atlas.shutdown",
+            {
+                "status": "stopped"
+            }
+        )
