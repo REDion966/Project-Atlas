@@ -10,3 +10,6 @@ data/memory.json
 
 # Logs
 logs/
+
+# Temporary / Mock Data
+MagicMock/
