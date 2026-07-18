@@ -11,6 +11,7 @@ from atlas.ai.ai_manager import AIManager
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
 from atlas.kernel.service_container import ServiceContainer
+from atlas.memory.context.context_engine import ContextEngine
 from atlas.memory.ranking.ranking_engine import RankingEngine
 from atlas.memory.repository.memory_repository import MemoryRepository
 from atlas.memory.search.search_engine import MemorySearchEngine
@@ -31,6 +32,7 @@ class Atlas:
         self._config = Configuration()
 
         self._ai_manager = AIManager()
+
         self._conversation: ConversationService | None = None
         self._memory_service: MemoryManagerService | None = None
 
@@ -64,9 +66,20 @@ class Atlas:
 
         self._config.load()
 
-        provider = self._config.get("ai", "provider")
-        model = self._config.get("ai", "model")
-        timeout = self._config.get("ai", "timeout")
+        provider = self._config.get(
+            "ai",
+            "provider",
+        )
+
+        model = self._config.get(
+            "ai",
+            "model",
+        )
+
+        timeout = self._config.get(
+            "ai",
+            "timeout",
+        )
 
         self._ai_manager.initialize(
             provider,
@@ -74,9 +87,45 @@ class Atlas:
             timeout,
         )
 
-        self._conversation = ConversationService(
-            self._ai_manager.service
+        # --------------------------------------------------
+        # Memory subsystem
+        # --------------------------------------------------
+
+        repository = MemoryRepository()
+
+        ranking_engine = RankingEngine()
+
+        search_engine = MemorySearchEngine(
+            repository,
+            ranking_engine,
         )
+
+        self._memory_service = MemoryManagerService(
+            repository=repository,
+            ranking_engine=ranking_engine,
+            search_engine=search_engine,
+        )
+
+        # --------------------------------------------------
+        # Memory-aware context system
+        # --------------------------------------------------
+
+        context_engine = ContextEngine(
+            memory_service=self._memory_service,
+        )
+
+        # --------------------------------------------------
+        # Conversation subsystem
+        # --------------------------------------------------
+
+        self._conversation = ConversationService(
+            self._ai_manager.service,
+            context_engine=context_engine,
+        )
+
+        # --------------------------------------------------
+        # Register services
+        # --------------------------------------------------
 
         self._container.register(
             "ai",
@@ -86,16 +135,6 @@ class Atlas:
         self._container.register(
             "conversation",
             self._conversation,
-        )
-
-        # Assemble MemoryService with dependency injection
-        repository = MemoryRepository()
-        ranking_engine = RankingEngine()
-        search_engine = MemorySearchEngine(repository, ranking_engine)
-        self._memory_service = MemoryManagerService(
-            repository=repository,
-            ranking_engine=ranking_engine,
-            search_engine=search_engine,
         )
 
         self._container.register(

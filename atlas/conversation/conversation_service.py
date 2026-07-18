@@ -11,6 +11,7 @@ from atlas.conversation.conversation import Conversation
 from atlas.conversation.history import History
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
+from atlas.memory.context.context_engine import ContextEngine
 from atlas.services.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
 
@@ -18,16 +19,28 @@ from atlas.storage.conversation_storage import ConversationStorage
 class ConversationService:
     """Coordinates the complete conversation pipeline."""
 
-    def __init__(self, ai_service: AIService):
+    def __init__(
+        self,
+        ai_service: AIService,
+        context_engine: ContextEngine | None = None,
+    ):
         """
         Initialize the conversation service.
 
         Args:
-            ai_service: A configured AIService instance.
+            ai_service:
+                A configured AIService instance.
+
+            context_engine:
+                Optional memory-aware context engine.
         """
 
         self._history = History()
-        self._context = ContextManager()
+
+        self._context = ContextManager(
+            context_engine=context_engine,
+        )
+
         self._prompt_builder = PromptBuilder()
         self._storage = ConversationStorage()
 
@@ -42,7 +55,10 @@ class ConversationService:
 
         return self._conversation
 
-    def send(self, text: str) -> Message:
+    def send(
+        self,
+        text: str,
+    ) -> Message:
         """
         Send a user message through Atlas.
         """
@@ -52,17 +68,22 @@ class ConversationService:
             content=text,
         )
 
-        self._conversation.add_message(user_message)
+        self._conversation.add_message(
+            user_message
+        )
 
         context = self._context.build(
-            self._conversation
+            self._conversation,
+            memory_query=text,
         )
 
         prompt = self._prompt_builder.build(
             context
         )
 
-        response = self._ai.chat(prompt)
+        response = self._ai.chat(
+            prompt
+        )
 
         assistant_message = Message(
             role="assistant",
@@ -75,7 +96,10 @@ class ConversationService:
 
         return assistant_message
 
-    def stream(self, text: str):
+    def stream(
+        self,
+        text: str,
+    ):
         """
         Stream a response through Atlas.
         """
@@ -88,13 +112,10 @@ class ConversationService:
         self._conversation.add_message(
             user_message
         )
-        
-        print(
-            f"\nDEBUG: messages = {self._conversation.message_count()}"
-        )
 
         context = self._context.build(
-            self._conversation
+            self._conversation,
+            memory_query=text,
         )
 
         prompt = self._prompt_builder.build(
