@@ -4,10 +4,10 @@
 Core Foundation → Memory Intelligence
 
 ## Current Task
-WS-027 Context Pipeline Integration
+WS-028 Context Pipeline Completion
 
 ## Last Completed
-WS-026 ContextEngine
+WS-027 Context Pipeline Integration
 
 ## Completed Work
 
@@ -19,6 +19,7 @@ WS-026 ContextEngine
 - Memory Service
 - Memory Service Kernel Integration
 - Context Engine
+- Conversation Memory Integration
 
 ## Current Architecture Status
 
@@ -41,19 +42,30 @@ Conversation:
 - Conversation service exists
 - ContextManager exists
 - PromptBuilder exists
+- Memory-aware context pipeline integrated
+
+## Current Pipeline
+
+User Input
+→ Conversation Service
+→ Context Manager
+→ Context Engine
+→ Memory Service
+→ Ranked Relevant Memories
+→ Conversation History
+→ Prompt Builder
+→ AI Provider
 
 ## Next Task
 
-Integrate ContextEngine into the conversation context pipeline.
+Improve context intelligence.
 
-Goal:
+Goals:
 
-Allow Atlas conversations to use:
-- Recent conversation history
-- Relevant long-term memories
-- Ranked memory context
-
-before sending prompts to AI.
+- Add better memory selection logic.
+- Separate conversation context from memory context.
+- Prepare context pipeline for AI orchestration.
+- Improve relevance ranking before prompt generation.
 
 ## Important Decisions
 
@@ -62,6 +74,7 @@ before sending prompts to AI.
 - Keep services modular.
 - Avoid large refactors.
 - Preserve backward compatibility.
+- Build intelligence incrementally.
 
 ## Test Status
 
