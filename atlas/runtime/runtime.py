@@ -4,189 +4,166 @@ Atlas Runtime
 Central runtime environment for Atlas.
 """
 
+from __future__ import annotations
+
+import time
 from datetime import datetime
+
+from atlas.runtime.health import RuntimeHealth
+from atlas.runtime.heartbeat import Heartbeat
+from atlas.runtime.metrics import RuntimeMetrics
+from atlas.runtime.runtime_events import RuntimeEvents
+from atlas.runtime.runtime_state import RuntimeState
 
 
 class AtlasRuntime:
     """
-    Controls Atlas runtime lifecycle,
-    execution state, and environment status.
+    Atlas execution runtime.
     """
 
     def __init__(
         self,
-        registry,
+        kernel,
         state_manager=None,
         event_bus=None,
+        tick_interval: float = 0.05,
+        heartbeat_interval: int = 20,
     ):
-        """
-        Initialize runtime.
 
-        Args:
-            registry:
-                Atlas service registry.
-
-            state_manager:
-                Atlas state manager.
-
-            event_bus:
-                Atlas event bus.
-        """
-
-        self.registry = registry
+        self.kernel = kernel
 
         self.state_manager = state_manager
 
         self.event_bus = event_bus
 
-        self.running = False
+        self.tick_interval = tick_interval
 
-        self.started_at = None
+        self.state = RuntimeState()
 
-        self.stopped_at = None
+        self.metrics = RuntimeMetrics(
+            self.state
+        )
+
+        self.heartbeat = Heartbeat(
+            event_bus=event_bus,
+            interval=heartbeat_interval,
+        )
+
+        self.health = RuntimeHealth(
+            self.state
+        )
 
 
     def start(self):
-        """
-        Start Atlas runtime.
-        """
 
-        if self.running:
+        if self.state.running:
             return
 
+        self.state.running = True
 
-        self.running = True
+        self.state.started_at = datetime.now()
 
-        self.started_at = datetime.now()
+        self.state.last_tick = None
 
-        self.stopped_at = None
+        self.state.tick_count = 0
 
+        self.state.healthy = True
 
         if self.state_manager:
-
             self.state_manager.update(
                 {
                     "runtime": "active",
-                    "runtime_health": "healthy",
                 }
             )
-
 
         if self.event_bus:
-
             self.event_bus.publish(
-                "runtime.started",
+                RuntimeEvents.STARTED,
                 {
-                    "time": self.started_at.isoformat(),
-                    "status": "active",
-                }
+                    "time": self.state.started_at.isoformat(),
+                },
             )
 
+
+    def run(self):
+
+        self.start()
+
+        while self.state.running:
+
+            self.kernel.tick()
+
+            self.state.tick_count += 1
+
+            self.state.last_tick = datetime.now()
+
+
+            health = self.health.check()
+
+
+            if self.heartbeat.should_publish(
+                self.state.tick_count,
+            ):
+
+                self.heartbeat.publish(
+                    tick_count=self.state.tick_count,
+                    uptime=self.metrics.uptime,
+                    tps=self.metrics.ticks_per_second,
+                )
+
+
+            time.sleep(
+                self.tick_interval
+            )
 
 
     def stop(self):
-        """
-        Stop Atlas runtime.
-        """
 
-        if not self.running:
+        if not self.state.running:
             return
 
-
-        self.running = False
-
-        self.stopped_at = datetime.now()
+        self.state.running = False
 
 
         if self.state_manager:
-
             self.state_manager.update(
                 {
                     "runtime": "inactive",
-                    "runtime_health": "offline",
                 }
             )
 
 
         if self.event_bus:
-
             self.event_bus.publish(
-                "runtime.stopped",
-                {
-                    "time": self.stopped_at.isoformat(),
-                    "status": "inactive",
-                }
+                RuntimeEvents.STOPPED,
+                {},
             )
 
 
-
-    def get_service(
-        self,
-        name: str,
-    ):
-        """
-        Retrieve a service from registry.
-        """
-
-        return self.registry.get(name)
-
-
-
-    def uptime(self):
-        """
-        Return runtime uptime.
-        """
-
-        if not self.running or not self.started_at:
-            return None
-
-
-        return (
-            datetime.now()
-            - self.started_at
-        ).total_seconds()
-
-
-
-    def health(self):
-        """
-        Return runtime health status.
-        """
-
-        return {
-            "running": self.running,
-            "health": (
-                "healthy"
-                if self.running
-                else "offline"
-            ),
-        }
-
-
-
     def status(self):
-        """
-        Return complete runtime status.
-        """
 
         return {
-            "running": self.running,
+            "running": self.state.running,
+
+            "health": self.health.check(),
 
             "started_at": (
-                self.started_at.isoformat()
-                if self.started_at
+                self.state.started_at.isoformat()
+                if self.state.started_at
                 else None
             ),
 
-            "stopped_at": (
-                self.stopped_at.isoformat()
-                if self.stopped_at
+            "last_tick": (
+                self.state.last_tick.isoformat()
+                if self.state.last_tick
                 else None
             ),
 
-            "uptime": self.uptime(),
+            "tick_count": self.state.tick_count,
 
-            "services": (
-                self.registry.list_services()
-            ),
+            **self.metrics.snapshot(),
+
+            "tick_interval": self.tick_interval,
+
+            "heartbeat_interval": self.heartbeat.interval,
         }

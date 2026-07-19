@@ -1,8 +1,7 @@
 """
 Atlas Application
 
-Main application controller responsible for
-initializing and running Atlas.
+Main application controller.
 """
 
 from atlas.core.boot_manager import BootManager
@@ -17,23 +16,17 @@ class Application:
 
     def __init__(self):
 
-        # Main Atlas kernel
         self.kernel = Atlas()
 
-
-        # Runtime environment
         self.runtime = AtlasRuntime(
-            self.kernel.container,
-            self.kernel.state,
-            self.kernel.events,
+            kernel=self.kernel,
+            state_manager=self.kernel.state,
+            event_bus=self.kernel.events,
         )
 
-
-        # Startup manager
         self.boot_manager = BootManager(
             self.kernel
         )
-
 
     def initialize(self):
         """
@@ -42,20 +35,17 @@ class Application:
 
         return self.boot_manager.boot()
 
-
     def run(self):
         """
         Run Atlas.
         """
 
-        if self.initialize():
+        if not self.initialize():
+            return False
 
-            self.runtime.start()
+        self.runtime.run()
 
-            return True
-
-        return False
-
+        return True
 
     def shutdown(self):
         """
@@ -64,8 +54,4 @@ class Application:
 
         self.runtime.stop()
 
-        self.kernel.shutdown()
-
-        print(
-            "Atlas shutdown requested."
-        )
+        self.boot_manager.shutdown()
