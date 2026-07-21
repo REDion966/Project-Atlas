@@ -23,17 +23,37 @@ class TestKernel(unittest.TestCase):
         atlas.start()
 
         memory_service = atlas.container.get("memory")
+
         self.assertIsNotNone(memory_service)
 
         atlas.shutdown()
 
     def test_memory_service_cleaned_after_shutdown(self):
         atlas = Atlas()
+
         atlas.start()
         atlas.shutdown()
 
-        self.assertFalse(atlas.container.has("memory"))
-        self.assertFalse(atlas.started)
+        self.assertFalse(
+            atlas.container.has("memory")
+        )
+
+        self.assertFalse(
+            atlas.started
+        )
+
+    def test_kernel_registers_knowledge_service(self):
+        atlas = Atlas()
+
+        atlas.start()
+
+        knowledge = atlas.container.get("knowledge")
+
+        self.assertIsNotNone(
+            knowledge
+        )
+
+        atlas.shutdown()
 
 
 if __name__ == "__main__":

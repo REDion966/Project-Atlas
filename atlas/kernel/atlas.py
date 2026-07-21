@@ -12,11 +12,19 @@ from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
 from atlas.events.event_bus import EventBus
 from atlas.kernel.service_container import ServiceContainer
+from atlas.intelligence.cognitive_loop import CognitiveLoop
+from atlas.intelligence.cognitive_service import CognitiveService
+
 from atlas.memory.context.context_engine import ContextEngine
 from atlas.memory.ranking.ranking_engine import RankingEngine
 from atlas.memory.repository.memory_repository import MemoryRepository
 from atlas.memory.search.search_engine import MemorySearchEngine
 from atlas.memory.service.memory_manager_service import MemoryManagerService
+
+from atlas.knowledge.knowledge_manager import KnowledgeManager
+
+from atlas.intelligence.cognitive_loop import CognitiveLoop
+
 from atlas.state.state_manager import StateManager
 from atlas.task.task_manager import TaskManager
 
@@ -24,9 +32,6 @@ from atlas.task.task_manager import TaskManager
 class Atlas:
     """
     Root object for the Atlas application.
-
-    Responsible for assembling and managing
-    every Atlas subsystem.
     """
 
     def __init__(self):
@@ -49,93 +54,88 @@ class Atlas:
 
         self._memory_service: MemoryManagerService | None = None
 
+        self._knowledge_manager: KnowledgeManager | None = None
+
+        self._cognitive_loop: CognitiveLoop | None = None
+
+        self._cognitive_service: CognitiveService | None = None
+
         self._started = False
 
-    @property
-    def container(self) -> ServiceContainer:
-        """
-        Return the application's service container.
-        """
 
+    @property
+    def container(self):
         return self._container
 
-    @property
-    def events(self) -> EventBus:
-        """
-        Return Atlas event bus.
-        """
 
+    @property
+    def events(self):
         return self._event_bus
 
-    @property
-    def state(self) -> StateManager:
-        """
-        Return Atlas state manager.
-        """
 
+    @property
+    def state(self):
         return self._state_manager
 
-    @property
-    def tasks(self) -> TaskManager:
-        """
-        Return Atlas task manager.
-        """
 
+    @property
+    def tasks(self):
         return self._task_manager
+    
+    @property
+    def cognitive(self):
+        """
+        Return Atlas cognitive loop.
+        """
+
+        return self._cognitive_loop
+
 
     @property
-    def started(self) -> bool:
-        """
-        Return whether Atlas has been started.
-        """
-
+    def started(self):
         return self._started
+
 
     @property
     def provider(self):
-        """
-        Return the active AI provider.
-        """
-
         return self._ai_manager.provider
 
+
     def models(self):
-        """
-        Return available AI models.
-        """
 
         return self._ai_manager.service.models()
 
+
     def start(self):
-        """
-        Start Atlas.
-        """
 
         if self._started:
             return
 
+
         self._config.load()
 
-        provider = self._config.get(
+        provider = str(self._config.get(
             "ai",
             "provider",
-        )
+        ))
 
-        model = self._config.get(
+        model = str(self._config.get(
             "ai",
             "model",
-        )
+        ))
 
-        timeout = self._config.get(
+        timeout = int(self._config.get(
             "ai",
             "timeout",
-        )
+        ))
+
 
         self._ai_manager.initialize(
             provider,
             model,
             timeout,
         )
+
 
         repository = MemoryRepository()
 
@@ -146,20 +146,42 @@ class Atlas:
             ranking_engine,
         )
 
+
         self._memory_service = MemoryManagerService(
             repository=repository,
             ranking_engine=ranking_engine,
             search_engine=search_engine,
         )
 
+
+        self._knowledge_manager = KnowledgeManager()
+
+        self._cognitive_loop = CognitiveLoop(
+            memory_service=self._memory_service,
+            knowledge_manager=self._knowledge_manager,
+        )
+
+        self._cognitive_service = CognitiveService(
+            cognitive_loop=self._cognitive_loop
+        )
+
+
+        self._cognitive_loop = CognitiveLoop(
+            memory_service=self._memory_service,
+            knowledge_manager=self._knowledge_manager,
+        )
+
+
         context_engine = ContextEngine(
             memory_service=self._memory_service,
         )
+
 
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
         )
+
 
         self._container.register(
             "ai",
@@ -177,13 +199,30 @@ class Atlas:
         )
 
         self._container.register(
+            "knowledge",
+            self._knowledge_manager,
+        )
+
+        self._container.register(
+            "cognition",
+            self._cognitive_loop,
+        )
+
+        self._container.register(
+            "cognitive",
+            self._cognitive_service,
+        )
+
+        self._container.register(
             "tasks",
             self._task_manager,
         )
 
+
         self._container.start_all()
 
         self._started = True
+
 
         self._state_manager.update(
             {
@@ -192,6 +231,7 @@ class Atlas:
             }
         )
 
+
         self._event_bus.publish(
             "atlas.started",
             {
@@ -199,20 +239,16 @@ class Atlas:
             },
         )
 
+
     def tick(self):
-        """
-        Advance Atlas runtime.
-        """
 
         self._task_manager.tick()
+
 
     def chat(
         self,
         text: str,
     ):
-        """
-        Send a message to Atlas.
-        """
 
         if not self._started:
             raise RuntimeError(
@@ -221,13 +257,11 @@ class Atlas:
 
         return self._conversation.send(text)
 
+
     def stream(
         self,
         text: str,
     ) -> Iterator[str]:
-        """
-        Stream a response from Atlas.
-        """
 
         if not self._started:
             raise RuntimeError(
@@ -236,10 +270,8 @@ class Atlas:
 
         yield from self._conversation.stream(text)
 
+
     def save_conversation(self) -> Path:
-        """
-        Save the active conversation.
-        """
 
         if not self._started:
             raise RuntimeError(
@@ -248,27 +280,21 @@ class Atlas:
 
         return self._conversation.save()
 
+
     def load_conversation(
         self,
         filepath: Path,
     ):
-        """
-        Load a saved conversation.
-        """
 
         if not self._started:
             raise RuntimeError(
                 "Atlas has not been started."
             )
 
-        return self._conversation.load(
-            filepath
-        )
+        return self._conversation.load(filepath)
+
 
     def saved_conversations(self):
-        """
-        Return saved conversations.
-        """
 
         if not self._started:
             raise RuntimeError(
@@ -277,23 +303,31 @@ class Atlas:
 
         return self._conversation.saved_conversations()
 
+
     def shutdown(self):
-        """
-        Shutdown Atlas.
-        """
 
         if not self._started:
             return
+
 
         self._container.stop_all()
 
         self._container.clear()
 
+
         self._conversation = None
 
         self._memory_service = None
 
+        self._knowledge_manager = None
+
+        self._cognitive_loop = None
+
+        self._cognitive_service = None
+
+
         self._started = False
+
 
         self._state_manager.update(
             {
@@ -301,6 +335,7 @@ class Atlas:
                 "health": "offline",
             }
         )
+
 
         self._event_bus.publish(
             "atlas.shutdown",

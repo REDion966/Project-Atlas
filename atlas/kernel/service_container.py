@@ -27,6 +27,7 @@ class ServiceContainer:
 
         self._services[name] = service
 
+
     def get(self, name: str) -> Any:
         """
         Retrieve a registered service.
@@ -39,12 +40,25 @@ class ServiceContainer:
 
         return self._services[name]
 
+
+    def resolve(self, name: str) -> Any:
+        """
+        Resolve a service.
+
+        Alias for get().
+        Used by higher-level Atlas components.
+        """
+
+        return self.get(name)
+
+
     def has(self, name: str) -> bool:
         """
         Check whether a service exists.
         """
 
         return name in self._services
+
 
     def remove(self, name: str) -> None:
         """
@@ -58,12 +72,14 @@ class ServiceContainer:
 
         del self._services[name]
 
+
     def clear(self) -> None:
         """
         Remove all services.
         """
 
         self._services.clear()
+
 
     def names(self) -> list[str]:
         """
@@ -72,16 +88,19 @@ class ServiceContainer:
 
         return sorted(self._services.keys())
 
+
     def start_all(self) -> None:
         """
         Start every registered service.
         """
 
         for service in self._services.values():
+
             start = getattr(service, "start", None)
 
             if callable(start):
                 start()
+
 
     def stop_all(self) -> None:
         """
@@ -91,6 +110,7 @@ class ServiceContainer:
         services = list(self._services.values())
 
         for service in reversed(services):
+
             stop = getattr(service, "stop", None)
 
             if callable(stop):
