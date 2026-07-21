@@ -1,0 +1,431 @@
+Folder PATH listing for volume New Volume
+Volume serial number is 00000258 7A30:6F93
+F:\PROJECT ATLAS\ATLAS
++---agents
+¦       agent.py
+¦       agent_capabilities.py
+¦       agent_communication.py
+¦       agent_coordinator.py
+¦       agent_dispatcher.py
+¦       agent_events.py
+¦       agent_executor.py
+¦       agent_identity.py
+¦       agent_lifecycle.py
+¦       agent_manager.py
+¦       agent_memory.py
+¦       agent_message.py
+¦       agent_permissions.py
+¦       agent_planner.py
+¦       agent_registry.py
+¦       agent_state.py
+¦       collaboration_engine.py
+¦       decision_router.py
+¦       execution_context.py
+¦       execution_pipeline.py
+¦       execution_result.py
+¦       goal.py
+¦       goal_manager.py
+¦       orchestrator.py
+¦       workflow.py
+¦       workflow_manager.py
+¦       __init__.py
+¦       
++---ai
+¦   ¦   ai_manager.py
+¦   ¦   capabilities.py
+¦   ¦   provider.py
+¦   ¦   registry.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---providers
+¦   ¦   ¦   lmstudio_provider.py
+¦   ¦   ¦   mock_provider.py
+¦   ¦   ¦   ollama_provider.py
+¦   ¦   ¦   openai_provider.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           mock_provider.cpython-314.pyc
+¦   ¦           ollama_provider.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---router
+¦   ¦   ¦   ai_router.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           ai_router.cpython-314.pyc
+¦   ¦           
+¦   +---__pycache__
+¦           ai_manager.cpython-314.pyc
+¦           provider.cpython-314.pyc
+¦           registry.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---automation
+¦       __init__.py
+¦       
++---cli
+¦   ¦   cli.py
+¦   ¦   commands.py
+¦   ¦   command_router.py
+¦   ¦   main.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           commands.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---config
+¦   ¦   configuration.py
+¦   ¦   configuration_models.py
+¦   ¦   settings.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           configuration.cpython-314.pyc
+¦           configuration_models.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---conversation
+¦   ¦   context.py
+¦   ¦   conversation.py
+¦   ¦   conversation_service.py
+¦   ¦   history.py
+¦   ¦   message.py
+¦   ¦   prompt_builder.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           context.cpython-314.pyc
+¦           conversation.cpython-314.pyc
+¦           conversation_service.cpython-314.pyc
+¦           history.cpython-314.pyc
+¦           message.cpython-314.pyc
+¦           prompt_builder.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---core
+¦       application.py
+¦       boot_manager.py
+¦       boot_screen.py
+¦       dependency_checker.py
+¦       error_handler.py
+¦       startup.py
+¦       
++---events
+¦   ¦   agent_event_bridge.py
+¦   ¦   event_bus.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           event_bus.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---intelligence
+¦   ¦   cognitive_loop.py
+¦   ¦   cognitive_service.py
+¦   ¦   decision_engine.py
+¦   ¦   decision_result.py
+¦   ¦   intelligence_manager.py
+¦   ¦   reasoning_context.py
+¦   ¦   reasoning_engine.py
+¦   ¦   reasoning_result.py
+¦   ¦   reasoning_strategy.py
+¦   ¦   reflection_engine.py
+¦   ¦   reflection_result.py
+¦   ¦   thinking_context.py
+¦   ¦   thinking_cycle.py
+¦   ¦   thinking_pipeline.py
+¦   ¦   thinking_result.py
+¦   ¦   thinking_session.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           cognitive_loop.cpython-314.pyc
+¦           cognitive_service.cpython-314.pyc
+¦           decision_engine.cpython-314.pyc
+¦           decision_result.cpython-314.pyc
+¦           intelligence_manager.cpython-314.pyc
+¦           reasoning_context.cpython-314.pyc
+¦           reasoning_engine.cpython-314.pyc
+¦           reasoning_result.cpython-314.pyc
+¦           reasoning_strategy.cpython-314.pyc
+¦           reflection_engine.cpython-314.pyc
+¦           reflection_result.cpython-314.pyc
+¦           thinking_cycle.cpython-314.pyc
+¦           thinking_pipeline.cpython-314.pyc
+¦           thinking_result.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---interfaces
+¦       __init__.py
+¦       
++---kernel
+¦   ¦   atlas.py
+¦   ¦   service_container.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           atlas.cpython-314.pyc
+¦           service_container.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---knowledge
+¦   ¦   knowledge_base.py
+¦   ¦   knowledge_context.py
+¦   ¦   knowledge_entry.py
+¦   ¦   knowledge_index.py
+¦   ¦   knowledge_manager.py
+¦   ¦   knowledge_query.py
+¦   ¦   knowledge_ranker.py
+¦   ¦   knowledge_search.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           knowledge_base.cpython-314.pyc
+¦           knowledge_entry.cpython-314.pyc
+¦           knowledge_manager.cpython-314.pyc
+¦           knowledge_ranker.cpython-314.pyc
+¦           knowledge_search.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---learning
+¦   ¦   experience_collector.py
+¦   ¦   knowledge_extractor.py
+¦   ¦   knowledge_feedback.py
+¦   ¦   knowledge_store.py
+¦   ¦   learning_manager.py
+¦   ¦   learning_record.py
+¦   ¦   learning_result.py
+¦   ¦   learning_session.py
+¦   ¦   reflection_learning_bridge.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           experience_collector.cpython-314.pyc
+¦           knowledge_extractor.cpython-314.pyc
+¦           knowledge_feedback.cpython-314.pyc
+¦           knowledge_store.cpython-314.pyc
+¦           learning_manager.cpython-314.pyc
+¦           learning_record.cpython-314.pyc
+¦           learning_result.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---lifecycle
+¦       hooks.py
+¦       lifecycle_manager.py
+¦       phases.py
+¦       __init__.py
+¦       
++---memory
+¦   ¦   agent_memory_service.py
+¦   ¦   constants.py
+¦   ¦   enums.py
+¦   ¦   manager.py
+¦   ¦   memory_manager.py
+¦   ¦   storage.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---context
+¦   ¦   ¦   context_engine.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           context_engine.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---models
+¦   ¦   ¦   memory.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           memory.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---ranking
+¦   ¦   ¦   ranking_engine.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           ranking_engine.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---repository
+¦   ¦   ¦   memory_repository.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           memory_repository.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---search
+¦   ¦   ¦   search_engine.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           search_engine.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---service
+¦   ¦   ¦   memory_manager_service.py
+¦   ¦   ¦   memory_service.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           memory_manager_service.cpython-314.pyc
+¦   ¦           memory_service.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---storage
+¦   ¦   ¦   json_storage.py
+¦   ¦   ¦   __init__.py
+¦   ¦   ¦   
+¦   ¦   +---__pycache__
+¦   ¦           json_storage.cpython-314.pyc
+¦   ¦           __init__.cpython-314.pyc
+¦   ¦           
+¦   +---__pycache__
+¦           constants.cpython-314.pyc
+¦           enums.cpython-314.pyc
+¦           manager.cpython-314.pyc
+¦           memory_manager.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---models
+¦   ¦   ai_response.py
+¦   ¦   
+¦   +---__pycache__
+¦           ai_response.cpython-314.pyc
+¦           
++---router
++---runtime
+¦       agent_runtime.py
+¦       health.py
+¦       heartbeat.py
+¦       metrics.py
+¦       runtime.py
+¦       runtime_events.py
+¦       runtime_state.py
+¦       __init__.py
+¦       
++---scheduler
+¦   ¦   agent_scheduler.py
+¦   ¦   scheduled_task.py
+¦   ¦   scheduler.py
+¦   ¦   schedule_policy.py
+¦   ¦   worker.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           scheduled_task.cpython-314.pyc
+¦           scheduler.cpython-314.pyc
+¦           worker.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---services
+¦   ¦   ai_service.py
+¦   ¦   memory_service.py
+¦   ¦   registry.py
+¦   ¦   service.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           ai_service.cpython-314.pyc
+¦           service.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---skills
+¦       __init__.py
+¦       
++---state
+¦   ¦   state_manager.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           state_manager.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---storage
+¦   ¦   conversation_storage.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           conversation_storage.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---task
+¦   ¦   agent_task.py
+¦   ¦   agent_task_manager.py
+¦   ¦   task.py
+¦   ¦   task_manager.py
+¦   ¦   task_priority.py
+¦   ¦   task_queue.py
+¦   ¦   task_status.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           task.cpython-314.pyc
+¦           task_manager.cpython-314.pyc
+¦           task_priority.cpython-314.pyc
+¦           task_queue.cpython-314.pyc
+¦           task_status.cpython-314.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---utils
+¦       logger.py
+¦       
++---workspace
+    ¦   enums.py
+    ¦   loader.py
+    ¦   member_manager.py
+    ¦   paths.py
+    ¦   permission_manager.py
+    ¦   project_manager.py
+    ¦   resource_manager.py
+    ¦   storage.py
+    ¦   tag_manager.py
+    ¦   workspace_manager.py
+    ¦   workspace_service.py
+    ¦   __init__.py
+    ¦   
+    +---models
+    ¦   ¦   member.py
+    ¦   ¦   permission.py
+    ¦   ¦   project.py
+    ¦   ¦   resource.py
+    ¦   ¦   settings.py
+    ¦   ¦   tag.py
+    ¦   ¦   workspace.py
+    ¦   ¦   __init__.py
+    ¦   ¦   
+    ¦   +---__pycache__
+    ¦           member.cpython-314.pyc
+    ¦           permission.cpython-314.pyc
+    ¦           project.cpython-314.pyc
+    ¦           resource.cpython-314.pyc
+    ¦           settings.cpython-314.pyc
+    ¦           tag.cpython-314.pyc
+    ¦           workspace.cpython-314.pyc
+    ¦           __init__.cpython-314.pyc
+    ¦           
+    +---storage
+    ¦   ¦   json_storage.py
+    ¦   ¦   __init__.py
+    ¦   ¦   
+    ¦   +---__pycache__
+    ¦           json_storage.cpython-314.pyc
+    ¦           __init__.cpython-314.pyc
+    ¦           
+    +---__pycache__
+            enums.cpython-314.pyc
+            loader.cpython-314.pyc
+            member_manager.cpython-314.pyc
+            paths.cpython-314.pyc
+            permission_manager.cpython-314.pyc
+            project_manager.cpython-314.pyc
+            resource_manager.cpython-314.pyc
+            tag_manager.cpython-314.pyc
+            workspace_manager.cpython-314.pyc
+            workspace_service.cpython-314.pyc
+            __init__.cpython-314.pyc
+            

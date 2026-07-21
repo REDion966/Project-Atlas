@@ -1,0 +1,125 @@
+Folder PATH listing for volume New Volume
+Volume serial number is 000001C0 7A30:6F93
+F:\PROJECT ATLAS\TESTS
+¦   test_agent_integration.py
+¦   test_ai_capabilities.py
+¦   test_ai_manager_routing.py
+¦   test_ai_provider_metadata.py
+¦   test_ai_registry.py
+¦   test_ai_router.py
+¦   test_ai_service.py
+¦   test_boot.py
+¦   test_cognition_service.py
+¦   test_cognitive_api.py
+¦   test_cognitive_loop.py
+¦   test_cognitive_loop_integration.py
+¦   test_cognitive_service.py
+¦   test_context.py
+¦   test_conversation.py
+¦   test_conversation_service.py
+¦   test_history.py
+¦   test_kernel.py
+¦   test_knowledge.py
+¦   test_knowledge_service.py
+¦   test_learning.py
+¦   test_memory.py
+¦   test_mock_provider.py
+¦   test_ollama_provider.py
+¦   test_prompt_builder.py
+¦   test_services.py
+¦   test_service_container.py
+¦   test_workspace.py
+¦   __init__.py
+¦   
++---cli
+¦   ¦   test_commands.py
+¦   ¦   test_loader.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           test_commands.cpython-314-pytest-9.1.1.pyc
+¦           test_loader.cpython-314-pytest-9.1.1.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---memory
+¦   ¦   test_memory.py
+¦   ¦   test_memory_service.py
+¦   ¦   test_ranking_engine.py
+¦   ¦   test_repository.py
+¦   ¦   test_search_engine.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---context
+¦   ¦   ¦   test_context_engine.py
+¦   ¦   ¦   
+¦   ¦   +---intelligence
+¦   ¦   +---__pycache__
+¦   ¦           test_context_engine.cpython-314-pytest-9.1.1.pyc
+¦   ¦           
+¦   +---__pycache__
+¦           test_memory.cpython-314-pytest-9.1.1.pyc
+¦           test_memory_service.cpython-314-pytest-9.1.1.pyc
+¦           test_ranking_engine.cpython-314-pytest-9.1.1.pyc
+¦           test_repository.cpython-314-pytest-9.1.1.pyc
+¦           test_search_engine.cpython-314-pytest-9.1.1.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---workspace
+¦   ¦   test_permission.py
+¦   ¦   test_permission_manager.py
+¦   ¦   test_project.py
+¦   ¦   test_project_manager.py
+¦   ¦   test_resource.py
+¦   ¦   test_resource_manager.py
+¦   ¦   test_storage.py
+¦   ¦   test_tag_manager.py
+¦   ¦   test_workspace.py
+¦   ¦   test_workspace_manager.py
+¦   ¦   test_workspace_service.py
+¦   ¦   __init__.py
+¦   ¦   
+¦   +---__pycache__
+¦           test_permission.cpython-314-pytest-9.1.1.pyc
+¦           test_permission_manager.cpython-314-pytest-9.1.1.pyc
+¦           test_project.cpython-314-pytest-9.1.1.pyc
+¦           test_project_manager.cpython-314-pytest-9.1.1.pyc
+¦           test_resource.cpython-314-pytest-9.1.1.pyc
+¦           test_resource_manager.cpython-314-pytest-9.1.1.pyc
+¦           test_storage.cpython-314-pytest-9.1.1.pyc
+¦           test_tag_manager.cpython-314-pytest-9.1.1.pyc
+¦           test_workspace.cpython-314-pytest-9.1.1.pyc
+¦           test_workspace_manager.cpython-314-pytest-9.1.1.pyc
+¦           test_workspace_service.cpython-314-pytest-9.1.1.pyc
+¦           __init__.cpython-314.pyc
+¦           
++---__pycache__
+        test_agent_integration.cpython-314-pytest-9.1.1.pyc
+        test_ai_capabilities.cpython-314-pytest-9.1.1.pyc
+        test_ai_manager_routing.cpython-314-pytest-9.1.1.pyc
+        test_ai_provider_metadata.cpython-314-pytest-9.1.1.pyc
+        test_ai_registry.cpython-314-pytest-9.1.1.pyc
+        test_ai_router.cpython-314-pytest-9.1.1.pyc
+        test_ai_service.cpython-314-pytest-9.1.1.pyc
+        test_boot.cpython-314-pytest-9.1.1.pyc
+        test_cognition_service.cpython-314-pytest-9.1.1.pyc
+        test_cognitive_api.cpython-314-pytest-9.1.1.pyc
+        test_cognitive_loop.cpython-314-pytest-9.1.1.pyc
+        test_cognitive_loop_integration.cpython-314-pytest-9.1.1.pyc
+        test_cognitive_service.cpython-314-pytest-9.1.1.pyc
+        test_context.cpython-314-pytest-9.1.1.pyc
+        test_conversation.cpython-314-pytest-9.1.1.pyc
+        test_conversation_service.cpython-314-pytest-9.1.1.pyc
+        test_history.cpython-314-pytest-9.1.1.pyc
+        test_kernel.cpython-314-pytest-9.1.1.pyc
+        test_knowledge.cpython-314-pytest-9.1.1.pyc
+        test_knowledge_service.cpython-314-pytest-9.1.1.pyc
+        test_learning.cpython-314-pytest-9.1.1.pyc
+        test_memory.cpython-314-pytest-9.1.1.pyc
+        test_mock_provider.cpython-314-pytest-9.1.1.pyc
+        test_ollama_provider.cpython-314-pytest-9.1.1.pyc
+        test_prompt_builder.cpython-314-pytest-9.1.1.pyc
+        test_services.cpython-314-pytest-9.1.1.pyc
+        test_service_container.cpython-314-pytest-9.1.1.pyc
+        test_workspace.cpython-314-pytest-9.1.1.pyc
+        __init__.cpython-314.pyc
+        
