@@ -179,6 +179,7 @@ class Atlas:
             knowledge_manager=self._knowledge_manager,
             learning_manager=self._learning_manager,
             knowledge_feedback=self._knowledge_feedback,
+            event_bus=self._event_bus,
         )
 
 

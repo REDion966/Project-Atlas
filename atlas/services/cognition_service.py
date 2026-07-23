@@ -24,6 +24,7 @@ class CognitionService(Service):
         knowledge_manager=None,
         learning_manager: LearningManager | None = None,
         knowledge_feedback: KnowledgeFeedback | None = None,
+        event_bus=None,
     ):
         super().__init__("cognition")
 
@@ -32,6 +33,7 @@ class CognitionService(Service):
         self._knowledge_manager = knowledge_manager
         self._learning_manager = learning_manager
         self._knowledge_feedback = knowledge_feedback
+        self._event_bus = event_bus
 
     def start(self):
         """
@@ -92,7 +94,19 @@ class CognitionService(Service):
 
         decision = self._engine.process(context)
 
+        # --- Cognition Event: decision.made ---
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "cognition.decision.made",
+                {
+                    "action": decision.action,
+                    "reasoning": decision.reasoning,
+                    "data": decision.data,
+                },
+            )
+
         # --- Cognition Feedback Loop (Phase 5.3) ---
+        learning_result = None
         if self._learning_manager is not None:
             experience = (
                 f"Action: {decision.action} | "
@@ -111,6 +125,16 @@ class CognitionService(Service):
                     content=learning_result.knowledge,
                     source="cognition_service",
                 )
+
+        # --- Cognition Event: learning.completed ---
+        if self._event_bus is not None and learning_result is not None:
+            self._event_bus.publish(
+                "cognition.learning.completed",
+                {
+                    "action": decision.action,
+                    "knowledge": learning_result.knowledge,
+                },
+            )
 
         return decision
 

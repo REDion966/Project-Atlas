@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 from atlas.kernel.atlas import Atlas
 from atlas.intelligence.cognitive_loop import CognitiveLoop
@@ -187,6 +187,86 @@ class TestCognitionService(unittest.TestCase):
 
         self.assertEqual(result.action, "respond")
         self.assertEqual(result.data["input"], "Existing behavior test")
+
+        service.stop()
+
+    # ------------------------------------------------------------------
+    # Phase 5.4 — Cognition Event Publishing Tests
+    # ------------------------------------------------------------------
+
+    def test_cognition_decision_event_published(self):
+        """cognition.decision.made is published when event_bus is injected."""
+
+        event_bus = MagicMock()
+        service = CognitionService(
+            event_bus=event_bus,
+        )
+        service.start()
+
+        result = service.process("Test decision event")
+
+        event_bus.publish.assert_any_call(
+            "cognition.decision.made",
+            {
+                "action": result.action,
+                "reasoning": result.reasoning,
+                "data": result.data,
+            },
+        )
+
+        service.stop()
+
+    def test_cognition_learning_event_published(self):
+        """cognition.learning.completed is published when learning feedback runs."""
+
+        event_bus = MagicMock()
+        service = CognitionService(
+            event_bus=event_bus,
+            learning_manager=LearningManager(),
+            knowledge_feedback=KnowledgeFeedback(),
+        )
+        service.start()
+
+        result = service.process("Test learning event")
+
+        event_bus.publish.assert_any_call(
+            "cognition.learning.completed",
+            {
+                "action": result.action,
+                "knowledge": ANY,
+            },
+        )
+
+        service.stop()
+
+    def test_no_event_bus_still_works(self):
+        """CognitionService works normally when event_bus is None."""
+
+        service = CognitionService()
+        service.start()
+
+        result = service.process("No bus test")
+
+        self.assertEqual(result.action, "respond")
+        self.assertEqual(result.data["input"], "No bus test")
+
+        service.stop()
+
+    def test_existing_tests_unchanged_with_event_bus(self):
+        """Existing test scenarios produce same results with event_bus injected."""
+
+        event_bus = MagicMock()
+
+        service = CognitionService(event_bus=event_bus)
+        service.start()
+
+        result = service.process("Existing behavior with bus")
+
+        self.assertEqual(result.action, "respond")
+        self.assertEqual(result.data["input"], "Existing behavior with bus")
+
+        # EventBus should have been called, not crashed
+        event_bus.publish.assert_called()
 
         service.stop()
 
