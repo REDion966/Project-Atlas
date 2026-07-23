@@ -23,7 +23,7 @@ from atlas.memory.service.memory_manager_service import MemoryManagerService
 
 from atlas.knowledge.knowledge_manager import KnowledgeManager
 
-from atlas.intelligence.cognitive_loop import CognitiveLoop
+from atlas.services.cognition_service import CognitionService
 
 from atlas.state.state_manager import StateManager
 from atlas.task.task_manager import TaskManager
@@ -59,6 +59,8 @@ class Atlas:
         self._cognitive_loop: CognitiveLoop | None = None
 
         self._cognitive_service: CognitiveService | None = None
+
+        self._cognition_service: CognitionService | None = None
 
         self._started = False
 
@@ -156,6 +158,7 @@ class Atlas:
 
         self._knowledge_manager = KnowledgeManager()
 
+
         self._cognitive_loop = CognitiveLoop(
             memory_service=self._memory_service,
             knowledge_manager=self._knowledge_manager,
@@ -165,11 +168,7 @@ class Atlas:
             cognitive_loop=self._cognitive_loop
         )
 
-
-        self._cognitive_loop = CognitiveLoop(
-            memory_service=self._memory_service,
-            knowledge_manager=self._knowledge_manager,
-        )
+        self._cognition_service = CognitionService()
 
 
         context_engine = ContextEngine(
@@ -211,6 +210,11 @@ class Atlas:
         self._container.register(
             "cognitive",
             self._cognitive_service,
+        )
+
+        self._container.register(
+            "cognition_service",
+            self._cognition_service,
         )
 
         self._container.register(
@@ -324,6 +328,8 @@ class Atlas:
         self._cognitive_loop = None
 
         self._cognitive_service = None
+
+        self._cognition_service = None
 
 
         self._started = False
