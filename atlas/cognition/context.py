@@ -13,10 +13,18 @@ class CognitionContext:
         user_input: str,
         memory=None,
         metadata=None,
+        goal: str | None = None,
+        knowledge: list | None = None,
+        memory_results: list | None = None,
+        knowledge_results: list | None = None,
     ):
         self.user_input = user_input
         self.memory = memory or []
         self.metadata = metadata or {}
+        self.goal = goal
+        self.knowledge = knowledge or []
+        self.memory_results = memory_results or []
+        self.knowledge_results = knowledge_results or []
 
     def add_memory(self, item):
         """Add memory information."""

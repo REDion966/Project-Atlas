@@ -168,7 +168,10 @@ class Atlas:
             cognitive_loop=self._cognitive_loop
         )
 
-        self._cognition_service = CognitionService()
+        self._cognition_service = CognitionService(
+            memory_service=self._memory_service,
+            knowledge_manager=self._knowledge_manager,
+        )
 
 
         context_engine = ContextEngine(
