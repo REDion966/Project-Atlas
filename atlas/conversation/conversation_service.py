@@ -6,6 +6,7 @@ Coordinates Atlas conversations.
 
 from pathlib import Path
 
+from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
 from atlas.conversation.history import History
@@ -23,6 +24,7 @@ class ConversationService:
         self,
         ai_service: AIService,
         context_engine: ContextEngine | None = None,
+        cognition_api: CognitionAPI | None = None,
     ):
         """
         Initialize the conversation service.
@@ -33,6 +35,9 @@ class ConversationService:
 
             context_engine:
                 Optional memory-aware context engine.
+
+            cognition_api:
+                Optional CognitionAPI for service-based cognition.
         """
 
         self._history = History()
@@ -45,6 +50,7 @@ class ConversationService:
         self._storage = ConversationStorage()
 
         self._ai = ai_service
+        self._cognition_api = cognition_api
 
         # Create the initial conversation.
         self._conversation = self._history.create()
@@ -76,6 +82,32 @@ class ConversationService:
             self._conversation,
             memory_query=text,
         )
+
+        # --- Phase 5.6: Optional cognition context ---
+        if self._cognition_api is not None:
+            decision = self._cognition_api.process(
+                user_input=text,
+            )
+
+            context.append(
+                Message(
+                    role="system",
+                    content=(
+                        f"Cognition analysis: "
+                        f"action={decision.action}, "
+                        f"reasoning={decision.reasoning}, "
+                        f"data={decision.data}"
+                    ),
+                    metadata={
+                        "cognition": {
+                            "action": decision.action,
+                            "reasoning": decision.reasoning,
+                            "data": decision.data,
+                        }
+                    },
+                )
+            )
+        # --- End cognition context ---
 
         prompt = self._prompt_builder.build(
             context
@@ -117,6 +149,32 @@ class ConversationService:
             self._conversation,
             memory_query=text,
         )
+
+        # --- Phase 5.6: Optional cognition context ---
+        if self._cognition_api is not None:
+            decision = self._cognition_api.process(
+                user_input=text,
+            )
+
+            context.append(
+                Message(
+                    role="system",
+                    content=(
+                        f"Cognition analysis: "
+                        f"action={decision.action}, "
+                        f"reasoning={decision.reasoning}, "
+                        f"data={decision.data}"
+                    ),
+                    metadata={
+                        "cognition": {
+                            "action": decision.action,
+                            "reasoning": decision.reasoning,
+                            "data": decision.data,
+                        }
+                    },
+                )
+            )
+        # --- End cognition context ---
 
         prompt = self._prompt_builder.build(
             context

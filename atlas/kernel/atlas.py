@@ -206,6 +206,7 @@ class Atlas:
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
+            cognition_api=self._cognition_api,
         )
 
 
