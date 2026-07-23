@@ -23,6 +23,9 @@ from atlas.memory.service.memory_manager_service import MemoryManagerService
 
 from atlas.knowledge.knowledge_manager import KnowledgeManager
 
+from atlas.learning.learning_manager import LearningManager
+from atlas.learning.knowledge_feedback import KnowledgeFeedback
+
 from atlas.services.cognition_service import CognitionService
 
 from atlas.state.state_manager import StateManager
@@ -168,9 +171,14 @@ class Atlas:
             cognitive_loop=self._cognitive_loop
         )
 
+        self._learning_manager = LearningManager()
+        self._knowledge_feedback = KnowledgeFeedback()
+
         self._cognition_service = CognitionService(
             memory_service=self._memory_service,
             knowledge_manager=self._knowledge_manager,
+            learning_manager=self._learning_manager,
+            knowledge_feedback=self._knowledge_feedback,
         )
 
 
@@ -333,6 +341,10 @@ class Atlas:
         self._cognitive_service = None
 
         self._cognition_service = None
+
+        self._learning_manager = None
+
+        self._knowledge_feedback = None
 
 
         self._started = False

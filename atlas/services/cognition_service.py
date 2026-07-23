@@ -8,6 +8,8 @@ with the Cognition Engine.
 from atlas.services.service import Service
 from atlas.cognition.context import CognitionContext
 from atlas.cognition.engine import CognitionEngine
+from atlas.learning.learning_manager import LearningManager
+from atlas.learning.knowledge_feedback import KnowledgeFeedback
 
 
 class CognitionService(Service):
@@ -20,12 +22,16 @@ class CognitionService(Service):
         engine: CognitionEngine | None = None,
         memory_service=None,
         knowledge_manager=None,
+        learning_manager: LearningManager | None = None,
+        knowledge_feedback: KnowledgeFeedback | None = None,
     ):
         super().__init__("cognition")
 
         self._engine = engine or CognitionEngine()
         self._memory_service = memory_service
         self._knowledge_manager = knowledge_manager
+        self._learning_manager = learning_manager
+        self._knowledge_feedback = knowledge_feedback
 
     def start(self):
         """
@@ -84,7 +90,29 @@ class CognitionService(Service):
             knowledge_results=knowledge_results,
         )
 
-        return self._engine.process(context)
+        decision = self._engine.process(context)
+
+        # --- Cognition Feedback Loop (Phase 5.3) ---
+        if self._learning_manager is not None:
+            experience = (
+                f"Action: {decision.action} | "
+                f"Reasoning: {decision.reasoning}"
+            )
+            learning_result = self._learning_manager.learn(experience)
+
+            if self._knowledge_feedback is not None:
+                self._knowledge_feedback.remember(
+                    learning_result.knowledge
+                )
+
+            if self._knowledge_manager is not None:
+                self._knowledge_manager.remember(
+                    title=f"cognition:{decision.action}",
+                    content=learning_result.knowledge,
+                    source="cognition_service",
+                )
+
+        return decision
 
     @property
     def engine(self):
