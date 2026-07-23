@@ -157,3 +157,18 @@ class CognitionService(Service):
         """Return knowledge manager dependency."""
 
         return self._knowledge_manager
+
+    @property
+    def status(self):
+        """
+        Return cognition service status summary.
+
+        Returns a dict with running state and dependency availability.
+        """
+
+        return {
+            "running": self.running,
+            "has_memory": self._memory_service is not None,
+            "has_knowledge": self._knowledge_manager is not None,
+            "has_learning": self._learning_manager is not None,
+        }
