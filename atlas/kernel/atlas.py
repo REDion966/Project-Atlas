@@ -10,6 +10,7 @@ from pathlib import Path
 from atlas.ai.ai_manager import AIManager
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
+from atlas.cognition.api import CognitionAPI
 from atlas.events.event_bus import EventBus
 from atlas.kernel.service_container import ServiceContainer
 from atlas.intelligence.cognitive_loop import CognitiveLoop
@@ -65,6 +66,8 @@ class Atlas:
 
         self._cognition_service: CognitionService | None = None
 
+        self._cognition_api: CognitionAPI | None = None
+
         self._started = False
 
 
@@ -94,6 +97,14 @@ class Atlas:
         """
 
         return self._cognitive_loop
+
+    @property
+    def cognition_api(self):
+        """
+        Return the public Cognition API.
+        """
+
+        return self._cognition_api
 
 
     @property
@@ -182,6 +193,10 @@ class Atlas:
             event_bus=self._event_bus,
         )
 
+        self._cognition_api = CognitionAPI(
+            cognition_service=self._cognition_service,
+        )
+
 
         context_engine = ContextEngine(
             memory_service=self._memory_service,
@@ -227,6 +242,11 @@ class Atlas:
         self._container.register(
             "cognition_service",
             self._cognition_service,
+        )
+
+        self._container.register(
+            "cognition_api",
+            self._cognition_api,
         )
 
         self._container.register(
@@ -342,6 +362,8 @@ class Atlas:
         self._cognitive_service = None
 
         self._cognition_service = None
+
+        self._cognition_api = None
 
         self._learning_manager = None
 
