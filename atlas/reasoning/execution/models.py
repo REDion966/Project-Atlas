@@ -29,6 +29,30 @@ class ExecutionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class ExecutionRoute:
+    """
+    A routing decision for a single capability.
+
+    Carries the handler to invoke, parameters to pass, and the
+    routing strategy used. The strategy and metadata fields are
+    extension points for future model routing (Phase 6.5+).
+
+    Attributes:
+        capability: The name of the capability being routed.
+        handler_name: The handler to execute (looked up in registry).
+        parameters: Parameters to pass to the handler.
+        strategy: Routing strategy identifier (e.g. "default").
+        metadata: Additional routing context (priority, reason, etc.).
+    """
+
+    capability: str = ""
+    handler_name: str = ""
+    parameters: dict[str, Any] = field(default_factory=dict)
+    strategy: str = "default"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 CapabilityHandler = Callable[[dict[str, Any]], ExecutionResult]
 """
 A callable that accepts parameters and returns an ExecutionResult.
