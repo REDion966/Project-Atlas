@@ -13,3 +13,8 @@ logs/
 
 # Temporary / Mock Data
 MagicMock/
+
+.continue/agents/new-config.yaml
+.continue/
+.env
+*.env
