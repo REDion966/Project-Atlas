@@ -35,6 +35,31 @@ atlas/
 ├── core/              # Application lifecycle and boot
 ├── kernel/            # Service container and wiring
 ├── services/          # High-level business services
+│   └── cognition_service.py  # Cognition orchestration
+├── cognition/         # Cognition API, context, engine, decisions
+│   ├── api.py
+│   ├── context.py
+│   ├── decision.py
+│   ├── engine.py
+│   └── pipeline.py
+├── reasoning/         # Adaptive reasoning pipeline
+│   ├── models.py
+│   ├── controller.py
+│   ├── capabilities/  #   Capability selection
+│   │   ├── models.py
+│   │   └── analyzer.py
+│   └── execution/     #   Registry, routing, dispatch, handlers
+│       ├── models.py
+│       ├── registry.py
+│       ├── dispatcher.py
+│       ├── routing.py
+│       └── handlers.py
+├── intelligence/      # Legacy cognitive loop (preserved)
+├── knowledge/         # Knowledge management
+├── learning/          # Learning and feedback
+├── events/            # Event bus
+├── state/             # State management
+├── task/              # Task management
 ├── workspace/         # Workspace management
 │   ├── models/        #   Workspace, project, resource, etc.
 │   ├── storage/       #   Workspace persistence
@@ -105,6 +130,36 @@ Startup → Boot Screen → Boot Manager
            Dependency    Service       Application
            Checker      Container       Ready
 ```
+
+### Atlas.start() Detail (Phase 6.5.1)
+
+At runtime, `Atlas.start()` wires the reasoning pipeline as private dependencies before starting services:
+
+```
+Atlas.start()
+    │
+    ├──→ Load Configuration
+    ├──→ Initialise AI Manager
+    ├──→ Create Memory Service
+    ├──→ Create Knowledge Manager
+    ├──→ Create Learning Manager + Feedback
+    │
+    ├──→ [Phase 6.5.1] Create CapabilityRegistry
+    ├──→ [Phase 6.5.1] Register DEFAULT_HANDLERS
+    ├──→ [Phase 6.5.1] Create ReasoningController
+    ├──→ [Phase 6.5.1] Create CapabilityAnalyzer
+    ├──→ [Phase 6.5.1] Create CapabilityRouter
+    ├──→ [Phase 6.5.1] Create CapabilityDispatcher
+    │
+    ├──→ Create CognitionService (with reasoning injection)
+    ├──→ Create CognitionAPI
+    ├──→ Create ConversationService
+    ├──→ Register public services in ServiceContainer
+    ├──→ Start all services
+    └──→ Publish atlas.started
+```
+
+The reasoning components are **not** registered in `ServiceContainer`; they are private Atlas-owned dependencies injected directly into `CognitionService`.
 
 ---
 

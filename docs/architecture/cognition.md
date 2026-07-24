@@ -2,10 +2,12 @@
 
 ## Status
 
-**Phase 5 — Complete**  
-The Service-based Cognition system is fully integrated into the Atlas runtime.  
+**Phase 6.5.1 — Complete**  
+The Service-based Cognition system is fully integrated into the Atlas runtime and the Phase 6 reasoning pipeline is now wired into `CognitionService`.  
 Previous phases (1–4) established the legacy `CognitiveLoop` in `atlas/intelligence`.  
-Phase 5 introduced a new, decoupled cognition pipeline under `atlas/cognition/` and `atlas/services/cognition_service.py`, preserving backward compatibility with the existing intelligence layer.
+Phase 5 introduced a new, decoupled cognition pipeline under `atlas/cognition/` and `atlas/services/cognition_service.py`.  
+Phase 6.1–6.4 built the pure reasoning, capability selection, routing, and execution layers under `atlas/reasoning/`.  
+Phase 6.5.1 integrated the reasoning pipeline into the runtime while keeping all reasoning components free of infrastructure dependencies.
 
 ---
 
@@ -60,6 +62,15 @@ CognitionDecision              ← action + reasoning + data
     │       ├──→ KnowledgeManager.remember()
     │       └──→ Event: learning.completed
     │
+    ├──→ Reasoning Pipeline (Phase 6.5.1)
+    │       │
+    │       ├──→ ReasoningController.create_plan(decision)
+    │       ├──→ CapabilityAnalyzer.analyze(plan)
+    │       ├──→ CapabilityRouter.route(capabilities)
+    │       ├──→ CapabilityDispatcher.dispatch(capabilities)
+    │       │
+    │       └──→ decision.data["reasoning"]  ← goal, capabilities, routes, results
+    │
     ▼
 Returned to caller
 ```
@@ -112,7 +123,10 @@ class CognitionAPI:
 ```python
 class CognitionService(Service):
     def __init__(self, engine, memory_service, knowledge_manager,
-                 learning_manager, knowledge_feedback, event_bus): ...
+                 learning_manager, knowledge_feedback, event_bus,
+                 reasoning_controller=None, capability_analyzer=None,
+                 capability_registry=None, capability_router=None,
+                 capability_dispatcher=None): ...
     def process(self, user_input, ...) -> CognitionDecision: ...
 ```
 
@@ -124,13 +138,15 @@ class CognitionService(Service):
 - Passes the context to `CognitionEngine.process()`.
 - Publishes `cognition.decision.made` and `cognition.learning.completed` events.
 - Drives the learning feedback loop after each decision.
+- Optionally runs the reasoning pipeline when all five reasoning components are injected.
+- Attaches reasoning pipeline results to `decision.data["reasoning"]`.
 
 **Status visibility:**
 
 ```python
 @property
 def status(self) -> dict:
-    # Returns: running, has_memory, has_knowledge, has_learning
+    # Returns: running, has_memory, has_knowledge, has_learning, has_reasoning
 ```
 
 ### CognitionContext
@@ -190,6 +206,16 @@ These constraints must be enforced during code review and future development.
 │  (imports: Service, CognitionContext,            │
 │   CognitionEngine, MemoryManagerService,         │
 │   KnowledgeManager, LearningManager, etc.)       │
+│                                                  │
+│  ┌─────────────────────────────────────────┐    │
+│  │  Optional reasoning pipeline (Phase     │    │
+│  │  6.5.1) — injected, not imported        │    │
+│  │  directly by CognitionService logic     │    │
+│  │                                          │    │
+│  │  ReasoningController → CapabilityAnalyzer│   │
+│  │       ↓                                  │    │
+│  │  CapabilityRouter → CapabilityDispatcher │   │
+│  └─────────────────────────────────────────┘    │
 └──────┬─────────────────────┬────────────────────┘
        │                     │
        ▼                     ▼
@@ -199,6 +225,8 @@ These constraints must be enforced during code review and future development.
 │               │   │  (infrastructure)    │
 └──────────────┘   └──────────────────────┘
 ```
+
+The reasoning pipeline components remain **pure logic**. `CognitionService` orchestrates them via injection; they do not import infrastructure, and `CognitionService` logic does not depend on their internals.
 
 ### 4.2 Prohibited Imports
 
@@ -224,6 +252,8 @@ The Atlas kernel registers four cognition-related service keys in `ServiceContai
 
 **All four keys must remain registered.** Migration of legacy keys is out of scope.
 
+The reasoning pipeline components (`ReasoningController`, `CapabilityAnalyzer`, `CapabilityRegistry`, `CapabilityRouter`, `CapabilityDispatcher`) are **private Atlas-owned dependencies**. They are instantiated and injected into `CognitionService` during `Atlas.start()`, but they are **not registered in `ServiceContainer`**. This keeps the public service surface small and preserves the purity of the reasoning components.
+
 ### 4.4 ConversationService Constraints
 
 - `cognition_api` parameter must default to `None`.
@@ -236,7 +266,7 @@ The Atlas kernel registers four cognition-related service keys in `ServiceContai
 
 ### Phase 6 — Adaptive Intelligence
 
-The following capabilities are planned but not yet implemented:
+Phase 6.1–6.5.1 established the reasoning, capability selection, routing, and execution pipeline and integrated it into the runtime. The following capabilities are still planned:
 
 - **Model Routing**  
   Select the optimal AI model per request based on complexity, latency, and cost constraints.
@@ -272,6 +302,23 @@ atlas/cognition/
 atlas/services/
 └── cognition_service.py ← CognitionService
 
+atlas/reasoning/
+├── __init__.py          ← exports: ReasoningPlan, ReasoningStep,
+│                           ReasoningController
+├── models.py            ← ReasoningPlan, ReasoningStep
+├── controller.py        ← ReasoningController
+├── capabilities/
+│   ├── __init__.py
+│   ├── models.py        ← Capability
+│   └── analyzer.py      ← CapabilityAnalyzer
+└── execution/
+    ├── __init__.py
+    ├── models.py        ← ExecutionResult, ExecutionRoute, CapabilityHandler
+    ├── registry.py      ← CapabilityRegistry
+    ├── dispatcher.py    ← CapabilityDispatcher
+    ├── routing.py       ← CapabilityRouter
+    └── handlers.py      ← DEFAULT_HANDLERS
+
 atlas/kernel/
 ├── atlas.py             ← kernel wiring, service registration
 └── service_container.py ← ServiceContainer
@@ -284,5 +331,12 @@ tests/
 ├── test_cognition_service.py    ← CognitionService orchestration
 ├── test_cognition_service_new.py← dependency injection tests
 ├── test_cognition_engine.py     ← pure engine tests
+├── test_cognition_reasoning_integration.py ← reasoning pipeline integration
 ├── test_cognition_runtime.py    ← integration tests
-└── test_conversation_service.py ← cognition context integration
+├── test_conversation_service.py ← cognition context integration
+├── test_reasoning_controller.py ← ReasoningController
+├── test_capability_analyzer.py  ← CapabilityAnalyzer
+├── test_capability_execution.py ← CapabilityRegistry, CapabilityDispatcher
+├── test_capability_routing.py   ← CapabilityRouter
+├── test_capability_handlers.py  ← DEFAULT_HANDLERS
+└── test_reasoning_runtime_wiring.py ← Atlas runtime reasoning wiring
