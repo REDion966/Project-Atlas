@@ -8,6 +8,14 @@ from atlas.reasoning.execution.models import ExecutionResult, ExecutionRoute, Ca
 from atlas.reasoning.execution.registry import CapabilityRegistry
 from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
 from atlas.reasoning.execution.routing import CapabilityRouter
+from atlas.reasoning.execution.handlers import (
+    DEFAULT_HANDLERS,
+    conversation_handler,
+    knowledge_retrieval_handler,
+    analysis_handler,
+    task_execution_handler,
+    noop_handler,
+)
 
 
 __all__ = [
@@ -17,4 +25,10 @@ __all__ = [
     "CapabilityRegistry",
     "CapabilityDispatcher",
     "CapabilityRouter",
+    "DEFAULT_HANDLERS",
+    "conversation_handler",
+    "knowledge_retrieval_handler",
+    "analysis_handler",
+    "task_execution_handler",
+    "noop_handler",
 ]
