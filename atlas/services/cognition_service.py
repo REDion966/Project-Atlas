@@ -302,4 +302,5 @@ class CognitionService(Service):
             "has_memory": self._memory_service is not None,
             "has_knowledge": self._knowledge_manager is not None,
             "has_learning": self._learning_manager is not None,
+            "has_reasoning": self._reasoning_controller is not None,
         }

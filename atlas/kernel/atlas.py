@@ -27,6 +27,13 @@ from atlas.knowledge.knowledge_manager import KnowledgeManager
 from atlas.learning.learning_manager import LearningManager
 from atlas.learning.knowledge_feedback import KnowledgeFeedback
 
+from atlas.reasoning.controller import ReasoningController
+from atlas.reasoning.capabilities.analyzer import CapabilityAnalyzer
+from atlas.reasoning.execution.registry import CapabilityRegistry
+from atlas.reasoning.execution.routing import CapabilityRouter
+from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
+from atlas.reasoning.execution.handlers import DEFAULT_HANDLERS
+
 from atlas.services.cognition_service import CognitionService
 
 from atlas.state.state_manager import StateManager
@@ -67,6 +74,16 @@ class Atlas:
         self._cognition_service: CognitionService | None = None
 
         self._cognition_api: CognitionAPI | None = None
+
+        self._reasoning_controller: ReasoningController | None = None
+
+        self._capability_analyzer: CapabilityAnalyzer | None = None
+
+        self._capability_registry: CapabilityRegistry | None = None
+
+        self._capability_router: CapabilityRouter | None = None
+
+        self._capability_dispatcher: CapabilityDispatcher | None = None
 
         self._started = False
 
@@ -185,12 +202,27 @@ class Atlas:
         self._learning_manager = LearningManager()
         self._knowledge_feedback = KnowledgeFeedback()
 
+        self._capability_registry = CapabilityRegistry()
+
+        for capability_name, handler in DEFAULT_HANDLERS.items():
+            self._capability_registry.register(capability_name, handler)
+
+        self._reasoning_controller = ReasoningController()
+        self._capability_analyzer = CapabilityAnalyzer()
+        self._capability_router = CapabilityRouter(self._capability_registry)
+        self._capability_dispatcher = CapabilityDispatcher(self._capability_registry)
+
         self._cognition_service = CognitionService(
             memory_service=self._memory_service,
             knowledge_manager=self._knowledge_manager,
             learning_manager=self._learning_manager,
             knowledge_feedback=self._knowledge_feedback,
             event_bus=self._event_bus,
+            reasoning_controller=self._reasoning_controller,
+            capability_analyzer=self._capability_analyzer,
+            capability_registry=self._capability_registry,
+            capability_router=self._capability_router,
+            capability_dispatcher=self._capability_dispatcher,
         )
 
         self._cognition_api = CognitionAPI(
@@ -369,6 +401,12 @@ class Atlas:
         self._learning_manager = None
 
         self._knowledge_feedback = None
+
+        self._reasoning_controller = None
+        self._capability_analyzer = None
+        self._capability_registry = None
+        self._capability_router = None
+        self._capability_dispatcher = None
 
 
         self._started = False
