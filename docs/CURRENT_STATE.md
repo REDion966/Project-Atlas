@@ -85,6 +85,17 @@ Reasoning pipeline is now wired into the Atlas runtime:
 - Pipeline results are attached to `decision.data["reasoning"]`
 - All reasoning components remain pure logic with no infrastructure dependencies
 
+### Phase 6.5.2 — Reasoning Outcome Recording & Observability
+Status: **Complete**
+
+Reasoning pipeline outcomes are now recorded for future reflection:
+- `ReasoningOutcome` dataclass captures goal, capabilities, routes, results, success, timestamp
+- `ReasoningRecorder` provides an in-memory ring buffer (default max 100) with `record()`, `recent()`, `latest()`, `summary()`, `clear()`
+- `ReasoningRecorder` is injected as an optional private dependency into `CognitionService`
+- Recording occurs after the reasoning pipeline completes, only when both recorder and reasoning results are present
+- `Atlas.start()` creates and injects the recorder; `shutdown()` clears the reference
+- Recorder remains private — not registered in `ServiceContainer`
+
 ---
 
 ## 3. Phase Timeline
@@ -100,6 +111,7 @@ Reasoning pipeline is now wired into the Atlas runtime:
 | 6.4 | Adaptive execution routing | Complete |
 | **6.5** | **Documentation Memory Foundation** | **Complete** |
 | 6.5.1 | Reasoning runtime integration | Complete |
+| 6.5.2 | Reasoning outcome recording & observability | Complete |
 | 6.6+ | Model routing, reflection, planning | Planned |
 
 ---
@@ -122,11 +134,11 @@ Reasoning pipeline is now wired into the Atlas runtime:
 
 ## 5. Test Status
 
-**Current count: 389 tests collected**
+**Current count: 436 tests collected**
 
 ```
 pytest
-Result: 389 passed
+Result: 436 passed
 ```
 
 Key test files:
@@ -148,6 +160,9 @@ Key test files:
 | `test_kernel.py` | Kernel lifecycle |
 | `test_memory.py` | Memory system |
 | `test_reasoning_runtime_wiring.py` | Atlas runtime reasoning wiring |
+| `test_reasoning_outcomes.py` | ReasoningOutcome and ReasoningRecorder |
+| `test_reasoning_recorder_integration.py` | CognitionService recorder integration |
+| `test_reasoning_recorder_wiring.py` | Atlas runtime recorder wiring |
 | `test_ai_service.py` | AI provider service |
 | `test_ai_router.py` | AI routing |
 
@@ -185,7 +200,11 @@ ConversationService
     │               ├──→ CapabilityRouter.route()
     │               ├──→ CapabilityDispatcher.dispatch()
     │               │
-    │               └──→ decision.data["reasoning"]
+     │               └──→ decision.data["reasoning"]
+    │
+    ├──→ Reasoning Outcome Recording (Phase 6.5.2)
+    │       │
+    │       └──→ ReasoningRecorder.record()  ← goal, capabilities, routes, results, success
     │
     ├──→ PromptBuilder.build()
     │
@@ -225,7 +244,7 @@ All reasoning, capability analysis, routing, and execution layers remain **pure 
 
 ## 7. Next Steps
 
-Following Phase 6.5.1 completion:
+Following Phase 6.5.2 completion:
 
 1. **Architecture review** — Evaluate the current runtime integration to identify gaps, inconsistencies, and priorities for the next implementation phase.
 2. **Model routing** — Select optimal AI model per request based on complexity and constraints.
@@ -241,6 +260,7 @@ Following Phase 6.5.1 completion:
 - The reasoning, capability analysis, routing, and execution layers are **pure logic** — no AI, memory, knowledge, or EventBus dependencies.
 - Reasoning components are **Atlas-owned private dependencies**. They are created and injected into `CognitionService` during `Atlas.start()` but are not registered in `ServiceContainer`.
 - `DEFAULT_HANDLERS` are registered in the private `CapabilityRegistry` at startup, providing placeholder handlers for the five default capabilities.
+- `ReasoningRecorder` is an additional private Atlas-owned dependency that records completed reasoning pipeline outcomes in a bounded in-memory buffer for future reflection and observability.
 - Legacy `CognitiveLoop` and `CognitiveService` in `atlas/intelligence/` are preserved for backward compatibility.
 - All new development should target the new cognition service layer in `atlas/cognition/` and `atlas/services/cognition_service.py`.
 - The documentation memory layer is designed to survive AI model and provider changes.

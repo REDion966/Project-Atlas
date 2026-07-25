@@ -20,6 +20,7 @@ Phase 6 is the current major development cycle. Sub-phases:
 | 6.4 | Adaptive execution routing — `CapabilityRouter`, `ExecutionRoute` | Complete |
 | **6.5** | **Documentation Memory Foundation** — permanent documentation layer | **Complete** |
 | 6.5.1 | Reasoning Runtime Integration — default handlers, CognitionService integration, Atlas wiring | Complete |
+| 6.5.2 | Reasoning Outcome Recording & Observability — in-memory ring buffer for reasoning outcomes | Complete |
 
 ---
 
@@ -45,6 +46,21 @@ This documentation layer provides long-term project continuity and allows future
 ---
 
 ## Future Phases
+
+### Phase 6.5.2 — Reasoning Outcome Recording & Observability
+
+**Goal:** Record completed reasoning pipeline outcomes for future reflection and observability.
+
+**Key features:**
+- `ReasoningOutcome` dataclass for reasoning pipeline snapshots
+- `ReasoningRecorder` bounded in-memory ring buffer (default max 100)
+- Optional injection into `CognitionService`
+- Private Atlas-owned dependency (not in ServiceContainer)
+- Backward compatible when recorder is missing
+
+**Status:** Complete
+
+---
 
 ### Phase 6.6 — Model Routing
 

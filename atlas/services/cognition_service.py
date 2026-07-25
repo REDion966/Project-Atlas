@@ -10,7 +10,8 @@ the full pipeline (controller → analyzer → router → dispatcher)
 after each cognition decision.
 """
 
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from atlas.services.service import Service
 from atlas.cognition.context import CognitionContext
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from atlas.reasoning.execution.registry import CapabilityRegistry
     from atlas.reasoning.execution.routing import CapabilityRouter
     from atlas.reasoning.models import ReasoningPlan
+    from atlas.reasoning.outcomes import ReasoningOutcome, ReasoningRecorder
 
 
 class CognitionService(Service):
@@ -38,6 +40,11 @@ class CognitionService(Service):
     orchestrates the full reasoning chain after each decision:
       ReasoningController → CapabilityAnalyzer →
       CapabilityRouter → CapabilityDispatcher.
+
+    Phase 6.5.2 — Supports optional reasoning outcome recording.
+    When a ReasoningRecorder is injected alongside the reasoning
+    pipeline, completed reasoning outcomes are recorded for future
+    reflection and observability.
     """
 
     def __init__(
@@ -53,6 +60,7 @@ class CognitionService(Service):
         capability_registry=None,
         capability_router=None,
         capability_dispatcher=None,
+        reasoning_recorder=None,
     ):
         super().__init__("cognition")
 
@@ -69,6 +77,9 @@ class CognitionService(Service):
         self._capability_registry = capability_registry
         self._capability_router = capability_router
         self._capability_dispatcher = capability_dispatcher
+
+        # --- Phase 6.5.2: Optional reasoning outcome recording ---
+        self._reasoning_recorder = reasoning_recorder
 
     def start(self):
         """
@@ -174,6 +185,9 @@ class CognitionService(Service):
         # --- Phase 6.5.1: Optional reasoning pipeline ---
         self._run_reasoning_pipeline(decision)
 
+        # --- Phase 6.5.2: Optional reasoning outcome recording ---
+        self._record_reasoning_outcome(decision)
+
         return decision
 
     # --- Phase 6.5.1: Reasoning pipeline orchestration ---
@@ -259,6 +273,80 @@ class CognitionService(Service):
             ],
         }
 
+    def _record_reasoning_outcome(self, decision) -> None:
+        """
+        Record the reasoning pipeline outcome when available.
+
+        If a ReasoningRecorder is injected and the reasoning pipeline
+        produced results in decision.data["reasoning"], this method
+        constructs a ReasoningOutcome and stores it in the recorder.
+
+        If the recorder is missing or no reasoning results exist,
+        this method does nothing — preserving backward compatibility.
+
+        Args:
+            decision: The CognitionDecision that may contain reasoning
+                pipeline results.
+        """
+        if self._reasoning_recorder is None:
+            return
+
+        reasoning_data = decision.data.get("reasoning")
+        if reasoning_data is None:
+            return
+
+        success = all(
+            r.get("success", False)
+            for r in reasoning_data.get("results", [])
+        )
+
+        outcome = self._build_reasoning_outcome(
+            decision_action=decision.action,
+            reasoning_data=reasoning_data,
+            success=success,
+        )
+
+        self._reasoning_recorder.record(outcome)
+
+    def _build_reasoning_outcome(
+        self,
+        decision_action: str,
+        reasoning_data: dict[str, Any],
+        success: bool,
+    ) -> "ReasoningOutcome":
+        """
+        Build a ReasoningOutcome from serialized reasoning data.
+
+        This helper avoids a runtime import of ReasoningOutcome by
+        constructing it through importlib, preserving the TYPE_CHECKING
+        pattern and keeping CognitionService loosely coupled to the
+        reasoning outcome types.
+
+        Args:
+            decision_action: The CognitionDecision action.
+            reasoning_data: The serialized reasoning data produced by
+                the reasoning pipeline.
+            success: Whether all execution results succeeded.
+
+        Returns:
+            A populated ReasoningOutcome instance.
+        """
+        import importlib
+
+        outcomes_module = importlib.import_module("atlas.reasoning.outcomes")
+        outcome_cls = getattr(outcomes_module, "ReasoningOutcome")
+
+        return outcome_cls(
+            timestamp=datetime.now(),
+            goal=reasoning_data.get("goal", ""),
+            decision_action=decision_action,
+            capabilities=list(reasoning_data.get("capabilities", [])),
+            routes=list(reasoning_data.get("routes", [])),
+            results=list(reasoning_data.get("results", [])),
+            success=success,
+            metadata={"source": "cognition_service"},
+        )
+
     @property
     def reasoning_controller(self):
         """
@@ -268,6 +356,16 @@ class CognitionService(Service):
             The ReasoningController if injected, or None.
         """
         return self._reasoning_controller
+
+    @property
+    def reasoning_recorder(self):
+        """
+        Return the reasoning recorder dependency (Phase 6.5.2).
+
+        Returns:
+            The ReasoningRecorder if injected, or None.
+        """
+        return self._reasoning_recorder
 
     @property
     def engine(self):
@@ -303,4 +401,5 @@ class CognitionService(Service):
             "has_knowledge": self._knowledge_manager is not None,
             "has_learning": self._learning_manager is not None,
             "has_reasoning": self._reasoning_controller is not None,
+            "has_recorder": self._reasoning_recorder is not None,
         }

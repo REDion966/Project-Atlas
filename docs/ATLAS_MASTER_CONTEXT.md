@@ -150,19 +150,25 @@ CognitionDecision
     list[ExecutionResult]
          │
          ▼
-    decision.data["reasoning"]  ← goal, capabilities, routes, results
+     decision.data["reasoning"]  ← goal, capabilities, routes, results
+          │
+          ▼
+     ReasoningRecorder.record()  ← Phase 6.5.2
+          │
+          ▼
+     ReasoningOutcome stored     ← goal, capabilities, routes, results, success
 ```
 
-All reasoning, capability analysis, routing, and execution layers remain **pure logic** — no AI calls, no memory access, no knowledge access, no EventBus dependencies. `CognitionService` orchestrates the pipeline as an optional runtime integration while preserving this purity.
+All reasoning, capability analysis, routing, execution, and outcome recording layers remain **pure logic** — no AI calls, no memory access, no knowledge access, no EventBus dependencies. `CognitionService` orchestrates the pipeline as an optional runtime integration while preserving this purity.
 
 ---
 
 ## 8. Current Status
 
 - **Branch:** `phase5-memory-evolution`
-- **Completed phases:** Phase 5 (Memory evolution), Phase 6.1–6.5.1 (Reasoning foundation through Reasoning Runtime Integration)
-- **Tests passing:** 389
-- **Current task:** Phase 6.5.1 Reasoning Runtime Integration completed.
+- **Completed phases:** Phase 5 (Memory evolution), Phase 6.1–6.5.2 (Reasoning foundation through Reasoning Outcome Recording)
+- **Tests passing:** 436
+- **Current task:** Phase 6.5.2 Reasoning Outcome Recording & Observability completed.
 - **Next:** Continue adaptive intelligence roadmap (model routing, reflection, planning, tool intelligence).
 
 ---

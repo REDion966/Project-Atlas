@@ -33,6 +33,7 @@ from atlas.reasoning.execution.registry import CapabilityRegistry
 from atlas.reasoning.execution.routing import CapabilityRouter
 from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
 from atlas.reasoning.execution.handlers import DEFAULT_HANDLERS
+from atlas.reasoning.outcomes import ReasoningRecorder
 
 from atlas.services.cognition_service import CognitionService
 
@@ -84,6 +85,8 @@ class Atlas:
         self._capability_router: CapabilityRouter | None = None
 
         self._capability_dispatcher: CapabilityDispatcher | None = None
+
+        self._reasoning_recorder: ReasoningRecorder | None = None
 
         self._started = False
 
@@ -211,6 +214,7 @@ class Atlas:
         self._capability_analyzer = CapabilityAnalyzer()
         self._capability_router = CapabilityRouter(self._capability_registry)
         self._capability_dispatcher = CapabilityDispatcher(self._capability_registry)
+        self._reasoning_recorder = ReasoningRecorder()
 
         self._cognition_service = CognitionService(
             memory_service=self._memory_service,
@@ -223,6 +227,7 @@ class Atlas:
             capability_registry=self._capability_registry,
             capability_router=self._capability_router,
             capability_dispatcher=self._capability_dispatcher,
+            reasoning_recorder=self._reasoning_recorder,
         )
 
         self._cognition_api = CognitionAPI(
@@ -407,6 +412,7 @@ class Atlas:
         self._capability_registry = None
         self._capability_router = None
         self._capability_dispatcher = None
+        self._reasoning_recorder = None
 
 
         self._started = False

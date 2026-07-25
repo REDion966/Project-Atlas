@@ -264,6 +264,34 @@ Safe, bounded optimisation of internal cognition parameters through feedback ana
 
 ---
 
+## Phase 6.5.2 — Reasoning Outcome Recording & Observability
+
+**Approximate date:** July 2026
+
+Added a pure reasoning outcome recording layer to the Atlas runtime. This phase establishes the observability foundation required by future reflection and continuous improvement capabilities.
+
+**What was added:**
+- `atlas/reasoning/outcomes.py` — `ReasoningOutcome` dataclass and `ReasoningRecorder` ring buffer
+- Optional `reasoning_recorder` parameter to `CognitionService`
+- `_record_reasoning_outcome()` method in `CognitionService` that records a `ReasoningOutcome` after the reasoning pipeline runs
+- `ReasoningRecorder` wired as a private Atlas-owned dependency in `Atlas.start()`
+- `Atlas.shutdown()` clears the recorder reference
+- `CognitionService.status` now reports `has_recorder`
+
+**Design decisions:**
+- `ReasoningRecorder` is a pure logic component with no infrastructure dependencies
+- Recording is optional and skipped when the recorder is not injected
+- Recording is skipped when the reasoning pipeline is not active
+- No ServiceContainer registration; the recorder remains private like the reasoning components
+- Bounded in-memory storage (default max 100 outcomes) with no disk persistence
+
+**Test files added:**
+- `tests/test_reasoning_outcomes.py`
+- `tests/test_reasoning_recorder_integration.py`
+- `tests/test_reasoning_recorder_wiring.py`
+
+---
+
 ## Test Count Progression
 
 | Phase | Tests Passing |
@@ -277,3 +305,4 @@ Safe, bounded optimisation of internal cognition parameters through feedback ana
 | Phase 6.4 | 331 |
 | Phase 6.5 | 331 (no code changes) |
 | Phase 6.5.1 | 389 |
+| Phase 6.5.2 | 436 |

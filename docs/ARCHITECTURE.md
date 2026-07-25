@@ -150,8 +150,9 @@ Atlas.start()
     ├──→ [Phase 6.5.1] Create CapabilityAnalyzer
     ├──→ [Phase 6.5.1] Create CapabilityRouter
     ├──→ [Phase 6.5.1] Create CapabilityDispatcher
+    ├──→ [Phase 6.5.2] Create ReasoningRecorder
     │
-    ├──→ Create CognitionService (with reasoning injection)
+    ├──→ Create CognitionService (with reasoning and recorder injection)
     ├──→ Create CognitionAPI
     ├──→ Create ConversationService
     ├──→ Register public services in ServiceContainer
@@ -159,7 +160,7 @@ Atlas.start()
     └──→ Publish atlas.started
 ```
 
-The reasoning components are **not** registered in `ServiceContainer`; they are private Atlas-owned dependencies injected directly into `CognitionService`.
+The reasoning components are **not** registered in `ServiceContainer`; they are private Atlas-owned dependencies injected directly into `CognitionService`. The `ReasoningRecorder` (Phase 6.5.2) follows the same private dependency pattern.
 
 ---
 
