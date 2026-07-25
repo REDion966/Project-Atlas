@@ -1,6 +1,28 @@
 # Atlas Current State
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+>
+> This document is preserved for detailed context, history, and architectural reference.
+>
+> Canonical AI startup files:
+>
+> 1. docs/ATLAS_CORE.md
+> 2. docs/ATLAS_STATE.md
+>
+> Authority order:
+>
+> - Source code = actual runtime behavior truth
+> - ATLAS_CORE.md = permanent architectural principles and rules
+> - ATLAS_STATE.md = current operational state and resume point
+> - Historical documents = supplementary context only
+>
+> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+---
+
 **Live snapshot of Project Atlas.**
+
+> Current operational truth is maintained in docs/ATLAS_STATE.md. This document represents a detailed state snapshot/reference.
 
 **Date:** July 2026  
 **Branch:** `phase5-memory-evolution`  
@@ -63,10 +85,10 @@ Status: **Complete**
 ### Phase 6.5 — Documentation Memory Foundation
 Status: **Complete**
 
-The permanent documentation memory system for Atlas has been created:
-- `ATLAS_MASTER_CONTEXT.md` — the single-entry context for any AI model
+The permanent documentation memory system for Atlas has been created. The following files remain available as historical/reference context:
+- `ATLAS_MASTER_CONTEXT.md` — historical reference context (was originally the single-entry context for any AI model)
 - `ARCHITECTURE.md` — full system architecture documentation
-- `CURRENT_STATE.md` — this file, live project snapshot
+- `CURRENT_STATE.md` — this file, historical reference state snapshot
 - `DEVELOPMENT_LOG.md` — chronological development history
 - `ROADMAP.md` — future development roadmap
 - `ARCHITECTURE_DECISIONS.md` — decision record system
@@ -74,6 +96,8 @@ The permanent documentation memory system for Atlas has been created:
 - `MODEL_STRATEGY.md` — AI provider and workflow strategy
 - `AI_WORKFLOW_PROTOCOL.md` — AI agent working protocol
 - `FUTURE_DIRECTION.md` — long-term vision
+
+The canonical AI memory entry points are now `ATLAS_CORE.md` and `ATLAS_STATE.md`.
 
 ### Phase 6.5.1 — Reasoning Runtime Integration
 Status: **Complete**

@@ -1,5 +1,25 @@
 # Atlas Roadmap
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+>
+> This document is preserved for detailed context, history, and architectural reference.
+>
+> Canonical AI startup files:
+>
+> 1. docs/ATLAS_CORE.md
+> 2. docs/ATLAS_STATE.md
+>
+> Authority order:
+>
+> - Source code = actual runtime behavior truth
+> - ATLAS_CORE.md = permanent architectural principles and rules
+> - ATLAS_STATE.md = current operational state and resume point
+> - Historical documents = supplementary context only
+>
+> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+---
+
 **Future development roadmap for Project Atlas.**
 
 **Last updated:** July 2026
@@ -30,8 +50,8 @@ The Documentation Memory Foundation has been completed.
 
 This milestone established Atlas's permanent documentation memory consisting of:
 
-- ATLAS_MASTER_CONTEXT.md
-- CURRENT_STATE.md
+- ATLAS_MASTER_CONTEXT.md (historical reference context)
+- CURRENT_STATE.md (historical reference state snapshot)
 - ARCHITECTURE.md
 - DEVELOPMENT_LOG.md
 - ROADMAP.md
@@ -41,7 +61,7 @@ This milestone established Atlas's permanent documentation memory consisting of:
 - AI_WORKFLOW_PROTOCOL.md
 - FUTURE_DIRECTION.md
 
-This documentation layer provides long-term project continuity and allows future AI models, providers, and developers to understand Atlas without relying on previous conversations.
+The canonical AI memory entry points are now ATLAS_CORE.md and ATLAS_STATE.md. This documentation layer provides long-term project continuity and allows future AI models, providers, and developers to understand Atlas without relying on previous conversations.
 
 ---
 

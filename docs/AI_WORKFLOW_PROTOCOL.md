@@ -1,5 +1,25 @@
 # Atlas AI Workflow Protocol
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+>
+> This document is preserved for detailed context, history, and architectural reference.
+>
+> Canonical AI startup files:
+>
+> 1. docs/ATLAS_CORE.md
+> 2. docs/ATLAS_STATE.md
+>
+> Authority order:
+>
+> - Source code = actual runtime behavior truth
+> - ATLAS_CORE.md = permanent architectural principles and rules
+> - ATLAS_STATE.md = current operational state and resume point
+> - Historical documents = supplementary context only
+>
+> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+---
+
 **Standard operating procedure for AI agents working on Project Atlas.**
 
 **Last updated:** July 2026
@@ -33,12 +53,14 @@ Every AI agent working on Atlas must follow this workflow:
 
 Before making any changes, read the following files in order:
 
-1. **`docs/ATLAS_MASTER_CONTEXT.md`** — The single-entry context. Understand what Atlas is, why it exists, and the core philosophy.
-2. **`docs/CURRENT_STATE.md`** — Understand the current state of the project, completed phases, and test status.
-3. **`docs/ARCHITECTURE.md`** — Understand the system architecture, module structure, and data flow.
-4. **`docs/ARCHITECTURE_DECISIONS.md`** — Review past decisions to avoid repeating mistakes or violating established patterns.
-5. **`docs/CODING_GUIDELINES.md`** — Review development rules before writing any code.
-6. **`docs/ROADMAP.md`** — Confirm the requested task aligns with the project roadmap.
+1. **`docs/ATLAS_CORE.md`** — The canonical AI memory entry point. Read this first.
+2. **`docs/ATLAS_STATE.md`** — Current operational state and resume point. Read this second.
+3. **`docs/ATLAS_MASTER_CONTEXT.md`** — Historical / reference context (supplementary only).
+4. **`docs/CURRENT_STATE.md`** — Historical / reference state snapshot (supplementary only).
+5. **`docs/ARCHITECTURE.md`** — Understand the system architecture, module structure, and data flow.
+6. **`docs/ARCHITECTURE_DECISIONS.md`** — Review past decisions to avoid repeating mistakes or violating established patterns.
+7. **`docs/CODING_GUIDELINES.md`** — Review development rules before writing any code.
+8. **`docs/ROADMAP.md`** — Confirm the requested task aligns with the project roadmap.
 
 ### Step 2: Understand Current State
 

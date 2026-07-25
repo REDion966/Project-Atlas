@@ -1,6 +1,28 @@
 # ATLAS MASTER CONTEXT
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+>
+> This document is preserved for detailed context, history, and architectural reference.
+>
+> Canonical AI startup files:
+>
+> 1. docs/ATLAS_CORE.md
+> 2. docs/ATLAS_STATE.md
+>
+> Authority order:
+>
+> - Source code = actual runtime behavior truth
+> - ATLAS_CORE.md = permanent architectural principles and rules
+> - ATLAS_STATE.md = current operational state and resume point
+> - Historical documents = supplementary context only
+>
+> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+---
+
 **The single file an AI model needs to understand Project Atlas.**
+
+> This document was the previous AI onboarding context. It has been replaced as the primary AI entry point by docs/ATLAS_CORE.md and docs/ATLAS_STATE.md. It is now historical context only.
 
 ---
 
@@ -175,8 +197,8 @@ All reasoning, capability analysis, routing, execution, and outcome recording la
 
 ## 9. How to Work With Atlas
 
-1. Read the documentation memory files (starting with this one).
-2. Understand the current state from `CURRENT_STATE.md`.
+1. Read the canonical AI memory files in order: `docs/ATLAS_CORE.md`, then `docs/ATLAS_STATE.md`.
+2. Refer to this document (`ATLAS_MASTER_CONTEXT.md`) and `docs/CURRENT_STATE.md` as historical/reference context only.
 3. Understand the architecture from `ARCHITECTURE.md`.
 4. Check `ARCHITECTURE_DECISIONS.md` for past decisions.
 5. Review `CODING_GUIDELINES.md` before writing code.

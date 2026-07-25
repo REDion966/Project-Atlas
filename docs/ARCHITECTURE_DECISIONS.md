@@ -1,5 +1,25 @@
 # Atlas Architecture Decisions
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+>
+> This document is preserved for detailed context, history, and architectural reference.
+>
+> Canonical AI startup files:
+>
+> 1. docs/ATLAS_CORE.md
+> 2. docs/ATLAS_STATE.md
+>
+> Authority order:
+>
+> - Source code = actual runtime behavior truth
+> - ATLAS_CORE.md = permanent architectural principles and rules
+> - ATLAS_STATE.md = current operational state and resume point
+> - Historical documents = supplementary context only
+>
+> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+---
+
 **Decision record system for Project Atlas.**
 
 **Last updated:** July 2026
@@ -101,7 +121,7 @@ Each decision follows this structure:
 | **Date** | July 2026 |
 | **Status** | Accepted |
 | **Context** | After completing Phases 5 and 6.1–6.4, Atlas had grown complex enough that understanding the full system required reading many source files. AI assistants working on Atlas had no single entry point to understand the architecture, leading to context fragmentation and repeated exploration. |
-| **Decision** | Create a permanent documentation memory layer in `docs/` with a structured set of documents. The master file (`ATLAS_MASTER_CONTEXT.md`) must be sufficient for any AI model to understand Atlas by reading only that file first. Supporting documents cover architecture, state, history, roadmap, decisions, guidelines, strategy, and workflow. |
+| **Decision** | Create a permanent documentation memory layer in `docs/` with a structured set of documents. The master file (`ATLAS_MASTER_CONTEXT.md`) was originally intended to be sufficient for any AI model to understand Atlas by reading only that file first. Supporting documents cover architecture, state, history, roadmap, decisions, guidelines, strategy, and workflow. The canonical AI memory entry points are now `ATLAS_CORE.md` and `ATLAS_STATE.md`; `ATLAS_MASTER_CONTEXT.md` and the other supporting documents are preserved as historical/reference context. |
 | **Consequences** | - Any AI model can understand Atlas quickly<br>- Context fragmentation is eliminated<br>- Documentation is persistent and version-controlled<br>- Requires ongoing maintenance as Atlas evolves |
 
 

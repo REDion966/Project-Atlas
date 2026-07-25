@@ -1,5 +1,25 @@
 # Atlas Development Log
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+>
+> This document is preserved for detailed context, history, and architectural reference.
+>
+> Canonical AI startup files:
+>
+> 1. docs/ATLAS_CORE.md
+> 2. docs/ATLAS_STATE.md
+>
+> Authority order:
+>
+> - Source code = actual runtime behavior truth
+> - ATLAS_CORE.md = permanent architectural principles and rules
+> - ATLAS_STATE.md = current operational state and resume point
+> - Historical documents = supplementary context only
+>
+> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+---
+
 **Chronological development history of Project Atlas.**
 
 ---
@@ -205,9 +225,9 @@ Created the permanent documentation memory system for Atlas. This phase establis
 
 The following documentation files were created:
 
-- `ATLAS_MASTER_CONTEXT.md` — single-entry context for any AI model
+- `ATLAS_MASTER_CONTEXT.md` — historical reference context (was originally the single-entry context for any AI model)
 - `ARCHITECTURE.md` — full system architecture documentation
-- `CURRENT_STATE.md` — live project snapshot
+- `CURRENT_STATE.md` — historical reference state snapshot (was originally the live project snapshot)
 - `DEVELOPMENT_LOG.md` — this file, chronological history
 - `ROADMAP.md` — future development roadmap
 - `ARCHITECTURE_DECISIONS.md` — decision record system
@@ -215,6 +235,8 @@ The following documentation files were created:
 - `MODEL_STRATEGY.md` — AI provider and workflow strategy
 - `AI_WORKFLOW_PROTOCOL.md` — AI agent working protocol
 - `FUTURE_DIRECTION.md` — long-term vision
+
+The canonical AI memory entry points are now `ATLAS_CORE.md` and `ATLAS_STATE.md`; the above files are preserved as historical/reference context.
 
 ---
 
