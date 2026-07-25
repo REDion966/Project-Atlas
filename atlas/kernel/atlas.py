@@ -8,6 +8,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from atlas.ai.ai_manager import AIManager
+from atlas.ai.routing.models import ModelProfile
+from atlas.ai.routing.registry import ModelProfileRegistry
+from atlas.ai.routing.router import ModelRouter
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
 from atlas.cognition.api import CognitionAPI
@@ -77,6 +80,10 @@ class Atlas:
         self._cognition_api: CognitionAPI | None = None
 
         self._reasoning_controller: ReasoningController | None = None
+
+        self._model_profile_registry: ModelProfileRegistry | None = None
+
+        self._model_router: ModelRouter | None = None
 
         self._capability_analyzer: CapabilityAnalyzer | None = None
 
@@ -166,10 +173,41 @@ class Atlas:
         ))
 
 
+        self._model_profile_registry = ModelProfileRegistry()
+
+        self._model_profile_registry.register(
+            ModelProfile(
+                provider_name="Mock Provider",
+                model_name="atlas-mock-v1",
+                complexity_score=0.3,
+                latency_class="fast",
+                cost_tier=0.1,
+                supported_tasks=["conversation"],
+                priority=10,
+            )
+        )
+
+        self._model_profile_registry.register(
+            ModelProfile(
+                provider_name="Ollama",
+                model_name=model,
+                complexity_score=0.8,
+                latency_class="medium",
+                cost_tier=0.2,
+                supported_tasks=["conversation", "analysis", "code"],
+                priority=20,
+            )
+        )
+
+        self._model_router = ModelRouter(
+            self._model_profile_registry,
+        )
+
         self._ai_manager.initialize(
             provider,
             model,
             timeout,
+            model_router=self._model_router,
         )
 
 
@@ -413,6 +451,9 @@ class Atlas:
         self._capability_router = None
         self._capability_dispatcher = None
         self._reasoning_recorder = None
+
+        self._model_profile_registry = None
+        self._model_router = None
 
 
         self._started = False

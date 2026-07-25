@@ -7,6 +7,7 @@ Routes AI requests through the Provider Registry.
 from collections.abc import Iterator
 
 from atlas.ai.registry import AIProviderRegistry
+from atlas.ai.routing.models import RoutingDecision
 
 
 class AIRouter:
@@ -37,28 +38,37 @@ class AIRouter:
         """Return the active provider."""
         return self._active_provider
 
-    def chat(self, messages):
+    def chat(
+        self,
+        messages,
+        routing_decision: RoutingDecision | None = None,
+    ):
         """Route chat requests."""
 
-        if self._active_provider is None:
+        provider = self._resolve_provider(routing_decision)
+
+        if provider is None:
             raise RuntimeError(
                 "No active AI provider selected."
             )
 
-        return self._active_provider.chat(messages)
+        return provider.chat(messages)
 
     def stream_chat(
         self,
         messages,
+        routing_decision: RoutingDecision | None = None,
     ) -> Iterator[str]:
         """Route streaming chat requests."""
 
-        if self._active_provider is None:
+        provider = self._resolve_provider(routing_decision)
+
+        if provider is None:
             raise RuntimeError(
                 "No active AI provider selected."
             )
 
-        return self._active_provider.stream_chat(
+        return provider.stream_chat(
             messages
         )
 
@@ -83,3 +93,29 @@ class AIRouter:
             )
 
         return self._active_provider.models()
+
+    def _resolve_provider(
+        self,
+        routing_decision: RoutingDecision | None,
+    ):
+        """
+        Resolve the provider to use for a request.
+
+        If a routing decision is provided, look up the requested provider
+        in the registry. Otherwise, return the active provider.
+        """
+
+        if routing_decision is None:
+            return self._active_provider
+
+        provider = self._registry.get(
+            routing_decision.provider_name
+        )
+
+        if provider is None:
+            raise RuntimeError(
+                f"Provider '{routing_decision.provider_name}' "
+                f"requested by routing decision is not registered."
+            )
+
+        return provider
