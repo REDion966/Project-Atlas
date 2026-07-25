@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from atlas.reasoning.execution.routing import CapabilityRouter
     from atlas.reasoning.models import ReasoningPlan
     from atlas.reasoning.outcomes import ReasoningOutcome, ReasoningRecorder
+    from atlas.reasoning.reflection import ReflectionEngine, ReflectionSuggestion
 
 
 class CognitionService(Service):
@@ -45,6 +46,11 @@ class CognitionService(Service):
     When a ReasoningRecorder is injected alongside the reasoning
     pipeline, completed reasoning outcomes are recorded for future
     reflection and observability.
+
+    Phase 6.7 — Supports optional reflection analysis.
+    When a ReflectionEngine is injected and outcomes are available,
+    the service runs reflection after recording to produce analysis
+    suggestions.
     """
 
     def __init__(
@@ -61,6 +67,7 @@ class CognitionService(Service):
         capability_router=None,
         capability_dispatcher=None,
         reasoning_recorder=None,
+        reflection_engine=None,
     ):
         super().__init__("cognition")
 
@@ -80,6 +87,9 @@ class CognitionService(Service):
 
         # --- Phase 6.5.2: Optional reasoning outcome recording ---
         self._reasoning_recorder = reasoning_recorder
+
+        # --- Phase 6.7: Optional reflection analysis ---
+        self._reflection_engine = reflection_engine
 
     def start(self):
         """
@@ -187,6 +197,9 @@ class CognitionService(Service):
 
         # --- Phase 6.5.2: Optional reasoning outcome recording ---
         self._record_reasoning_outcome(decision)
+
+        # --- Phase 6.7: Optional reflection analysis ---
+        self._run_reflection(decision)
 
         return decision
 
@@ -308,6 +321,54 @@ class CognitionService(Service):
 
         self._reasoning_recorder.record(outcome)
 
+    # --- Phase 6.7: Reflection analysis ---
+
+    def _run_reflection(self, decision) -> None:
+        """
+        Run reflection analysis when a ReflectionEngine is available.
+
+        Requires both a ReflectionEngine and a ReasoningRecorder with
+        recorded outcomes to produce suggestions. Suggestions are stored
+        in decision.data["reflection"] as serialized metadata only.
+
+        If the engine or recorder is missing, or no outcomes have been
+        recorded, this method does nothing — preserving backward
+        compatibility.
+
+        Args:
+            decision: The CognitionDecision to attach reflection
+                suggestions to.
+        """
+        if self._reflection_engine is None:
+            return
+
+        if self._reasoning_recorder is None:
+            return
+
+        if self._reasoning_recorder.count == 0:
+            return
+
+        # Use the last 20 outcomes as a sliding reflection window
+        recent_outcomes = self._reasoning_recorder.recent(20)
+
+        suggestions = self._reflection_engine.analyze(recent_outcomes)
+
+        if not suggestions:
+            return
+
+        decision.data["reflection"] = [
+            {
+                "pattern": s.pattern,
+                "description": s.description,
+                "suggestion": s.suggestion,
+                "confidence": s.confidence,
+                "target_area": s.target_area,
+                "timestamp": s.timestamp.isoformat(),
+                "affected_outcomes_count": s.affected_outcomes_count,
+            }
+            for s in suggestions
+        ]
+
     def _build_reasoning_outcome(
         self,
         decision_action: str,
@@ -368,6 +429,16 @@ class CognitionService(Service):
         return self._reasoning_recorder
 
     @property
+    def reflection_engine(self):
+        """
+        Return the reflection engine dependency (Phase 6.7).
+
+        Returns:
+            The ReflectionEngine if injected, or None.
+        """
+        return self._reflection_engine
+
+    @property
     def engine(self):
         """
         Return cognition engine.
@@ -402,4 +473,5 @@ class CognitionService(Service):
             "has_learning": self._learning_manager is not None,
             "has_reasoning": self._reasoning_controller is not None,
             "has_recorder": self._reasoning_recorder is not None,
+            "has_reflection": self._reflection_engine is not None,
         }
