@@ -7,14 +7,16 @@
 ## 1. Current Git State
 
 | Field | Value |
-|---|---|
-| Branch | `phase5-memory-evolution` |
-| HEAD | `577a7cc` |
-| Latest Tag | `phase-6.5.2-complete` |
-| Latest Commit Message | Complete Phase 6.5.2 reasoning outcome recording and observability |
+|---|---|---|
+| | Branch | `phase5-memory-evolution` |
+| | HEAD | `e051b94` |
+| | Latest Tag | `phase-6.7-complete` |
+| | Latest Commit Message | Complete Phase 6.7 reflection foundation |
 
 **All Tags:**
-- `phase-6.5.2-complete` — current
+- `phase-6.7-complete` — current
+- `phase-6.6-complete`
+- `phase-6.5.2-complete`
 - `phase-6.5.1-complete`
 - `sprint-05-stable`
 - `v0.5.3-stable`
@@ -25,15 +27,18 @@
 
 ## 2. Latest Checkpoint
 
-**Phase 6.5.2 — Reasoning Outcome Recording & Observability**
+**Phase 6.7 — Reflection Foundation**
 
 What was added:
-- `ReasoningOutcome` dataclass for reasoning pipeline snapshots
-- `ReasoningRecorder` bounded in-memory ring buffer (default max 100)
-- Optional injection into `CognitionService`
+- `ReflectionEngine` pure logic analysis component
+- `ReflectionSuggestion` dataclass for structured analysis output
+- `_run_reflection()` method in `CognitionService` (optional)
+- `reflection_engine` property and `has_reflection` status key
+- `ReflectionEngine` creation and injection in `Atlas.start()`
 - Private Atlas-owned dependency (not in `ServiceContainer`)
-- `Atlas.start()` wiring and `shutdown()` cleanup
-- Backward compatibility when recorder is missing
+- Three initial analysis patterns: frequent failures, repeated routing, capability imbalance
+- 25 new unit and integration tests (`test_reflection_engine.py`, `test_reflection_wiring.py`)
+- Backward compatibility when reflection engine is missing
 
 ---
 
@@ -51,6 +56,8 @@ What was added:
 | 6.5 | Documentation memory foundation | Complete | 331 |
 | 6.5.1 | Reasoning runtime integration | Complete | 389 |
 | **6.5.2** | **Reasoning outcome recording & observability** | **Complete** | **436** |
+| 6.6 | Model routing subsystem | Complete | 456 |
+| **6.7** | **Reflection foundation** | **Complete** | **481** |
 
 ---
 
@@ -100,9 +107,14 @@ ConversationService
     │       │
     │       └──→ Reasoning Outcome Recording  ← Phase 6.5.2
     │               │
-    │               └──→ ReasoningRecorder.record()
-    │                       ↓
-    │               Future Reflection Layer (not implemented)
+    │               ├──→ ReasoningRecorder.record()
+    │               │
+    │               └──→ Bounded Reflection Analysis  ← Phase 6.7
+    │                       │
+    │                       └──→ ReflectionEngine.analyze()
+    │                               ↓
+    │                       ReflectionSuggestion stored
+    │                         in decision.data["reflection"]
     │
     ├──→ PromptBuilder.build()
     │
@@ -138,18 +150,26 @@ ReasoningRecorder.record()   ← Phase 6.5.2
     │
     ▼
 ReasoningOutcome stored      ← goal, capabilities, routes, results, success
+    │
+    ▼
+ReflectionEngine.analyze()   ← Phase 6.7 (bounded analysis)
+    │
+    ▼
+list[ReflectionSuggestion]   ← patterns, description, confidence, target_area
 ```
 
-### 4.4 Observation Layer
+### 4.4 Observation & Reflective Analysis Layer
 
-Atlas currently observes its own reasoning outcomes through `ReasoningOutcome` recording:
+Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording and performs bounded reflective analysis through `ReflectionEngine`:
 
-- Stores last 100 reasoning outcomes in memory
+- `ReasoningRecorder` stores last 100 reasoning outcomes in memory
 - Provides `recent()`, `latest()`, `summary()`, `clear()`
 - Records: goal, capabilities, routes, results, success, timestamp
-- No reflection or strategy adjustment yet
+- `ReflectionEngine.analyze()` produces `ReflectionSuggestion` instances from outcome history (Phase 6.7)
+- Reflection is bounded analysis only — suggestions are stored in `decision.data["reflection"]` as metadata
+- No strategy adjustment, no autonomous modification
 
-> **Clarification:** Observation is implemented through `ReasoningOutcome` recording. Reflection is not yet implemented; the recorder provides the structured data foundation required for future reflection.
+> **Clarification:** Observation is implemented through `ReasoningOutcome` recording. Bounded reflective analysis is implemented through `ReflectionEngine`. The reflection engine produces suggestions but does not autonomously act on them. Full reflective learning (closed-loop strategy adjustment) remains a future capability.
 
 ---
 
@@ -173,6 +193,7 @@ Atlas currently observes its own reasoning outcomes through `ReasoningOutcome` r
 |---|---|
 | Reasoning | ✅ Implemented |
 | Observation | ✅ Implemented (via `ReasoningRecorder`) |
+| Bounded reflective analysis | ✅ Implemented (`ReflectionEngine`, Phase 6.7) |
 | Capability selection | ✅ Implemented |
 | Routing | ✅ Implemented |
 | Dispatch | ✅ Implemented |
@@ -183,8 +204,7 @@ Atlas currently observes its own reasoning outcomes through `ReasoningOutcome` r
 
 | Capability | Status |
 |---|---|
-| Reflective learning | ❌ Not implemented |
-| Reflection | ❌ Not implemented |
+| Reflective learning (closed-loop) | ❌ Not implemented |
 | Strategy adjustment | ❌ Not implemented |
 | Autonomous improvement | ❌ Not implemented |
 
@@ -203,7 +223,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 
 ## 6. Current Test Status
 
-**436 passing tests**
+**481 passing tests**
 
 ### 6.1 Test Progression
 
@@ -218,7 +238,9 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | Phase 6.4 | 331 |
 | Phase 6.5 | 331 |
 | Phase 6.5.1 | 389 |
-| **Phase 6.5.2** | **436** |
+| Phase 6.5.2 | 436 |
+| Phase 6.6 | 456 |
+| **Phase 6.7** | **481** |
 
 
 ### 6.2 Key Test Files
@@ -248,6 +270,8 @@ Representative key test areas only.
 | `test_reasoning_recorder_integration.py` | Recorder integration |
 | `test_reasoning_recorder_wiring.py` | Recorder runtime wiring |
 | `test_reasoning_runtime_wiring.py` | Reasoning runtime wiring |
+| `test_reflection_engine.py` | Reflection engine analysis |
+| `test_reflection_wiring.py` | Reflection integration wiring |
 
 > **Note:** This table lists representative key test areas only. The complete test suite contains additional module-specific tests across `tests/`, `tests/cli/`, `tests/memory/`, `tests/workspace/`, and other subdirectories.
 
@@ -282,7 +306,7 @@ Deferred:
 | 3 | `ReasoningRecorder` is in-memory only | No disk persistence; resets on shutdown |
 | 4 | Memory storage is JSON-based | No concurrent write protection |
 | 5 | Single AI provider per session | No model routing yet |
-| 6 | No reflection engine | Cannot evaluate or adjust reasoning strategies |
+| 6 | Reflection analysis is in-memory only | No disk persistence; suggestions lost on shutdown |
 | 7 | No planning engine | Cannot decompose complex goals |
 | 8 | No tool intelligence | Cannot dynamically choose real tools |
 | 9 | No autonomous improvement | Bounded optimisation not implemented |
@@ -356,9 +380,9 @@ A phase is complete only after:
 | Phase 6.5 Documentation Memory Foundation | ✅ Complete |
 | Phase 6.5.1 Reasoning Runtime Integration | ✅ Complete |
 | Phase 6.5.2 Reasoning Outcome Recording | ✅ Complete |
-| **Phase 6.6 Model Routing** | **🟡 Next** |
-| Phase 6.7 Reflection System | Planned |
-| Phase 6.8 Planning Engine | Planned |
+| Phase 6.6 Model Routing | ✅ Complete |
+| **Phase 6.7 Reflection Foundation** | **✅ Complete** |
+| Phase 6.8 Planning Engine | 🟡 Next |
 | Phase 6.9 Tool Intelligence | Planned |
 | Phase 6.10+ Continuous Improvement | Conceptual |
 
@@ -376,14 +400,14 @@ A phase is complete only after:
    git rev-parse HEAD
    git tag --list
    ```
-   Expected: branch `phase5-memory-evolution`, HEAD `577a7cc`, tag `phase-6.5.2-complete`.
+   Expected: branch `phase5-memory-evolution`, HEAD `e051b94`, tag `phase-6.7-complete`.
 4. Run the full test suite:
    ```
    pytest
    ```
-5. Confirm **436 tests passing**.
-6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, and `atlas/reasoning/`.
-7. Pick up from **Phase 6.6 — Model Routing**.
+5. Confirm **481 tests passing**.
+6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, and `atlas/reasoning/reflection.py`.
+7. Pick up from **Phase 6.8 — Planning Engine**.
 8. Do not modify legacy `atlas/intelligence/` components.
 9. Preserve all existing public APIs.
 10. Add tests for any new functionality.
