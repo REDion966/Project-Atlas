@@ -286,23 +286,29 @@ Representative key test areas only.
 
 ## 9. Next Milestone
 
-**Phase 6.6 — Model Routing**
+Phase 6.6 — Model Routing
+Status: Completed
 
-**Goal:** Select the optimal AI model per request based on complexity, latency, and cost constraints.
+Implemented:
+- Added private AI model routing subsystem.
+- Added atlas/ai/routing package.
+- Added ModelProfile, RoutingRequest, RoutingDecision.
+- Added RoutingPolicy pure decision logic.
+- Added ModelProfileRegistry.
+- Added ModelRouter.
+- Extended AIRouter with optional routing decisions.
+- Extended AIService with optional routing context.
+- Preserved existing single-provider behavior.
 
-**Key features:**
-- Model capability profiling
-- Request complexity analysis
-- Latency and cost optimization
-- Fallback strategies when preferred models are unavailable
+Verification:
+- 456 tests passing.
 
-**Status:** Planned
-
-**Subsequent phases:**
-- Phase 6.7 — Reflection System
-- Phase 6.8 — Planning Engine
-- Phase 6.9 — Tool Intelligence
-- Phase 6.10+ — Continuous Improvement
+Deferred:
+- Dynamic model discovery.
+- Cost-aware routing.
+- Latency-aware routing.
+- Health-aware routing.
+- Reflection-driven model selection.
 
 ### 9.2 Phase Completion Contract
 
