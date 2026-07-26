@@ -60,6 +60,7 @@ from atlas.understanding.understanding_engine import UnderstandingEngine
 from atlas.world_model.world_model_engine import WorldModelEngine
 from atlas.evolution.self_observation import SelfObservationEngine
 from atlas.learning_engine.learning_engine import LearningEngine
+from atlas.identity.identity_engine import IdentityEngine
 
 
 class Atlas:
@@ -93,6 +94,7 @@ class Atlas:
         self._world_model_engine: WorldModelEngine | None = None
         self._self_observation_engine: SelfObservationEngine | None = None
         self._learning_engine: LearningEngine | None = None
+        self._identity_engine: IdentityEngine | None = None
 
         # --- Reasoning pipeline ---
         self._reasoning_controller: ReasoningController | None = None
@@ -255,6 +257,8 @@ class Atlas:
         self._world_model_engine = WorldModelEngine()
         self._self_observation_engine = SelfObservationEngine()
         self._learning_engine = LearningEngine()
+        self._identity_engine = IdentityEngine()
+        self._identity_engine.initialize()
 
         # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
         self._runtime_coordinator = RuntimeCoordinator(
@@ -276,6 +280,7 @@ class Atlas:
             knowledge_feedback=self._knowledge_feedback,
             learning_engine=self._learning_engine,
             evolution_observation_engine=self._self_observation_engine,
+            identity_engine=self._identity_engine,
             conversation_service=None,  # Wired below
             event_bus=self._event_bus,
         )
@@ -330,6 +335,7 @@ class Atlas:
         self._container.register("world_model", self._world_model_engine)
         self._container.register("evolution_observer", self._self_observation_engine)
         self._container.register("learning_engine", self._learning_engine)
+        self._container.register("identity", self._identity_engine)
 
         self._container.start_all()
         self._started = True
@@ -386,6 +392,7 @@ class Atlas:
         self._world_model_engine = None
         self._self_observation_engine = None
         self._learning_engine = None
+        self._identity_engine = None
 
         self._learning_manager = None
         self._knowledge_feedback = None

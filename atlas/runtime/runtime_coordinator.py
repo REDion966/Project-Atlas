@@ -74,6 +74,7 @@ class RuntimeCoordinator:
         knowledge_feedback: Any = None,
         learning_engine: Any = None,
         evolution_observation_engine: Any = None,
+        identity_engine: Any = None,
         conversation_service: Any = None,
         event_bus: Any = None,
     ):
@@ -98,6 +99,7 @@ class RuntimeCoordinator:
         self._knowledge_feedback = knowledge_feedback
         self._learning_engine = learning_engine
         self._evolution_observation_engine = evolution_observation_engine
+        self._identity_engine = identity_engine
         self._conversation_service = conversation_service
         self._event_bus = event_bus
 
@@ -951,6 +953,10 @@ class RuntimeCoordinator:
     @property
     def evolution_observation_engine(self):
         return self._evolution_observation_engine
+
+    @property
+    def identity_engine(self):
+        return self._identity_engine
 
     @property
     def conversation_service(self):
