@@ -9,14 +9,14 @@
 | Field | Value |
 |---|---|---|
 | | Branch | `phase5-memory-evolution` |
-| | HEAD | `<commit-hash>` |
-| | Latest Tag | `phase-6.8-complete` |
+| | HEAD | `67bc3c9bf2697ee817a44b471ee72f3ff6f0c708` |
+| | Latest Tag | `phase-6.9-complete` |
 | | Latest Commit Message | feat(reasoning): implement Phase 6.8 planning engine |
 
 **All Tags:**
-- `phase-6.8-complete` — current
+- `phase-6.9-complete` — current
+- `phase-6.8-complete`
 - `phase-6.7-complete`
-- `phase-6.6-complete`
 - `phase-6.5.2-complete`
 - `phase-6.5.1-complete`
 - `sprint-05-stable`
@@ -28,21 +28,21 @@
 
 ## 2. Latest Checkpoint
 
-**Phase 6.8 — Planning Engine**
+**Phase 6.9 — Tool Intelligence Foundation**
 
 What was added:
-- `PlanningEngine` pure logic decomposition component
-- `PlanningPlan` and `PlanningStep` dataclasses with dependency tracking
-- `decompose()`, `validate()`, `next_steps()` public methods
-- `_run_planning()` integration in `CognitionService` reasoning pipeline (optional)
-- `planning_engine` property and `has_planning` status key
-- `PlanningEngine` creation and injection in `Atlas.start()`
+- `Tool`, `ToolParameter`, `ToolResult`, `ToolRequest` dataclasses
+- `ToolRegistry` for tool lifecycle management (register, unregister, get, list, find)
+- `ToolSelector` for keyword-based deterministic tool matching and ranking
+- `ToolExecutor` for tool invocation with timing capture and error handling
+- `ToolEngine` orchestrator with `fulfill()` and `fulfill_with_fallback()`
+- `_run_tool_pipeline()` integration in `CognitionService` (optional)
+- `tool_engine` property and `has_tools` status key
+- `ToolEngine` creation and injection in `Atlas.start()`
 - Private Atlas-owned dependency (not in `ServiceContainer`)
-- Plan validation: empty actions, unknown dependencies, circular dependency detection
-- Sub-goal extraction from multi-step reasoning plans
-- Sequential dependency chain with explicit dependency support
-- 39 new unit and integration tests (`test_planning_engine.py`, `test_planning_wiring.py`)
-- Backward compatibility when planning engine is missing
+- Two built-in tools: `echo` and `list_tools`
+- 64 new unit and integration tests (`test_tool_models.py`, `test_tool_registry.py`, `test_tool_selector.py`, `test_tool_executor.py`, `test_tool_engine.py`, `test_tool_wiring.py`)
+- Backward compatibility when tool engine is missing
 
 ---
 
@@ -63,6 +63,7 @@ What was added:
 | 6.6 | Model routing subsystem | Complete | 456 |
 | **6.7** | **Reflection foundation** | **Complete** | **481** |
 | **6.8** | **Planning engine** | **Complete** | **520** |
+| **6.9** | **Tool intelligence foundation** | **Complete** | **584** |
 
 ---
 
@@ -111,6 +112,13 @@ ConversationService
     │       │       ├──→ CapabilityRouter.route()
     │       │       └──→ CapabilityDispatcher.dispatch()
     │       │
+    │       ├──→ Tool Intelligence pipeline  ← Phase 6.9
+    │       │       │
+    │       │       └──→ ToolEngine.fulfill()
+    │       │               │
+    │       │               ├──→ ToolSelector.select()
+    │       │               └──→ ToolExecutor.execute()
+    │       │
     │       └──→ Reasoning Outcome Recording  ← Phase 6.5.2
     │               │
     │               ├──→ ReasoningRecorder.record()
@@ -136,35 +144,31 @@ Response → User
 ```
 CognitionDecision
     │
-    ▼
-ReasoningController          ← decision → ReasoningPlan
+    ├──→ Reasoning pipeline
+    │       │
+    │       ├──→ ReasoningController.create_plan()
+    │       ├──→ PlanningEngine.decompose()  ← Phase 6.8 (optional)
+    │       ├──→ CapabilityAnalyzer.analyze()
+    │       ├──→ CapabilityRouter.route()
+    │       ├──→ CapabilityDispatcher.dispatch()
+    │       └──→ decision.data["reasoning"]
     │
-    ▼
-PlanningEngine.decompose()   ← Phase 6.8 (optional)
+    ├──→ Tool Intelligence pipeline  ← Phase 6.9
+    │       │
+    │       └──→ ToolEngine.fulfill()
+    │               │
+    │               ├──→ ToolSelector.select()
+    │               └──→ ToolExecutor.execute()
+    │               ↓
+    │       decision.data["tool_results"]
     │
-    ▼
-CapabilityAnalyzer           ← plan → list[Capability]
-    │
-    ▼
-CapabilityRouter             ← capabilities → list[ExecutionRoute]
-    │
-    ▼
-CapabilityDispatcher         ← capabilities → list[ExecutionResult]
-    │
-    ▼
-decision.data["reasoning"]   ← goal, capabilities, routes, results
-    │
-    ▼
-ReasoningRecorder.record()   ← Phase 6.5.2
-    │
-    ▼
-ReasoningOutcome stored      ← goal, capabilities, routes, results, success
-    │
-    ▼
-ReflectionEngine.analyze()   ← Phase 6.7 (bounded analysis)
-    │
-    ▼
-list[ReflectionSuggestion]   ← patterns, description, confidence, target_area
+    └──→ Outcome Recording & Reflection
+            │
+            ├──→ ReasoningRecorder.record()   ← Phase 6.5.2
+            ├──→ ReasoningOutcome stored
+            └──→ ReflectionEngine.analyze()   ← Phase 6.7
+                    ↓
+            list[ReflectionSuggestion]
 ```
 
 ### 4.4 Observation & Reflective Analysis Layer
@@ -208,6 +212,7 @@ Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording a
 | Dispatch | ✅ Implemented |
 | Outcome recording | ✅ Implemented |
 | Plan decomposition | ✅ Implemented (`PlanningEngine`, Phase 6.8) |
+| Tool selection and execution | ✅ Implemented (`ToolEngine`, Phase 6.9) |
 | Learning infrastructure | ✅ Implemented (`LearningManager`, `KnowledgeFeedback`) |
 
 ### 5.3 Missing Capabilities
@@ -233,7 +238,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 
 ## 6. Current Test Status
 
-**520 passing tests**
+**584 passing tests**
 
 ### 6.1 Test Progression
 
@@ -252,6 +257,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | Phase 6.6 | 456 |
 | **Phase 6.7** | **481** |
 | **Phase 6.8** | **520** |
+| **Phase 6.9** | **584** |
 
 
 ### 6.2 Key Test Files
@@ -283,6 +289,12 @@ Representative key test areas only.
 | `test_reasoning_runtime_wiring.py` | Reasoning runtime wiring |
 | `test_reflection_engine.py` | Reflection engine analysis |
 | `test_reflection_wiring.py` | Reflection integration wiring |
+| `test_tool_models.py` | Tool data models |
+| `test_tool_registry.py` | Tool registry |
+| `test_tool_selector.py` | Tool selector |
+| `test_tool_executor.py` | Tool executor |
+| `test_tool_engine.py` | Tool engine orchestrator |
+| `test_tool_wiring.py` | Tool wiring integration |
 
 > **Note:** This table lists representative key test areas only. The complete test suite contains additional module-specific tests across `tests/`, `tests/cli/`, `tests/memory/`, `tests/workspace/`, and other subdirectories.
 
@@ -318,9 +330,8 @@ Deferred:
 | 4 | Memory storage is JSON-based | No concurrent write protection |
 | 5 | Single AI provider per session | No model routing yet |
 | 6 | Reflection analysis is in-memory only | No disk persistence; suggestions lost on shutdown |
-| 7 | No tool intelligence | Cannot dynamically choose real tools |
-| 8 | No autonomous improvement | Bounded optimisation not implemented |
-| 9 | Three empty documentation files | `developer/coding-standards.md`, `roadmap/roadmap-v1.md`, `sprints/sprint-01.md` |
+| 7 | No autonomous improvement | Bounded optimisation not implemented |
+| 8 | Three empty documentation files | `developer/coding-standards.md`, `roadmap/roadmap-v1.md`, `sprints/sprint-01.md` |
 
 ---
 
@@ -393,8 +404,8 @@ A phase is complete only after:
 | Phase 6.6 Model Routing | ✅ Complete |
 | **Phase 6.7 Reflection Foundation** | **✅ Complete** |
 | **Phase 6.8 Planning Engine** | **✅ Complete** |
-| Phase 6.9 Tool Intelligence | 🟡 Next |
-| Phase 6.10+ Continuous Improvement | Planned |
+| **Phase 6.9 Tool Intelligence** | **✅ Complete** |
+| Phase 6.10+ Continuous Improvement | 🟡 Next |
 
 ---
 
@@ -410,14 +421,14 @@ A phase is complete only after:
    git rev-parse HEAD
    git tag --list
    ```
-   Expected: branch `phase5-memory-evolution`, HEAD `<commit-hash>`, tag `phase-6.8-complete`.
+   Expected: branch `phase5-memory-evolution`, HEAD `67bc3c9bf2697ee817a44b471ee72f3ff6f0c708`, tag `phase-6.9-complete`.
 4. Run the full test suite:
    ```
    pytest
    ```
-5. Confirm **520 tests passing**.
-6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, and `atlas/reasoning/reflection.py`.
-7. Pick up from **Phase 6.9 — Tool Intelligence**.
+5. Confirm **584 tests passing**.
+6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, and `atlas/tools/`.
+7. Pick up from **Phase 6.10+ — Continuous Improvement**.
 8. Do not modify legacy `atlas/intelligence/` components.
 9. Preserve all existing public APIs.
 10. Add tests for any new functionality.

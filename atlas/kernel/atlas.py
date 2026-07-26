@@ -40,6 +40,12 @@ from atlas.reasoning.outcomes import ReasoningRecorder
 from atlas.reasoning.planning import PlanningEngine
 from atlas.reasoning.reflection import ReflectionEngine
 
+from atlas.tools.builtins import BUILTIN_TOOLS
+from atlas.tools.engine import ToolEngine
+from atlas.tools.executor import ToolExecutor
+from atlas.tools.registry import ToolRegistry
+from atlas.tools.selector import ToolSelector
+
 from atlas.services.cognition_service import CognitionService
 
 from atlas.state.state_manager import StateManager
@@ -100,6 +106,11 @@ class Atlas:
         self._reflection_engine: ReflectionEngine | None = None
 
         self._planning_engine: PlanningEngine | None = None
+
+        self._tool_registry: ToolRegistry | None = None
+        self._tool_selector: ToolSelector | None = None
+        self._tool_executor: ToolExecutor | None = None
+        self._tool_engine: ToolEngine | None = None
 
         self._started = False
 
@@ -262,6 +273,18 @@ class Atlas:
         self._reflection_engine = ReflectionEngine()
         self._planning_engine = PlanningEngine()
 
+        # --- Phase 6.9: Tool engine setup ---
+        self._tool_registry = ToolRegistry()
+        self._tool_selector = ToolSelector()
+        self._tool_executor = ToolExecutor(self._tool_registry)
+        self._tool_engine = ToolEngine(
+            self._tool_registry,
+            self._tool_selector,
+            self._tool_executor,
+        )
+        for tool in BUILTIN_TOOLS:
+            self._tool_registry.register(tool)
+
         self._cognition_service = CognitionService(
             memory_service=self._memory_service,
             knowledge_manager=self._knowledge_manager,
@@ -276,6 +299,7 @@ class Atlas:
             reasoning_recorder=self._reasoning_recorder,
             reflection_engine=self._reflection_engine,
             planning_engine=self._planning_engine,
+            tool_engine=self._tool_engine,
         )
 
         self._cognition_api = CognitionAPI(
@@ -463,6 +487,10 @@ class Atlas:
         self._reasoning_recorder = None
         self._reflection_engine = None
         self._planning_engine = None
+        self._tool_engine = None
+        self._tool_executor = None
+        self._tool_selector = None
+        self._tool_registry = None
 
         self._model_profile_registry = None
         self._model_router = None

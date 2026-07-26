@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from atlas.reasoning.outcomes import ReasoningOutcome, ReasoningRecorder
     from atlas.reasoning.planning import PlanningEngine, PlanningPlan
     from atlas.reasoning.reflection import ReflectionEngine, ReflectionSuggestion
+    from atlas.tools.engine import ToolEngine
+    from atlas.tools.models import ToolRequest, ToolResult
 
 
 class CognitionService(Service):
@@ -57,6 +59,11 @@ class CognitionService(Service):
     When a PlanningEngine is injected, the reasoning pipeline
     enriches the flat ReasoningPlan into a structured PlanningPlan
     with sub-goals, dependencies, and validation.
+
+    Phase 6.9 — Supports optional tool intelligence.
+    When a ToolEngine is injected, the reasoning pipeline runs
+    tool selection and execution after capability dispatch,
+    attaching tool results to the decision data.
     """
 
     def __init__(
@@ -75,6 +82,7 @@ class CognitionService(Service):
         reasoning_recorder=None,
         reflection_engine=None,
         planning_engine=None,
+        tool_engine=None,
     ):
         super().__init__("cognition")
 
@@ -100,6 +108,9 @@ class CognitionService(Service):
 
         # --- Phase 6.8: Optional planning engine ---
         self._planning_engine = planning_engine
+
+        # --- Phase 6.9: Optional tool intelligence ---
+        self._tool_engine = tool_engine
 
     def start(self):
         """
@@ -204,6 +215,9 @@ class CognitionService(Service):
 
         # --- Phase 6.5.1: Optional reasoning pipeline ---
         self._run_reasoning_pipeline(decision)
+
+        # --- Phase 6.9: Optional tool intelligence pipeline ---
+        self._run_tool_pipeline(decision)
 
         # --- Phase 6.5.2: Optional reasoning outcome recording ---
         self._record_reasoning_outcome(decision)
@@ -351,6 +365,56 @@ class CognitionService(Service):
 
         self._reasoning_recorder.record(outcome)
 
+    # --- Phase 6.9: Tool intelligence pipeline ---
+
+    def _run_tool_pipeline(self, decision) -> None:
+        """
+        Run tool selection and execution when a ToolEngine is available.
+
+        Uses the reasoning pipeline results to build a ToolRequest
+        and fulfills it through the ToolEngine. Results are stored
+        in decision.data["tool_results"] as serialized metadata.
+
+        If the tool engine is missing or no reasoning results exist,
+        this method does nothing — preserving backward compatibility.
+
+        Args:
+            decision: The CognitionDecision to attach tool results to.
+        """
+        if self._tool_engine is None:
+            return
+
+        reasoning_data = decision.data.get("reasoning")
+        if reasoning_data is None:
+            return
+
+        # Build a ToolRequest from the reasoning goal
+        # Use deferred import to keep CognitionService loosely coupled
+        import importlib
+
+        tools_models = importlib.import_module("atlas.tools.models")
+        tr_cls = getattr(tools_models, "ToolRequest")
+
+        goal = reasoning_data.get("goal", decision.action)
+        tool_request = tr_cls(
+            goal=goal,
+            context={
+                "action": decision.action,
+                "reasoning_data": reasoning_data,
+                "planning_data": decision.data.get("planning"),
+            },
+        )
+
+        result = self._tool_engine.fulfill(tool_request)
+
+        decision.data["tool_results"] = {
+            "tool_name": result.tool_name,
+            "success": result.success,
+            "output": result.output,
+            "error": result.error,
+            "execution_time_ms": result.execution_time_ms,
+        }
+
     # --- Phase 6.7: Reflection analysis ---
 
     def _run_reflection(self, decision) -> None:
@@ -479,6 +543,16 @@ class CognitionService(Service):
         return self._planning_engine
 
     @property
+    def tool_engine(self):
+        """
+        Return the tool engine dependency (Phase 6.9).
+
+        Returns:
+            The ToolEngine if injected, or None.
+        """
+        return self._tool_engine
+
+    @property
     def engine(self):
         """
         Return cognition engine.
@@ -515,4 +589,5 @@ class CognitionService(Service):
             "has_recorder": self._reasoning_recorder is not None,
             "has_reflection": self._reflection_engine is not None,
             "has_planning": self._planning_engine is not None,
+            "has_tools": self._tool_engine is not None,
         }

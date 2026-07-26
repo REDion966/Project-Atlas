@@ -426,6 +426,8 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 
 ### 13.1 Required Workflow
 
+The complete development workflow is documented in `docs/DEVELOPMENT_WORKFLOW.md`. The canonical per-session workflow is:
+
 ```
 1. Read ATLAS_CORE.md
 2. Read ATLAS_STATE.md
@@ -440,7 +442,7 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 
 > `ATLAS_MASTER_CONTEXT.md` is preserved as historical reference and is no longer the primary AI entry point.
 
-### 13.2 Planner AI
+### 13.2 Architecture Agent
 
 **Allowed:**
 - Read any file
@@ -455,7 +457,7 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 - Run destructive commands
 - Make autonomous architectural decisions
 
-### 13.3 Developer AI
+### 13.3 Implementation Agent
 
 **Allowed:**
 - Read any file
@@ -498,7 +500,7 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 
 Every report must include:
 - Summary: what changed, why, files created/modified
-- Test results: total, passing, failing
+- Test results: total, passing, failing (raw terminal output per `docs/DEVELOPMENT_WORKFLOW.md`)
 - Assumptions made
 - Issues encountered
 
@@ -567,7 +569,8 @@ For deeper context, read these preserved files after ATLAS_CORE.md and ATLAS_STA
 | Roadmap | `docs/ROADMAP.md` |
 | Development history | `docs/DEVELOPMENT_LOG.md` |
 | Coding guidelines | `docs/CODING_GUIDELINES.md` |
-| AI workflow protocol | `docs/AI_WORKFLOW_PROTOCOL.md` |
+| Development workflow | `docs/DEVELOPMENT_WORKFLOW.md` |
+| AI workflow protocol (historical) | `docs/AI_WORKFLOW_PROTOCOL.md` |
 | Model strategy | `docs/MODEL_STRATEGY.md` |
 | Future direction | `docs/FUTURE_DIRECTION.md` |
 | Engineering guide | `docs/ATLAS_ENGINEERING_GUIDE.md` |
