@@ -77,6 +77,10 @@ class UnderstandingMemory:
         """Return all stored concepts."""
         return list(self._concepts.values())
 
+    def remove_concept(self, concept_id: str) -> bool:
+        """Remove a concept by ID. Returns True if found."""
+        return self._concepts.pop(concept_id, None) is not None
+
     @property
     def concept_count(self) -> int:
         return len(self._concepts)
@@ -94,6 +98,10 @@ class UnderstandingMemory:
         if n <= 0:
             return []
         return list(reversed(self._relationships))[:n]
+
+    def clear_relationships(self) -> None:
+        """Clear all stored relationships."""
+        self._relationships.clear()
 
     @property
     def relationship_count(self) -> int:
@@ -119,6 +127,10 @@ class UnderstandingMemory:
         if n <= 0:
             return []
         return list(reversed(self._patterns))[:n]
+
+    def clear_patterns(self) -> None:
+        """Clear all stored patterns."""
+        self._patterns.clear()
 
     @property
     def pattern_count(self) -> int:
@@ -149,6 +161,10 @@ class UnderstandingMemory:
             if i.category == category
         ]
         return filtered[:n]
+
+    def clear_insights(self) -> None:
+        """Clear all stored insights."""
+        self._insights.clear()
 
     @property
     def insight_count(self) -> int:

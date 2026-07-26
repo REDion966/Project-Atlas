@@ -75,6 +75,8 @@ class RuntimeCoordinator:
         learning_engine: Any = None,
         evolution_observation_engine: Any = None,
         identity_engine: Any = None,
+        feedback_coordinator: Any = None,
+        goal_intelligence_engine: Any = None,
         conversation_service: Any = None,
         event_bus: Any = None,
     ):
@@ -100,6 +102,8 @@ class RuntimeCoordinator:
         self._learning_engine = learning_engine
         self._evolution_observation_engine = evolution_observation_engine
         self._identity_engine = identity_engine
+        self._feedback_coordinator = feedback_coordinator
+        self._goal_intelligence_engine = goal_intelligence_engine
         self._conversation_service = conversation_service
         self._event_bus = event_bus
 
@@ -221,6 +225,10 @@ class RuntimeCoordinator:
             intermediate_data=intermediate,
         )
 
+        # --- Phase 8.2: Cognitive Feedback Loop ---
+        if self._feedback_coordinator is not None:
+            self._feedback_coordinator.process_feedback(state, result)
+
         # Publish pipeline completion event
         if self._event_bus is not None:
             self._event_bus.publish(
@@ -257,6 +265,7 @@ class RuntimeCoordinator:
             (StageType.REFLECTION, self._stage_reflection),
             (StageType.LEARNING, self._stage_learning),
             (StageType.EVOLUTION_OBSERVATION, self._stage_evolution_observation),
+            (StageType.GOAL_INTELLIGENCE, self._stage_goal_intelligence),
             (StageType.MEMORY_STORAGE, self._stage_memory_storage),
         ]
 
@@ -790,7 +799,47 @@ class RuntimeCoordinator:
         )
 
     # ------------------------------------------------------------------
-    # Stage 14: Memory Storage
+    # Stage 14: Goal Intelligence
+    # ------------------------------------------------------------------
+
+    def _stage_goal_intelligence(
+        self,
+        state: CognitionState,
+    ) -> StageResult:
+        """Analyze accumulated evidence and generate improvement recommendations."""
+        if self._goal_intelligence_engine is None:
+            return StageResult(
+                stage=StageType.GOAL_INTELLIGENCE,
+                status=StageStatus.SKIPPED,
+            )
+
+        # Build evidence payload from pipeline state
+        evidence = {
+            "learning_insights": getattr(state, "learning_engine_result", {}) or {},
+            "reflection_suggestions": getattr(state, "reflection_suggestions", []) or [],
+            "capability_profiles": {},
+            "identity_summary": (
+                self._identity_engine.summary() if self._identity_engine is not None else {}
+            ),
+            "world_model_summary": getattr(state, "world_model_state", {}) or {},
+        }
+
+        report = self._goal_intelligence_engine.analyze(evidence)
+        state.goal_intelligence_report = report
+
+        return StageResult(
+            stage=StageType.GOAL_INTELLIGENCE,
+            status=StageStatus.SUCCESS,
+            data={
+                "report_id": report.report_id,
+                "total_recommendations": report.total_recommendations,
+                "total_opportunities": report.total_opportunities,
+            },
+            confidence=0.6 if report.total_recommendations > 0 else 0.3,
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 15: Memory Storage
     # ------------------------------------------------------------------
 
     def _stage_memory_storage(
@@ -867,36 +916,365 @@ class RuntimeCoordinator:
         self,
         state: CognitionState,
     ) -> list[dict[str, str]]:
-        """Build chat messages from the accumulated pipeline state."""
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": "You are Atlas, an intelligent AI operating framework."},
+        """
+        Build structured cognitive context for the AI provider.
+
+        Phase 8.1 — Assembles a comprehensive system prompt from all
+        cognitive subsystems. The LLM is the final reasoning assistant —
+        it receives pre-computed identity, reasoning, planning, tool
+        results, understanding, world model state, and learning insights.
+
+        Atlas's intelligence is in the pipeline. The LLM is the voice.
+        """
+        return [
+            {"role": "system", "content": self._build_cognitive_context(state)},
+            {"role": "user", "content": state.user_input},
         ]
 
-        if state.memories:
-            memory_summary = f"Relevant memories: {len(state.memories)} items found."
-            messages.append({"role": "system", "content": memory_summary})
+    def _build_cognitive_context(self, state: CognitionState) -> str:
+        """
+        Assemble a structured cognitive context from all subsystems.
 
-        if state.knowledge:
-            knowledge_summary = f"Relevant knowledge: {len(state.knowledge)} items found."
-            messages.append({"role": "system", "content": knowledge_summary})
+        Order preserves the cognition pipeline flow:
+          Identity → Conversation → Memory → Knowledge → Understanding →
+          World Model → Reasoning → Planning → Tool Results →
+          Learning → Evolution
+        Each section is only included if data is available.
+        """
+        sections: list[str] = []
 
-        if state.understanding_insights:
-            insight_summary = "Understanding insights:\n"
-            for i in state.understanding_insights[:5]:
-                insight_summary += f"- {i.summary}\n"
-            messages.append({"role": "system", "content": insight_summary})
+        # --- 1. Identity (who Atlas is, permanent) ---
+        identity_section = self._build_identity_section()
+        if identity_section:
+            sections.append(identity_section)
 
-        if state.tool_result:
-            tool_summary = (
-                f"Tool '{state.tool_result.get('tool_name', 'unknown')}' "
-                f"{'succeeded' if state.tool_result.get('success') else 'failed'}: "
-                f"{state.tool_result.get('output', '')}"
-            )
-            messages.append({"role": "system", "content": tool_summary})
+        # --- 2. Conversation Context ---
+        conv_section = self._build_conversation_section(state)
+        if conv_section:
+            sections.append(conv_section)
 
-        messages.append({"role": "user", "content": state.user_input})
+        # --- 3. Retrieved Memory ---
+        memory_section = self._build_memory_section(state)
+        if memory_section:
+            sections.append(memory_section)
 
-        return messages
+        # --- 4. Retrieved Knowledge ---
+        knowledge_section = self._build_knowledge_section(state)
+        if knowledge_section:
+            sections.append(knowledge_section)
+
+        # --- 5. Understanding Insights (structured summaries) ---
+        understanding_section = self._build_understanding_section(state)
+        if understanding_section:
+            sections.append(understanding_section)
+
+        # --- 6. World Model State ---
+        world_section = self._build_world_model_section(state)
+        if world_section:
+            sections.append(world_section)
+
+        # --- 7. Reasoning Results ---
+        reasoning_section = self._build_reasoning_section(state)
+        if reasoning_section:
+            sections.append(reasoning_section)
+
+        # --- 8. Planning Decisions ---
+        planning_section = self._build_planning_section(state)
+        if planning_section:
+            sections.append(planning_section)
+
+        # --- 9. Tool Results ---
+        tool_section = self._build_tool_section(state)
+        if tool_section:
+            sections.append(tool_section)
+
+        # --- 10. Learning Insights ---
+        learning_section = self._build_learning_section(state)
+        if learning_section:
+            sections.append(learning_section)
+
+        # --- Role instruction (LLM as assistant, not primary intelligence) ---
+        sections.append(self._build_role_instruction())
+
+        return "\n\n".join(sections)
+
+    # ------------------------------------------------------------------
+    # Individual cognitive context sections
+    # ------------------------------------------------------------------
+
+    def _build_identity_section(self) -> str:
+        """Build the Identity section from IdentityEngine."""
+        if self._identity_engine is None:
+            return ""
+        if not self._identity_engine.initialized:
+            return ""
+
+        snap = self._identity_engine.snapshot()
+
+        lines = ["## Identity"]
+        lines.append(f"You are {snap.name}. You are {snap.description[:200]}.")
+
+        # Core principles (immutable guidance)
+        active_principles = snap.principles[:5]
+        if active_principles:
+            lines.append("\nCore principles you follow:")
+            for p in active_principles:
+                lines.append(f"- {p.title}: {p.description}")
+
+        # Core beliefs (how Atlas sees itself)
+        active_beliefs = [
+            b for b in snap.beliefs
+            if getattr(b, "confidence", "tentative") not in ("retired", "weak")
+        ][:5]
+        if active_beliefs:
+            lines.append("\nWhat you believe about yourself:")
+            for b in active_beliefs:
+                lines.append(f"- {b.statement}")
+
+        # Decision style
+        style = snap.decision_style
+        if style:
+            lines.append(f"\nDecision style: {getattr(style, 'preferred_reasoning_style', 'structured')}, "
+                         f"{getattr(style, 'preferred_explanation_style', 'transparent')} explanations")
+
+        # Engineering preferences (how Atlas prefers to work)
+        prefs = snap.engineering_preferences[:3]
+        if prefs:
+            lines.append("\nEngineering preferences:")
+            for p in prefs:
+                lines.append(f"- {p.name}: {p.description}")
+
+        return "\n".join(lines)
+
+    def _build_conversation_section(self, state: CognitionState) -> str:
+        """Build conversation context."""
+        ctx = state.conversation_context
+        if not ctx:
+            return ""
+        history_len = ctx.get("history_length", 0)
+        if history_len:
+            return f"## Conversation Context\nCurrent conversation has {history_len} previous messages."
+        return ""
+
+    def _build_memory_section(self, state: CognitionState) -> str:
+        """Build memory retrieval results."""
+        if not state.memories:
+            return ""
+        lines = ["## Retrieved Memories"]
+        for m in state.memories[:5]:
+            title = getattr(m, "title", "") or getattr(m, "content", "")[:80]
+            if title:
+                lines.append(f"- {title}")
+        return "\n".join(lines)
+
+    def _build_knowledge_section(self, state: CognitionState) -> str:
+        """Build knowledge retrieval results."""
+        if not state.knowledge:
+            return ""
+        lines = ["## Retrieved Knowledge"]
+        for k in state.knowledge[:5]:
+            title = getattr(k, "title", "") or str(k)[:80]
+            if title:
+                lines.append(f"- {title}")
+        return "\n".join(lines)
+
+    def _build_understanding_section(self, state: CognitionState) -> str:
+        """
+        Build structured understanding summaries.
+
+        Understanding provides concept-level analysis, not raw text.
+        This is what elevates Atlas above simple text matching.
+        """
+        if not state.understanding_insights:
+            return ""
+
+        lines = ["## Understanding"]
+
+        # Concept-level insights
+        for i in state.understanding_insights[:5]:
+            summary = getattr(i, "summary", "")
+            category = getattr(i, "category", None)
+            if summary:
+                cat_str = f" [{category.value if hasattr(category, 'value') else category}]" if category else ""
+                lines.append(f"- {summary}{cat_str}")
+
+        # Extracted concepts
+        if state.concepts:
+            concept_names = [
+                getattr(c, "label", "") or getattr(c, "name", "") or str(c)
+                for c in state.concepts[:8]
+            ]
+            if concept_names:
+                lines.append(f"\nKey concepts detected: {', '.join(c for c in concept_names if c)}")
+
+        # Detected patterns
+        if state.patterns:
+            pattern_summaries = [
+                getattr(p, "description", "") or getattr(p, "name", "") or str(p)
+                for p in state.patterns[:3]
+            ]
+            if pattern_summaries:
+                lines.append("\nPatterns recognized:")
+                for ps in pattern_summaries:
+                    if ps:
+                        lines.append(f"- {ps}")
+
+        return "\n".join(lines)
+
+    def _build_world_model_section(self, state: CognitionState) -> str:
+        """Build world model state for planning/prediction context."""
+        wm = state.world_model_state
+        if not wm:
+            return ""
+
+        lines = ["## World Model State"]
+        entities = wm.get("graph_entities", 0)
+        relations = wm.get("graph_relations", 0)
+        rules = wm.get("behavior_rules", 0)
+        lines.append(f"Entities tracked: {entities}, relations: {relations}, behavior rules: {rules}")
+
+        active_goals = wm.get("active_goals", [])
+        if active_goals:
+            lines.append("Active goals:")
+            for g in active_goals[:3]:
+                desc = getattr(g, "description", str(g))[:100]
+                lines.append(f"- {desc}")
+
+        return "\n".join(lines)
+
+    def _build_reasoning_section(self, state: CognitionState) -> str:
+        """Build reasoning results."""
+        if not state.reasoning_result:
+            return ""
+
+        lines = ["## Reasoning Analysis"]
+        goal = state.reasoning_result.get("goal", "")
+        if goal:
+            lines.append(f"Goal: {goal}")
+
+        capabilities = state.reasoning_result.get("capabilities", [])
+        if capabilities:
+            lines.append("Capabilities identified:")
+            for c in capabilities[:5]:
+                name = c.get("name", "unknown")
+                reason = c.get("reason", "")
+                lines.append(f"- {name}" + (f": {reason}" if reason else ""))
+
+        results = state.reasoning_result.get("results", [])
+        if results:
+            success_count = sum(1 for r in results if r.get("success"))
+            lines.append(f"Capability execution: {success_count}/{len(results)} succeeded")
+
+        return "\n".join(lines)
+
+    def _build_planning_section(self, state: CognitionState) -> str:
+        """Build planning decisions — influenced by world model and learning."""
+        if not state.planning_result:
+            return ""
+
+        lines = ["## Plan"]
+        goal = state.planning_result.get("goal", "")
+        status = state.planning_result.get("status", "")
+        if goal:
+            lines.append(f"Goal: {goal} (status: {status})")
+
+        sub_goals = state.planning_result.get("sub_goals", [])
+        if sub_goals:
+            lines.append(f"Sub-goals: {len(sub_goals)} defined")
+
+        steps = state.planning_result.get("steps", [])
+        if steps:
+            lines.append("Steps:")
+            for s in steps[:8]:
+                desc = s.get("description", "")
+                step_status = s.get("status", "")
+                if desc:
+                    lines.append(f"- {desc} [{step_status}]")
+
+        errors = state.planning_result.get("validation_errors", [])
+        if errors:
+            lines.append(f"Validation warnings: {len(errors)}")
+
+        return "\n".join(lines)
+
+    def _build_tool_section(self, state: CognitionState) -> str:
+        """Build tool execution results."""
+        if not state.tool_result:
+            return ""
+
+        tool_name = state.tool_result.get("tool_name", "unknown")
+        success = state.tool_result.get("success", False)
+        output = state.tool_result.get("output", "")
+        error = state.tool_result.get("error", "")
+
+        lines = ["## Tool Execution"]
+        lines.append(f"Tool: {tool_name} — {'succeeded' if success else 'failed'}")
+        if output and success:
+            lines.append(f"Output: {str(output)[:300]}")
+        if error:
+            lines.append(f"Error: {error}")
+
+        return "\n".join(lines)
+
+    def _build_learning_section(self, state: CognitionState) -> str:
+        """Build learning insights for context."""
+        insights: list[str] = []
+
+        # Learning engine insights
+        if state.learning_engine_result:
+            summary = state.learning_engine_result.get("summary", {})
+            pipelines = summary.get("pipelines_processed", 0)
+            if pipelines:
+                insights.append(f"Pipelines observed: {pipelines}")
+
+            top = summary.get("top_insights", [])
+            if top:
+                insights.append("Recent learning insights:")
+                for t in top[:3]:
+                    title = t.get("title", "")
+                    importance = t.get("importance", "")
+                    if title:
+                        insights.append(f"- {title} [{importance}]")
+
+        # Reflection suggestions
+        if state.reflection_suggestions:
+            insights.append("Reflection observations:")
+            for s in state.reflection_suggestions[:3]:
+                pattern = getattr(s, "pattern", "")
+                desc = getattr(s, "description", "")
+                if pattern:
+                    insights.append(f"- {pattern}: {desc}")
+
+        if not insights:
+            return ""
+
+        return "## Learning & Reflection\n" + "\n".join(insights)
+
+    def _build_role_instruction(self) -> str:
+        """
+        Define the LLM's role: it is the final reasoning assistant.
+
+        Atlas's identity, reasoning, planning, and understanding are
+        pre-computed by the cognitive pipeline. The LLM receives this
+        structured context and produces the response.
+
+        The LLM is the VOICE of Atlas — not the brain.
+        """
+        return (
+            "## Role\n"
+            "You are the voice of Atlas, an intelligent AI operating framework. "
+            "The identity, reasoning, planning, understanding, memory retrieval, "
+            "knowledge querying, tool execution, learning, and world modeling "
+            "have already been performed by Atlas's cognitive pipeline. "
+            "Your role is to:\n"
+            "1. Synthesize the provided cognitive context into a coherent response.\n"
+            "2. Be transparent about how you arrive at conclusions.\n"
+            "3. Acknowledge uncertainty when the context is insufficient.\n"
+            "4. Respect Atlas's identity, principles, and preferences.\n"
+            "5. Do not hallucinate capabilities Atlas does not have.\n"
+            "6. The context above represents Atlas's actual cognitive state — "
+            "treat it as authoritative."
+        )
 
     # ------------------------------------------------------------------
     # Properties (for introspection and testing)
@@ -957,6 +1335,10 @@ class RuntimeCoordinator:
     @property
     def identity_engine(self):
         return self._identity_engine
+
+    @property
+    def feedback_coordinator(self):
+        return self._feedback_coordinator
 
     @property
     def conversation_service(self):

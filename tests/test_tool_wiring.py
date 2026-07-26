@@ -217,7 +217,8 @@ class TestAtlasKernelToolWiring(unittest.TestCase):
                 "cognition_api", "tasks",
                 "runtime_coordinator", "understanding",
                 "world_model", "evolution_observer", "learning_engine",
-                "identity",
+                "identity", "feedback_coordinator",
+                "goal_repository", "goal_intelligence",
             }
             self.assertEqual(
                 set(atlas.container.names()),

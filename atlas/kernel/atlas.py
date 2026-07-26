@@ -54,6 +54,7 @@ from atlas.task.task_manager import TaskManager
 
 # --- Phase 7.5: Unified Cognitive Runtime ---
 from atlas.runtime.runtime_coordinator import RuntimeCoordinator
+from atlas.runtime.feedback_coordinator import FeedbackCoordinator
 
 # --- Previously-unwired subsystems ---
 from atlas.understanding.understanding_engine import UnderstandingEngine
@@ -61,6 +62,8 @@ from atlas.world_model.world_model_engine import WorldModelEngine
 from atlas.evolution.self_observation import SelfObservationEngine
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
+from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
+from atlas.goals.goal_repository import GoalRepository
 
 
 class Atlas:
@@ -260,6 +263,20 @@ class Atlas:
         self._identity_engine = IdentityEngine()
         self._identity_engine.initialize()
 
+        # --- Phase 8.3: Goal Intelligence Engine ---
+        self._goal_repository = GoalRepository()
+        self._goal_intelligence_engine = GoalIntelligenceEngine(
+            repository=self._goal_repository,
+        )
+
+        # --- Phase 8.2: Create FeedbackCoordinator ---
+        self._feedback_coordinator = FeedbackCoordinator(
+            identity_engine=self._identity_engine,
+            world_model_engine=self._world_model_engine,
+            understanding_engine=self._understanding_engine,
+            learning_engine=self._learning_engine,
+        )
+
         # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
         self._runtime_coordinator = RuntimeCoordinator(
             memory_service=self._memory_service,
@@ -281,6 +298,8 @@ class Atlas:
             learning_engine=self._learning_engine,
             evolution_observation_engine=self._self_observation_engine,
             identity_engine=self._identity_engine,
+            feedback_coordinator=self._feedback_coordinator,
+            goal_intelligence_engine=self._goal_intelligence_engine,
             conversation_service=None,  # Wired below
             event_bus=self._event_bus,
         )
@@ -336,6 +355,9 @@ class Atlas:
         self._container.register("evolution_observer", self._self_observation_engine)
         self._container.register("learning_engine", self._learning_engine)
         self._container.register("identity", self._identity_engine)
+        self._container.register("feedback_coordinator", self._feedback_coordinator)
+        self._container.register("goal_repository", self._goal_repository)
+        self._container.register("goal_intelligence", self._goal_intelligence_engine)
 
         self._container.start_all()
         self._started = True

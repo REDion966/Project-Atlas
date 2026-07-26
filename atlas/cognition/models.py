@@ -4,6 +4,7 @@ Atlas Cognition Pipeline Models
 Data models for the integrated cognitive pipeline.
 Phase 7.2 — Integrated Cognitive Pipeline.
 Phase 7.5 — Added WORLD_MODEL stage and learning_engine_result field.
+Phase 8.3 — Added GOAL_INTELLIGENCE stage.
 """
 
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ class StageType(Enum):
     REFLECTION = auto()
     LEARNING = auto()
     EVOLUTION_OBSERVATION = auto()
+    GOAL_INTELLIGENCE = auto()
     MEMORY_STORAGE = auto()
 
 
@@ -144,6 +146,7 @@ class CognitionState:
         learning_result: Legacy learning feedback result.
         learning_engine_result: Structured learning engine result.
         evolution_observations: Observations for the evolution subsystem.
+        goal_intelligence_report: Latest goal intelligence report.
         metadata: Additional context data.
     """
 
@@ -164,4 +167,5 @@ class CognitionState:
     learning_result: dict[str, Any] = field(default_factory=dict)
     learning_engine_result: dict[str, Any] = field(default_factory=dict)
     evolution_observations: list[Any] = field(default_factory=list)
+    goal_intelligence_report: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
