@@ -2,6 +2,7 @@
 Atlas Kernel
 
 The root application object.
+Phase 7.5 — Wires RuntimeCoordinator and all cognitive subsystems.
 """
 
 from collections.abc import Iterator
@@ -51,147 +52,124 @@ from atlas.services.cognition_service import CognitionService
 from atlas.state.state_manager import StateManager
 from atlas.task.task_manager import TaskManager
 
+# --- Phase 7.5: Unified Cognitive Runtime ---
+from atlas.runtime.runtime_coordinator import RuntimeCoordinator
+
+# --- Previously-unwired subsystems ---
+from atlas.understanding.understanding_engine import UnderstandingEngine
+from atlas.world_model.world_model_engine import WorldModelEngine
+from atlas.evolution.self_observation import SelfObservationEngine
+from atlas.learning_engine.learning_engine import LearningEngine
+
 
 class Atlas:
     """
     Root object for the Atlas application.
+
+    Phase 7.5 — Wires all cognitive subsystems through the
+    RuntimeCoordinator, the single permanent orchestrator.
     """
 
     def __init__(self):
 
         self._container = ServiceContainer()
-
         self._event_bus = EventBus()
-
-        self._state_manager = StateManager(
-            self._event_bus
-        )
-
+        self._state_manager = StateManager(self._event_bus)
         self._config = Configuration()
-
         self._ai_manager = AIManager()
-
         self._task_manager = TaskManager()
 
         self._conversation: ConversationService | None = None
-
         self._memory_service: MemoryManagerService | None = None
-
         self._knowledge_manager: KnowledgeManager | None = None
-
         self._cognitive_loop: CognitiveLoop | None = None
-
         self._cognitive_service: CognitiveService | None = None
-
         self._cognition_service: CognitionService | None = None
-
         self._cognition_api: CognitionAPI | None = None
 
+        # --- Runtime Coordinator (Phase 7.5) ---
+        self._runtime_coordinator: RuntimeCoordinator | None = None
+        self._understanding_engine: UnderstandingEngine | None = None
+        self._world_model_engine: WorldModelEngine | None = None
+        self._self_observation_engine: SelfObservationEngine | None = None
+        self._learning_engine: LearningEngine | None = None
+
+        # --- Reasoning pipeline ---
         self._reasoning_controller: ReasoningController | None = None
-
-        self._model_profile_registry: ModelProfileRegistry | None = None
-
-        self._model_router: ModelRouter | None = None
-
         self._capability_analyzer: CapabilityAnalyzer | None = None
-
         self._capability_registry: CapabilityRegistry | None = None
-
         self._capability_router: CapabilityRouter | None = None
-
         self._capability_dispatcher: CapabilityDispatcher | None = None
-
         self._reasoning_recorder: ReasoningRecorder | None = None
-
         self._reflection_engine: ReflectionEngine | None = None
-
         self._planning_engine: PlanningEngine | None = None
 
+        # --- Tool intelligence ---
         self._tool_registry: ToolRegistry | None = None
         self._tool_selector: ToolSelector | None = None
         self._tool_executor: ToolExecutor | None = None
         self._tool_engine: ToolEngine | None = None
 
-        self._started = False
+        # --- Model routing ---
+        self._model_profile_registry: ModelProfileRegistry | None = None
+        self._model_router: ModelRouter | None = None
 
+        self._learning_manager: LearningManager | None = None
+        self._knowledge_feedback: KnowledgeFeedback | None = None
+        self._started = False
 
     @property
     def container(self):
         return self._container
 
-
     @property
     def events(self):
         return self._event_bus
-
 
     @property
     def state(self):
         return self._state_manager
 
-
     @property
     def tasks(self):
         return self._task_manager
-    
+
     @property
     def cognitive(self):
-        """
-        Return Atlas cognitive loop.
-        """
-
         return self._cognitive_loop
 
     @property
     def cognition_api(self):
-        """
-        Return the public Cognition API.
-        """
-
         return self._cognition_api
 
+    @property
+    def runtime_coordinator(self):
+        """Return the unified RuntimeCoordinator (Phase 7.5)."""
+        return self._runtime_coordinator
 
     @property
     def started(self):
         return self._started
 
-
     @property
     def provider(self):
         return self._ai_manager.provider
 
-
     def models(self):
-
         return self._ai_manager.service.models()
 
-
     def start(self):
-
         if self._started:
             return
 
-
         self._config.load()
 
-        provider = str(self._config.get(
-            "ai",
-            "provider",
-        ))
+        provider = str(self._config.get("ai", "provider"))
+        model = str(self._config.get("ai", "model"))
+        timeout = int(self._config.get("ai", "timeout"))  # type: ignore[arg-type]
 
-        model = str(self._config.get(
-            "ai",
-            "model",
-        ))
-
-        timeout = int(self._config.get(
-            "ai",
-            "timeout",
-        ))
-
-
+        # --- Model routing ---
         self._model_profile_registry = ModelProfileRegistry()
-
         self._model_profile_registry.register(
             ModelProfile(
                 provider_name="Mock Provider",
@@ -203,7 +181,6 @@ class Atlas:
                 priority=10,
             )
         )
-
         self._model_profile_registry.register(
             ModelProfile(
                 provider_name="Ollama",
@@ -215,56 +192,43 @@ class Atlas:
                 priority=20,
             )
         )
-
-        self._model_router = ModelRouter(
-            self._model_profile_registry,
-        )
+        self._model_router = ModelRouter(self._model_profile_registry)
 
         api_keys = self._config.get("ai", "api_keys")
-
         self._ai_manager.initialize(
-            provider,
-            model,
-            timeout,
+            provider, model, timeout,
             model_router=self._model_router,
-            api_keys=api_keys,
+            api_keys=api_keys,  # type: ignore[arg-type]
         )
 
-
+        # --- Memory ---
         repository = MemoryRepository()
-
         ranking_engine = RankingEngine()
-
-        search_engine = MemorySearchEngine(
-            repository,
-            ranking_engine,
-        )
-
-
+        search_engine = MemorySearchEngine(repository, ranking_engine)
         self._memory_service = MemoryManagerService(
             repository=repository,
             ranking_engine=ranking_engine,
             search_engine=search_engine,
         )
 
-
+        # --- Knowledge ---
         self._knowledge_manager = KnowledgeManager()
 
-
+        # --- Legacy intelligence (preserved) ---
         self._cognitive_loop = CognitiveLoop(
             memory_service=self._memory_service,
             knowledge_manager=self._knowledge_manager,
         )
-
         self._cognitive_service = CognitiveService(
             cognitive_loop=self._cognitive_loop
         )
 
+        # --- Learning ---
         self._learning_manager = LearningManager()
         self._knowledge_feedback = KnowledgeFeedback()
 
+        # --- Reasoning pipeline ---
         self._capability_registry = CapabilityRegistry()
-
         for capability_name, handler in DEFAULT_HANDLERS.items():
             self._capability_registry.register(capability_name, handler)
 
@@ -276,18 +240,47 @@ class Atlas:
         self._reflection_engine = ReflectionEngine()
         self._planning_engine = PlanningEngine()
 
-        # --- Phase 6.9: Tool engine setup ---
+        # --- Tool engine ---
         self._tool_registry = ToolRegistry()
         self._tool_selector = ToolSelector()
         self._tool_executor = ToolExecutor(self._tool_registry)
         self._tool_engine = ToolEngine(
-            self._tool_registry,
-            self._tool_selector,
-            self._tool_executor,
+            self._tool_registry, self._tool_selector, self._tool_executor,
         )
         for tool in BUILTIN_TOOLS:
             self._tool_registry.register(tool)
 
+        # --- Phase 7.5: Wire all cognitive subsystems ---
+        self._understanding_engine = UnderstandingEngine()
+        self._world_model_engine = WorldModelEngine()
+        self._self_observation_engine = SelfObservationEngine()
+        self._learning_engine = LearningEngine()
+
+        # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
+        self._runtime_coordinator = RuntimeCoordinator(
+            memory_service=self._memory_service,
+            knowledge_manager=self._knowledge_manager,
+            understanding_engine=self._understanding_engine,
+            world_model_engine=self._world_model_engine,
+            reasoning_controller=self._reasoning_controller,
+            capability_analyzer=self._capability_analyzer,
+            capability_registry=self._capability_registry,
+            capability_router=self._capability_router,
+            capability_dispatcher=self._capability_dispatcher,
+            planning_engine=self._planning_engine,
+            tool_engine=self._tool_engine,
+            ai_service=self._ai_manager.service,
+            reflection_engine=self._reflection_engine,
+            reasoning_recorder=self._reasoning_recorder,
+            learning_manager=self._learning_manager,
+            knowledge_feedback=self._knowledge_feedback,
+            learning_engine=self._learning_engine,
+            evolution_observation_engine=self._self_observation_engine,
+            conversation_service=None,  # Wired below
+            event_bus=self._event_bus,
+        )
+
+        # --- Phase 7.5.1: CognitionService delegates to RuntimeCoordinator ---
         self._cognition_service = CognitionService(
             memory_service=self._memory_service,
             knowledge_manager=self._knowledge_manager,
@@ -303,17 +296,14 @@ class Atlas:
             reflection_engine=self._reflection_engine,
             planning_engine=self._planning_engine,
             tool_engine=self._tool_engine,
+            runtime_coordinator=self._runtime_coordinator,
         )
 
         self._cognition_api = CognitionAPI(
             cognition_service=self._cognition_service,
         )
 
-
-        context_engine = ContextEngine(
-            memory_service=self._memory_service,
-        )
-
+        context_engine = ContextEngine(memory_service=self._memory_service)
 
         self._conversation = ConversationService(
             self._ai_manager.service,
@@ -321,167 +311,84 @@ class Atlas:
             cognition_api=self._cognition_api,
         )
 
+        # Wire conversation into the runtime coordinator
+        self._runtime_coordinator._conversation_service = self._conversation
 
-        self._container.register(
-            "ai",
-            self._ai_manager.service,
-        )
-
-        self._container.register(
-            "conversation",
-            self._conversation,
-        )
-
-        self._container.register(
-            "memory",
-            self._memory_service,
-        )
-
-        self._container.register(
-            "knowledge",
-            self._knowledge_manager,
-        )
-
-        self._container.register(
-            "cognition",
-            self._cognitive_loop,
-        )
-
-        self._container.register(
-            "cognitive",
-            self._cognitive_service,
-        )
-
-        self._container.register(
-            "cognition_service",
-            self._cognition_service,
-        )
-
-        self._container.register(
-            "cognition_api",
-            self._cognition_api,
-        )
-
-        self._container.register(
-            "tasks",
-            self._task_manager,
-        )
-
+        # --- Service container registration ---
+        self._container.register("ai", self._ai_manager.service)
+        self._container.register("conversation", self._conversation)
+        self._container.register("memory", self._memory_service)
+        self._container.register("knowledge", self._knowledge_manager)
+        self._container.register("cognition", self._cognitive_loop)
+        self._container.register("cognitive", self._cognitive_service)
+        self._container.register("cognition_service", self._cognition_service)
+        self._container.register("cognition_api", self._cognition_api)
+        self._container.register("tasks", self._task_manager)
+        # --- Phase 7.5: Register runtime coordinator ---
+        self._container.register("runtime_coordinator", self._runtime_coordinator)
+        self._container.register("understanding", self._understanding_engine)
+        self._container.register("world_model", self._world_model_engine)
+        self._container.register("evolution_observer", self._self_observation_engine)
+        self._container.register("learning_engine", self._learning_engine)
 
         self._container.start_all()
-
         self._started = True
 
-
-        self._state_manager.update(
-            {
-                "status": "running",
-                "health": "healthy",
-            }
-        )
-
-
-        self._event_bus.publish(
-            "atlas.started",
-            {
-                "status": "running",
-            },
-        )
-
+        self._state_manager.update({"status": "running", "health": "healthy"})
+        self._event_bus.publish("atlas.started", {"status": "running"})
 
     def tick(self):
-
         self._task_manager.tick()
 
-
-    def chat(
-        self,
-        text: str,
-    ):
-
+    def chat(self, text: str):
         if not self._started:
-            raise RuntimeError(
-                "Atlas has not been started."
-            )
+            raise RuntimeError("Atlas has not been started.")
+        return self._conversation.send(text)  # type: ignore[union-attr]
 
-        return self._conversation.send(text)
-
-
-    def stream(
-        self,
-        text: str,
-    ) -> Iterator[str]:
-
+    def stream(self, text: str) -> Iterator[str]:
         if not self._started:
-            raise RuntimeError(
-                "Atlas has not been started."
-            )
-
-        yield from self._conversation.stream(text)
-
+            raise RuntimeError("Atlas has not been started.")
+        yield from self._conversation.stream(text)  # type: ignore[union-attr]
 
     def save_conversation(self) -> Path:
-
         if not self._started:
-            raise RuntimeError(
-                "Atlas has not been started."
-            )
+            raise RuntimeError("Atlas has not been started.")
+        return self._conversation.save()  # type: ignore[union-attr]
 
-        return self._conversation.save()
-
-
-    def load_conversation(
-        self,
-        filepath: Path,
-    ):
-
+    def load_conversation(self, filepath: Path):
         if not self._started:
-            raise RuntimeError(
-                "Atlas has not been started."
-            )
-
-        return self._conversation.load(filepath)
-
+            raise RuntimeError("Atlas has not been started.")
+        return self._conversation.load(filepath)  # type: ignore[union-attr]
 
     def saved_conversations(self):
-
         if not self._started:
-            raise RuntimeError(
-                "Atlas has not been started."
-            )
-
-        return self._conversation.saved_conversations()
-
+            raise RuntimeError("Atlas has not been started.")
+        return self._conversation.saved_conversations()  # type: ignore[union-attr]
 
     def shutdown(self):
-
         if not self._started:
             return
 
-
         self._container.stop_all()
-
         self._container.clear()
 
-
         self._conversation = None
-
         self._memory_service = None
-
         self._knowledge_manager = None
-
         self._cognitive_loop = None
-
         self._cognitive_service = None
-
         self._cognition_service = None
-
         self._cognition_api = None
 
+        # --- Phase 7.5: Cleanup ---
+        self._runtime_coordinator = None
+        self._understanding_engine = None
+        self._world_model_engine = None
+        self._self_observation_engine = None
+        self._learning_engine = None
+
         self._learning_manager = None
-
         self._knowledge_feedback = None
-
         self._reasoning_controller = None
         self._capability_analyzer = None
         self._capability_registry = None
@@ -494,25 +401,10 @@ class Atlas:
         self._tool_executor = None
         self._tool_selector = None
         self._tool_registry = None
-
         self._model_profile_registry = None
         self._model_router = None
 
-
         self._started = False
 
-
-        self._state_manager.update(
-            {
-                "status": "stopped",
-                "health": "offline",
-            }
-        )
-
-
-        self._event_bus.publish(
-            "atlas.shutdown",
-            {
-                "status": "stopped",
-            },
-        )
+        self._state_manager.update({"status": "stopped", "health": "offline"})
+        self._event_bus.publish("atlas.shutdown", {"status": "stopped"})

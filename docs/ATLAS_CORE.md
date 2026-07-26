@@ -60,8 +60,11 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | Context is fragmented | Centralised memory, knowledge, and decisions |
 | Prompts are ephemeral | Structured reasoning and capability routing replace prompt engineering |
 | Systems become unmaintainable | Modular, replaceable subsystems with clean boundaries |
+| Knowledge without understanding is brittle | Understanding — not storage — is the foundation of intelligence |
 
 **Goal:** Build a system capable of research, analysis, knowledge management, controlled self-improvement, and assisting its own development with user permission.
+
+**Core distinction:** Knowledge != Understanding != Intelligence. Knowledge is stored information. Understanding is the ability to reason about that information. Intelligence is the ability to improve understanding over time. Atlas architecture shall respect all three as distinct layers.
 
 ---
 
@@ -90,22 +93,39 @@ Documented Self-Analysis  →  Guided Improvement  →  Bounded Optimisation  �
 
 ## 4. Intelligence Growth Pipeline
 
+### 4.1 Understanding Layer
+
+Understanding is the permanent foundation upon which reasoning, planning, learning, memory, and tool use operate. It is distinct from both knowledge and intelligence:
+
+- **Knowledge** is stored information — facts, data, records, and learned content.
+- **Understanding** is the ability to relate knowledge to context, identify patterns, recognize gaps, and apply knowledge to novel situations.
+- **Intelligence** is the ability to improve understanding over time through reasoning, observation, reflection, and learning.
+
+Architecture law: No component shall prioritize raw knowledge accumulation over deepening understanding. Memory storage shall prioritize semantic understanding over raw accumulation whenever practical. A memory system that understands what it stores is more valuable than one that merely stores everything.
+
+All future evolution components must strengthen Atlas's internal understanding rather than simply increasing stored information. The evolution subsystem (`atlas/evolution/`) shall measure its success by how much it deepens Atlas's understanding of itself, its users, and its domain — not by how much data it accumulates.
+
+### 4.2 Growth Pipeline
+
 ```
-Reasoning
-    ↓
-Observation
-    ↓
-Reflection
-    ↓
-Learning
-    ↓
-Adaptation
-    ↓
-Self-improvement
+         Understanding Layer  ← permanent foundation
+               ↓
+           Reasoning
+               ↓
+          Observation
+               ↓
+          Reflection
+               ↓
+           Learning
+               ↓
+          Adaptation
+               ↓
+       Self-improvement
 ```
 
 **Current position:**
-- **Reasoning** and **Observation** are established.
+- **Understanding Layer** is established as an architectural concept in this document.
+- **Reasoning** and **Observation** are implemented.
 - **Learning infrastructure** exists through `LearningManager` and `KnowledgeFeedback`. This is feedback storage, not a closed-loop learning system.
 - **Not implemented:** outcome-level reflective learning, strategy adjustment, adaptation, and closed-loop self-improvement (`Reflection` → `Learning` → `Adaptation` → `Self-improvement`).
 
@@ -218,6 +238,7 @@ CLI / Presentation
 | Layer / Subsystem | Responsibility |
 |-------------------|----------------|
 | Models | Data representation and serialization only |
+| Understanding | Permanent foundation layer: reasoning, learning, memory, tool use — all operate on understanding, not raw knowledge |
 | Managers | Domain operations and business logic |
 | Repositories | Data access and persistence |
 | Services | Coordinate multiple components |
@@ -234,12 +255,13 @@ CLI / Presentation
 | `scheduler` | Scheduling components |
 | `skills` | Skill abstractions and extensions |
 | `memory/context` | Context management layer |
+| `evolution` | Self-observation, improvement planning, proposal generation, approval workflow — designed to deepen understanding, not merely accumulate changes |
 
 ### 9.3 Module Maturity Classification
 
 | Maturity | Modules |
 |----------|---------|
-| Core (active, wired) | `kernel`, `cognition`, `reasoning`, `services` |
+| Core (active, wired) | `kernel`, `cognition`, `reasoning`, `services`, `evolution` |
 | Infrastructure (active, wired) | `memory`, `storage`, `events`, `config` |
 | Capability (active, wired) | `ai`, `knowledge`, `learning`, `workspace` |
 | Future / scaffold (not fully wired) | `agents`, `automation`, `lifecycle`, `runtime`, `scheduler`, `skills`, `interfaces`, `models` |
@@ -278,6 +300,10 @@ atlas/
 ├── models/              Shared domain models
 ├── runtime/             Health, heartbeat, metrics, runtime monitoring
 ├── scheduler/           Scheduling components
+├── evolution/           Self-evolution architecture (observation, planning, proposals, approval)
+├── understanding/       Understanding Layer: concept extraction, pattern analysis, understanding graph, understanding engine
+├── cognition/           Integrated cognitive pipeline (orchestration, models, metrics, state)
+├── learning_engine/     Learning engine: strategy analysis, insight consolidation, learning memory
 └── skills/              Skill abstractions and extensions
 ```
 
@@ -303,6 +329,23 @@ The following components must remain **pure logic** — no AI calls, no memory a
 - `CapabilityDispatcher`
 - `ReasoningRecorder`
 - `ReasoningOutcome`
+- `SelfObservationEngine`
+- `ImprovementPlanner`
+- `ProposalGenerator`
+- `ApprovalManager`
+- `EvolutionMemory`
+- All `atlas/evolution/` data models
+- `CognitionPipeline`
+- `CognitionState`
+- `PipelineResult`
+- `StageResult`
+- `PipelineMetrics`
+- All `atlas/cognition/` pipeline models
+- `LearningEngine`
+- `StrategyAnalyzer`
+- `InsightConsolidator`
+- `LearningMemory`
+- All `atlas/learning_engine/` data models
 
 ### 10.2 Prohibited Imports
 
@@ -340,6 +383,11 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 | `"cognition_service"` | `CognitionService` | Active |
 | `"cognition_api"` | `CognitionAPI` | Active |
 | `"tasks"` | `TaskManager` | Active |
+| `"runtime_coordinator"` | `RuntimeCoordinator` | Active (Phase 7.5) |
+| `"understanding"` | `UnderstandingEngine` | Active (Phase 7.5) |
+| `"world_model"` | `WorldModelEngine` | Active (Phase 7.5) |
+| `"evolution_observer"` | `SelfObservationEngine` | Active (Phase 7.5) |
+| `"learning_engine"` | `LearningEngine` | Active (Phase 7.5) |
 
 **All four cognition keys must remain registered.** Legacy keys must not be modified.
 

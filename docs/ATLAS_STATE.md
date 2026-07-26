@@ -10,8 +10,8 @@
 |---|---|---|
 | | Branch | `phase5-memory-evolution` |
 | | HEAD | `67bc3c9bf2697ee817a44b471ee72f3ff6f0c708` |
-| | Latest Tag | `phase-6.9-complete` |
-| | Latest Commit Message | feat(reasoning): implement Phase 6.8 planning engine |
+| | Latest Tag | `phase-7.5-complete` |
+| | Latest Commit Message | Phase 7.5 — Unified Cognitive Runtime |
 
 **All Tags:**
 - `phase-6.9-complete` — current
@@ -27,6 +27,18 @@
 ---
 
 ## 2. Latest Checkpoint
+
+**Phase 7.5 — Unified Cognitive Runtime**
+
+What was added:
+- **RuntimeCoordinator** (`atlas/runtime/runtime_coordinator.py`) — permanent single orchestrator for all cognitive processing. Executes 14 stages in invariant order: Conversation Context → Memory Retrieval → Knowledge Retrieval → Understanding → World Model → Reasoning → Planning → Tool Decision → Tool Execution → AI Response → Reflection → Learning → Evolution Observation → Memory Storage. Every stage exchanges structured `CognitionState` objects.
+- **Previously-unwired subsystems wired**: `UnderstandingEngine`, `WorldModelEngine`, `SelfObservationEngine`, `LearningEngine` — all previously implemented but never instantiated in `Atlas.start()`.
+- **CognitionState extended** — added `world_model_state`, `learning_engine_result` fields.
+- **StageType extended** — added `WORLD_MODEL` stage.
+- **Service container updated** — 5 new keys registered: `runtime_coordinator`, `understanding`, `world_model`, `evolution_observer`, `learning_engine`.
+- **All 850 tests pass** — 2 test assertions updated to reflect new service keys.
+- **Architecture preserved** — pure logic isolation, dependency injection, provider independence, legacy components untouched.
+- **All 11 subsystems wired**: Memory, Knowledge, Understanding, World Model, Reasoning, Planning, Cognition Pipeline, Learning Engine, Evolution Foundation, AI Provider Layer, Tool Intelligence.
 
 **Phase 6.10 — Multi-Provider AI Layer**
 
@@ -62,6 +74,12 @@ What was added:
 | **6.8** | **Planning engine** | **Complete** | **520** |
 | **6.9** | **Tool intelligence foundation** | **Complete** | **584** |
 | **6.10** | **Multi-Provider AI Layer** | **Complete** | **624** |
+| **7.0** | **Self-Evolution Foundation** | **Complete** | **725** |
+| **7.1** | **Understanding Engine** | **Complete** | **763** |
+| **7.2** | **Integrated Cognitive Pipeline** | **Complete** | **789** |
+| **7.3** | **Learning Engine** | **Complete** | **820** |
+| 7.4 | World Model Foundation | Complete | 850 |
+| **7.5** | **Unified Cognitive Runtime** | **Complete** | **850** |
 
 ---
 
@@ -80,6 +98,11 @@ What was added:
 | `"cognition_service"` | `CognitionService` | Active |
 | `"cognition_api"` | `CognitionAPI` | Active |
 | `"tasks"` | `TaskManager` | Active |
+| `"runtime_coordinator"` | `RuntimeCoordinator` | Active (Phase 7.5) |
+| `"understanding"` | `UnderstandingEngine` | Active (Phase 7.5) |
+| `"world_model"` | `WorldModelEngine` | Active (Phase 7.5) |
+| `"evolution_observer"` | `SelfObservationEngine` | Active (Phase 7.5) |
+| `"learning_engine"` | `LearningEngine` | Active (Phase 7.5) |
 
 ### 4.2 Runtime Pipeline
 
@@ -211,6 +234,8 @@ Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording a
 | Outcome recording | ✅ Implemented |
 | Plan decomposition | ✅ Implemented (`PlanningEngine`, Phase 6.8) |
 | Tool selection and execution | ✅ Implemented (`ToolEngine`, Phase 6.9) |
+| Integrated cognitive pipeline | ✅ Implemented (`CognitionPipeline`, Phase 7.2) |
+| Learning engine | ✅ Implemented (`LearningEngine`, Phase 7.3) |
 | Learning infrastructure | ✅ Implemented (`LearningManager`, `KnowledgeFeedback`) |
 
 ### 5.3 Missing Capabilities
@@ -236,7 +261,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 
 ## 6. Current Test Status
 
-**624 passing tests**
+**850 passing tests**
 
 ### 6.1 Test Progression
 
@@ -257,6 +282,12 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | **Phase 6.8** | **520** |
 | **Phase 6.9** | **584** |
 | **Phase 6.10** | **624** |
+| **Phase 7.0** | **725** |
+| **Phase 7.1** | **763** |
+| **Phase 7.2** | **789** |
+| **Phase 7.3** | **820** |
+| **Phase 7.4** | **850** |
+| **Phase 7.5** | **850** |
 
 
 ### 6.2 Key Test Files
@@ -405,7 +436,13 @@ A phase is complete only after:
 | **Phase 6.8 Planning Engine** | **✅ Complete** |
 | **Phase 6.9 Tool Intelligence** | **✅ Complete** |
 | **Phase 6.10 Multi-Provider AI Layer** | **✅ Complete** |
-| Phase 6.11+ Continuous Improvement | 🟡 Next |
+| **Phase 7.0 Self-Evolution Foundation** | **✅ Complete** |
+| **Phase 7.1 Understanding Engine** | **✅ Complete** |
+| **Phase 7.2 Integrated Cognitive Pipeline** | **✅ Complete** |
+| **Phase 7.3 Learning Engine** | **✅ Complete** |
+| **Phase 7.4 World Model Foundation** | **✅ Complete** |
+| **Phase 7.5 Unified Cognitive Runtime** | **✅ Complete** |
+| Phase 7.6+ Continuous Improvement | 🟡 Next |
 
 ---
 
@@ -426,9 +463,9 @@ A phase is complete only after:
    ```
    pytest
    ```
-5. Confirm **624 tests passing**.
-6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, `atlas/tools/`, and `atlas/ai/providers/`.
-7. Pick up from **Phase 6.11+ — Continuous Improvement**.
+5. Confirm **850 tests passing**.
+6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, `atlas/tools/`, `atlas/ai/providers/`, `atlas/evolution/`, `atlas/understanding/`, `atlas/cognition/`, and `atlas/learning_engine/`.
+7. Pick up from **Phase 7.6+ — Continuous Improvement**.
 8. Do not modify legacy `atlas/intelligence/` components.
 9. Preserve all existing public APIs.
 10. Add tests for any new functionality.

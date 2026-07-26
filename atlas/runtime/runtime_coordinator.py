@@ -1,26 +1,26 @@
 """
-[DEPRECATED] Atlas Cognition Pipeline — Replaced by RuntimeCoordinator
+Atlas RuntimeCoordinator — Phase 7.5 Unified Cognitive Runtime.
 
-Phase 7.5.1 — This module is DEPRECATED. The CognitionPipeline is
-preserved for reference only. All cognitive orchestration is now
-handled by RuntimeCoordinator (atlas/runtime/runtime_coordinator.py).
-The models (CognitionState, PipelineResult, etc.) in atlas/cognition/models.py
-are still actively used by RuntimeCoordinator.
+The RuntimeCoordinator is the SINGLE permanent orchestrator for all
+cognitive processing. Nothing else orchestrates cognition.
 
-DO NOT import or use CognitionPipeline in new code.
-DO NOT modify this file — it is preserved for backward compatibility
-with existing tests only.
+Execution order (invariant):
+  Conversation Context → Memory Retrieval → Knowledge Retrieval →
+  Understanding Engine → World Model Update → Reasoning Engine →
+  Planning Engine → Tool Decision → Tool Execution →
+  AI Response Generation → Learning Engine → Evolution Observation →
+  Memory Storage
 
-Original docstring follows:
+Every stage exchanges structured CognitionState objects.
+No raw string passing between stages.
 
-Orchestrates every cognitive stage in order:
-  User Input → Conversation Context → Memory Retrieval → Knowledge Retrieval →
-  Understanding Engine → Reasoning Pipeline → Planning Engine → Tool Decision →
-  Tool Execution → AI Response Generation → Reflection → Learning →
-  Evolution Observation → Store Updated Memory
-
-Every stage exchanges structured data via CognitionState.
-Only CognitionPipeline orchestrates — no stage knows about other stages.
+Architecture rules:
+  - Pure logic NEVER imports infrastructure.
+  - Infrastructure NEVER owns reasoning.
+  - Providers NEVER own cognition.
+  - Understanding stays between Knowledge and Reasoning.
+  - Learning NEVER edits code.
+  - Evolution NEVER edits code.
 """
 
 import time
@@ -40,18 +40,17 @@ from atlas.cognition.models import (
 )
 
 
-class CognitionPipeline:
+class RuntimeCoordinator:
     """
-    Integrated cognitive pipeline that orchestrates all stages.
+    Permanent unified cognitive runtime coordinator.
 
-    This is the permanent orchestration layer. Every cognitive stage
-    is executed in order. Stages are modular — they receive and return
-    structured data through CognitionState. No stage knows about other
-    stages. Only CognitionPipeline orchestrates.
+    This is the ONLY orchestrator for cognition. All processing
+    flows through this single coordinator. No other component
+    may orchestrate cognitive stages independently.
 
-    All dependencies are optional. Missing dependencies cause stages
-    to be skipped gracefully. This preserves complete backward
-    compatibility with existing code that does not inject all stages.
+    Dependencies are all optional via injection. Missing dependencies
+    cause stages to be skipped gracefully, preserving backward
+    compatibility with all existing code paths.
     """
 
     def __init__(
@@ -60,6 +59,7 @@ class CognitionPipeline:
         memory_service: Any = None,
         knowledge_manager: Any = None,
         understanding_engine: Any = None,
+        world_model_engine: Any = None,
         reasoning_controller: Any = None,
         capability_analyzer: Any = None,
         capability_registry: Any = None,
@@ -72,15 +72,18 @@ class CognitionPipeline:
         reasoning_recorder: Any = None,
         learning_manager: Any = None,
         knowledge_feedback: Any = None,
+        learning_engine: Any = None,
         evolution_observation_engine: Any = None,
         conversation_service: Any = None,
+        event_bus: Any = None,
     ):
         self._engine = engine or CognitionEngine()
 
-        # Stage dependencies (all optional)
+        # Stage dependencies (all optional — skipped gracefully if None)
         self._memory_service = memory_service
         self._knowledge_manager = knowledge_manager
         self._understanding_engine = understanding_engine
+        self._world_model_engine = world_model_engine
         self._reasoning_controller = reasoning_controller
         self._capability_analyzer = capability_analyzer
         self._capability_registry = capability_registry
@@ -93,11 +96,13 @@ class CognitionPipeline:
         self._reasoning_recorder = reasoning_recorder
         self._learning_manager = learning_manager
         self._knowledge_feedback = knowledge_feedback
+        self._learning_engine = learning_engine
         self._evolution_observation_engine = evolution_observation_engine
         self._conversation_service = conversation_service
+        self._event_bus = event_bus
 
     # ------------------------------------------------------------------
-    # Public API
+    # Public API — the single entry point for all cognitive processing
     # ------------------------------------------------------------------
 
     def process(
@@ -108,7 +113,10 @@ class CognitionPipeline:
         goal: str | None = None,
     ) -> PipelineResult:
         """
-        Process user input through the full cognitive pipeline.
+        Process user input through the full unified cognitive pipeline.
+
+        This is the single, permanent entry point for ALL cognitive
+        processing. Every stage is executed in its defined order.
 
         Args:
             user_input: The user's input text.
@@ -132,7 +140,6 @@ class CognitionPipeline:
         stages: list[StageResult] = []
         pipeline_path: list[str] = []
 
-        # Define the stage execution order
         stage_definitions = self._build_stage_definitions()
 
         for stage_type, stage_fn in stage_definitions:
@@ -166,8 +173,6 @@ class CognitionPipeline:
                 ))
                 metrics.failed_count += 1
                 pipeline_path.append(f"{stage_path_name}:error")
-
-                # Stop on critical failure
                 break
 
         # Finalize metrics
@@ -182,7 +187,6 @@ class CognitionPipeline:
         if state.tool_result and state.tool_result.get("tool_name"):
             metrics.tool_usage.append(state.tool_result["tool_name"])
 
-        # Collect understanding insights count
         metrics.understanding_insights = len(state.understanding_insights)
 
         # Build intermediate data
@@ -193,11 +197,13 @@ class CognitionPipeline:
             "understanding_insights_count": len(state.understanding_insights),
             "concepts_count": len(state.concepts),
             "patterns_count": len(state.patterns),
+            "has_world_model_state": bool(state.world_model_state),
             "has_reasoning": bool(state.reasoning_result),
             "has_planning": bool(state.planning_result),
             "has_tool_result": bool(state.tool_result),
             "has_reflection": bool(state.reflection_suggestions),
             "has_learning": bool(state.learning_result),
+            "has_learning_engine": bool(state.learning_engine_result),
             "evolution_observations_count": len(state.evolution_observations),
         }
 
@@ -205,7 +211,7 @@ class CognitionPipeline:
             s.status != StageStatus.FAILED for s in stages
         )
 
-        return PipelineResult(
+        result = PipelineResult(
             success=overall_success,
             final_response=state.ai_response,
             stages=stages,
@@ -213,8 +219,22 @@ class CognitionPipeline:
             intermediate_data=intermediate,
         )
 
+        # Publish pipeline completion event
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "runtime.pipeline.completed",
+                {
+                    "success": overall_success,
+                    "stages_executed": metrics.stage_count,
+                    "total_duration_ms": metrics.total_duration_ms,
+                    "pipeline_path": pipeline_path,
+                },
+            )
+
+        return result
+
     # ------------------------------------------------------------------
-    # Stage definitions
+    # Stage definitions — the invariant execution order
     # ------------------------------------------------------------------
 
     def _build_stage_definitions(
@@ -226,6 +246,7 @@ class CognitionPipeline:
             (StageType.MEMORY_RETRIEVAL, self._stage_memory_retrieval),
             (StageType.KNOWLEDGE_RETRIEVAL, self._stage_knowledge_retrieval),
             (StageType.UNDERSTANDING, self._stage_understanding),
+            (StageType.WORLD_MODEL, self._stage_world_model),
             (StageType.REASONING, self._stage_reasoning),
             (StageType.PLANNING, self._stage_planning),
             (StageType.TOOL_DECISION, self._stage_tool_decision),
@@ -238,14 +259,13 @@ class CognitionPipeline:
         ]
 
     # ------------------------------------------------------------------
-    # Individual stage implementations
+    # Stage 1: Conversation Context
     # ------------------------------------------------------------------
 
     def _stage_conversation_context(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Build conversation context from the conversation service."""
         if self._conversation_service is None:
             return StageResult(
                 stage=StageType.CONVERSATION_CONTEXT,
@@ -273,21 +293,21 @@ class CognitionPipeline:
             confidence=1.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 2: Memory Retrieval
+    # ------------------------------------------------------------------
+
     def _stage_memory_retrieval(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Retrieve relevant memories."""
         if self._memory_service is None:
             return StageResult(
                 stage=StageType.MEMORY_RETRIEVAL,
                 status=StageStatus.SKIPPED,
             )
 
-        results = self._memory_service.search(
-            keyword=state.user_input,
-        )
-
+        results = self._memory_service.search(keyword=state.user_input)
         memories = results if results else []
         state.memories = memories
 
@@ -298,11 +318,14 @@ class CognitionPipeline:
             confidence=0.8 if memories else 0.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 3: Knowledge Retrieval
+    # ------------------------------------------------------------------
+
     def _stage_knowledge_retrieval(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Retrieve relevant knowledge."""
         if self._knowledge_manager is None:
             return StageResult(
                 stage=StageType.KNOWLEDGE_RETRIEVAL,
@@ -320,21 +343,23 @@ class CognitionPipeline:
             confidence=0.8 if knowledge else 0.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 4: Understanding Engine
+    # ------------------------------------------------------------------
+
     def _stage_understanding(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Run the Understanding Engine to extract concepts and insights."""
         if self._understanding_engine is None:
             return StageResult(
                 stage=StageType.UNDERSTANDING,
                 status=StageStatus.SKIPPED,
             )
 
-        # Process the user input through the understanding engine
         insights = self._understanding_engine.process_text(
             text=state.user_input,
-            source="cognition_pipeline",
+            source="runtime_coordinator",
         )
 
         state.understanding_insights = insights
@@ -352,18 +377,56 @@ class CognitionPipeline:
             confidence=0.7 if insights else 0.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 5: World Model Update
+    # ------------------------------------------------------------------
+
+    def _stage_world_model(
+        self,
+        state: CognitionState,
+    ) -> StageResult:
+        if self._world_model_engine is None:
+            return StageResult(
+                stage=StageType.WORLD_MODEL,
+                status=StageStatus.SKIPPED,
+            )
+
+        # Record the current input as an observation in the world model
+        observation = self._world_model_engine.record_observation(
+            description=f"User input: {state.user_input[:100]}",
+            source="runtime_coordinator",
+        )
+
+        # Get current world summary
+        world_summary = self._world_model_engine.get_world_summary()
+
+        state.world_model_state = world_summary
+
+        return StageResult(
+            stage=StageType.WORLD_MODEL,
+            status=StageStatus.SUCCESS,
+            data={
+                "observation_id": observation.observation_id,
+                "entities_count": world_summary.get("graph_entities", 0),
+                "active_goals_count": len(world_summary.get("active_goals", [])),
+            },
+            confidence=0.7,
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 6: Reasoning Engine
+    # ------------------------------------------------------------------
+
     def _stage_reasoning(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Run the reasoning pipeline."""
         if not self._has_reasoning_components():
             return StageResult(
                 stage=StageType.REASONING,
                 status=StageStatus.SKIPPED,
             )
 
-        # Build a CognitionDecision from the current state
         decision = CognitionDecision(
             action="respond",
             reasoning=f"Process: {state.user_input[:100]}",
@@ -399,6 +462,10 @@ class CognitionPipeline:
 
         state.reasoning_result = reasoning_data
 
+        # Record reasoning outcome if recorder available
+        if self._reasoning_recorder is not None:
+            self._record_outcome(decision.action, reasoning_data, results)
+
         return StageResult(
             stage=StageType.REASONING,
             status=StageStatus.SUCCESS,
@@ -406,11 +473,14 @@ class CognitionPipeline:
             confidence=0.8 if results else 0.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 7: Planning Engine
+    # ------------------------------------------------------------------
+
     def _stage_planning(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Run the planning engine if available and reasoning produced a plan."""
         if self._planning_engine is None:
             return StageResult(
                 stage=StageType.PLANNING,
@@ -424,7 +494,6 @@ class CognitionPipeline:
                 data={"reason": "No reasoning result to plan from"},
             )
 
-        # Build a plan from the reasoning goal
         from atlas.reasoning.models import ReasoningPlan
 
         plan = ReasoningPlan(
@@ -460,11 +529,14 @@ class CognitionPipeline:
             confidence=0.7,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 8: Tool Decision
+    # ------------------------------------------------------------------
+
     def _stage_tool_decision(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Decide whether tools are needed based on reasoning and planning."""
         if self._tool_engine is None:
             return StageResult(
                 stage=StageType.TOOL_DECISION,
@@ -478,7 +550,6 @@ class CognitionPipeline:
                 data={"reason": "No reasoning result"},
             )
 
-        # Build a tool request from the reasoning goal
         from atlas.tools.models import ToolRequest
 
         goal = state.reasoning_result.get("goal", state.user_input)
@@ -500,11 +571,14 @@ class CognitionPipeline:
             confidence=0.7,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 9: Tool Execution
+    # ------------------------------------------------------------------
+
     def _stage_tool_execution(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Execute tools if a tool request was created."""
         if self._tool_engine is None:
             return StageResult(
                 stage=StageType.TOOL_EXECUTION,
@@ -537,20 +611,21 @@ class CognitionPipeline:
             confidence=0.8 if result.success else 0.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 10: AI Response Generation
+    # ------------------------------------------------------------------
+
     def _stage_ai_response(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Generate an AI response using the AI service."""
         if self._ai_service is None:
             return StageResult(
                 stage=StageType.AI_RESPONSE,
                 status=StageStatus.SKIPPED,
             )
 
-        # Build messages from the accumulated state
         messages = self._build_messages(state)
-
         response = self._ai_service.chat(messages)
 
         state.ai_response = response.text if hasattr(response, "text") else str(response)
@@ -562,11 +637,14 @@ class CognitionPipeline:
             confidence=0.9,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 11: Reflection
+    # ------------------------------------------------------------------
+
     def _stage_reflection(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Run reflection analysis on recent reasoning outcomes."""
         if self._reflection_engine is None or self._reasoning_recorder is None:
             return StageResult(
                 stage=StageType.REFLECTION,
@@ -592,17 +670,61 @@ class CognitionPipeline:
             confidence=0.6 if suggestions else 0.0,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 12: Learning Engine
+    # ------------------------------------------------------------------
+
     def _stage_learning(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Record learning from the pipeline execution."""
-        if self._learning_manager is None:
-            return StageResult(
-                stage=StageType.LEARNING,
-                status=StageStatus.SKIPPED,
-            )
+        # Use LearningEngine if available (Phase 7.3), fall back to legacy LearningManager
+        if self._learning_engine is not None:
+            return self._stage_learning_engine(state)
 
+        if self._learning_manager is not None:
+            return self._stage_learning_legacy(state)
+
+        return StageResult(
+            stage=StageType.LEARNING,
+            status=StageStatus.SKIPPED,
+        )
+
+    def _stage_learning_engine(
+        self,
+        state: CognitionState,
+    ) -> StageResult:
+        pipeline_data = {
+            "user_input": state.user_input,
+            "memories_count": len(state.memories),
+            "knowledge_count": len(state.knowledge),
+            "understanding_insights_count": len(state.understanding_insights),
+            "has_reasoning": bool(state.reasoning_result),
+            "has_planning": bool(state.planning_result),
+            "has_tool_result": bool(state.tool_result),
+            "has_reflection": bool(state.reflection_suggestions),
+        }
+
+        insights = self._learning_engine.learn_from_pipeline(pipeline_data)
+
+        learning_data = {
+            "insights_count": len(insights),
+            "summary": self._learning_engine.get_learning_summary(),
+        }
+
+        state.learning_engine_result = learning_data
+
+        return StageResult(
+            stage=StageType.LEARNING,
+            status=StageStatus.SUCCESS,
+            data=learning_data,
+            confidence=0.6 if insights else 0.3,
+        )
+
+    def _stage_learning_legacy(
+        self,
+        state: CognitionState,
+    ) -> StageResult:
         experience = (
             f"Input: {state.user_input[:100]} | "
             f"Reasoning: {state.reasoning_result.get('goal', 'none') if state.reasoning_result else 'none'} | "
@@ -623,7 +745,7 @@ class CognitionPipeline:
             self._knowledge_manager.remember(
                 title=f"pipeline:{state.user_input[:50]}",
                 content=learning_result.knowledge,
-                source="cognition_pipeline",
+                source="runtime_coordinator",
             )
 
         state.learning_result = learning_data
@@ -635,23 +757,25 @@ class CognitionPipeline:
             confidence=0.5,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 13: Evolution Observation
+    # ------------------------------------------------------------------
+
     def _stage_evolution_observation(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Feed structured observations to the evolution subsystem."""
         if self._evolution_observation_engine is None:
             return StageResult(
                 stage=StageType.EVOLUTION_OBSERVATION,
                 status=StageStatus.SKIPPED,
             )
 
-        # Create a runtime observation
         obs = self._evolution_observation_engine.observe_runtime_metrics(
             avg_response_time_ms=0.0,
             request_count=1,
             error_count=0,
-            source="cognition_pipeline",
+            source="runtime_coordinator",
         )
 
         state.evolution_observations = [obs]
@@ -663,22 +787,24 @@ class CognitionPipeline:
             confidence=0.7,
         )
 
+    # ------------------------------------------------------------------
+    # Stage 14: Memory Storage
+    # ------------------------------------------------------------------
+
     def _stage_memory_storage(
         self,
         state: CognitionState,
     ) -> StageResult:
-        """Store pipeline results back to memory."""
         if self._memory_service is None:
             return StageResult(
                 stage=StageType.MEMORY_STORAGE,
                 status=StageStatus.SKIPPED,
             )
 
-        # Store the interaction as a memory
         try:
             self._memory_service.store(
                 content=state.ai_response or state.user_input,
-                source="cognition_pipeline",
+                source="runtime_coordinator",
             )
             stored = True
         except Exception:
@@ -696,13 +822,44 @@ class CognitionPipeline:
     # ------------------------------------------------------------------
 
     def _has_reasoning_components(self) -> bool:
-        """Check if all reasoning pipeline components are available."""
         return all([
             self._reasoning_controller is not None,
             self._capability_analyzer is not None,
             self._capability_router is not None,
             self._capability_dispatcher is not None,
         ])
+
+    def _record_outcome(
+        self,
+        decision_action: str,
+        reasoning_data: dict[str, Any],
+        results: list[Any],
+    ) -> None:
+        """Record a reasoning outcome using the recorder."""
+        import importlib
+
+        outcomes_module = importlib.import_module("atlas.reasoning.outcomes")
+        outcome_cls = getattr(outcomes_module, "ReasoningOutcome")
+
+        success = all(
+            r.success for r in results
+        ) if results else False
+
+        outcome = outcome_cls(
+            timestamp=datetime.now(),
+            goal=reasoning_data.get("goal", ""),
+            decision_action=decision_action,
+            capabilities=list(reasoning_data.get("capabilities", [])),
+            routes=list(reasoning_data.get("routes", [])),
+            results=[
+                {"capability": r.capability, "success": r.success, "output": r.output, "error": r.error}
+                for r in results
+            ],
+            success=success,
+            metadata={"source": "runtime_coordinator"},
+        )
+
+        self._reasoning_recorder.record(outcome)
 
     def _build_messages(
         self,
@@ -713,24 +870,20 @@ class CognitionPipeline:
             {"role": "system", "content": "You are Atlas, an intelligent AI operating framework."},
         ]
 
-        # Add context from memories
         if state.memories:
             memory_summary = f"Relevant memories: {len(state.memories)} items found."
             messages.append({"role": "system", "content": memory_summary})
 
-        # Add context from knowledge
         if state.knowledge:
             knowledge_summary = f"Relevant knowledge: {len(state.knowledge)} items found."
             messages.append({"role": "system", "content": knowledge_summary})
 
-        # Add understanding insights
         if state.understanding_insights:
             insight_summary = "Understanding insights:\n"
             for i in state.understanding_insights[:5]:
                 insight_summary += f"- {i.summary}\n"
             messages.append({"role": "system", "content": insight_summary})
 
-        # Add tool results
         if state.tool_result:
             tool_summary = (
                 f"Tool '{state.tool_result.get('tool_name', 'unknown')}' "
@@ -739,7 +892,74 @@ class CognitionPipeline:
             )
             messages.append({"role": "system", "content": tool_summary})
 
-        # Add the user input
         messages.append({"role": "user", "content": state.user_input})
 
         return messages
+
+    # ------------------------------------------------------------------
+    # Properties (for introspection and testing)
+    # ------------------------------------------------------------------
+
+    @property
+    def memory_service(self):
+        return self._memory_service
+
+    @property
+    def knowledge_manager(self):
+        return self._knowledge_manager
+
+    @property
+    def understanding_engine(self):
+        return self._understanding_engine
+
+    @property
+    def world_model_engine(self):
+        return self._world_model_engine
+
+    @property
+    def reasoning_controller(self):
+        return self._reasoning_controller
+
+    @property
+    def planning_engine(self):
+        return self._planning_engine
+
+    @property
+    def tool_engine(self):
+        return self._tool_engine
+
+    @property
+    def ai_service(self):
+        return self._ai_service
+
+    @property
+    def reflection_engine(self):
+        return self._reflection_engine
+
+    @property
+    def reasoning_recorder(self):
+        return self._reasoning_recorder
+
+    @property
+    def learning_manager(self):
+        return self._learning_manager
+
+    @property
+    def learning_engine(self):
+        return self._learning_engine
+
+    @property
+    def evolution_observation_engine(self):
+        return self._evolution_observation_engine
+
+    @property
+    def conversation_service(self):
+        return self._conversation_service
+
+    @property
+    def event_bus(self):
+        return self._event_bus
+
+    @property
+    def engine(self):
+        return self._engine

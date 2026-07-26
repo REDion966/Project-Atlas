@@ -16,9 +16,9 @@ It is an AI ecosystem that can:
 
 ## Current Status
 
-**Phase 6.9 — Tool Intelligence Foundation (Complete)**
+**Phase 7.5 — Unified Cognitive Runtime (Complete)**
 
-Atlas has evolved through 6 major phases covering:
+Atlas has evolved through 7 major phases covering:
 
 | Capability | Status |
 |---|---|
@@ -32,8 +32,12 @@ Atlas has evolved through 6 major phases covering:
 | Planning engine (goal decomposition) | ✅ Active |
 | Tool intelligence (select, execute) | ✅ Active |
 | Learning feedback loop | ✅ Active |
+| Integrated cognitive pipeline | ✅ Active |
+| Learning engine (strategy analysis, insights) | ✅ Active |
+| World model (causal graph, predictions) | ✅ Active |
+| Unified cognitive runtime (14-stage pipeline) | ✅ Active |
 
-**Test suite:** 584 passing tests
+**Test suite:** 850 passing tests
 
 **Architecture:** Modular, AI-independent, event-driven. Pure logic layers are isolated from infrastructure. All major subsystems are optional and backward-compatible.
 
@@ -52,7 +56,7 @@ python main.py
 ```
 atlas/
 ├── kernel/          Service container and root application
-├── cognition/       API, context, engine, decisions
+├── cognition/       API, context, engine, decisions, pipeline
 ├── reasoning/       Controller, capabilities, execution, planning, reflection
 ├── tools/           Tool registry, selector, executor, engine
 ├── services/        High-level orchestration
@@ -60,6 +64,9 @@ atlas/
 ├── memory/          Models, ranking, search, repository, service
 ├── knowledge/       Knowledge management
 ├── learning/        Learning manager, knowledge feedback
+├── learning_engine/ Strategy analysis, insight consolidation, learning memory
+├── understanding/   Concept extraction, pattern analysis, understanding engine
+├── evolution/       Self-observation, improvement planning, proposal generation
 ├── conversation/    Conversation service, history, prompt builder
 ├── events/          Event bus
 ├── config/          Configuration system

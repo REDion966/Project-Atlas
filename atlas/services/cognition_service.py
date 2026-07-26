@@ -1,163 +1,219 @@
 """
 Atlas Cognition Service
 
-Service layer connecting Atlas applications
-with the Cognition Engine.
+Service layer — delegates orchestration to RuntimeCoordinator.
+CognitionService is a service component only. It does NOT own
+pipeline execution. All orchestration is delegated to RuntimeCoordinator.
 
-Phase 6.5.1 — Optional reasoning pipeline integration.
-When reasoning components are injected, the service runs
-the full pipeline (controller → analyzer → router → dispatcher)
-after each cognition decision.
+When RuntimeCoordinator is not available, a backward-compatible
+inline pipeline runs (preserving all existing behavior).
+
+Phase 7.5.1 — Architecture Consolidation.
 """
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from atlas.services.service import Service
-from atlas.cognition.context import CognitionContext
-from atlas.cognition.engine import CognitionEngine
-from atlas.learning.learning_manager import LearningManager
-from atlas.learning.knowledge_feedback import KnowledgeFeedback
+from atlas.cognition.decision import CognitionDecision
+from atlas.cognition.models import PipelineResult
 
 if TYPE_CHECKING:
     from atlas.reasoning.capabilities.analyzer import CapabilityAnalyzer
-    from atlas.reasoning.capabilities.models import Capability
     from atlas.reasoning.controller import ReasoningController
     from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
-    from atlas.reasoning.execution.models import ExecutionResult, ExecutionRoute
     from atlas.reasoning.execution.registry import CapabilityRegistry
     from atlas.reasoning.execution.routing import CapabilityRouter
-    from atlas.reasoning.models import ReasoningPlan
     from atlas.reasoning.outcomes import ReasoningOutcome, ReasoningRecorder
-    from atlas.reasoning.planning import PlanningEngine, PlanningPlan
-    from atlas.reasoning.reflection import ReflectionEngine, ReflectionSuggestion
+    from atlas.reasoning.planning import PlanningEngine
+    from atlas.reasoning.reflection import ReflectionEngine
     from atlas.tools.engine import ToolEngine
-    from atlas.tools.models import ToolRequest, ToolResult
+    from atlas.runtime.runtime_coordinator import RuntimeCoordinator
 
 
 class CognitionService(Service):
     """
-    Provides cognition capabilities to Atlas.
+    Service wrapper around the RuntimeCoordinator.
 
-    Phase 6.5.1 — Supports optional reasoning pipeline injection.
-    When reasoning components are provided, the service
-    orchestrates the full reasoning chain after each decision:
-      ReasoningController → CapabilityAnalyzer →
-      CapabilityRouter → CapabilityDispatcher.
+    All cognitive processing is delegated to RuntimeCoordinator.
+    CognitionService adapts the PipelineResult back to a
+    CognitionDecision for backward compatibility.
 
-    Phase 6.5.2 — Supports optional reasoning outcome recording.
-    When a ReasoningRecorder is injected alongside the reasoning
-    pipeline, completed reasoning outcomes are recorded for future
-    reflection and observability.
-
-    Phase 6.7 — Supports optional reflection analysis.
-    When a ReflectionEngine is injected and outcomes are available,
-    the service runs reflection after recording to produce analysis
-    suggestions.
-
-    Phase 6.8 — Supports optional planning engine.
-    When a PlanningEngine is injected, the reasoning pipeline
-    enriches the flat ReasoningPlan into a structured PlanningPlan
-    with sub-goals, dependencies, and validation.
-
-    Phase 6.9 — Supports optional tool intelligence.
-    When a ToolEngine is injected, the reasoning pipeline runs
-    tool selection and execution after capability dispatch,
-    attaching tool results to the decision data.
+    When RuntimeCoordinator is not available, a backward-compatible
+    inline pipeline runs (preserving all legacy test behavior).
     """
 
     def __init__(
         self,
-        engine: CognitionEngine | None = None,
-        memory_service=None,
-        knowledge_manager=None,
-        learning_manager: LearningManager | None = None,
-        knowledge_feedback: KnowledgeFeedback | None = None,
-        event_bus=None,
-        reasoning_controller=None,
-        capability_analyzer=None,
-        capability_registry=None,
-        capability_router=None,
-        capability_dispatcher=None,
-        reasoning_recorder=None,
-        reflection_engine=None,
-        planning_engine=None,
-        tool_engine=None,
+        engine: Any = None,
+        memory_service: Any = None,
+        knowledge_manager: Any = None,
+        learning_manager: Any = None,
+        knowledge_feedback: Any = None,
+        event_bus: Any = None,
+        reasoning_controller: Any = None,
+        capability_analyzer: Any = None,
+        capability_registry: Any = None,
+        capability_router: Any = None,
+        capability_dispatcher: Any = None,
+        reasoning_recorder: Any = None,
+        reflection_engine: Any = None,
+        planning_engine: Any = None,
+        tool_engine: Any = None,
+        runtime_coordinator: "RuntimeCoordinator | None" = None,
     ):
         super().__init__("cognition")
 
-        self._engine = engine or CognitionEngine()
+        self._engine = engine
         self._memory_service = memory_service
         self._knowledge_manager = knowledge_manager
         self._learning_manager = learning_manager
         self._knowledge_feedback = knowledge_feedback
         self._event_bus = event_bus
 
-        # --- Phase 6.5.1: Optional reasoning pipeline ---
         self._reasoning_controller = reasoning_controller
         self._capability_analyzer = capability_analyzer
         self._capability_registry = capability_registry
         self._capability_router = capability_router
         self._capability_dispatcher = capability_dispatcher
-
-        # --- Phase 6.5.2: Optional reasoning outcome recording ---
         self._reasoning_recorder = reasoning_recorder
-
-        # --- Phase 6.7: Optional reflection analysis ---
         self._reflection_engine = reflection_engine
-
-        # --- Phase 6.8: Optional planning engine ---
         self._planning_engine = planning_engine
-
-        # --- Phase 6.9: Optional tool intelligence ---
         self._tool_engine = tool_engine
 
-    def start(self):
-        """
-        Start cognition service.
-        """
+        # --- Phase 7.5.1: RuntimeCoordinator is the primary orchestrator ---
+        self._runtime_coordinator = runtime_coordinator
 
+    def start(self):
         self.mark_running()
 
     def stop(self):
-        """
-        Stop cognition service.
-        """
-
         super().stop()
 
     def process(
         self,
         user_input: str,
-        memory=None,
-        metadata=None,
+        memory: Any = None,
+        metadata: Any = None,
         goal: str | None = None,
-    ):
+    ) -> CognitionDecision:
         """
-        Process user input through cognition engine.
+        Process user input through the cognitive runtime.
 
-        Retrieves relevant memories and knowledge if available,
-        builds a complete CognitionContext, and passes it to
-        the CognitionEngine.
+        When a RuntimeCoordinator is injected, ALL cognitive processing
+        is delegated to it. The PipelineResult is mapped back to a
+        CognitionDecision for backward compatibility.
+
+        When no RuntimeCoordinator is available but reasoning components
+        are injected, the legacy inline pipeline runs (preserving all
+        existing test behavior).
+
+        When neither is available, returns a minimal decision.
         """
-
         if not self.running:
-            raise RuntimeError(
-                "Cognition service is not running."
+            raise RuntimeError("Cognition service is not running.")
+
+        # --- Phase 7.5.1: Primary path via RuntimeCoordinator ---
+        if self._runtime_coordinator is not None:
+            return self._process_via_runtime_coordinator(user_input, memory, metadata, goal)
+
+        # --- Legacy fallback: inline pipeline (backward compatible) ---
+        return self._process_legacy(user_input, memory, metadata, goal)
+
+    # ------------------------------------------------------------------
+    # Primary path: RuntimeCoordinator
+    # ------------------------------------------------------------------
+
+    def _process_via_runtime_coordinator(
+        self,
+        user_input: str,
+        memory: Any,
+        metadata: Any,
+        goal: str | None,
+    ) -> CognitionDecision:
+        """Delegate full processing to RuntimeCoordinator, adapt result."""
+        assert self._runtime_coordinator is not None
+
+        result: PipelineResult = self._runtime_coordinator.process(
+            user_input=user_input,
+            memory=memory,
+            metadata=metadata or {},
+            goal=goal,
+        )
+
+        intermediate = result.intermediate_data
+        reasoning_data: dict[str, Any] = {}
+        planning_data: dict[str, Any] = {}
+        tool_data: dict[str, Any] = {}
+
+        # Extract structured data from pipeline stages
+        for stage in result.stages:
+            if not stage.data or stage.status.value <= 0:
+                continue
+            stage_name = stage.stage.name if hasattr(stage.stage, "name") else str(stage.stage)
+            if "REASONING" in stage_name:
+                reasoning_data = stage.data
+            elif "PLANNING" in stage_name:
+                planning_data = stage.data
+            elif "TOOL_EXECUTION" in stage_name:
+                tool_data = stage.data
+
+        data_payload: dict[str, Any] = {
+            "input": user_input,
+            "memory_count": intermediate.get("memories_count", 0),
+            "knowledge_count": intermediate.get("knowledge_count", 0),
+            "understanding_insights_count": intermediate.get("understanding_insights_count", 0),
+        }
+
+        if reasoning_data:
+            data_payload["reasoning"] = reasoning_data
+        if planning_data:
+            data_payload["planning"] = planning_data
+        if tool_data:
+            data_payload["tool_results"] = tool_data
+
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "cognition.decision.made",
+                {
+                    "action": "respond",
+                    "reasoning": f"Pipeline: {user_input[:100]}",
+                    "data": data_payload,
+                },
             )
+
+        return CognitionDecision(
+            action="respond",
+            reasoning=f"Processed through unified runtime: {result.metrics.stage_count} stages, "
+                      f"{result.metrics.success_count} succeeded",
+            data=data_payload,
+        )
+
+    # ------------------------------------------------------------------
+    # Legacy fallback: inline pipeline (preserves all existing tests)
+    # ------------------------------------------------------------------
+
+    def _process_legacy(
+        self,
+        user_input: str,
+        memory: Any,
+        metadata: Any,
+        goal: str | None,
+    ) -> CognitionDecision:
+        """Legacy inline pipeline — backward compatible with all tests."""
+        from atlas.cognition.context import CognitionContext
+        from atlas.cognition.engine import CognitionEngine
+
+        engine = self._engine or CognitionEngine()
 
         memory_results = None
         knowledge_results = None
 
         if self._memory_service is not None and user_input:
-            memory_results = self._memory_service.search(
-                keyword=user_input,
-            )
+            memory_results = self._memory_service.search(keyword=user_input)
 
         if self._knowledge_manager is not None and user_input:
-            knowledge_results = self._knowledge_manager.query(
-                user_input,
-            )
+            knowledge_results = self._knowledge_manager.query(user_input)
 
         context = CognitionContext(
             user_input=user_input,
@@ -169,74 +225,56 @@ class CognitionService(Service):
             knowledge_results=knowledge_results,
         )
 
-        decision = self._engine.process(context)
+        decision = engine.process(context)
 
-        # --- Cognition Event: decision.made ---
+        # --- Event: decision.made ---
         if self._event_bus is not None:
             self._event_bus.publish(
                 "cognition.decision.made",
-                {
-                    "action": decision.action,
-                    "reasoning": decision.reasoning,
-                    "data": decision.data,
-                },
+                {"action": decision.action, "reasoning": decision.reasoning, "data": decision.data},
             )
 
-        # --- Cognition Feedback Loop (Phase 5.3) ---
+        # --- Learning feedback loop (Phase 5.3) ---
         learning_result = None
         if self._learning_manager is not None:
-            experience = (
-                f"Action: {decision.action} | "
-                f"Reasoning: {decision.reasoning}"
-            )
+            experience = f"Action: {decision.action} | Reasoning: {decision.reasoning}"
             learning_result = self._learning_manager.learn(experience)
 
-            if self._knowledge_feedback is not None:
-                self._knowledge_feedback.remember(
-                    learning_result.knowledge
-                )
+            if self._knowledge_feedback is not None and learning_result:
+                self._knowledge_feedback.remember(learning_result.knowledge)
 
-            if self._knowledge_manager is not None:
+            if self._knowledge_manager is not None and learning_result:
                 self._knowledge_manager.remember(
                     title=f"cognition:{decision.action}",
                     content=learning_result.knowledge,
                     source="cognition_service",
                 )
 
-        # --- Cognition Event: learning.completed ---
         if self._event_bus is not None and learning_result is not None:
             self._event_bus.publish(
                 "cognition.learning.completed",
-                {
-                    "action": decision.action,
-                    "knowledge": learning_result.knowledge,
-                },
+                {"action": decision.action, "knowledge": learning_result.knowledge},
             )
 
-        # --- Phase 6.5.1: Optional reasoning pipeline ---
+        # --- Reasoning pipeline (Phase 6.5.1) ---
         self._run_reasoning_pipeline(decision)
 
-        # --- Phase 6.9: Optional tool intelligence pipeline ---
+        # --- Tool pipeline (Phase 6.9) ---
         self._run_tool_pipeline(decision)
 
-        # --- Phase 6.5.2: Optional reasoning outcome recording ---
+        # --- Outcome recording (Phase 6.5.2) ---
         self._record_reasoning_outcome(decision)
 
-        # --- Phase 6.7: Optional reflection analysis ---
+        # --- Reflection (Phase 6.7) ---
         self._run_reflection(decision)
 
         return decision
 
-    # --- Phase 6.5.1: Reasoning pipeline orchestration ---
+    # ------------------------------------------------------------------
+    # Legacy pipeline helper methods (preserved from Phase 6.x)
+    # ------------------------------------------------------------------
 
     def _has_all_reasoning_components(self) -> bool:
-        """
-        Check whether all reasoning pipeline components are injected.
-
-        Returns:
-            True if all five reasoning components are present,
-            False otherwise (pipeline is skipped).
-        """
         return (
             self._reasoning_controller is not None
             and self._capability_analyzer is not None
@@ -246,28 +284,9 @@ class CognitionService(Service):
         )
 
     def _run_reasoning_pipeline(self, decision) -> None:
-        """
-        Run the reasoning pipeline on a cognition decision.
-
-        When all reasoning components are injected, this method
-        runs the full chain:
-          ReasoningController.create_plan(decision)
-            → CapabilityAnalyzer.analyze(plan)
-            → CapabilityRouter.route(capabilities)
-            → CapabilityDispatcher.dispatch(capabilities)
-
-        Results are attached to decision.data["reasoning"].
-
-        If any component is missing, the pipeline is silently
-        skipped — preserving backward compatibility.
-
-        Args:
-            decision: The CognitionDecision produced by the engine.
-        """
         if not self._has_all_reasoning_components():
             return
 
-        # Type narrowing — the guard above ensures these are injected
         assert self._reasoning_controller is not None
         assert self._capability_analyzer is not None
         assert self._capability_router is not None
@@ -275,20 +294,14 @@ class CognitionService(Service):
 
         plan = self._reasoning_controller.create_plan(decision)
 
-        # --- Phase 6.8: Optional planning engine decomposition ---
         if self._planning_engine is not None:
             planning_plan = self._planning_engine.decompose(plan)
             decision.data["planning"] = {
                 "goal": planning_plan.goal,
                 "sub_goals": list(planning_plan.sub_goals),
                 "steps": [
-                    {
-                        "id": s.id,
-                        "description": s.description,
-                        "action": s.action,
-                        "depends_on": list(s.depends_on),
-                        "status": s.status,
-                    }
+                    {"id": s.id, "description": s.description, "action": s.action,
+                     "depends_on": list(s.depends_on), "status": s.status}
                     for s in planning_plan.steps
                 ],
                 "status": planning_plan.status,
@@ -296,91 +309,26 @@ class CognitionService(Service):
             }
 
         capabilities = self._capability_analyzer.analyze(plan)
-
         routes = self._capability_router.route(capabilities)
-
         results = self._capability_dispatcher.dispatch(capabilities)
 
         decision.data["reasoning"] = {
             "goal": plan.goal,
             "capabilities": [
-                {
-                    "name": c.name,
-                    "priority": c.priority,
-                    "reason": c.reason,
-                }
+                {"name": c.name, "priority": c.priority, "reason": c.reason}
                 for c in capabilities
             ],
             "routes": [
-                {
-                    "capability": r.capability,
-                    "handler_name": r.handler_name,
-                    "strategy": r.strategy,
-                }
+                {"capability": r.capability, "handler_name": r.handler_name, "strategy": r.strategy}
                 for r in routes
             ],
             "results": [
-                {
-                    "capability": r.capability,
-                    "success": r.success,
-                    "output": r.output,
-                    "error": r.error,
-                }
+                {"capability": r.capability, "success": r.success, "output": r.output, "error": r.error}
                 for r in results
             ],
         }
 
-    def _record_reasoning_outcome(self, decision) -> None:
-        """
-        Record the reasoning pipeline outcome when available.
-
-        If a ReasoningRecorder is injected and the reasoning pipeline
-        produced results in decision.data["reasoning"], this method
-        constructs a ReasoningOutcome and stores it in the recorder.
-
-        If the recorder is missing or no reasoning results exist,
-        this method does nothing — preserving backward compatibility.
-
-        Args:
-            decision: The CognitionDecision that may contain reasoning
-                pipeline results.
-        """
-        if self._reasoning_recorder is None:
-            return
-
-        reasoning_data = decision.data.get("reasoning")
-        if reasoning_data is None:
-            return
-
-        success = all(
-            r.get("success", False)
-            for r in reasoning_data.get("results", [])
-        )
-
-        outcome = self._build_reasoning_outcome(
-            decision_action=decision.action,
-            reasoning_data=reasoning_data,
-            success=success,
-        )
-
-        self._reasoning_recorder.record(outcome)
-
-    # --- Phase 6.9: Tool intelligence pipeline ---
-
     def _run_tool_pipeline(self, decision) -> None:
-        """
-        Run tool selection and execution when a ToolEngine is available.
-
-        Uses the reasoning pipeline results to build a ToolRequest
-        and fulfills it through the ToolEngine. Results are stored
-        in decision.data["tool_results"] as serialized metadata.
-
-        If the tool engine is missing or no reasoning results exist,
-        this method does nothing — preserving backward compatibility.
-
-        Args:
-            decision: The CognitionDecision to attach tool results to.
-        """
         if self._tool_engine is None:
             return
 
@@ -388,10 +336,7 @@ class CognitionService(Service):
         if reasoning_data is None:
             return
 
-        # Build a ToolRequest from the reasoning goal
-        # Use deferred import to keep CognitionService loosely coupled
         import importlib
-
         tools_models = importlib.import_module("atlas.tools.models")
         tr_cls = getattr(tools_models, "ToolRequest")
 
@@ -406,7 +351,6 @@ class CognitionService(Service):
         )
 
         result = self._tool_engine.fulfill(tool_request)
-
         decision.data["tool_results"] = {
             "tool_name": result.tool_name,
             "success": result.success,
@@ -415,36 +359,43 @@ class CognitionService(Service):
             "execution_time_ms": result.execution_time_ms,
         }
 
-    # --- Phase 6.7: Reflection analysis ---
-
-    def _run_reflection(self, decision) -> None:
-        """
-        Run reflection analysis when a ReflectionEngine is available.
-
-        Requires both a ReflectionEngine and a ReasoningRecorder with
-        recorded outcomes to produce suggestions. Suggestions are stored
-        in decision.data["reflection"] as serialized metadata only.
-
-        If the engine or recorder is missing, or no outcomes have been
-        recorded, this method does nothing — preserving backward
-        compatibility.
-
-        Args:
-            decision: The CognitionDecision to attach reflection
-                suggestions to.
-        """
-        if self._reflection_engine is None:
-            return
-
+    def _record_reasoning_outcome(self, decision) -> None:
         if self._reasoning_recorder is None:
             return
 
+        reasoning_data = decision.data.get("reasoning")
+        if reasoning_data is None:
+            return
+
+        success = all(
+            r.get("success", False) for r in reasoning_data.get("results", [])
+        )
+
+        import importlib
+        outcomes_module = importlib.import_module("atlas.reasoning.outcomes")
+        outcome_cls = getattr(outcomes_module, "ReasoningOutcome")
+
+        outcome = outcome_cls(
+            timestamp=datetime.now(),
+            goal=reasoning_data.get("goal", ""),
+            decision_action=decision.action,
+            capabilities=list(reasoning_data.get("capabilities", [])),
+            routes=list(reasoning_data.get("routes", [])),
+            results=list(reasoning_data.get("results", [])),
+            success=success,
+            metadata={"source": "cognition_service"},
+        )
+        self._reasoning_recorder.record(outcome)
+
+    def _run_reflection(self, decision) -> None:
+        if self._reflection_engine is None:
+            return
+        if self._reasoning_recorder is None:
+            return
         if self._reasoning_recorder.count == 0:
             return
 
-        # Use the last 20 outcomes as a sliding reflection window
         recent_outcomes = self._reasoning_recorder.recent(20)
-
         suggestions = self._reflection_engine.analyze(recent_outcomes)
 
         if not suggestions:
@@ -463,123 +414,50 @@ class CognitionService(Service):
             for s in suggestions
         ]
 
-    def _build_reasoning_outcome(
-        self,
-        decision_action: str,
-        reasoning_data: dict[str, Any],
-        success: bool,
-    ) -> "ReasoningOutcome":
-        """
-        Build a ReasoningOutcome from serialized reasoning data.
+    # ------------------------------------------------------------------
+    # Properties (preserved for backward compatibility)
+    # ------------------------------------------------------------------
 
-        This helper avoids a runtime import of ReasoningOutcome by
-        constructing it through importlib, preserving the TYPE_CHECKING
-        pattern and keeping CognitionService loosely coupled to the
-        reasoning outcome types.
-
-        Args:
-            decision_action: The CognitionDecision action.
-            reasoning_data: The serialized reasoning data produced by
-                the reasoning pipeline.
-            success: Whether all execution results succeeded.
-
-        Returns:
-            A populated ReasoningOutcome instance.
-        """
-        import importlib
-
-        outcomes_module = importlib.import_module("atlas.reasoning.outcomes")
-        outcome_cls = getattr(outcomes_module, "ReasoningOutcome")
-
-        return outcome_cls(
-            timestamp=datetime.now(),
-            goal=reasoning_data.get("goal", ""),
-            decision_action=decision_action,
-            capabilities=list(reasoning_data.get("capabilities", [])),
-            routes=list(reasoning_data.get("routes", [])),
-            results=list(reasoning_data.get("results", [])),
-            success=success,
-            metadata={"source": "cognition_service"},
-        )
+    @property
+    def engine(self):
+        """Return cognition engine (legacy, may be None if using RuntimeCoordinator)."""
+        return self._engine
 
     @property
     def reasoning_controller(self):
-        """
-        Return the reasoning controller dependency (Phase 6.5.1).
-
-        Returns:
-            The ReasoningController if injected, or None.
-        """
         return self._reasoning_controller
 
     @property
     def reasoning_recorder(self):
-        """
-        Return the reasoning recorder dependency (Phase 6.5.2).
-
-        Returns:
-            The ReasoningRecorder if injected, or None.
-        """
         return self._reasoning_recorder
 
     @property
     def reflection_engine(self):
-        """
-        Return the reflection engine dependency (Phase 6.7).
-
-        Returns:
-            The ReflectionEngine if injected, or None.
-        """
         return self._reflection_engine
 
     @property
     def planning_engine(self):
-        """
-        Return the planning engine dependency (Phase 6.8).
-
-        Returns:
-            The PlanningEngine if injected, or None.
-        """
         return self._planning_engine
 
     @property
     def tool_engine(self):
-        """
-        Return the tool engine dependency (Phase 6.9).
-
-        Returns:
-            The ToolEngine if injected, or None.
-        """
         return self._tool_engine
 
     @property
-    def engine(self):
-        """
-        Return cognition engine.
-        """
-
-        return self._engine
-
-    @property
     def memory_service(self):
-        """Return memory service dependency."""
-
         return self._memory_service
 
     @property
     def knowledge_manager(self):
-        """Return knowledge manager dependency."""
-
         return self._knowledge_manager
 
     @property
+    def runtime_coordinator(self):
+        """Return the RuntimeCoordinator (Phase 7.5.1)."""
+        return self._runtime_coordinator
+
+    @property
     def status(self):
-        """
-        Return cognition service status summary.
-
-        Returns a dict with running state and dependency availability.
-        """
-
         return {
             "running": self.running,
             "has_memory": self._memory_service is not None,
@@ -590,4 +468,5 @@ class CognitionService(Service):
             "has_reflection": self._reflection_engine is not None,
             "has_planning": self._planning_engine is not None,
             "has_tools": self._tool_engine is not None,
+            "has_runtime_coordinator": self._runtime_coordinator is not None,
         }
