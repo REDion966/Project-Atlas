@@ -16,6 +16,14 @@ class ApplicationSettings:
 
 
 @dataclass(slots=True)
+class APIKeySettings:
+    """Provider API key configuration."""
+
+    openai: str = ""
+    anthropic: str = ""
+
+
+@dataclass(slots=True)
 class AISettings:
     """AI configuration."""
 
@@ -23,6 +31,7 @@ class AISettings:
     model: str
     temperature: float
     timeout: int
+    api_keys: APIKeySettings | None = None
 
 
 @dataclass(slots=True)

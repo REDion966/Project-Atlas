@@ -220,11 +220,14 @@ class Atlas:
             self._model_profile_registry,
         )
 
+        api_keys = self._config.get("ai", "api_keys")
+
         self._ai_manager.initialize(
             provider,
             model,
             timeout,
             model_router=self._model_router,
+            api_keys=api_keys,
         )
 
 

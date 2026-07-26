@@ -7,6 +7,7 @@ import tomllib
 
 from atlas.config.configuration_models import (
     AISettings,
+    APIKeySettings,
     ApplicationSettings,
     AtlasSettings,
     ConversationSettings,
@@ -27,6 +28,8 @@ class Configuration:
         with self._path.open("rb") as file:
             data = tomllib.load(file)
 
+        api_keys_data = data.get("api_keys", {})
+
         self._settings = AtlasSettings(
             application=ApplicationSettings(
                 name=data["application"]["name"],
@@ -37,6 +40,10 @@ class Configuration:
                 model=data["ai"]["model"],
                 temperature=data["ai"]["temperature"],
                 timeout=data["ai"]["timeout"],
+                api_keys=APIKeySettings(
+                    openai=api_keys_data.get("openai", ""),
+                    anthropic=api_keys_data.get("anthropic", ""),
+                ),
             ),
             conversation=ConversationSettings(
                 history_limit=data["conversation"]["history_limit"],

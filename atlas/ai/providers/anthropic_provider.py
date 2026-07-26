@@ -1,7 +1,7 @@
 """
-Atlas OpenAI Provider
+Atlas Anthropic Provider
 
-Provides AI access through the OpenAI API.
+Provides AI access through the Anthropic API.
 """
 
 import json
@@ -14,10 +14,11 @@ from atlas.ai.provider import AIProvider
 from atlas.models.ai_response import AIResponse
 
 
-class OpenAIProvider(AIProvider):
-    """OpenAI API Provider."""
+class AnthropicProvider(AIProvider):
+    """Anthropic API Provider."""
 
-    BASE_URL = "https://api.openai.com/v1"
+    BASE_URL = "https://api.anthropic.com/v1"
+    API_VERSION = "2023-06-01"
 
     def __init__(
         self,
@@ -27,39 +28,45 @@ class OpenAIProvider(AIProvider):
     ):
         self._model = model
         self._timeout = timeout
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
 
     def _require_api_key(self):
         """Raise if no API key is configured."""
         if not self._api_key:
             raise RuntimeError(
-                "OpenAI API key is required. "
-                "Set OPENAI_API_KEY environment variable or pass api_key."
+                "Anthropic API key is required. "
+                "Set ANTHROPIC_API_KEY environment variable or pass api_key."
             )
 
     def name(self) -> str:
         """Return provider name."""
-        return "OpenAI"
+        return "Anthropic"
 
     def _headers(self) -> dict:
         return {
-            "Authorization": f"Bearer {self._api_key}",
+            "x-api-key": self._api_key,
+            "anthropic-version": self.API_VERSION,
             "Content-Type": "application/json",
         }
 
     def chat(self, messages):
-        """Generate a complete chat response."""
+        """Generate a complete chat response.
+
+        Anthropic uses a /v1/messages endpoint with a 'content'
+        field that contains a list of content blocks.
+        """
 
         self._require_api_key()
 
         payload = {
             "model": self._model,
             "messages": messages,
+            "max_tokens": 4096,
             "stream": False,
         }
 
         response = requests.post(
-            f"{self.BASE_URL}/chat/completions",
+            f"{self.BASE_URL}/messages",
             headers=self._headers(),
             json=payload,
             timeout=self._timeout,
@@ -69,17 +76,24 @@ class OpenAIProvider(AIProvider):
 
         data = response.json()
 
-        choice = data["choices"][0]
+        text = "".join(
+            block["text"]
+            for block in data.get("content", [])
+            if block.get("type") == "text"
+        )
 
         return AIResponse(
-            text=choice["message"]["content"],
+            text=text,
             provider=self.name(),
             model=self._model,
-            tokens=data.get("usage", {}).get("total_tokens"),
-            finish_reason=choice.get("finish_reason"),
+            tokens=(
+                data.get("usage", {}).get("input_tokens", 0)
+                + data.get("usage", {}).get("output_tokens", 0)
+            ),
+            finish_reason=data.get("stop_reason"),
             metadata={
-                "prompt_tokens": data.get("usage", {}).get("prompt_tokens"),
-                "completion_tokens": data.get("usage", {}).get("completion_tokens"),
+                "input_tokens": data.get("usage", {}).get("input_tokens"),
+                "output_tokens": data.get("usage", {}).get("output_tokens"),
             },
         )
 
@@ -87,18 +101,24 @@ class OpenAIProvider(AIProvider):
         self,
         messages,
     ) -> Iterator[str]:
-        """Stream chat response from OpenAI."""
+        """Stream chat response from Anthropic.
+
+        Anthropic SSE events include:
+          - message_start, content_block_start, content_block_delta,
+            content_block_stop, message_delta, message_stop
+        """
 
         self._require_api_key()
 
         payload = {
             "model": self._model,
             "messages": messages,
+            "max_tokens": 4096,
             "stream": True,
         }
 
         response = requests.post(
-            f"{self.BASE_URL}/chat/completions",
+            f"{self.BASE_URL}/messages",
             headers=self._headers(),
             json=payload,
             stream=True,
@@ -121,26 +141,31 @@ class OpenAIProvider(AIProvider):
                     break
 
                 try:
-                    chunk = json.loads(data_str)
+                    event_data = json.loads(data_str)
                 except json.JSONDecodeError:
                     continue
 
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                event_type = event_data.get("type")
 
-                content = delta.get("content")
-
-                if content:
-                    yield content
+                if event_type == "content_block_delta":
+                    delta = event_data.get("delta", {})
+                    text = delta.get("text")
+                    if text:
+                        yield text
 
     def complete(self, prompt):
-        """Generate a completion using the chat endpoint."""
+        """Generate a completion using the messages endpoint."""
 
         return self.chat(
             [{"role": "user", "content": prompt}]
         )
 
     def models(self):
-        """Return available OpenAI models."""
+        """Return available Anthropic models.
+
+        Anthropic's /v1/models endpoint returns the list of
+        available models.
+        """
 
         self._require_api_key()
 

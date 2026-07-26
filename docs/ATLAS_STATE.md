@@ -28,21 +28,18 @@
 
 ## 2. Latest Checkpoint
 
-**Phase 6.9 — Tool Intelligence Foundation**
+**Phase 6.10 — Multi-Provider AI Layer**
 
 What was added:
-- `Tool`, `ToolParameter`, `ToolResult`, `ToolRequest` dataclasses
-- `ToolRegistry` for tool lifecycle management (register, unregister, get, list, find)
-- `ToolSelector` for keyword-based deterministic tool matching and ranking
-- `ToolExecutor` for tool invocation with timing capture and error handling
-- `ToolEngine` orchestrator with `fulfill()` and `fulfill_with_fallback()`
-- `_run_tool_pipeline()` integration in `CognitionService` (optional)
-- `tool_engine` property and `has_tools` status key
-- `ToolEngine` creation and injection in `Atlas.start()`
-- Private Atlas-owned dependency (not in `ServiceContainer`)
-- Two built-in tools: `echo` and `list_tools`
-- 64 new unit and integration tests (`test_tool_models.py`, `test_tool_registry.py`, `test_tool_selector.py`, `test_tool_executor.py`, `test_tool_engine.py`, `test_tool_wiring.py`)
-- Backward compatibility when tool engine is missing
+- **OpenAI provider** (`atlas/ai/providers/openai_provider.py`) — full `AIProvider` implementation using the OpenAI REST API (`/v1/chat/completions`, `/v1/models`). Supports chat, streaming, completion, and model listing. API key via constructor or `OPENAI_API_KEY` env var. Key check deferred to usage time for registration compatibility.
+- **LM Studio provider** (`atlas/ai/providers/lmstudio_provider.py`) — full `AIProvider` implementation for local models via LM Studio's OpenAI-compatible endpoint. Configurable `base_url` (defaults to `http://localhost:1234/v1`). No API key required.
+- **Anthropic provider** (`atlas/ai/providers/anthropic_provider.py`) — full `AIProvider` implementation using the Anthropic Messages API (`/v1/messages`, `/v1/models`). Supports chat, streaming (SSE `content_block_delta` events), completion, and model listing. API key via constructor or `ANTHROPIC_API_KEY` env var. Key check deferred to usage time.
+- **Configuration extension** — `APIKeySettings` dataclass with `openai` and `anthropic` fields; `AISettings.api_keys` optional field; `[api_keys]` section in `config.toml`; `Configuration.load()` parses the new section.
+- **`.env.example`** — updated with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LM_STUDIO_BASE_URL`, and Atlas-specific env vars.
+- **`AIManager`** — remains provider-agnostic; registers all 5 providers (Mock, Ollama, OpenAI, LM Studio, Anthropic) and activates the configured one. Accepts optional `api_keys` parameter.
+- **`AIProvider` interface** — added proper return type annotations (`-> "AIResponse"`, `-> list[str]`) and `from __future__ import annotations` for forward references.
+- **Backward compatibility** — Ollama remains the default provider; all existing tests pass unchanged.
+- **40 new tests** in `tests/test_ai_providers.py` covering: OpenAI chat/stream/complete/models/headers/errors/env-var, LM Studio chat/stream/complete/models/custom-base-url/errors, Anthropic chat/stream/complete/models/headers/errors/env-var, MockProvider regression, and provider interface compliance for all 5 providers.
 
 ---
 
@@ -64,6 +61,7 @@ What was added:
 | **6.7** | **Reflection foundation** | **Complete** | **481** |
 | **6.8** | **Planning engine** | **Complete** | **520** |
 | **6.9** | **Tool intelligence foundation** | **Complete** | **584** |
+| **6.10** | **Multi-Provider AI Layer** | **Complete** | **624** |
 
 ---
 
@@ -238,7 +236,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 
 ## 6. Current Test Status
 
-**584 passing tests**
+**624 passing tests**
 
 ### 6.1 Test Progression
 
@@ -258,6 +256,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | **Phase 6.7** | **481** |
 | **Phase 6.8** | **520** |
 | **Phase 6.9** | **584** |
+| **Phase 6.10** | **624** |
 
 
 ### 6.2 Key Test Files
@@ -405,7 +404,8 @@ A phase is complete only after:
 | **Phase 6.7 Reflection Foundation** | **✅ Complete** |
 | **Phase 6.8 Planning Engine** | **✅ Complete** |
 | **Phase 6.9 Tool Intelligence** | **✅ Complete** |
-| Phase 6.10+ Continuous Improvement | 🟡 Next |
+| **Phase 6.10 Multi-Provider AI Layer** | **✅ Complete** |
+| Phase 6.11+ Continuous Improvement | 🟡 Next |
 
 ---
 
@@ -426,9 +426,9 @@ A phase is complete only after:
    ```
    pytest
    ```
-5. Confirm **584 tests passing**.
-6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, and `atlas/tools/`.
-7. Pick up from **Phase 6.10+ — Continuous Improvement**.
+5. Confirm **624 tests passing**.
+6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, `atlas/tools/`, and `atlas/ai/providers/`.
+7. Pick up from **Phase 6.11+ — Continuous Improvement**.
 8. Do not modify legacy `atlas/intelligence/` components.
 9. Preserve all existing public APIs.
 10. Add tests for any new functionality.
