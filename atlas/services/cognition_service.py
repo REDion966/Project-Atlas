@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from atlas.reasoning.execution.routing import CapabilityRouter
     from atlas.reasoning.models import ReasoningPlan
     from atlas.reasoning.outcomes import ReasoningOutcome, ReasoningRecorder
+    from atlas.reasoning.planning import PlanningEngine, PlanningPlan
     from atlas.reasoning.reflection import ReflectionEngine, ReflectionSuggestion
 
 
@@ -51,6 +52,11 @@ class CognitionService(Service):
     When a ReflectionEngine is injected and outcomes are available,
     the service runs reflection after recording to produce analysis
     suggestions.
+
+    Phase 6.8 — Supports optional planning engine.
+    When a PlanningEngine is injected, the reasoning pipeline
+    enriches the flat ReasoningPlan into a structured PlanningPlan
+    with sub-goals, dependencies, and validation.
     """
 
     def __init__(
@@ -68,6 +74,7 @@ class CognitionService(Service):
         capability_dispatcher=None,
         reasoning_recorder=None,
         reflection_engine=None,
+        planning_engine=None,
     ):
         super().__init__("cognition")
 
@@ -90,6 +97,9 @@ class CognitionService(Service):
 
         # --- Phase 6.7: Optional reflection analysis ---
         self._reflection_engine = reflection_engine
+
+        # --- Phase 6.8: Optional planning engine ---
+        self._planning_engine = planning_engine
 
     def start(self):
         """
@@ -250,6 +260,26 @@ class CognitionService(Service):
         assert self._capability_dispatcher is not None
 
         plan = self._reasoning_controller.create_plan(decision)
+
+        # --- Phase 6.8: Optional planning engine decomposition ---
+        if self._planning_engine is not None:
+            planning_plan = self._planning_engine.decompose(plan)
+            decision.data["planning"] = {
+                "goal": planning_plan.goal,
+                "sub_goals": list(planning_plan.sub_goals),
+                "steps": [
+                    {
+                        "id": s.id,
+                        "description": s.description,
+                        "action": s.action,
+                        "depends_on": list(s.depends_on),
+                        "status": s.status,
+                    }
+                    for s in planning_plan.steps
+                ],
+                "status": planning_plan.status,
+                "validation_errors": list(planning_plan.validation_errors),
+            }
 
         capabilities = self._capability_analyzer.analyze(plan)
 
@@ -439,6 +469,16 @@ class CognitionService(Service):
         return self._reflection_engine
 
     @property
+    def planning_engine(self):
+        """
+        Return the planning engine dependency (Phase 6.8).
+
+        Returns:
+            The PlanningEngine if injected, or None.
+        """
+        return self._planning_engine
+
+    @property
     def engine(self):
         """
         Return cognition engine.
@@ -474,4 +514,5 @@ class CognitionService(Service):
             "has_reasoning": self._reasoning_controller is not None,
             "has_recorder": self._reasoning_recorder is not None,
             "has_reflection": self._reflection_engine is not None,
+            "has_planning": self._planning_engine is not None,
         }

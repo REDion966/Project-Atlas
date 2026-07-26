@@ -8,6 +8,7 @@ from atlas.reasoning.models import ReasoningPlan, ReasoningStep
 from atlas.reasoning.controller import ReasoningController
 from atlas.reasoning.outcomes import ReasoningOutcome, ReasoningRecorder
 from atlas.reasoning.reflection import ReflectionEngine, ReflectionSuggestion
+from atlas.reasoning.planning import PlanningEngine, PlanningPlan, PlanningStep
 
 
 __all__ = [
@@ -18,4 +19,7 @@ __all__ = [
     "ReasoningRecorder",
     "ReflectionEngine",
     "ReflectionSuggestion",
+    "PlanningEngine",
+    "PlanningPlan",
+    "PlanningStep",
 ]

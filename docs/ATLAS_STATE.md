@@ -9,12 +9,13 @@
 | Field | Value |
 |---|---|---|
 | | Branch | `phase5-memory-evolution` |
-| | HEAD | `e051b94` |
-| | Latest Tag | `phase-6.7-complete` |
-| | Latest Commit Message | Complete Phase 6.7 reflection foundation |
+| | HEAD | `<commit-hash>` |
+| | Latest Tag | `phase-6.8-complete` |
+| | Latest Commit Message | feat(reasoning): implement Phase 6.8 planning engine |
 
 **All Tags:**
-- `phase-6.7-complete` — current
+- `phase-6.8-complete` — current
+- `phase-6.7-complete`
 - `phase-6.6-complete`
 - `phase-6.5.2-complete`
 - `phase-6.5.1-complete`
@@ -27,18 +28,21 @@
 
 ## 2. Latest Checkpoint
 
-**Phase 6.7 — Reflection Foundation**
+**Phase 6.8 — Planning Engine**
 
 What was added:
-- `ReflectionEngine` pure logic analysis component
-- `ReflectionSuggestion` dataclass for structured analysis output
-- `_run_reflection()` method in `CognitionService` (optional)
-- `reflection_engine` property and `has_reflection` status key
-- `ReflectionEngine` creation and injection in `Atlas.start()`
+- `PlanningEngine` pure logic decomposition component
+- `PlanningPlan` and `PlanningStep` dataclasses with dependency tracking
+- `decompose()`, `validate()`, `next_steps()` public methods
+- `_run_planning()` integration in `CognitionService` reasoning pipeline (optional)
+- `planning_engine` property and `has_planning` status key
+- `PlanningEngine` creation and injection in `Atlas.start()`
 - Private Atlas-owned dependency (not in `ServiceContainer`)
-- Three initial analysis patterns: frequent failures, repeated routing, capability imbalance
-- 25 new unit and integration tests (`test_reflection_engine.py`, `test_reflection_wiring.py`)
-- Backward compatibility when reflection engine is missing
+- Plan validation: empty actions, unknown dependencies, circular dependency detection
+- Sub-goal extraction from multi-step reasoning plans
+- Sequential dependency chain with explicit dependency support
+- 39 new unit and integration tests (`test_planning_engine.py`, `test_planning_wiring.py`)
+- Backward compatibility when planning engine is missing
 
 ---
 
@@ -58,6 +62,7 @@ What was added:
 | **6.5.2** | **Reasoning outcome recording & observability** | **Complete** | **436** |
 | 6.6 | Model routing subsystem | Complete | 456 |
 | **6.7** | **Reflection foundation** | **Complete** | **481** |
+| **6.8** | **Planning engine** | **Complete** | **520** |
 
 ---
 
@@ -101,6 +106,7 @@ ConversationService
     │       ├──→ Reasoning pipeline   ← Phase 6.5.1
     │       │       │
     │       │       ├──→ ReasoningController.create_plan()
+    │       │       ├──→ PlanningEngine.decompose()  ← Phase 6.8
     │       │       ├──→ CapabilityAnalyzer.analyze()
     │       │       ├──→ CapabilityRouter.route()
     │       │       └──→ CapabilityDispatcher.dispatch()
@@ -132,6 +138,9 @@ CognitionDecision
     │
     ▼
 ReasoningController          ← decision → ReasoningPlan
+    │
+    ▼
+PlanningEngine.decompose()   ← Phase 6.8 (optional)
     │
     ▼
 CapabilityAnalyzer           ← plan → list[Capability]
@@ -198,6 +207,7 @@ Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording a
 | Routing | ✅ Implemented |
 | Dispatch | ✅ Implemented |
 | Outcome recording | ✅ Implemented |
+| Plan decomposition | ✅ Implemented (`PlanningEngine`, Phase 6.8) |
 | Learning infrastructure | ✅ Implemented (`LearningManager`, `KnowledgeFeedback`) |
 
 ### 5.3 Missing Capabilities
@@ -223,7 +233,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 
 ## 6. Current Test Status
 
-**481 passing tests**
+**520 passing tests**
 
 ### 6.1 Test Progression
 
@@ -241,6 +251,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | Phase 6.5.2 | 436 |
 | Phase 6.6 | 456 |
 | **Phase 6.7** | **481** |
+| **Phase 6.8** | **520** |
 
 
 ### 6.2 Key Test Files
@@ -307,10 +318,9 @@ Deferred:
 | 4 | Memory storage is JSON-based | No concurrent write protection |
 | 5 | Single AI provider per session | No model routing yet |
 | 6 | Reflection analysis is in-memory only | No disk persistence; suggestions lost on shutdown |
-| 7 | No planning engine | Cannot decompose complex goals |
-| 8 | No tool intelligence | Cannot dynamically choose real tools |
-| 9 | No autonomous improvement | Bounded optimisation not implemented |
-| 10 | Three empty documentation files | `developer/coding-standards.md`, `roadmap/roadmap-v1.md`, `sprints/sprint-01.md` |
+| 7 | No tool intelligence | Cannot dynamically choose real tools |
+| 8 | No autonomous improvement | Bounded optimisation not implemented |
+| 9 | Three empty documentation files | `developer/coding-standards.md`, `roadmap/roadmap-v1.md`, `sprints/sprint-01.md` |
 
 ---
 
@@ -382,9 +392,9 @@ A phase is complete only after:
 | Phase 6.5.2 Reasoning Outcome Recording | ✅ Complete |
 | Phase 6.6 Model Routing | ✅ Complete |
 | **Phase 6.7 Reflection Foundation** | **✅ Complete** |
-| Phase 6.8 Planning Engine | 🟡 Next |
-| Phase 6.9 Tool Intelligence | Planned |
-| Phase 6.10+ Continuous Improvement | Conceptual |
+| **Phase 6.8 Planning Engine** | **✅ Complete** |
+| Phase 6.9 Tool Intelligence | 🟡 Next |
+| Phase 6.10+ Continuous Improvement | Planned |
 
 ---
 
@@ -400,14 +410,14 @@ A phase is complete only after:
    git rev-parse HEAD
    git tag --list
    ```
-   Expected: branch `phase5-memory-evolution`, HEAD `e051b94`, tag `phase-6.7-complete`.
+   Expected: branch `phase5-memory-evolution`, HEAD `<commit-hash>`, tag `phase-6.8-complete`.
 4. Run the full test suite:
    ```
    pytest
    ```
-5. Confirm **481 tests passing**.
-6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, and `atlas/reasoning/reflection.py`.
-7. Pick up from **Phase 6.8 — Planning Engine**.
+5. Confirm **520 tests passing**.
+6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, and `atlas/reasoning/reflection.py`.
+7. Pick up from **Phase 6.9 — Tool Intelligence**.
 8. Do not modify legacy `atlas/intelligence/` components.
 9. Preserve all existing public APIs.
 10. Add tests for any new functionality.

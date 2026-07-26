@@ -1,12 +1,5 @@
-- [x] Inspect all relevant files
-- [x] Plan changes and verify safety
-- [x] Update atlas/kernel/atlas.py:
-  - [x] Add import for CognitionService from atlas.services.cognition_service
-  - [x] Remove duplicate CognitiveLoop import (line 26)
-  - [x] Remove duplicate CognitiveLoop creation (lines 169-172)
-  - [x] Instantiate CognitionService using existing DI patterns
-  - [x] Register under new key "cognition_service"
-  - [x] Keep existing "cognition" and "cognitive" registrations intact
-- [x] Update tests to verify new registration
-- [x] Run all 213 tests — ALL PASS
-- [x] Report results
+- [x] Complete finalization of Phase 6.8
+- [ ] Remove unused import from engine.py
+- [ ] Update ATLAS_STATE.md
+- [ ] Run ruff check . and pytest -q
+- [ ] Git add, commit
