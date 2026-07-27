@@ -15,6 +15,7 @@ Every entry point deepens understanding instead of accumulating duplicates.
 
 from typing import Any
 
+from atlas.experience.models import StructuredExperience
 from atlas.understanding.models import (
     BehavioralSignal,
     Concept,
@@ -26,6 +27,7 @@ from atlas.understanding.models import (
     BehaviorExtractor,
 )
 from atlas.understanding.concept_extractor import ConceptExtractor
+from atlas.understanding.experience_bridge import ExperienceBridge
 from atlas.understanding.pattern_analyzer import PatternAnalyzer
 from atlas.understanding.understanding_graph import UnderstandingGraph
 from atlas.understanding.understanding_memory import UnderstandingMemory
@@ -64,12 +66,14 @@ class UnderstandingEngine:
         insight_consolidator: InsightConsolidator | None = None,
         understanding_scorer: UnderstandingScorer | None = None,
         abstraction_registry: AbstractionRegistry | None = None,
+        experience_bridge: ExperienceBridge | None = None,
     ) -> None:
         self._memory = memory or UnderstandingMemory()
         self._graph = graph or UnderstandingGraph()
         self._extractor = extractor or ConceptExtractor()
         self._analyzer = analyzer or PatternAnalyzer()
         self._behavior_extractor = behavior_extractor or BehaviorExtractor()
+        self._experience_bridge = experience_bridge or ExperienceBridge()
 
         # Consolidation layer — pass storage refs for auto-sync
         self._concept_consolidator = concept_consolidator or ConceptConsolidator(
@@ -134,8 +138,33 @@ class UnderstandingEngine:
 
         return self._run_pipeline(source=source or "observation", text=combined_text)
 
+    def process_experiences(
+        self,
+        experiences: list[StructuredExperience],
+        source: str = "experience_bridge",
+    ) -> list[UnderstandingInsight]:
+        """
+        Process structured experiences through the full consolidation pipeline.
+
+        Uses ExperienceBridge to transform experiences into concepts, patterns,
+        insights, and relationships, then consolidates them through the same
+        path as process_text().
+        """
+        if not experiences:
+            return []
+
+        bridge_result = self._experience_bridge.transform(experiences)
+
+        return self._consolidate_and_store(
+            concepts=bridge_result.concepts,
+            relationships=bridge_result.relationships,
+            patterns=bridge_result.patterns,
+            insights=bridge_result.insights,
+            source=source,
+        )
+
     def _run_pipeline(self, source: str, text: str) -> list[UnderstandingInsight]:
-        """Common pipeline with full consolidation for both entry points."""
+        """Common pipeline with full consolidation for text/observation input."""
 
         # 1. Extract raw concepts
         raw_concepts = self._extractor.extract_from_text(text, source=source)
@@ -158,10 +187,52 @@ class UnderstandingEngine:
         # 4. Auto-connect concepts → relationships
         new_relationships = self._auto_connect_concepts(concepts)
 
-        # 5. Consolidate relationships (authoritative source: memory)
+        # 5-10. Consolidation and storage through shared path
+        return self._consolidate_and_store(
+            concepts=concepts,
+            relationships=new_relationships,
+            patterns=self._analyzer.analyze_concepts(concepts),
+            insights=self._build_text_insights(concepts, source),
+            source=source,
+            text=text,
+        )
+
+    def _consolidate_and_store(
+        self,
+        concepts: list[Concept],
+        relationships: list[Relationship],
+        patterns: list[Pattern],
+        insights: list[UnderstandingInsight],
+        source: str,
+        text: str | None = None,
+    ) -> list[UnderstandingInsight]:
+        """
+        Shared consolidation path for all understanding inputs.
+
+        This method is used by process_text(), process_observation(), and
+        process_experiences() to avoid duplicating consolidation logic.
+        """
+        # 0. Consolidate concepts against existing graph (storage-aware)
+        existing_concepts = self._graph.get_all_concepts()
+        concepts = self._concept_consolidator.consolidate(concepts, existing_concepts)
+
+        # 1. Generate abstractions (only meaningful for text-derived concepts;
+        # experience-derived concepts may already be abstract, but running
+        # abstraction registry is safe and idempotent).
+        abstractions = self._abstraction_registry.generate_abstractions(concepts)
+        for abs_concept in abstractions:
+            merged = self._concept_consolidator.try_merge_with_existing(
+                abs_concept, self._graph.get_all_concepts(),
+            )
+            if merged is None:
+                self._graph.add_concepts([abs_concept])
+                self._memory.store_concept(abs_concept)
+                concepts = concepts + [abs_concept]
+
+        # 2. Consolidate relationships (authoritative source: memory)
         existing_rels = self._memory.get_relationships()
         consolidated_rels = self._relationship_consolidator.consolidate(
-            new_relationships, existing_rels,
+            relationships, existing_rels,
         )
         # Sync: clear memory relationships, re-add consolidated
         self._memory.clear_relationships()
@@ -169,28 +240,29 @@ class UnderstandingEngine:
             self._memory.store_relationship(rel)
             self._graph.add_relationship(rel)
 
-        # 6. Detect patterns
-        raw_patterns = self._analyzer.analyze_concepts(concepts)
-
-        # 7. Consolidate patterns
+        # 3. Consolidate patterns
         existing_patterns = self._memory.get_patterns()
-        patterns = self._pattern_consolidator.consolidate(raw_patterns, existing_patterns)
+        consolidated_patterns = self._pattern_consolidator.consolidate(
+            patterns, existing_patterns,
+        )
         self._memory.clear_patterns()
-        for pattern in patterns:
+        for pattern in consolidated_patterns:
             self._memory.store_pattern(pattern)
 
-        # 8. Generate concept insights
+        # 4. Generate and consolidate insights
         raw_insights: list[UnderstandingInsight] = []
         for concept in concepts:
             insight = self._generate_concept_insight(concept)
             raw_insights.append(insight)
 
-        for pattern in patterns:
+        for pattern in consolidated_patterns:
             insight = self._generate_pattern_insight(pattern, concepts)
             if insight is not None:
                 raw_insights.append(insight)
 
-        # 9. Consolidate insights
+        # Add externally supplied insights (e.g., from experience bridge)
+        raw_insights.extend(insights)
+
         existing_insights = self._memory.get_insights()
         consolidated_insights = self._insight_consolidator.consolidate(
             raw_insights, existing_insights,
@@ -199,12 +271,24 @@ class UnderstandingEngine:
         for ins in consolidated_insights:
             self._memory.store_insight(ins)
 
-        # 10. Behavioral signals
-        signals = self._behavior_extractor.extract_signals(text, source=source)
-        for signal in signals:
-            self._memory.store_signal(signal)
+        # 5. Behavioral signals (only when text is provided)
+        if text is not None:
+            signals = self._behavior_extractor.extract_signals(text, source=source)
+            for signal in signals:
+                self._memory.store_signal(signal)
 
         return consolidated_insights
+
+    def _build_text_insights(
+        self,
+        concepts: list[Concept],
+        source: str,
+    ) -> list[UnderstandingInsight]:
+        """Build initial insights for text-derived concepts (legacy helper)."""
+        # Text pipeline does not pre-generate insights; they are generated
+        # inside _consolidate_and_store. This helper returns an empty list
+        # so the signature remains uniform.
+        return []
 
     # ------------------------------------------------------------------
     # Analysis queries
