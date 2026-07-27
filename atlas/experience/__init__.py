@@ -1,5 +1,5 @@
 """
-Atlas Experience & Self-Model — Phase 9.0
+Atlas Experience & Self-Model — Phase 9.1
 
 Persistent experience accumulation and self-model evolution.
 Captures every cognitive pipeline execution as a structured experience,
@@ -16,6 +16,8 @@ from atlas.experience.models import (
     SelfModelSnapshot,
     GoalOutcome,
 )
+from atlas.experience.storage_interface import ExperienceStorage, RestoreResult
+from atlas.experience import serialization
 from atlas.experience.experience_repository import ExperienceRepository
 from atlas.experience.experience_accumulator import ExperienceAccumulator
 from atlas.experience.trend_analyzer import TrendAnalyzer
@@ -28,6 +30,9 @@ __all__ = [
     "TrendAnalysis",
     "SelfModelSnapshot",
     "GoalOutcome",
+    "ExperienceStorage",
+    "RestoreResult",
+    "serialization",
     "ExperienceRepository",
     "ExperienceAccumulator",
     "TrendAnalyzer",

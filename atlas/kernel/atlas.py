@@ -65,10 +65,12 @@ from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 from atlas.goals.goal_repository import GoalRepository
 
-# --- Phase 9.0: Experience & Self-Model ---
+# --- Phase 9.1: Experience & Self-Model ---
 from atlas.experience.experience_repository import ExperienceRepository
 from atlas.experience.experience_accumulator import ExperienceAccumulator
 from atlas.experience.self_model_engine import SelfModelEngine
+from atlas.experience.serialization import snapshot_to_dict
+from atlas.storage.experience_storage import SQLiteExperienceStorage
 
 
 class Atlas:
@@ -283,11 +285,18 @@ class Atlas:
             repository=self._goal_repository,
         )
 
-        # --- Phase 9.0: Experience & Self-Model ---
-        self._experience_repository = ExperienceRepository()
+        # --- Phase 9.1: Experience & Self-Model with persistence ---
+        storage = SQLiteExperienceStorage()
+        storage.initialize()
+
+        self._experience_repository = ExperienceRepository(storage=storage)
+        restore_result = self._experience_repository.restore()
+
         self._experience_accumulator = ExperienceAccumulator(
             repository=self._experience_repository,
         )
+        self._experience_accumulator.seed_counter(restore_result.max_experience_id or 0)
+
         self._self_model_engine = SelfModelEngine(
             repository=self._experience_repository,
             identity_engine=self._identity_engine,
@@ -296,6 +305,23 @@ class Atlas:
             window_size=20,
             update_interval=5,
         )
+        self._self_model_engine.seed_snapshot_counter(restore_result.max_snapshot_id or 0)
+        if restore_result.latest_snapshot is not None:
+            self._self_model_engine.restore_snapshot(restore_result.latest_snapshot)
+
+        if storage.is_available():
+            self._event_bus.publish(
+                "experience.storage.initialized",
+                {
+                    "restored_experiences": restore_result.experience_count,
+                    "db_path": str(storage.db_path),
+                },
+            )
+        else:
+            self._event_bus.publish(
+                "experience.storage.unavailable",
+                {"mode": "memory_only"},
+            )
 
         # --- Phase 8.2: Create FeedbackCoordinator ---
         self._feedback_coordinator = FeedbackCoordinator(
@@ -434,6 +460,20 @@ class Atlas:
     def shutdown(self):
         if not self._started:
             return
+
+        # --- Phase 9.1: Persist pending self-model snapshot before cleanup ---
+        if self._self_model_engine is not None and self._experience_repository is not None:
+            snapshot = self._self_model_engine.get_snapshot()
+            if snapshot is not None:
+                self._experience_repository.persist_snapshot(snapshot_to_dict(snapshot))
+
+            storage = getattr(self._experience_repository, "_storage", None)
+            if storage is not None and hasattr(storage, "close"):
+                try:
+                    storage.close()
+                    self._event_bus.publish("experience.storage.closed", {})
+                except Exception:
+                    pass
 
         self._container.stop_all()
         self._container.clear()

@@ -1,0 +1,202 @@
+"""
+Atlas Storage Migration Framework — Phase 9.1
+
+Simple additive migration system for SQLite-backed storage. Each migration
+is a tuple of (sql_statement, description). Migrations are applied in
+ascending version order inside a transaction.
+
+No destructive migrations are permitted.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from typing import Any
+
+
+CURRENT_SCHEMA_VERSION = 1
+
+# Migration chain: version_from -> list of (sql, description)
+MIGRATIONS: dict[int, list[tuple[str, str]]] = {
+    # Initial schema is created by _create_initial_schema; it represents
+    # version 1, so no SQL migrations are needed here yet.
+}
+
+
+def _create_initial_schema() -> list[str]:
+    """Return the initial schema DDL for version 1."""
+    return [
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS experiences (
+            experience_id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            duration_ms REAL NOT NULL,
+            pipeline_path TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            user_input TEXT DEFAULT '',
+            conversation_history_length INTEGER DEFAULT 0,
+            understanding_insights_count INTEGER DEFAULT 0,
+            concepts_extracted TEXT DEFAULT '[]',
+            world_model_entities INTEGER DEFAULT 0,
+            world_model_relations INTEGER DEFAULT 0,
+            reasoning_goal TEXT DEFAULT '',
+            reasoning_capabilities TEXT DEFAULT '[]',
+            reasoning_success_count INTEGER DEFAULT 0,
+            reasoning_total_count INTEGER DEFAULT 0,
+            planning_goal TEXT DEFAULT '',
+            planning_step_count INTEGER DEFAULT 0,
+            planning_validation_errors INTEGER DEFAULT 0,
+            tool_name TEXT DEFAULT '',
+            tool_success INTEGER DEFAULT 0,
+            learning_insights_count INTEGER DEFAULT 0,
+            reflection_suggestions_count INTEGER DEFAULT 0,
+            goal_recommendations_count INTEGER DEFAULT 0,
+            identity_version INTEGER DEFAULT 0,
+            identity_belief_count INTEGER DEFAULT 0,
+            identity_capability_count INTEGER DEFAULT 0
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_experiences_timestamp
+            ON experiences(timestamp DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_experiences_outcome
+            ON experiences(outcome)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS trend_analyses (
+            analysis_id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            window_size INTEGER NOT NULL,
+            overall_success_rate REAL DEFAULT 0,
+            success_rate_trend TEXT DEFAULT 'stable',
+            avg_understanding_insights REAL DEFAULT 0,
+            understanding_trend TEXT DEFAULT 'stable',
+            avg_reasoning_success REAL DEFAULT 0,
+            reasoning_trend TEXT DEFAULT 'stable',
+            avg_planning_errors REAL DEFAULT 0,
+            planning_trend TEXT DEFAULT 'stable',
+            tool_success_rate REAL DEFAULT 0,
+            tool_trend TEXT DEFAULT 'stable',
+            learning_insight_rate REAL DEFAULT 0,
+            learning_trend TEXT DEFAULT 'stable',
+            identity_stability REAL DEFAULT 0,
+            capability_trends TEXT DEFAULT '{}'
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS tracked_goals (
+            goal_id TEXT PRIMARY KEY,
+            recommendation_id TEXT DEFAULT '',
+            goal_title TEXT DEFAULT '',
+            proposed_at TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            outcome_reason TEXT DEFAULT '',
+            related_experience_ids TEXT DEFAULT '[]',
+            last_evaluated TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS self_model_snapshots (
+            snapshot_id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            total_experiences INTEGER NOT NULL,
+            overall_success_rate REAL NOT NULL,
+            capability_assessments TEXT DEFAULT '{}',
+            belief_evidence TEXT DEFAULT '{}',
+            trend_summary TEXT DEFAULT '',
+            identity_version INTEGER DEFAULT 0,
+            last_trend_analysis TEXT,
+            recent_improvement_evidence TEXT DEFAULT '[]',
+            persistent_challenges TEXT DEFAULT '[]'
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp
+            ON self_model_snapshots(timestamp DESC)
+        """,
+    ]
+
+
+def _ensure_schema_version_table(conn: sqlite3.Connection) -> None:
+    """Create the schema_version table if it does not exist."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _get_current_version(conn: sqlite3.Connection) -> int:
+    """Return the currently recorded schema version, or 0 if unset."""
+    _ensure_schema_version_table(conn)
+    cursor = conn.execute("SELECT MAX(version) FROM schema_version")
+    row = cursor.fetchone()
+    return row[0] or 0
+
+
+def _record_version(conn: sqlite3.Connection, version: int) -> None:
+    """Record that a schema version has been applied."""
+    from datetime import datetime
+
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_version(version, applied_at) VALUES (?, ?)",
+        (version, datetime.now().isoformat()),
+    )
+
+
+def apply_migrations(conn: sqlite3.Connection) -> int:
+    """
+    Apply all pending migrations to reach CURRENT_SCHEMA_VERSION.
+
+    The initial schema (version 1) is created automatically if no
+    schema_version row exists. Subsequent migrations are loaded from
+    MIGRATIONS and applied transactionally.
+
+    Args:
+        conn: An open sqlite3 connection.
+
+    Returns:
+        The final schema version.
+
+    Raises:
+        sqlite3.Error: If a migration fails. The transaction is rolled back.
+    """
+    current = _get_current_version(conn)
+
+    # Create the initial schema if we are at version 0.
+    if current == 0:
+        for ddl in _create_initial_schema():
+            conn.execute(ddl)
+        _record_version(conn, 1)
+        current = 1
+
+    # Apply any pending migrations from MIGRATIONS.
+    for version in range(current + 1, CURRENT_SCHEMA_VERSION + 1):
+        steps = MIGRATIONS.get(version)
+        if not steps:
+            # No migration steps recorded for this version; just record it.
+            _record_version(conn, version)
+            continue
+
+        with conn:
+            for sql, _description in steps:
+                conn.execute(sql)
+            _record_version(conn, version)
+
+    return _get_current_version(conn)
+
+
+def get_schema_version(conn: sqlite3.Connection) -> int:
+    """Return the current schema version without applying migrations."""
+    return _get_current_version(conn)

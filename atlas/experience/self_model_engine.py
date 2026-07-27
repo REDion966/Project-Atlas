@@ -23,6 +23,7 @@ from atlas.experience.models import (
     TrendAnalysis,
     TrackedGoal,
 )
+from atlas.experience import serialization
 from atlas.experience.experience_repository import ExperienceRepository
 from atlas.experience.trend_analyzer import TrendAnalyzer
 from atlas.experience.outcome_tracker import OutcomeTracker
@@ -109,6 +110,14 @@ class SelfModelEngine:
 
         snapshot = self._build_snapshot(analysis, experiences, persistent_challenges)
         self._latest_snapshot = snapshot
+
+        # Persist snapshot through repository. Best-effort; storage failures
+        # are swallowed so the pipeline is never blocked by persistence.
+        try:
+            self._repository.persist_snapshot(serialization.snapshot_to_dict(snapshot))
+        except Exception:
+            pass
+
         return snapshot
 
     def get_snapshot(self) -> SelfModelSnapshot | None:
@@ -122,6 +131,31 @@ class SelfModelEngine:
     @property
     def update_count(self) -> int:
         return self._update_counter
+
+    def seed_snapshot_counter(self, n: int) -> None:
+        """
+        Seed the snapshot counter from a restored state.
+
+        Prevents newly generated snapshot IDs from colliding with snapshots
+        loaded from persistent storage on startup.
+        """
+        self._snapshot_counter = max(0, n)
+
+    def restore_snapshot(self, snapshot_dict: dict) -> SelfModelSnapshot | None:
+        """
+        Restore the latest self-model snapshot from a dictionary.
+
+        Sets _latest_snapshot and synchronizes _snapshot_counter with the
+        restored snapshot_id so subsequent snapshots continue the sequence.
+        """
+        snapshot = serialization.dict_to_snapshot(snapshot_dict)
+        self._latest_snapshot = snapshot
+        sid = snapshot.snapshot_id
+        if isinstance(sid, str) and sid.startswith("SELF-") and sid[5:].isdigit():
+            # _build_snapshot pre-increments the counter before using it, so
+            # seed to the restored numeric ID; the next build will produce ID+1.
+            self._snapshot_counter = int(sid[5:])
+        return self._latest_snapshot
 
     # ------------------------------------------------------------------
     # Evidence feeding (approval-safe, never directly mutates identity)

@@ -105,6 +105,15 @@ class ExperienceAccumulator:
     def recorded_count(self) -> int:
         return self._repository.experience_count
 
+    def seed_counter(self, n: int) -> None:
+        """
+        Seed the experience counter from a restored state.
+
+        Ensures that newly recorded experience IDs do not collide with
+        experiences loaded from persistent storage on startup.
+        """
+        self._experience_counter = max(0, n)
+
     # ------------------------------------------------------------------
     # Extraction helpers (all defensive against missing attributes)
     # ------------------------------------------------------------------
