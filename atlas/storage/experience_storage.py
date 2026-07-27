@@ -343,15 +343,17 @@ class SQLiteExperienceStorage(ExperienceStorage):
                 outcome_reason, related_experience_ids, last_evaluated
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
+        proposed = data.get("proposed_at") or data.get("timestamp") or ""
+        evaluated = data.get("last_evaluated") or data.get("proposed_at") or data.get("timestamp") or ""
         params = (
             data.get("goal_id"),
             data.get("recommendation_id", ""),
             data.get("goal_title", ""),
-            data.get("timestamp") or data.get("proposed_at"),
+            proposed,
             data.get("outcome"),
             data.get("outcome_reason", ""),
             self._to_json(data.get("related_experience_ids", [])),
-            data.get("last_evaluated") or data.get("timestamp") or data.get("proposed_at"),
+            evaluated,
         )
         self._run_write(sql, params)
 

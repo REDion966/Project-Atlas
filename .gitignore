@@ -17,4 +17,4 @@ MagicMock/
 .continue/agents/new-config.yaml
 .continue/
 .env
-*.env
+*.envatlas_data/*.db

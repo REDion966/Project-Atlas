@@ -254,11 +254,21 @@ class ExperienceRepository:
         self._try_storage_write("store_snapshot", data)
 
     def _try_storage_write(self, method_name: str, data: dict) -> None:
-        """Call a storage write method, degrading gracefully on failure."""
+        """Call a storage write method, degrading gracefully on failure.
+
+        Uses explicit method routing (not dynamic getattr) for type safety
+        and early failure detection.
+        """
         if self._storage is None or not self._storage.is_available():
             return
         try:
-            write_method = getattr(self._storage, method_name)
-            write_method(data)
+            if method_name == "store_experience":
+                self._storage.store_experience(data)
+            elif method_name == "store_analysis":
+                self._storage.store_analysis(data)
+            elif method_name == "store_tracked_goal":
+                self._storage.store_tracked_goal(data)
+            elif method_name == "store_snapshot":
+                self._storage.store_snapshot(data)
         except Exception:
             logger.exception("Experience storage write failed for %s", method_name)

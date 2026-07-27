@@ -237,6 +237,19 @@ class RuntimeCoordinator:
         if self._self_model_engine is not None:
             self._self_model_engine.update()
 
+        # --- Phase 9.2a: Feed accumulated experiences into Understanding Engine ---
+        if (
+            self._experience_accumulator is not None
+            and self._understanding_engine is not None
+        ):
+            repo = self._experience_accumulator.repository
+            recent_experiences = repo.get_experiences(n=50)
+            if recent_experiences:
+                self._understanding_engine.process_experiences(
+                    experiences=recent_experiences,
+                    source="runtime_coordinator",
+                )
+
         # Publish pipeline completion event
         if self._event_bus is not None:
             self._event_bus.publish(
@@ -956,6 +969,11 @@ class RuntimeCoordinator:
         if identity_section:
             sections.append(identity_section)
 
+        # --- 1b. Self-Model Assessment (how Atlas is performing) ---
+        self_model_section = self._build_self_model_section()
+        if self_model_section:
+            sections.append(self_model_section)
+
         # --- 2. Conversation Context ---
         conv_section = self._build_conversation_section(state)
         if conv_section:
@@ -1009,6 +1027,49 @@ class RuntimeCoordinator:
     # ------------------------------------------------------------------
     # Individual cognitive context sections
     # ------------------------------------------------------------------
+
+    def _build_self_model_section(self) -> str:
+        """Build the Self-Model section from SelfModelEngine snapshot.
+
+        Appears after Identity and before Conversation context so the
+        LLM knows Atlas's performance state before seeing the current
+        input. If no snapshot is available the section is omitted silently.
+        """
+        if self._self_model_engine is None:
+            return ""
+        snapshot = self._self_model_engine.get_snapshot()
+        if snapshot is None:
+            return ""
+
+        lines = ["## Self-Model Assessment"]
+        lines.append(
+            f"Recent performance: {snapshot.overall_success_rate:.0%} "
+            f"success rate across {snapshot.total_experiences} pipeline executions."
+        )
+
+        if snapshot.capability_assessments:
+            lines.append("\nCapability confidence:")
+            for name, score in sorted(
+                snapshot.capability_assessments.items(),
+                key=lambda x: x[1],
+                reverse=True,
+            )[:5]:
+                lines.append(f"- {name}: {score:.0%}")
+
+        if snapshot.recent_improvement_evidence:
+            lines.append("\nRecent improvements:")
+            for ev in snapshot.recent_improvement_evidence[:3]:
+                lines.append(f"- {ev}")
+
+        if snapshot.persistent_challenges:
+            lines.append("\nChallenges:")
+            for ch in snapshot.persistent_challenges[:3]:
+                lines.append(f"- {ch}")
+
+        if snapshot.trend_summary:
+            lines.append(f"\nTrend summary: {snapshot.trend_summary}")
+
+        return "\n".join(lines)
 
     def _build_identity_section(self) -> str:
         """Build the Identity section from IdentityEngine."""

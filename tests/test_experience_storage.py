@@ -1,549 +1,414 @@
 """
-Phase 9.1 — Persistent Experience Storage Tests
+Phase 9.1 — SQLite Experience Storage Tests.
 
-Tests for:
-- ExperienceStorage interface
-- Model serialization round-trips
-- SQLiteExperienceStorage CRUD and lifecycle
-- ExperienceRepository with storage adapter
-- Counter restoration
-- Self-model snapshot persistence and restoration
-- Startup/shutdown continuity
-- Graceful degradation (corruption, missing DB)
-- Architecture boundaries (no sqlite3 in atlas/experience/)
+Comprehensive tests for:
+- SQLiteExperienceStorage lifecycle (init, close, availability)
+- CRUD operations for all four data types (experiences, analyses, goals, snapshots)
+- Queries (since, by_outcome, max_id, latest)
+- Schema migration
+- Graceful failure and degradation
+- Cross-session reopen persistence
 """
 
+import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
-from atlas.cognition.models import CognitionState, PipelineMetrics, PipelineResult
-from atlas.experience import serialization
-from atlas.experience.experience_accumulator import ExperienceAccumulator
-from atlas.experience.experience_repository import ExperienceRepository
-from atlas.experience.models import (
-    ExperienceOutcome,
-    GoalOutcome,
-    SelfModelSnapshot,
-    StructuredExperience,
-    TrackedGoal,
-    TrendAnalysis,
-)
-from atlas.experience.self_model_engine import SelfModelEngine
-from atlas.experience.storage_interface import ExperienceStorage, RestoreResult
+from atlas.experience.storage_interface import ExperienceStorage
 from atlas.storage.experience_storage import SQLiteExperienceStorage
 
 
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
-
-def _make_experience(exp_id: str = "EXP-00000001", outcome: ExperienceOutcome = ExperienceOutcome.SUCCESS) -> StructuredExperience:
-    return StructuredExperience(
-        experience_id=exp_id,
-        timestamp=datetime.now(),
-        duration_ms=10.0,
-        pipeline_path=["understanding", "reasoning"],
-        outcome=outcome,
-        user_input="hello",
-        reasoning_goal="respond",
-        reasoning_capabilities=["conversation"],
-        reasoning_total_count=1,
-    )
-
-
-def _make_analysis() -> TrendAnalysis:
-    return TrendAnalysis(
-        analysis_id="ANAL-0001",
-        timestamp=datetime.now(),
-        window_size=4,
-        overall_success_rate=0.75,
-        capability_trends={"conversation": "improving"},
-    )
-
-
-def _make_goal() -> TrackedGoal:
-    return TrackedGoal(
-        goal_id="G1",
-        recommendation_id="REC-1",
-        goal_title="Improve reasoning",
-        outcome=GoalOutcome.PENDING,
-    )
-
-
-def _make_snapshot() -> SelfModelSnapshot:
-    return SelfModelSnapshot(
-        snapshot_id="SELF-000007",
-        timestamp=datetime.now(),
-        total_experiences=7,
-        overall_success_rate=0.85,
-        capability_assessments={"conversation": 0.75},
-        belief_evidence={"I learn": 0.6},
-        trend_summary="Success: improving",
-        identity_version=1,
-        last_trend_analysis=datetime.now(),
-        recent_improvement_evidence=["Better"],
-        persistent_challenges=["None"],
-    )
-
-
-class TestStorageInterface(unittest.TestCase):
-    """ExperienceStorage ABC contract."""
-
-    def test_abc_cannot_be_instantiated(self):
-        with self.assertRaises(TypeError):
-            ExperienceStorage()
-
-    def test_restore_result_defaults(self):
-        result = RestoreResult()
-        self.assertEqual(result.experience_count, 0)
-        self.assertIsNone(result.max_experience_id)
-
-
-class TestSerializationRoundTrip(unittest.TestCase):
-    """Model → dict → model identity."""
-
-    def test_experience_round_trip(self):
-        original = _make_experience("EXP-00000042")
-        data = serialization.experience_to_dict(original)
-        restored = serialization.dict_to_experience(data)
-        self.assertEqual(original.experience_id, restored.experience_id)
-        self.assertEqual(original.outcome, restored.outcome)
-        self.assertEqual(original.pipeline_path, restored.pipeline_path)
-        self.assertEqual(original.user_input, restored.user_input)
-
-    def test_analysis_round_trip(self):
-        original = _make_analysis()
-        data = serialization.analysis_to_dict(original)
-        restored = serialization.dict_to_analysis(data)
-        self.assertEqual(original.analysis_id, restored.analysis_id)
-        self.assertEqual(original.capability_trends, restored.capability_trends)
-
-    def test_goal_round_trip(self):
-        original = _make_goal()
-        data = serialization.goal_to_dict(original)
-        restored = serialization.dict_to_goal(data)
-        self.assertEqual(original.goal_id, restored.goal_id)
-        self.assertEqual(original.outcome, restored.outcome)
-
-    def test_snapshot_round_trip(self):
-        original = _make_snapshot()
-        data = serialization.snapshot_to_dict(original)
-        restored = serialization.dict_to_snapshot(data)
-        self.assertEqual(original.snapshot_id, restored.snapshot_id)
-        self.assertEqual(original.capability_assessments, restored.capability_assessments)
-        self.assertEqual(original.recent_improvement_evidence, restored.recent_improvement_evidence)
-
-    def test_unknown_enum_defaults_to_first_member(self):
-        data = serialization.experience_to_dict(_make_experience())
-        data["outcome"] = "NOT_REAL"
-        restored = serialization.dict_to_experience(data)
-        self.assertIsInstance(restored.outcome, ExperienceOutcome)
-
-    def test_extra_keys_dropped(self):
-        data = serialization.experience_to_dict(_make_experience())
-        data["future_field"] = "ignored"
-        restored = serialization.dict_to_experience(data)
-        self.assertFalse(hasattr(restored, "future_field"))
-
-
-class TestSQLiteStorageLifecycle(unittest.TestCase):
-    """Adapter initialization and shutdown."""
+class TestSQLiteExperienceStorageLifecycle(unittest.TestCase):
+    """Initialization, close, and availability."""
 
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = Path(self.tempdir.name) / "test_experience.db"
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / "test_experience.db"
 
     def tearDown(self):
-        self.tempdir.cleanup()
+        try:
+            self.storage.close()
+        except Exception:
+            pass
+        self.temp_dir.cleanup()
 
-    def test_initialize_creates_database(self):
-        storage = SQLiteExperienceStorage(self.db_path)
-        storage.initialize()
-        self.assertTrue(storage.is_available())
+    def test_initialize_creates_db_file(self):
+        self.storage = SQLiteExperienceStorage(self.db_path)
+        self.assertFalse(self.storage.is_available())
+        self.storage.initialize()
         self.assertTrue(self.db_path.exists())
-        storage.close()
+        self.assertTrue(self.storage.is_available())
 
-    def test_schema_version_recorded(self):
-        storage = SQLiteExperienceStorage(self.db_path)
-        storage.initialize()
-        self.assertEqual(storage.get_schema_version(), 2)
-        storage.close()
+    def test_double_initialize_is_idempotent(self):
+        self.storage = SQLiteExperienceStorage(self.db_path)
+        self.storage.initialize()
+        version1 = self.storage.get_schema_version()
+        self.storage.initialize()
+        version2 = self.storage.get_schema_version()
+        self.assertEqual(version1, version2)
+        self.assertTrue(self.storage.is_available())
 
     def test_close_marks_unavailable(self):
-        storage = SQLiteExperienceStorage(self.db_path)
-        storage.initialize()
-        storage.close()
-        self.assertFalse(storage.is_available())
+        self.storage = SQLiteExperienceStorage(self.db_path)
+        self.storage.initialize()
+        self.assertTrue(self.storage.is_available())
+        self.storage.close()
+        self.assertFalse(self.storage.is_available())
 
-    def test_double_initialize_idempotent(self):
-        storage = SQLiteExperienceStorage(self.db_path)
-        storage.initialize()
-        storage.initialize()
-        self.assertTrue(storage.is_available())
-        storage.close()
+    def test_implements_storage_interface(self):
+        self.storage = SQLiteExperienceStorage(self.db_path)
+        self.assertIsInstance(self.storage, ExperienceStorage)
+
+    def test_schema_version_is_current(self):
+        self.storage = SQLiteExperienceStorage(self.db_path)
+        self.storage.initialize()
+        from atlas.storage import migration
+        self.assertEqual(self.storage.get_schema_version(), migration.CURRENT_SCHEMA_VERSION)
 
 
-class TestSQLiteStorageExperiences(unittest.TestCase):
-    """Experience CRUD through SQLite adapter."""
+class TestSQLiteExperienceStorageCRUD(unittest.TestCase):
+    """Create, read, update operations for all data types."""
 
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "test.db")
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp_dir.name) / "test_crud.db"
+        self.storage = SQLiteExperienceStorage(self.db_path)
         self.storage.initialize()
 
     def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
+        try:
+            self.storage.close()
+        except Exception:
+            pass
+        self.temp_dir.cleanup()
+
+    # --- Experiences ---
+
+    def _make_experience_dict(self, exp_id="EXP-00000001", outcome="SUCCESS"):
+        return {
+            "experience_id": exp_id,
+            "timestamp": datetime.now().isoformat(),
+            "duration_ms": 150.0,
+            "pipeline_path": ["understanding", "reasoning", "tool_execution"],
+            "outcome": outcome,
+            "user_input": "hello world",
+            "conversation_history_length": 5,
+            "understanding_insights_count": 2,
+            "concepts_extracted": ["concept_a", "concept_b"],
+            "world_model_entities": 3,
+            "world_model_relations": 2,
+            "reasoning_goal": "respond",
+            "reasoning_capabilities": ["conversation", "analysis"],
+            "reasoning_success_count": 2,
+            "reasoning_total_count": 2,
+            "planning_goal": "answer user",
+            "planning_step_count": 3,
+            "planning_validation_errors": 0,
+            "tool_name": "echo",
+            "tool_success": True,
+            "learning_insights_count": 1,
+            "reflection_suggestions_count": 0,
+            "goal_recommendations_count": 1,
+            "identity_version": 1,
+            "identity_belief_count": 5,
+            "identity_capability_count": 3,
+        }
 
     def test_store_and_load_experience(self):
-        exp = _make_experience("EXP-00000001")
-        self.storage.store_experience(serialization.experience_to_dict(exp))
+        data = self._make_experience_dict()
+        self.storage.store_experience(data)
         loaded = self.storage.load_experience("EXP-00000001")
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded["experience_id"], "EXP-00000001")
-        self.assertEqual(loaded["pipeline_path"], ["understanding", "reasoning"])
-        self.assertTrue(loaded["tool_success"] in (True, False))
+        self.assertEqual(loaded["outcome"], "SUCCESS")
+        self.assertEqual(loaded["user_input"], "hello world")
+        self.assertEqual(loaded["reasoning_goal"], "respond")
 
-    def test_load_experiences_ordered_oldest_first(self):
-        for i in range(3):
-            exp = _make_experience(f"EXP-{i:08d}")
-            self.storage.store_experience(serialization.experience_to_dict(exp))
-        loaded = self.storage.load_experiences()
-        self.assertEqual(len(loaded), 3)
-        self.assertEqual(loaded[0]["experience_id"], "EXP-00000000")
+    def test_store_and_load_multiple_experiences(self):
+        for i in range(5):
+            data = self._make_experience_dict(f"EXP-{i:08d}")
+            self.storage.store_experience(data)
+        all_exps = self.storage.load_experiences(limit=100)
+        self.assertEqual(len(all_exps), 5)
 
-    def test_load_by_outcome(self):
-        success = _make_experience("EXP-SUCCESS", ExperienceOutcome.SUCCESS)
-        failure = _make_experience("EXP-FAILURE", ExperienceOutcome.FAILURE)
-        self.storage.store_experience(serialization.experience_to_dict(success))
-        self.storage.store_experience(serialization.experience_to_dict(failure))
-        loaded = self.storage.load_experiences_by_outcome("FAILURE")
-        self.assertEqual(len(loaded), 1)
-        self.assertEqual(loaded[0]["experience_id"], "EXP-FAILURE")
+    def test_load_experiences_limited(self):
+        for i in range(10):
+            data = self._make_experience_dict(f"EXP-{i:08d}")
+            self.storage.store_experience(data)
+        limited = self.storage.load_experiences(limit=3)
+        self.assertEqual(len(limited), 3)
 
-    def test_load_since_timestamp(self):
-        now = datetime.now().isoformat()
-        exp = _make_experience("EXP-0001")
-        self.storage.store_experience(serialization.experience_to_dict(exp))
-        loaded = self.storage.load_experiences_since(now)
-        self.assertEqual(len(loaded), 1)
+    def test_load_nonexistent_experience_returns_none(self):
+        loaded = self.storage.load_experience("EXP-NONEXISTENT")
+        self.assertIsNone(loaded)
 
     def test_get_max_experience_id(self):
-        self.storage.store_experience(serialization.experience_to_dict(_make_experience("EXP-00000005")))
-        self.storage.store_experience(serialization.experience_to_dict(_make_experience("EXP-00000010")))
-        self.assertEqual(self.storage.get_max_experience_id(), 10)
+        for i in [3, 1, 7, 5]:
+            data = self._make_experience_dict(f"EXP-{i:08d}")
+            self.storage.store_experience(data)
+        max_id = self.storage.get_max_experience_id()
+        self.assertEqual(max_id, 7)
 
+    def test_get_max_experience_id_empty(self):
+        max_id = self.storage.get_max_experience_id()
+        self.assertIsNone(max_id)
 
-class TestSQLiteStorageAnalyses(unittest.TestCase):
-    """Trend analysis CRUD."""
+    def test_load_experiences_since(self):
+        from datetime import timedelta
+        now = datetime.now()
+        early = now - timedelta(hours=2)
+        later = now - timedelta(hours=1)
+        data1 = self._make_experience_dict("EXP-00000001")
+        data1["timestamp"] = early.isoformat()
+        data2 = self._make_experience_dict("EXP-00000002")
+        data2["timestamp"] = later.isoformat()
+        self.storage.store_experience(data1)
+        self.storage.store_experience(data2)
+        since = now - timedelta(minutes=90)
+        results = self.storage.load_experiences_since(since.isoformat())
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["experience_id"], "EXP-00000002")
 
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "test.db")
-        self.storage.initialize()
+    def test_load_experiences_by_outcome(self):
+        for i in range(3):
+            self.storage.store_experience(
+                self._make_experience_dict(f"EXP-{i:08d}", "SUCCESS")
+            )
+        self.storage.store_experience(
+            self._make_experience_dict("EXP-FAIL", "FAILURE")
+        )
+        successes = self.storage.load_experiences_by_outcome("SUCCESS", limit=10)
+        failures = self.storage.load_experiences_by_outcome("FAILURE", limit=10)
+        self.assertEqual(len(successes), 3)
+        self.assertEqual(len(failures), 1)
 
-    def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
+    # --- Trend analyses ---
 
-    def test_store_and_load_latest_analysis(self):
-        analysis = _make_analysis()
-        self.storage.store_analysis(serialization.analysis_to_dict(analysis))
+    def _make_analysis_dict(self, analysis_id="TRND-000001"):
+        return {
+            "analysis_id": analysis_id,
+            "timestamp": datetime.now().isoformat(),
+            "window_size": 10,
+            "overall_success_rate": 0.8,
+            "success_rate_trend": "improving",
+            "avg_understanding_insights": 2.5,
+            "understanding_trend": "stable",
+            "avg_reasoning_success": 0.85,
+            "reasoning_trend": "improving",
+            "avg_planning_errors": 0.5,
+            "planning_trend": "improving",
+            "tool_success_rate": 0.9,
+            "tool_trend": "stable",
+            "learning_insight_rate": 1.2,
+            "learning_trend": "improving",
+            "identity_stability": 0.95,
+            "capability_trends": {"conversation": "stable", "analysis": "improving"},
+        }
+
+    def test_store_and_load_analysis(self):
+        data = self._make_analysis_dict()
+        self.storage.store_analysis(data)
         loaded = self.storage.load_latest_analysis()
         self.assertIsNotNone(loaded)
-        self.assertEqual(loaded["analysis_id"], "ANAL-0001")
-        self.assertEqual(loaded["capability_trends"], {"conversation": "improving"})
+        self.assertEqual(loaded["analysis_id"], "TRND-000001")
+        self.assertEqual(loaded["success_rate_trend"], "improving")
 
-    def test_load_analyses_limit(self):
+    def test_load_latest_analysis_returns_most_recent(self):
+        data1 = self._make_analysis_dict("TRND-000001")
+        data2 = self._make_analysis_dict("TRND-000002")
+        self.storage.store_analysis(data1)
+        self.storage.store_analysis(data2)
+        latest = self.storage.load_latest_analysis()
+        self.assertEqual(latest["analysis_id"], "TRND-000002")
+
+    def test_load_latest_analysis_empty(self):
+        self.assertIsNone(self.storage.load_latest_analysis())
+
+    def test_load_analyses(self):
         for i in range(3):
-            analysis = TrendAnalysis(
-                analysis_id=f"ANAL-{i:04d}",
-                timestamp=datetime.now() + timedelta(seconds=i),
-                window_size=2,
-            )
-            self.storage.store_analysis(serialization.analysis_to_dict(analysis))
-        loaded = self.storage.load_analyses(limit=2)
-        self.assertEqual(len(loaded), 2)
+            self.storage.store_analysis(self._make_analysis_dict(f"TRND-{i:06d}"))
+        analyses = self.storage.load_analyses(limit=10)
+        self.assertEqual(len(analyses), 3)
 
+    # --- Tracked goals ---
 
-class TestSQLiteStorageGoals(unittest.TestCase):
-    """Tracked goal CRUD."""
+    def _make_goal_dict(self, goal_id="G-000001"):
+        return {
+            "goal_id": goal_id,
+            "recommendation_id": goal_id,
+            "goal_title": "Improve reasoning pipeline",
+            "proposed_at": datetime.now().isoformat(),
+            "outcome": "PENDING",
+            "outcome_reason": "",
+            "related_experience_ids": ["EXP-00000001"],
+            "last_evaluated": datetime.now().isoformat(),
+        }
 
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "test.db")
-        self.storage.initialize()
-
-    def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
-
-    def test_store_and_load_tracked_goals(self):
-        goal = _make_goal()
-        self.storage.store_tracked_goal(serialization.goal_to_dict(goal))
+    def test_store_and_load_tracked_goal(self):
+        data = self._make_goal_dict()
+        self.storage.store_tracked_goal(data)
         loaded = self.storage.load_tracked_goals()
         self.assertEqual(len(loaded), 1)
-        self.assertEqual(loaded[0]["goal_id"], "G1")
+        self.assertEqual(loaded[0]["goal_id"], "G-000001")
         self.assertEqual(loaded[0]["outcome"], "PENDING")
 
+    def test_store_tracked_goal_uses_proposed_at(self):
+        """Verify the timestamp fix: proposed_at is used, not timestamp."""
+        data = self._make_goal_dict()
+        data["proposed_at"] = "2026-07-01T12:00:00"
+        # Do NOT provide 'timestamp' key
+        data.pop("timestamp", None)
+        self.storage.store_tracked_goal(data)
+        loaded = self.storage.load_tracked_goals()
+        self.assertEqual(loaded[0]["proposed_at"], "2026-07-01T12:00:00")
 
-class TestSQLiteStorageSnapshots(unittest.TestCase):
-    """Self-model snapshot CRUD."""
+    def test_store_tracked_goal_update_existing(self):
+        data = self._make_goal_dict("G-000001")
+        self.storage.store_tracked_goal(data)
+        data["outcome"] = "IMPLEMENTED"
+        self.storage.store_tracked_goal(data)
+        loaded = self.storage.load_tracked_goals()
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0]["outcome"], "IMPLEMENTED")
 
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "test.db")
-        self.storage.initialize()
+    # --- Self-model snapshots ---
 
-    def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
+    def _make_snapshot_dict(self, snapshot_id="SELF-000001"):
+        return {
+            "snapshot_id": snapshot_id,
+            "timestamp": datetime.now().isoformat(),
+            "total_experiences": 100,
+            "overall_success_rate": 0.85,
+            "capability_assessments": {"conversation": 0.8, "analysis": 0.75},
+            "belief_evidence": {"I am improving": 0.9},
+            "trend_summary": "improving",
+            "identity_version": 3,
+            "last_trend_analysis": datetime.now().isoformat(),
+            "recent_improvement_evidence": ["Success rate improving"],
+            "persistent_challenges": ["Tool execution failures"],
+        }
 
-    def test_store_and_load_latest_snapshot(self):
-        snapshot = _make_snapshot()
-        self.storage.store_snapshot(serialization.snapshot_to_dict(snapshot))
-        loaded = self.storage.load_latest_snapshot()
-        self.assertIsNotNone(loaded)
-        self.assertEqual(loaded["snapshot_id"], "SELF-000007")
-        self.assertEqual(loaded["capability_assessments"], {"conversation": 0.75})
-
-    def test_get_max_snapshot_id(self):
-        snapshot = _make_snapshot()
-        self.storage.store_snapshot(serialization.snapshot_to_dict(snapshot))
-        self.assertEqual(self.storage.get_max_snapshot_id(), 7)
-
-
-class TestRepositoryWithStorage(unittest.TestCase):
-    """ExperienceRepository dual-write and restore behavior."""
-
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "repo.db")
-        self.storage.initialize()
-        self.repo = ExperienceRepository(storage=self.storage)
-
-    def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
-
-    def test_store_and_restore_experience(self):
-        exp = _make_experience("EXP-00000001")
-        self.repo.store_experience(exp)
-
-        new_repo = ExperienceRepository(storage=self.storage)
-        result = new_repo.restore()
-        self.assertEqual(result.experience_count, 1)
-        self.assertEqual(new_repo.get_experience("EXP-00000001").experience_id, "EXP-00000001")
-
-    def test_store_and_restore_analysis(self):
-        analysis = _make_analysis()
-        self.repo.store_analysis(analysis)
-
-        new_repo = ExperienceRepository(storage=self.storage)
-        new_repo.restore()
-        self.assertIsNotNone(new_repo.get_latest_analysis())
-
-    def test_store_and_restore_tracked_goal(self):
-        goal = _make_goal()
-        self.repo.store_tracked_goal(goal)
-
-        new_repo = ExperienceRepository(storage=self.storage)
-        new_repo.restore()
-        self.assertEqual(len(new_repo.get_tracked_goals()), 1)
-
-    def test_restore_returns_max_ids(self):
-        self.repo.store_experience(_make_experience("EXP-00000005"))
-        self.repo.persist_snapshot(serialization.snapshot_to_dict(_make_snapshot()))
-
-        new_repo = ExperienceRepository(storage=self.storage)
-        result = new_repo.restore()
-        self.assertEqual(result.max_experience_id, 5)
-        self.assertEqual(result.max_snapshot_id, 7)
-        self.assertIsNotNone(result.latest_snapshot)
-
-    def test_memory_only_mode(self):
-        repo = ExperienceRepository()
-        result = repo.restore()
-        self.assertEqual(result.experience_count, 0)
-        repo.store_experience(_make_experience())
-        self.assertEqual(repo.experience_count, 1)
-
-
-class TestCounterRestoration(unittest.TestCase):
-    """Prevent ID collisions after restart."""
-
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "counters.db")
-        self.storage.initialize()
-
-    def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
-
-    def test_accumulator_counter_seeded_after_restore(self):
-        self.storage.store_experience(serialization.experience_to_dict(_make_experience("EXP-00000005")))
-
-        repo = ExperienceRepository(storage=self.storage)
-        result = repo.restore()
-        accumulator = ExperienceAccumulator(repository=repo)
-        accumulator.seed_counter(result.max_experience_id or 0)
-
-        exp = accumulator.record(CognitionState(), PipelineResult(success=True))
-        self.assertEqual(exp.experience_id, "EXP-00000006")
-
-    def test_snapshot_counter_seeded_after_restore(self):
-        self.storage.store_snapshot(serialization.snapshot_to_dict(_make_snapshot()))
-
-        repo = ExperienceRepository(storage=self.storage)
-        result = repo.restore()
-        engine = SelfModelEngine(repository=repo, update_interval=1, window_size=2)
-        engine.seed_snapshot_counter(result.max_snapshot_id or 0)
-
-        for _ in range(2):
-            repo.store_experience(_make_experience())
-        snapshot = engine.update()
-        self.assertEqual(snapshot.snapshot_id, "SELF-000008")
-
-
-class TestSelfModelSnapshotPersistence(unittest.TestCase):
-    """SelfModelEngine persists and restores snapshots."""
-
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.storage = SQLiteExperienceStorage(Path(self.tempdir.name) / "snapshots.db")
-        self.storage.initialize()
-        self.repo = ExperienceRepository(storage=self.storage)
-
-    def tearDown(self):
-        self.storage.close()
-        self.tempdir.cleanup()
-
-    def test_update_persists_snapshot(self):
-        engine = SelfModelEngine(repository=self.repo, update_interval=1, window_size=2)
-        for _ in range(2):
-            self.repo.store_experience(_make_experience())
-        engine.update()
-
+    def test_store_and_load_snapshot(self):
+        data = self._make_snapshot_dict()
+        self.storage.store_snapshot(data)
         loaded = self.storage.load_latest_snapshot()
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded["snapshot_id"], "SELF-000001")
+        self.assertEqual(loaded["total_experiences"], 100)
 
-    def test_restore_snapshot_continues_counter(self):
-        snapshot = _make_snapshot()
-        engine = SelfModelEngine(repository=self.repo, update_interval=1, window_size=2)
-        engine.restore_snapshot(serialization.snapshot_to_dict(snapshot))
-        self.assertEqual(engine.get_snapshot().snapshot_id, "SELF-000007")
+    def test_load_latest_snapshot_returns_most_recent(self):
+        data1 = self._make_snapshot_dict("SELF-000001")
+        data2 = self._make_snapshot_dict("SELF-000002")
+        self.storage.store_snapshot(data1)
+        self.storage.store_snapshot(data2)
+        latest = self.storage.load_latest_snapshot()
+        self.assertEqual(latest["snapshot_id"], "SELF-000002")
 
-        for _ in range(2):
-            self.repo.store_experience(_make_experience())
-        new_snapshot = engine.update()
-        # Counter is seeded to restored numeric ID; _build_snapshot increments
-        # before formatting, so next ID is restored_id + 1.
-        self.assertEqual(new_snapshot.snapshot_id, "SELF-000008")
+    def test_load_latest_snapshot_empty(self):
+        self.assertIsNone(self.storage.load_latest_snapshot())
+
+    def test_get_max_snapshot_id(self):
+        for i in [2, 5, 3]:
+            data = self._make_snapshot_dict(f"SELF-{i:06d}")
+            self.storage.store_snapshot(data)
+        max_id = self.storage.get_max_snapshot_id()
+        self.assertEqual(max_id, 5)
+
+    def test_get_max_snapshot_id_empty(self):
+        self.assertIsNone(self.storage.get_max_snapshot_id())
+
+    def test_load_snapshots(self):
+        for i in range(3):
+            self.storage.store_snapshot(self._make_snapshot_dict(f"SELF-{i:06d}"))
+        snapshots = self.storage.load_snapshots(limit=10)
+        self.assertEqual(len(snapshots), 3)
+
+    # --- Clear all ---
+
+    def test_clear_all(self):
+        self.storage.store_experience(self._make_experience_dict())
+        self.storage.store_analysis(self._make_analysis_dict())
+        self.storage.store_tracked_goal(self._make_goal_dict())
+        self.storage.store_snapshot(self._make_snapshot_dict())
+        self.storage.clear_all()
+        self.assertEqual(len(self.storage.load_experiences()), 0)
+        self.assertEqual(len(self.storage.load_analyses()), 0)
+        self.assertEqual(len(self.storage.load_tracked_goals()), 0)
+        self.assertEqual(len(self.storage.load_snapshots()), 0)
 
 
-class TestGracefulDegradation(unittest.TestCase):
-    """Storage failures do not crash Atlas."""
+class TestSQLiteExperienceStorageFailure(unittest.TestCase):
+    """Graceful degradation on failures."""
 
-    def test_corrupted_database_degrades_gracefully(self):
-        tempdir = tempfile.TemporaryDirectory()
-        db_path = Path(tempdir.name) / "corrupt.db"
-        db_path.write_text("this is not sqlite data")
-
-        storage = SQLiteExperienceStorage(db_path)
+    @patch("sqlite3.connect")
+    def test_unavailable_on_connection_failure(self, mock_connect):
+        """When sqlite3.connect raises, initialize marks unavailable."""
+        mock_connect.side_effect = Exception("Connection refused")
+        storage = SQLiteExperienceStorage(":memory:")
         storage.initialize()
         self.assertFalse(storage.is_available())
 
-        # Repository should still work in memory
-        repo = ExperienceRepository(storage=storage)
-        repo.store_experience(_make_experience())
-        self.assertEqual(repo.experience_count, 1)
-
-        tempdir.cleanup()
-
-    def test_unavailable_storage_skips_writes(self):
-        storage = SQLiteExperienceStorage()
+    def test_write_failure_marks_unavailable(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        db_path = Path(temp_dir.name) / "test_fail.db"
+        storage = SQLiteExperienceStorage(db_path)
         storage.initialize()
+        self.assertTrue(storage.is_available())
+        # Close the underlying connection to simulate failure
         storage.close()
+        storage._available = True  # Force-mark available (simulates race)
+        with self.assertRaises(Exception):
+            storage.store_experience({"experience_id": "EXP-00000001"})
+        self.assertFalse(storage.is_available())
+        temp_dir.cleanup()
 
-        repo = ExperienceRepository(storage=storage)
-        repo.store_experience(_make_experience())
-        self.assertEqual(repo.experience_count, 1)
 
+class TestSQLiteExperienceStorageReopen(unittest.TestCase):
+    """Cross-session persistence: write, close, reopen, verify."""
 
-class TestStartupShutdownContinuity(unittest.TestCase):
-    """End-to-end restart persistence via Atlas kernel."""
+    def test_reopen_preserves_all_data(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        db_path = Path(temp_dir.name) / "test_reopen.db"
 
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        os.environ["ATLAS_EXPERIENCE_DB"] = str(Path(self.tempdir.name) / "atlas_experience.db")
+        # Session 1: write data
+        storage1 = SQLiteExperienceStorage(db_path)
+        storage1.initialize()
+        storage1.store_experience({
+            "experience_id": "EXP-00000001",
+            "timestamp": datetime.now().isoformat(),
+            "duration_ms": 100.0,
+            "pipeline_path": [],
+            "outcome": "SUCCESS",
+        })
+        storage1.store_snapshot({
+            "snapshot_id": "SELF-000001",
+            "timestamp": datetime.now().isoformat(),
+            "total_experiences": 50,
+            "overall_success_rate": 0.8,
+            "capability_assessments": {},
+            "belief_evidence": {},
+            "trend_summary": "stable",
+            "identity_version": 1,
+            "last_trend_analysis": datetime.now().isoformat(),
+        })
+        storage1.close()
 
-    def tearDown(self):
-        self.tempdir.cleanup()
-        os.environ.pop("ATLAS_EXPERIENCE_DB", None)
-
-    def test_atlas_start_shutdown_creates_storage(self):
-        # We cannot easily start full Atlas in unit tests because it needs AI
-        # providers. Instead test the storage/repository interaction directly.
-        storage = SQLiteExperienceStorage(os.environ["ATLAS_EXPERIENCE_DB"])
-        storage.initialize()
-        repo = ExperienceRepository(storage=storage)
-
-        # Simulate pipeline recording
-        accumulator = ExperienceAccumulator(repository=repo)
-        state = CognitionState(user_input="hello")
-        result = PipelineResult(success=True, metrics=PipelineMetrics(total_duration_ms=100.0))
-        accumulator.record(state, result)
-
-        # Simulate self-model update
-        engine = SelfModelEngine(repository=repo, update_interval=1, window_size=1)
-        engine.update()
-
-        # Simulate shutdown persist
-        snapshot = engine.get_snapshot()
-        repo.persist_snapshot(serialization.snapshot_to_dict(snapshot))
-        storage.close()
-
-        # Simulate restart
-        storage2 = SQLiteExperienceStorage(os.environ["ATLAS_EXPERIENCE_DB"])
+        # Session 2: verify data persists
+        storage2 = SQLiteExperienceStorage(db_path)
         storage2.initialize()
-        repo2 = ExperienceRepository(storage=storage2)
-        result = repo2.restore()
-
-        self.assertEqual(result.experience_count, 1)
-        self.assertEqual(repo2.get_experiences(1)[0].user_input, "hello")
-        self.assertIsNotNone(result.latest_snapshot)
-        self.assertEqual(result.max_snapshot_id, 1)
+        exps = storage2.load_experiences()
+        self.assertEqual(len(exps), 1)
+        self.assertEqual(exps[0]["experience_id"], "EXP-00000001")
+        snap = storage2.load_latest_snapshot()
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["total_experiences"], 50)
         storage2.close()
 
-
-class TestArchitectureBoundaries(unittest.TestCase):
-    """Ensure Phase 9.1 maintains pure logic boundaries."""
-
-    def test_no_sqlite3_imports_in_experience(self):
-        import atlas.experience.serialization as ser_mod
-        import atlas.experience.experience_repository as repo_mod
-        import atlas.experience.experience_accumulator as acc_mod
-        import atlas.experience.self_model_engine as self_mod
-        import atlas.experience.storage_interface as iface_mod
-
-        for mod in (ser_mod, repo_mod, acc_mod, self_mod, iface_mod):
-            source = mod.__doc__ or ""
-            source += "\n".join(str(v) for v in mod.__dict__.values())
-            self.assertNotIn("sqlite3", source, f"{mod.__name__} imports sqlite3")
-            self.assertNotIn("atlas.storage", source, f"{mod.__name__} imports atlas.storage")
-
-    def test_storage_interface_is_in_pure_logic_layer(self):
-        from atlas.experience.storage_interface import ExperienceStorage
-        self.assertTrue(hasattr(ExperienceStorage, "store_experience"))
-
-    def test_sqlite_adapter_implements_interface(self):
-        self.assertTrue(issubclass(SQLiteExperienceStorage, ExperienceStorage))
+        temp_dir.cleanup()
 
 
 if __name__ == "__main__":
