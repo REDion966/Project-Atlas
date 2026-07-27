@@ -1,5 +1,5 @@
 """
-Atlas Understanding Engine — Phase 8.2.1a Full Consolidation
+Atlas Understanding Engine — Phase 8.2.1a Full Consolidation / 9.2b Persistence
 
 Orchestrates the Understanding Layer pipeline with full consolidation.
 Both process_text() and process_observation() use identical consolidation.
@@ -13,6 +13,7 @@ New pipeline:
 Every entry point deepens understanding instead of accumulating duplicates.
 """
 
+import logging
 from typing import Any
 
 from atlas.experience.models import StructuredExperience
@@ -39,6 +40,16 @@ from atlas.understanding.consolidation.pattern_consolidator import PatternConsol
 from atlas.understanding.consolidation.insight_consolidator import InsightConsolidator
 from atlas.understanding.consolidation.understanding_scorer import UnderstandingScorer
 from atlas.understanding.consolidation.abstraction_registry import AbstractionRegistry
+
+# --- Phase 9.2b: Persistence ---
+from atlas.understanding import serialization
+from atlas.understanding.storage_interface import (
+    UnderstandingRestoreResult,
+    UnderstandingStorage,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class UnderstandingEngine:
@@ -67,6 +78,7 @@ class UnderstandingEngine:
         understanding_scorer: UnderstandingScorer | None = None,
         abstraction_registry: AbstractionRegistry | None = None,
         experience_bridge: ExperienceBridge | None = None,
+        understanding_storage: UnderstandingStorage | None = None,
     ) -> None:
         self._memory = memory or UnderstandingMemory()
         self._graph = graph or UnderstandingGraph()
@@ -85,6 +97,11 @@ class UnderstandingEngine:
         self._understanding_scorer = understanding_scorer or UnderstandingScorer()
         self._abstraction_registry = abstraction_registry or AbstractionRegistry()
         self._insight_counter = 0
+
+        # --- Phase 9.2b: Persistence ---
+        self._understanding_storage = understanding_storage
+        if understanding_storage is not None:
+            understanding_storage.initialize()
 
     # ------------------------------------------------------------------
     # Properties
@@ -272,12 +289,75 @@ class UnderstandingEngine:
             self._memory.store_insight(ins)
 
         # 5. Behavioral signals (only when text is provided)
+        signals: list[BehavioralSignal] = []
         if text is not None:
             signals = self._behavior_extractor.extract_signals(text, source=source)
             for signal in signals:
                 self._memory.store_signal(signal)
 
+        # --- Phase 9.2b: Best-effort persistence ---
+        self._persist_understanding(
+            concepts=concepts,
+            relationships=consolidated_rels,
+            patterns=consolidated_patterns,
+            insights=consolidated_insights,
+            signals=signals,
+        )
+
         return consolidated_insights
+
+    def _persist_understanding(
+        self,
+        concepts: list[Concept],
+        relationships: list[Relationship],
+        patterns: list[Pattern],
+        insights: list[UnderstandingInsight],
+        signals: list[BehavioralSignal],
+    ) -> None:
+        """
+        Best-effort persistence of understanding data.
+
+        Storage failures are swallowed so the understanding pipeline
+        never breaks. Follows the same pattern as ExperienceRepository.
+        """
+        storage = self._understanding_storage
+        if storage is None or not storage.is_available():
+            return
+
+        try:
+            storage.store_concepts(
+                [serialization.concept_to_dict(c) for c in concepts]
+            )
+        except Exception:
+            logger.exception("Understanding storage write failed for concepts")
+
+        try:
+            storage.store_relationships(
+                [serialization.relationship_to_dict(r) for r in relationships]
+            )
+        except Exception:
+            logger.exception("Understanding storage write failed for relationships")
+
+        try:
+            storage.store_patterns(
+                [serialization.pattern_to_dict(p) for p in patterns]
+            )
+        except Exception:
+            logger.exception("Understanding storage write failed for patterns")
+
+        try:
+            storage.store_insights(
+                [serialization.insight_to_dict(i) for i in insights]
+            )
+        except Exception:
+            logger.exception("Understanding storage write failed for insights")
+
+        try:
+            storage.store_signals(
+                [serialization.signal_to_dict(s) for s in signals]
+            )
+        except Exception:
+            logger.exception("Understanding storage write failed for signals")
 
     def _build_text_insights(
         self,
@@ -289,6 +369,104 @@ class UnderstandingEngine:
         # inside _consolidate_and_store. This helper returns an empty list
         # so the signature remains uniform.
         return []
+
+    # ------------------------------------------------------------------
+    # Persistence — Phase 9.2b
+    # ------------------------------------------------------------------
+
+    def restore(self) -> UnderstandingRestoreResult:
+        """
+        Load persisted understanding data back into memory and graph.
+
+        Returns a UnderstandingRestoreResult with counts of restored items.
+        If no storage is configured or storage is unavailable, returns an
+        empty result.
+        """
+        storage = self._understanding_storage
+        if storage is None or not storage.is_available():
+            return UnderstandingRestoreResult()
+
+        # Clear existing state before loading
+        self._memory.clear()
+        self._graph.clear()
+
+        concept_count = 0
+        relationship_count = 0
+        pattern_count = 0
+        insight_count = 0
+        signal_count = 0
+
+        # 1. Restore concepts
+        try:
+            for c_dict in storage.load_all_concepts():
+                concept = serialization.dict_to_concept(c_dict)
+                self._memory.store_concept(concept)
+                self._graph.add_concept(concept)
+                concept_count += 1
+        except Exception:
+            logger.exception("Failed to restore concepts from storage")
+
+        # 2. Restore relationships
+        try:
+            for r_dict in storage.load_all_relationships():
+                rel = serialization.dict_to_relationship(r_dict)
+                self._memory.store_relationship(rel)
+                self._graph.add_relationship(rel)
+                relationship_count += 1
+        except Exception:
+            logger.exception("Failed to restore relationships from storage")
+
+        # 3. Restore patterns
+        try:
+            for p_dict in storage.load_all_patterns():
+                pattern = serialization.dict_to_pattern(p_dict)
+                self._memory.store_pattern(pattern)
+                pattern_count += 1
+        except Exception:
+            logger.exception("Failed to restore patterns from storage")
+
+        # 4. Restore insights
+        try:
+            for i_dict in storage.load_all_insights():
+                insight = serialization.dict_to_insight(i_dict)
+                self._memory.store_insight(insight)
+                insight_count += 1
+        except Exception:
+            logger.exception("Failed to restore insights from storage")
+
+        # 5. Restore signals
+        try:
+            for s_dict in storage.load_all_signals():
+                signal = serialization.dict_to_signal(s_dict)
+                self._memory.store_signal(signal)
+                signal_count += 1
+        except Exception:
+            logger.exception("Failed to restore signals from storage")
+
+        # Seed the insight counter to avoid ID collisions
+        try:
+            max_id = storage.get_max_insight_id()
+            if max_id is not None:
+                self._insight_counter = max_id
+        except Exception:
+            logger.exception("Failed to read max insight ID from storage")
+
+        return UnderstandingRestoreResult(
+            concept_count=concept_count,
+            relationship_count=relationship_count,
+            pattern_count=pattern_count,
+            insight_count=insight_count,
+            signal_count=signal_count,
+            max_insight_id=self._insight_counter,
+        )
+
+    def close(self) -> None:
+        """Close the understanding storage adapter if present."""
+        if self._understanding_storage is not None:
+            try:
+                self._understanding_storage.close()
+            except Exception:
+                logger.exception("Error closing understanding storage")
 
     # ------------------------------------------------------------------
     # Analysis queries

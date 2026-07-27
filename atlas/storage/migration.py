@@ -1,5 +1,5 @@
 """
-Atlas Storage Migration Framework — Phase 9.1
+Atlas Storage Migration Framework — Phase 9.1 / 9.2b
 
 Simple additive migration system for SQLite-backed storage. Each migration
 is a tuple of (sql_statement, description). Migrations are applied in
@@ -14,12 +14,99 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 # Migration chain: version_from -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
-    # Initial schema is created by _create_initial_schema; it represents
-    # version 1, so no SQL migrations are needed here yet.
+    2: [
+        ("""
+            CREATE TABLE IF NOT EXISTS understanding_concepts (
+                concept_id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                source TEXT DEFAULT '',
+                frequency INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create understanding_concepts table"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_understanding_concepts_label
+                ON understanding_concepts(label)
+        """, "Index on understanding concept label"),
+        ("""
+            CREATE TABLE IF NOT EXISTS understanding_relationships (
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                relationship_type TEXT NOT NULL,
+                weight REAL NOT NULL DEFAULT 0.5,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                observed_count INTEGER NOT NULL DEFAULT 1,
+                first_observed TEXT NOT NULL,
+                last_observed TEXT NOT NULL,
+                PRIMARY KEY (source_id, target_id, relationship_type)
+            )
+        """, "Create understanding_relationships table with composite PK"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_understanding_relationships_source
+                ON understanding_relationships(source_id)
+        """, "Index on understanding relationship source"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_understanding_relationships_target
+                ON understanding_relationships(target_id)
+        """, "Index on understanding relationship target"),
+        ("""
+            CREATE TABLE IF NOT EXISTS understanding_patterns (
+                pattern_id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                description TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                related_concept_ids TEXT DEFAULT '[]',
+                frequency INTEGER NOT NULL DEFAULT 1,
+                first_observed TEXT NOT NULL,
+                last_observed TEXT NOT NULL
+            )
+        """, "Create understanding_patterns table"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_understanding_patterns_label
+                ON understanding_patterns(label)
+        """, "Index on understanding pattern label"),
+        ("""
+            CREATE TABLE IF NOT EXISTS understanding_insights (
+                insight_id TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                related_concept_ids TEXT DEFAULT '[]',
+                related_pattern_ids TEXT DEFAULT '[]',
+                source TEXT DEFAULT '',
+                timestamp TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create understanding_insights table"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_understanding_insights_category
+                ON understanding_insights(category)
+        """, "Index on understanding insight category"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_understanding_insights_timestamp
+                ON understanding_insights(timestamp DESC)
+        """, "Index on understanding insight timestamp"),
+        ("""
+            CREATE TABLE IF NOT EXISTS understanding_signals (
+                signal_id TEXT PRIMARY KEY,
+                domain TEXT NOT NULL,
+                description TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                related_concept_ids TEXT DEFAULT '[]',
+                source TEXT DEFAULT '',
+                timestamp TEXT NOT NULL
+            )
+        """, "Create understanding_signals table"),
+    ],
 }
 
 

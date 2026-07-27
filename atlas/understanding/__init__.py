@@ -1,5 +1,5 @@
 """
-Atlas Understanding Layer — Phase 7.1 / 9.2a
+Atlas Understanding Layer — Phase 7.1 / 9.2a / 9.2b
 
 The Understanding Layer sits between Memory and Cognition.
 It transforms raw observations, memories, conversations, tool results,
@@ -15,9 +15,17 @@ from atlas.understanding.experience_bridge import (
     ExperienceBridge,
     ExperienceSource,
 )
+from atlas.understanding.storage_interface import (
+    UnderstandingRestoreResult,
+    UnderstandingStorage,
+)
+from atlas.understanding import serialization
 
 __all__ = [
     "BridgeResult",
     "ExperienceBridge",
     "ExperienceSource",
+    "UnderstandingRestoreResult",
+    "UnderstandingStorage",
+    "serialization",
 ]

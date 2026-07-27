@@ -170,7 +170,7 @@ class TestSQLiteStorageLifecycle(unittest.TestCase):
     def test_schema_version_recorded(self):
         storage = SQLiteExperienceStorage(self.db_path)
         storage.initialize()
-        self.assertEqual(storage.get_schema_version(), 1)
+        self.assertEqual(storage.get_schema_version(), 2)
         storage.close()
 
     def test_close_marks_unavailable(self):
