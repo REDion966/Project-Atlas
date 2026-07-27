@@ -104,6 +104,8 @@ class RuntimeCoordinator:
         self._identity_engine = identity_engine
         self._feedback_coordinator = feedback_coordinator
         self._goal_intelligence_engine = goal_intelligence_engine
+        self._experience_accumulator = None
+        self._self_model_engine = None
         self._conversation_service = conversation_service
         self._event_bus = event_bus
 
@@ -228,6 +230,12 @@ class RuntimeCoordinator:
         # --- Phase 8.2: Cognitive Feedback Loop ---
         if self._feedback_coordinator is not None:
             self._feedback_coordinator.process_feedback(state, result)
+
+        # --- Phase 9.0: Experience Accumulation & Self-Model Update ---
+        if self._experience_accumulator is not None:
+            self._experience_accumulator.record(state, result)
+        if self._self_model_engine is not None:
+            self._self_model_engine.update()
 
         # Publish pipeline completion event
         if self._event_bus is not None:
@@ -1339,6 +1347,22 @@ class RuntimeCoordinator:
     @property
     def feedback_coordinator(self):
         return self._feedback_coordinator
+
+    @property
+    def experience_accumulator(self):
+        return self._experience_accumulator
+
+    @property
+    def self_model_engine(self):
+        return self._self_model_engine
+
+    def set_experience_accumulator(self, accumulator: Any) -> None:
+        """Inject an ExperienceAccumulator after construction."""
+        self._experience_accumulator = accumulator
+
+    def set_self_model_engine(self, engine: Any) -> None:
+        """Inject a SelfModelEngine after construction."""
+        self._self_model_engine = engine
 
     @property
     def conversation_service(self):

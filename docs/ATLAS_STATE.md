@@ -80,6 +80,12 @@ What was added:
 | **7.3** | **Learning Engine** | **Complete** | **820** |
 | 7.4 | World Model Foundation | Complete | 850 |
 | **7.5** | **Unified Cognitive Runtime** | **Complete** | **850** |
+| **8.0** | **Cognitive Identity Foundation** | **Complete** | ~870 |
+| **8.1** | **Runtime Cognitive Integration** | **Complete** | ~890 |
+| **8.2** | **Cognitive Feedback Loop** | **Complete** | ~900 |
+| **8.2.1** | **Understanding Consolidation** | **Complete** | ~910 |
+| **8.3** | **Goal Intelligence & Self-Directed Improvement Planner** | **Complete** | **912** |
+| **9.0** | **Persistent Self-Model & Experience Accumulation** | **Complete** | **948** |
 
 ---
 
@@ -103,6 +109,13 @@ What was added:
 | `"world_model"` | `WorldModelEngine` | Active (Phase 7.5) |
 | `"evolution_observer"` | `SelfObservationEngine` | Active (Phase 7.5) |
 | `"learning_engine"` | `LearningEngine` | Active (Phase 7.5) |
+| `"identity"` | `IdentityEngine` | Active (Phase 8.0) |
+| `"feedback_coordinator"` | `FeedbackCoordinator` | Active (Phase 8.2) |
+| `"goal_repository"` | `GoalRepository` | Active (Phase 8.3) |
+| `"goal_intelligence"` | `GoalIntelligenceEngine` | Active (Phase 8.3) |
+| `"experience_repository"` | `ExperienceRepository` | Active (Phase 9.0) |
+| `"experience_accumulator"` | `ExperienceAccumulator` | Active (Phase 9.0) |
+| `"self_model_engine"` | `SelfModelEngine` | Active (Phase 9.0) |
 
 ### 4.2 Runtime Pipeline
 
@@ -158,6 +171,16 @@ AI Provider
     │
     ▼
 Response → User
+
+Post-Response (Phase 9.0):
+    │
+    ├──→ ExperienceAccumulator.record()   ← capture execution
+    │
+    ├──→ SelfModelEngine.update()         ← analyze trends, evolve identity
+    │
+    ├──→ OutcomeTracker.evaluate()        ← goal outcome tracking
+    │
+    └──→ Memory Storage
 ```
 
 ### 4.3 Reasoning Pipeline
@@ -209,7 +232,7 @@ Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording a
 
 ## 5. Intelligence Maturity
 
-**Current: Level 3 — Observable Reasoning**
+**Current: Level 5 — Persistent Self-Model**
 
 ### 5.1 Maturity Levels
 
@@ -217,9 +240,10 @@ Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording a
 |---|---|---|
 | 1 | Reactive Response | Past |
 | 2 | Structured Cognition | Past |
-| 3 | Observable Reasoning | Current |
-| 4 | Reflective Learning | Future (Phase 6.7+) |
-| 5+ | Bounded Autonomy / Autonomous Evolution | Future |
+| 3 | Observable Reasoning | Past |
+| 4 | Reflective Learning | Past |
+| 5 | Persistent Self-Model | Current (Phase 9.0) |
+| 6+ | Bounded Autonomy / Autonomous Evolution | Future |
 
 ### 5.2 Current Capabilities
 
@@ -237,12 +261,21 @@ Atlas observes its own reasoning outcomes through `ReasoningOutcome` recording a
 | Integrated cognitive pipeline | ✅ Implemented (`CognitionPipeline`, Phase 7.2) |
 | Learning engine | ✅ Implemented (`LearningEngine`, Phase 7.3) |
 | Learning infrastructure | ✅ Implemented (`LearningManager`, `KnowledgeFeedback`) |
+| Identity engine | ✅ Implemented (`IdentityEngine`, Phase 8.0) |
+| Feedback coordination | ✅ Implemented (`FeedbackCoordinator`, Phase 8.2) |
+| Goal intelligence | ✅ Implemented (`GoalIntelligenceEngine`, Phase 8.3) |
+| Experience accumulation | ✅ Implemented (`ExperienceAccumulator`, Phase 9.0) |
+| Trend analysis | ✅ Implemented (`TrendAnalyzer`, Phase 9.0) |
+| Self-model engine | ✅ Implemented (`SelfModelEngine`, Phase 9.0) |
+| Goal outcome tracking | ✅ Implemented (`OutcomeTracker`, Phase 9.0) |
 
 ### 5.3 Missing Capabilities
 
 | Capability | Status |
 |---|---|
-| Reflective learning (closed-loop) | ❌ Not implemented |
+| Persistent disk storage for experiences | ❌ Not implemented |
+| Cross-session experience loading | ❌ Not implemented |
+| Self-model summary in LLM context | ❌ Not implemented |
 | Strategy adjustment | ❌ Not implemented |
 | Autonomous improvement | ❌ Not implemented |
 
@@ -254,6 +287,7 @@ Atlas currently does NOT:
 - Adjust its own strategy
 - Perform autonomous planning
 - Perform autonomous improvement
+- Persist experiences to disk (Phase 9.1+)
 
 Future capabilities require the corresponding roadmap phases and explicit user approval.
 
@@ -261,7 +295,7 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 
 ## 6. Current Test Status
 
-**850 passing tests**
+**948 passing tests**
 
 ### 6.1 Test Progression
 
@@ -288,6 +322,12 @@ Future capabilities require the corresponding roadmap phases and explicit user a
 | **Phase 7.3** | **820** |
 | **Phase 7.4** | **850** |
 | **Phase 7.5** | **850** |
+| **Phase 8.0** | **~870** |
+| **Phase 8.1** | **~890** |
+| **Phase 8.2** | **~900** |
+| **Phase 8.2.1** | **~910** |
+| **Phase 8.3** | **912** |
+| **Phase 9.0** | **948** |
 
 
 ### 6.2 Key Test Files
@@ -325,30 +365,40 @@ Representative key test areas only.
 | `test_tool_executor.py` | Tool executor |
 | `test_tool_engine.py` | Tool engine orchestrator |
 | `test_tool_wiring.py` | Tool wiring integration |
+| `test_experience.py` | Experience & self-model (Phase 9.0) |
 
 > **Note:** This table lists representative key test areas only. The complete test suite contains additional module-specific tests across `tests/`, `tests/cli/`, `tests/memory/`, `tests/workspace/`, and other subdirectories.
 
 ---
 
-## Phase 6.7 — Reflection Foundation
+## Phase 9.0 — Persistent Self-Model & Experience Accumulation
 
 Status: Completed
 
 Implemented:
-- Added ReflectionEngine pure analysis component.
-- Added ReflectionSuggestion model.
-- Integrated reflection analysis into CognitionService.
-- Reflection remains bounded analysis only.
-- No autonomous learning or self-modification.
+- Added `atlas/experience/` package with pure-logic components:
+  - `models.py` — `StructuredExperience`, `TrendAnalysis`, `SelfModelSnapshot`, `TrackedGoal`
+  - `experience_repository.py` — bounded in-memory storage
+  - `experience_accumulator.py` — converts `CognitionState` + `PipelineResult` into `StructuredExperience`
+  - `trend_analyzer.py` — directional trend detection across experience windows
+  - `outcome_tracker.py` — tracks recommendation/goal outcomes
+  - `self_model_engine.py` — orchestrates analysis and feeds evidence to identity, understanding, and goals
+- Integrated `ExperienceAccumulator` and `SelfModelEngine` into `RuntimeCoordinator`
+- Wired all Phase 9.0 components in `Atlas.start()`
+- Registered 3 new service container keys: `experience_repository`, `experience_accumulator`, `self_model_engine`
+- Added cognitive context integration hook: `SelfModelSnapshot` summary available for future context pipeline
+- Pure logic only — no AI providers, no EventBus, no infrastructure, no autonomous modification
+- Identity changes remain evidence-based and approval-safe
 
 Verification:
-- 481 tests passing.
+- 948 tests passing (up from 912)
 
 Deferred:
-- Reflection persistence
-- Configurable analysis windows
-- Automatic strategy adjustment
-- Autonomous learning loops
+- Disk persistence for `ExperienceRepository`
+- Cross-session loading of experiences
+- Self-model summary inclusion in LLM cognitive context
+- Persistent goal outcome history
+- Adaptive reasoning based on self-model snapshots
 
 ## 7. Known Limitations
 
@@ -361,7 +411,8 @@ Deferred:
 | 5 | Single AI provider per session | No model routing yet |
 | 6 | Reflection analysis is in-memory only | No disk persistence; suggestions lost on shutdown |
 | 7 | No autonomous improvement | Bounded optimisation not implemented |
-| 8 | Three empty documentation files | `developer/coding-standards.md`, `roadmap/roadmap-v1.md`, `sprints/sprint-01.md` |
+| 8 | Experience storage is in-memory only | No disk persistence; resets on shutdown (Phase 9.1) |
+| 9 | Three empty documentation files | `developer/coding-standards.md`, `roadmap/roadmap-v1.md`, `sprints/sprint-01.md` |
 
 ---
 
@@ -442,7 +493,13 @@ A phase is complete only after:
 | **Phase 7.3 Learning Engine** | **✅ Complete** |
 | **Phase 7.4 World Model Foundation** | **✅ Complete** |
 | **Phase 7.5 Unified Cognitive Runtime** | **✅ Complete** |
-| Phase 7.6+ Continuous Improvement | 🟡 Next |
+| **Phase 8.0 Cognitive Identity Foundation** | **✅ Complete** |
+| **Phase 8.1 Runtime Cognitive Integration** | **✅ Complete** |
+| **Phase 8.2 Cognitive Feedback Loop** | **✅ Complete** |
+| **Phase 8.2.1 Understanding Consolidation** | **✅ Complete** |
+| **Phase 8.3 Goal Intelligence & Self-Directed Improvement Planner** | **✅ Complete** |
+| **Phase 9.0 Persistent Self-Model & Experience Accumulation** | **✅ Complete** |
+| Phase 9.1+ Continuous Improvement | 🟡 Next |
 
 ---
 
@@ -463,9 +520,9 @@ A phase is complete only after:
    ```
    pytest
    ```
-5. Confirm **850 tests passing**.
-6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, `atlas/tools/`, `atlas/ai/providers/`, `atlas/evolution/`, `atlas/understanding/`, `atlas/cognition/`, and `atlas/learning_engine/`.
-7. Pick up from **Phase 7.6+ — Continuous Improvement**.
+5. Confirm **948 tests passing**.
+6. Review current architecture in `atlas/kernel/atlas.py`, `atlas/services/cognition_service.py`, `atlas/experience/`, `atlas/reasoning/`, `atlas/reasoning/planning/`, `atlas/reasoning/reflection.py`, `atlas/tools/`, `atlas/ai/providers/`, `atlas/evolution/`, `atlas/understanding/`, `atlas/cognition/`, and `atlas/learning_engine/`.
+7. Pick up from **Phase 9.1+ — Continuous Improvement**.
 8. Do not modify legacy `atlas/intelligence/` components.
 9. Preserve all existing public APIs.
 10. Add tests for any new functionality.

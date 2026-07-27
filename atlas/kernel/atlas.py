@@ -65,6 +65,11 @@ from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 from atlas.goals.goal_repository import GoalRepository
 
+# --- Phase 9.0: Experience & Self-Model ---
+from atlas.experience.experience_repository import ExperienceRepository
+from atlas.experience.experience_accumulator import ExperienceAccumulator
+from atlas.experience.self_model_engine import SelfModelEngine
+
 
 class Atlas:
     """
@@ -98,6 +103,15 @@ class Atlas:
         self._self_observation_engine: SelfObservationEngine | None = None
         self._learning_engine: LearningEngine | None = None
         self._identity_engine: IdentityEngine | None = None
+
+        # --- Phase 8.3: Goal Intelligence ---
+        self._goal_repository: GoalRepository | None = None
+        self._goal_intelligence_engine: GoalIntelligenceEngine | None = None
+
+        # --- Phase 9.0: Experience & Self-Model ---
+        self._experience_repository: ExperienceRepository | None = None
+        self._experience_accumulator: ExperienceAccumulator | None = None
+        self._self_model_engine: SelfModelEngine | None = None
 
         # --- Reasoning pipeline ---
         self._reasoning_controller: ReasoningController | None = None
@@ -269,6 +283,20 @@ class Atlas:
             repository=self._goal_repository,
         )
 
+        # --- Phase 9.0: Experience & Self-Model ---
+        self._experience_repository = ExperienceRepository()
+        self._experience_accumulator = ExperienceAccumulator(
+            repository=self._experience_repository,
+        )
+        self._self_model_engine = SelfModelEngine(
+            repository=self._experience_repository,
+            identity_engine=self._identity_engine,
+            understanding_engine=self._understanding_engine,
+            goal_intelligence_engine=self._goal_intelligence_engine,
+            window_size=20,
+            update_interval=5,
+        )
+
         # --- Phase 8.2: Create FeedbackCoordinator ---
         self._feedback_coordinator = FeedbackCoordinator(
             identity_engine=self._identity_engine,
@@ -301,8 +329,14 @@ class Atlas:
             feedback_coordinator=self._feedback_coordinator,
             goal_intelligence_engine=self._goal_intelligence_engine,
             conversation_service=None,  # Wired below
-            event_bus=self._event_bus,
         )
+
+        # Inject Phase 9.0 components after RuntimeCoordinator construction
+        self._runtime_coordinator.set_experience_accumulator(self._experience_accumulator)
+        self._runtime_coordinator.set_self_model_engine(self._self_model_engine)
+
+        # Set event bus
+        self._runtime_coordinator._event_bus = self._event_bus
 
         # --- Phase 7.5.1: CognitionService delegates to RuntimeCoordinator ---
         self._cognition_service = CognitionService(
@@ -358,6 +392,10 @@ class Atlas:
         self._container.register("feedback_coordinator", self._feedback_coordinator)
         self._container.register("goal_repository", self._goal_repository)
         self._container.register("goal_intelligence", self._goal_intelligence_engine)
+        # --- Phase 9.0: Register experience & self-model services ---
+        self._container.register("experience_repository", self._experience_repository)
+        self._container.register("experience_accumulator", self._experience_accumulator)
+        self._container.register("self_model_engine", self._self_model_engine)
 
         self._container.start_all()
         self._started = True

@@ -127,7 +127,7 @@ All future evolution components must strengthen Atlas's internal understanding r
 - **Understanding Layer** is established as an architectural concept in this document.
 - **Reasoning** and **Observation** are implemented.
 - **Learning infrastructure** exists through `LearningManager` and `KnowledgeFeedback`. This is feedback storage, not a closed-loop learning system.
-- **Not implemented:** outcome-level reflective learning, strategy adjustment, adaptation, and closed-loop self-improvement (`Reflection` → `Learning` → `Adaptation` → `Self-improvement`).
+- **Phase 9.0 bridges observation and learning into a persistent self-model.** Outcome-level reflective learning and strategy adjustment remain future capabilities.
 
 ---
 
@@ -256,12 +256,15 @@ CLI / Presentation
 | `skills` | Skill abstractions and extensions |
 | `memory/context` | Context management layer |
 | `evolution` | Self-observation, improvement planning, proposal generation, approval workflow — designed to deepen understanding, not merely accumulate changes |
+| `goals` | Goal intelligence and self-directed improvement planning (Phase 8.3) |
+| `identity` | Cognitive identity engine (Phase 8.0) |
+| `experience` | Persistent experience accumulation and self-model evolution (Phase 9.0) |
 
 ### 9.3 Module Maturity Classification
 
 | Maturity | Modules |
 |----------|---------|
-| Core (active, wired) | `kernel`, `cognition`, `reasoning`, `services`, `evolution` |
+| Core (active, wired) | `kernel`, `cognition`, `reasoning`, `services`, `evolution`, `identity`, `goals`, `experience` |
 | Infrastructure (active, wired) | `memory`, `storage`, `events`, `config` |
 | Capability (active, wired) | `ai`, `knowledge`, `learning`, `workspace` |
 | Future / scaffold (not fully wired) | `agents`, `automation`, `lifecycle`, `runtime`, `scheduler`, `skills`, `interfaces`, `models` |
@@ -304,6 +307,9 @@ atlas/
 ├── understanding/       Understanding Layer: concept extraction, pattern analysis, understanding graph, understanding engine
 ├── cognition/           Integrated cognitive pipeline (orchestration, models, metrics, state)
 ├── learning_engine/     Learning engine: strategy analysis, insight consolidation, learning memory
+├── goals/               Goal intelligence and self-directed improvement planning
+├── identity/            Cognitive identity engine
+├── experience/          Persistent experience accumulation and self-model evolution
 └── skills/              Skill abstractions and extensions
 ```
 
@@ -346,6 +352,12 @@ The following components must remain **pure logic** — no AI calls, no memory a
 - `InsightConsolidator`
 - `LearningMemory`
 - All `atlas/learning_engine/` data models
+- `ExperienceRepository`
+- `ExperienceAccumulator`
+- `TrendAnalyzer`
+- `OutcomeTracker`
+- `SelfModelEngine`
+- All `atlas/experience/` data models
 
 ### 10.2 Prohibited Imports
 
@@ -388,6 +400,13 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 | `"world_model"` | `WorldModelEngine` | Active (Phase 7.5) |
 | `"evolution_observer"` | `SelfObservationEngine` | Active (Phase 7.5) |
 | `"learning_engine"` | `LearningEngine` | Active (Phase 7.5) |
+| `"identity"` | `IdentityEngine` | Active (Phase 8.0) |
+| `"feedback_coordinator"` | `FeedbackCoordinator` | Active (Phase 8.2) |
+| `"goal_repository"` | `GoalRepository` | Active (Phase 8.3) |
+| `"goal_intelligence"` | `GoalIntelligenceEngine` | Active (Phase 8.3) |
+| `"experience_repository"` | `ExperienceRepository` | Active (Phase 9.0) |
+| `"experience_accumulator"` | `ExperienceAccumulator` | Active (Phase 9.0) |
+| `"self_model_engine"` | `SelfModelEngine` | Active (Phase 9.0) |
 
 **All four cognition keys must remain registered.** Legacy keys must not be modified.
 
