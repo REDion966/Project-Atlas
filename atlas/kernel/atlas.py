@@ -71,6 +71,7 @@ from atlas.experience.experience_accumulator import ExperienceAccumulator
 from atlas.experience.self_model_engine import SelfModelEngine
 from atlas.experience.serialization import snapshot_to_dict
 from atlas.storage.experience_storage import SQLiteExperienceStorage
+from atlas.storage.understanding_storage import SQLiteUnderstandingStorage
 
 
 class Atlas:
@@ -272,7 +273,14 @@ class Atlas:
             self._tool_registry.register(tool)
 
         # --- Phase 7.5: Wire all cognitive subsystems ---
-        self._understanding_engine = UnderstandingEngine()
+        understanding_storage = SQLiteUnderstandingStorage()
+        understanding_storage.initialize()
+
+        self._understanding_engine = UnderstandingEngine(
+            understanding_storage=understanding_storage,
+        )
+        understanding_restore_result = self._understanding_engine.restore()
+
         self._world_model_engine = WorldModelEngine()
         self._self_observation_engine = SelfObservationEngine()
         self._learning_engine = LearningEngine()
@@ -320,6 +328,20 @@ class Atlas:
         else:
             self._event_bus.publish(
                 "experience.storage.unavailable",
+                {"mode": "memory_only"},
+            )
+
+        if understanding_storage.is_available():
+            self._event_bus.publish(
+                "understanding.storage.initialized",
+                {
+                    "restored_concepts": understanding_restore_result.concept_count,
+                    "db_path": str(understanding_storage.db_path),
+                },
+            )
+        else:
+            self._event_bus.publish(
+                "understanding.storage.unavailable",
                 {"mode": "memory_only"},
             )
 
@@ -474,6 +496,12 @@ class Atlas:
                     self._event_bus.publish("experience.storage.closed", {})
                 except Exception:
                     pass
+
+        if self._understanding_engine is not None:
+            try:
+                self._understanding_engine.close()
+            except Exception:
+                pass
 
         self._container.stop_all()
         self._container.clear()
