@@ -73,6 +73,12 @@ from atlas.experience.serialization import snapshot_to_dict
 from atlas.storage.experience_storage import SQLiteExperienceStorage
 from atlas.storage.understanding_storage import SQLiteUnderstandingStorage
 
+# --- Phase 10.0: Evolution Pipeline ---
+from atlas.evolution.improvement_planner import ImprovementPlanner
+from atlas.evolution.proposal_generator import ProposalGenerator
+from atlas.evolution.approval_manager import ApprovalManager
+from atlas.evolution.evolution_memory import EvolutionMemory
+
 
 class Atlas:
     """
@@ -115,6 +121,12 @@ class Atlas:
         self._experience_repository: ExperienceRepository | None = None
         self._experience_accumulator: ExperienceAccumulator | None = None
         self._self_model_engine: SelfModelEngine | None = None
+
+        # --- Phase 10.0: Evolution Pipeline ---
+        self._improvement_planner: ImprovementPlanner | None = None
+        self._proposal_generator: ProposalGenerator | None = None
+        self._approval_manager: ApprovalManager | None = None
+        self._evolution_memory: EvolutionMemory | None = None
 
         # --- Reasoning pipeline ---
         self._reasoning_controller: ReasoningController | None = None
@@ -353,6 +365,12 @@ class Atlas:
             learning_engine=self._learning_engine,
         )
 
+        # --- Phase 10.0: Evolution Pipeline ---
+        self._improvement_planner = ImprovementPlanner()
+        self._proposal_generator = ProposalGenerator()
+        self._approval_manager = ApprovalManager()
+        self._evolution_memory = EvolutionMemory()
+
         # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
         self._runtime_coordinator = RuntimeCoordinator(
             memory_service=self._memory_service,
@@ -377,6 +395,10 @@ class Atlas:
             feedback_coordinator=self._feedback_coordinator,
             goal_intelligence_engine=self._goal_intelligence_engine,
             conversation_service=None,  # Wired below
+            improvement_planner=self._improvement_planner,
+            proposal_generator=self._proposal_generator,
+            approval_manager=self._approval_manager,
+            evolution_memory=self._evolution_memory,
         )
 
         # Inject Phase 9.0 components after RuntimeCoordinator construction

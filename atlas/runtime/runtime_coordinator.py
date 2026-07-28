@@ -79,6 +79,10 @@ class RuntimeCoordinator:
         goal_intelligence_engine: Any = None,
         conversation_service: Any = None,
         event_bus: Any = None,
+        improvement_planner: Any = None,
+        proposal_generator: Any = None,
+        approval_manager: Any = None,
+        evolution_memory: Any = None,
     ):
         self._engine = engine or CognitionEngine()
 
@@ -108,6 +112,12 @@ class RuntimeCoordinator:
         self._self_model_engine = None
         self._conversation_service = conversation_service
         self._event_bus = event_bus
+
+        # --- Phase 10.0: Evolution Pipeline ---
+        self._improvement_planner = improvement_planner
+        self._proposal_generator = proposal_generator
+        self._approval_manager = approval_manager
+        self._evolution_memory = evolution_memory
 
     # ------------------------------------------------------------------
     # Public API — the single entry point for all cognitive processing
@@ -249,6 +259,21 @@ class RuntimeCoordinator:
                     experiences=recent_experiences,
                     source="runtime_coordinator",
                 )
+
+        # --- Phase 10.0: Evolution Pipeline ---
+        if self._improvement_planner is not None and self._evolution_observation_engine is not None:
+            observations = self._evolution_observation_engine.recent_observations(n=100)
+            if observations:
+                weaknesses = self._improvement_planner.detect_weaknesses(observations)
+                if weaknesses:
+                    plan = self._improvement_planner.create_improvement_plan(weaknesses)
+                    if plan is not None and self._proposal_generator is not None:
+                        proposal = self._proposal_generator.generate_proposal(plan)
+                        if self._approval_manager is not None:
+                            approval_request = self._approval_manager.create_approval_request(proposal)
+                            if self._evolution_memory is not None:
+                                self._evolution_memory.store_proposal(proposal)
+                                self._evolution_memory.store_approval_request(approval_request)
 
         # Publish pipeline completion event
         if self._event_bus is not None:
