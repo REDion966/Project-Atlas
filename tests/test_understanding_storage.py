@@ -183,8 +183,12 @@ class TestSQLiteUnderstandingLifecycle(unittest.TestCase):
             cursor = conn.execute(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
             )
-            self.assertEqual(cursor.fetchone()[0], 2)
+            self.assertEqual(cursor.fetchone()[0], 3)
         storage.close()
+        # Release the extra connection reference so Windows can delete
+        # the temp directory during tearDown without PermissionError.
+        conn = None
+        storage = None
 
     def test_close_marks_unavailable(self):
         storage = SQLiteUnderstandingStorage(self.db_path)

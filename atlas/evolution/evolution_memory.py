@@ -12,21 +12,182 @@ from datetime import datetime
 from typing import Any
 
 from atlas.evolution.models import (
+    ApprovalDecision,
     ApprovalRequest,
+    ImprovementPlan,
+    ImprovementPriority,
     EvolutionProposal,
     EvolutionRecord,
     Observation,
     ProposalStatus,
+    Weakness,
 )
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers: dict → domain model (for restore from storage)
+# ---------------------------------------------------------------------------
+
+
+def _proposal_from_dict(data: dict) -> EvolutionProposal:
+    """Reconstruct an EvolutionProposal from a dictionary."""
+    plan_data = data.get("plan", {})
+    weaknesses_data = plan_data.get("weaknesses", [])
+    weaknesses = [
+        Weakness(
+            area=w.get("area", ""),
+            description=w.get("description", ""),
+            severity=getattr(ImprovementPriority, w.get("severity", "LOW"), ImprovementPriority.LOW),
+            supporting_observations=w.get("supporting_observations", []),
+            detected_at=datetime.fromisoformat(w["detected_at"])
+            if isinstance(w.get("detected_at"), str) else w.get("detected_at", datetime.now()),
+        )
+        for w in weaknesses_data
+    ]
+
+    plan = ImprovementPlan(
+        plan_id=plan_data.get("plan_id", ""),
+        title=plan_data.get("title", ""),
+        description=plan_data.get("description", ""),
+        priority=getattr(ImprovementPriority, plan_data.get("priority", "LOW"), ImprovementPriority.LOW),
+        weaknesses=weaknesses,
+        expected_benefit=plan_data.get("expected_benefit", ""),
+        complexity_estimate=plan_data.get("complexity_estimate", "medium"),
+        target_components=plan_data.get("target_components", []),
+        created_at=datetime.fromisoformat(plan_data["created_at"])
+        if isinstance(plan_data.get("created_at"), str) else plan_data.get("created_at", datetime.now()),
+    )
+
+    return EvolutionProposal(
+        proposal_id=data.get("proposal_id", ""),
+        title=data.get("title", ""),
+        summary=data.get("summary", ""),
+        rationale=data.get("rationale", ""),
+        expected_benefit=data.get("expected_benefit", ""),
+        risks=data.get("risks", ""),
+        impact_analysis=data.get("impact_analysis", ""),
+        implementation_approach=data.get("implementation_approach", ""),
+        plan=plan,
+        status=getattr(ProposalStatus, data.get("status", "DRAFT"), ProposalStatus.DRAFT),
+        rejection_reason=data.get("rejection_reason", ""),
+        created_at=datetime.fromisoformat(data["created_at"])
+        if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now()),
+        approved_at=datetime.fromisoformat(data["approved_at"])
+        if isinstance(data.get("approved_at"), str) else data.get("approved_at"),
+        metadata=data.get("metadata", {}),
+    )
+
+
+def _approval_request_from_dict(data: dict) -> ApprovalRequest:
+    """Reconstruct an ApprovalRequest from a dictionary."""
+    from atlas.evolution.models import ApprovalDecision
+
+    return ApprovalRequest(
+        request_id=data.get("request_id", ""),
+        proposal_id=data.get("proposal_id", ""),
+        title=data.get("title", ""),
+        description=data.get("description", ""),
+        rationale=data.get("rationale", ""),
+        risks=data.get("risks", ""),
+        expected_benefit=data.get("expected_benefit", ""),
+        decision=getattr(ApprovalDecision, data.get("decision", "PENDING"), ApprovalDecision.PENDING),
+        decision_comment=data.get("decision_comment", ""),
+        created_at=datetime.fromisoformat(data["created_at"])
+        if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now()),
+        decided_at=datetime.fromisoformat(data["decided_at"])
+        if isinstance(data.get("decided_at"), str) else data.get("decided_at"),
+    )
+
+
+def _proposal_to_dict(proposal: EvolutionProposal) -> dict:
+    """Serialize an EvolutionProposal to a JSON-safe dictionary."""
+    return {
+        "proposal_id": proposal.proposal_id,
+        "title": proposal.title,
+        "summary": proposal.summary,
+        "rationale": proposal.rationale,
+        "expected_benefit": proposal.expected_benefit,
+        "risks": proposal.risks,
+        "impact_analysis": proposal.impact_analysis,
+        "implementation_approach": proposal.implementation_approach,
+        "plan": {
+            "plan_id": proposal.plan.plan_id,
+            "title": proposal.plan.title,
+            "description": proposal.plan.description,
+            "priority": proposal.plan.priority.name,
+            "weaknesses": [
+                {
+                    "area": w.area,
+                    "description": w.description,
+                    "severity": w.severity.name,
+                    "supporting_observations": w.supporting_observations,
+                    "detected_at": w.detected_at.isoformat() if hasattr(w.detected_at, "isoformat") else str(w.detected_at),
+                }
+                for w in proposal.plan.weaknesses
+            ],
+            "expected_benefit": proposal.plan.expected_benefit,
+            "complexity_estimate": proposal.plan.complexity_estimate,
+            "target_components": list(proposal.plan.target_components),
+            "created_at": proposal.plan.created_at.isoformat() if hasattr(proposal.plan.created_at, "isoformat") else str(proposal.plan.created_at),
+        },
+        "status": proposal.status.name,
+        "rejection_reason": proposal.rejection_reason,
+        "created_at": proposal.created_at.isoformat() if hasattr(proposal.created_at, "isoformat") else str(proposal.created_at),
+        "approved_at": proposal.approved_at.isoformat() if proposal.approved_at and hasattr(proposal.approved_at, "isoformat") else (proposal.approved_at or None),
+        "metadata": dict(proposal.metadata),
+    }
+
+
+def _approval_request_to_dict(request: ApprovalRequest) -> dict:
+    """Serialize an ApprovalRequest to a JSON-safe dictionary."""
+    return {
+        "request_id": request.request_id,
+        "proposal_id": request.proposal_id,
+        "title": request.title,
+        "description": request.description,
+        "rationale": request.rationale,
+        "risks": request.risks,
+        "expected_benefit": request.expected_benefit,
+        "decision": request.decision.name,
+        "decision_comment": request.decision_comment,
+        "created_at": request.created_at.isoformat() if hasattr(request.created_at, "isoformat") else str(request.created_at),
+        "decided_at": request.decided_at.isoformat() if request.decided_at and hasattr(request.decided_at, "isoformat") else (request.decided_at or None),
+    }
+
+
+def _evolution_record_to_dict(record: EvolutionRecord) -> dict:
+    """Serialize an EvolutionRecord to a JSON-safe dictionary."""
+    return {
+        "record_id": record.record_id,
+        "event_type": record.event_type,
+        "description": record.description,
+        "related_ids": list(record.related_ids),
+        "timestamp": record.timestamp.isoformat() if hasattr(record.timestamp, "isoformat") else str(record.timestamp),
+        "metadata": dict(record.metadata),
+    }
+
+
+def _evolution_record_from_dict(data: dict) -> EvolutionRecord:
+    """Reconstruct an EvolutionRecord from a dictionary."""
+    return EvolutionRecord(
+        record_id=data.get("record_id", ""),
+        event_type=data.get("event_type", ""),
+        description=data.get("description", ""),
+        related_ids=data.get("related_ids", []),
+        timestamp=datetime.fromisoformat(data["timestamp"])
+        if isinstance(data.get("timestamp"), str) else data.get("timestamp", datetime.now()),
+        metadata=data.get("metadata", {}),
+    )
 
 
 class EvolutionMemory:
     """
-    Persistent (in-memory) store for evolution-related data.
+    Bounded in-memory store for evolution-related data.
 
-    Maintains bounded histories of observations, proposals, approval
-    requests, and evolution records. This is a pure logic component
-    with no infrastructure dependencies.
+    Maintains histories of observations, proposals, approval requests,
+    and evolution records. When a `storage` adapter is injected, the
+    memory dual-writes to both memory and storage; storage writes are
+    best-effort and never break the in-memory path.
 
     Attributes:
         max_observations: Maximum number of observations to retain.
@@ -39,6 +200,7 @@ class EvolutionMemory:
         max_observations: int = 1000,
         max_proposals: int = 200,
         max_records: int = 500,
+        storage: Any = None,
     ) -> None:
         if max_observations <= 0:
             raise ValueError("max_observations must be a positive integer")
@@ -50,11 +212,72 @@ class EvolutionMemory:
         self._max_observations = max_observations
         self._max_proposals = max_proposals
         self._max_records = max_records
+        self._storage = storage
 
         self._observations: deque[Observation] = deque(maxlen=max_observations)
         self._proposals: deque[EvolutionProposal] = deque(maxlen=max_proposals)
         self._approval_requests: deque[ApprovalRequest] = deque()
         self._records: deque[EvolutionRecord] = deque(maxlen=max_records)
+
+    @property
+    def storage(self):
+        """Return the injected storage adapter, or None."""
+        return self._storage
+
+    # ------------------------------------------------------------------
+    # Persistence (Phase 11.3)
+    # ------------------------------------------------------------------
+
+    def restore(self) -> None:
+        """
+        Load persisted data from the injected storage adapter into memory.
+
+        If no storage is configured or storage is unavailable, this is a
+        no-op. Storage failures are logged and do not crash startup.
+        """
+        if self._storage is None or not self._storage.is_available():
+            return
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            for prop_dict in self._storage.load_proposals():
+                proposal = _proposal_from_dict(prop_dict)
+                self._proposals.append(proposal)
+        except Exception:
+            logger.exception("Failed to restore evolution proposals from storage")
+
+        try:
+            for req_dict in self._storage.load_approval_requests():
+                request = _approval_request_from_dict(req_dict)
+                self._approval_requests.append(request)
+        except Exception:
+            logger.exception("Failed to restore evolution approval requests from storage")
+
+        try:
+            for rec_dict in self._storage.load_records():
+                record = _evolution_record_from_dict(rec_dict)
+                self._records.append(record)
+        except Exception:
+            logger.exception("Failed to restore evolution records from storage")
+
+    def _try_storage_write(self, method_name: str, data: dict) -> None:
+        """Call a storage write method, degrading gracefully on failure."""
+        if self._storage is None or not self._storage.is_available():
+            return
+        try:
+            if method_name == "store_proposal":
+                self._storage.store_proposal(data)
+            elif method_name == "store_approval_request":
+                self._storage.store_approval_request(data)
+            elif method_name == "store_record":
+                self._storage.store_record(data)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Evolution storage write failed for %s", method_name
+            )
 
     # ------------------------------------------------------------------
     # Observations
@@ -85,6 +308,7 @@ class EvolutionMemory:
     def store_proposal(self, proposal: EvolutionProposal) -> None:
         """Store an evolution proposal."""
         self._proposals.append(proposal)
+        self._try_storage_write("store_proposal", _proposal_to_dict(proposal))
 
     def get_proposal(self, proposal_id: str) -> EvolutionProposal | None:
         """Retrieve a proposal by its ID."""
@@ -148,6 +372,7 @@ class EvolutionMemory:
     def store_approval_request(self, request: ApprovalRequest) -> None:
         """Store an approval request."""
         self._approval_requests.append(request)
+        self._try_storage_write("store_approval_request", _approval_request_to_dict(request))
 
     def get_approval_request(
         self,
@@ -184,6 +409,7 @@ class EvolutionMemory:
     def store_record(self, record: EvolutionRecord) -> None:
         """Store an evolution history record."""
         self._records.append(record)
+        self._try_storage_write("store_record", _evolution_record_to_dict(record))
 
     def get_records(
         self,

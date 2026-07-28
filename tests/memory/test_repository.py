@@ -2,18 +2,35 @@
 Tests for Atlas Memory Manager.
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 from uuid import uuid4
+from unittest.mock import patch
 
 from atlas.memory.enums import MemoryImportance
 from atlas.memory.manager import MemoryManager
 from atlas.memory.models.memory import Memory
+from atlas.memory.storage.json_storage import Storage
 
 
 class TestMemoryManager(unittest.TestCase):
 
     def setUp(self):
+        # Isolate each test with a temporary storage file to prevent
+        # state contamination via the shared data/memory.json.
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._storage_patcher = patch.object(
+            Storage,
+            "MEMORY_FILE",
+            Path(self._temp_dir.name) / "memory.json",
+        )
+        self._storage_patcher.start()
         self.manager = MemoryManager()
+
+    def tearDown(self):
+        self._storage_patcher.stop()
+        self._temp_dir.cleanup()
 
     def test_add_and_get_memory(self):
         memory = Memory(

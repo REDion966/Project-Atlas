@@ -119,6 +119,9 @@ class RuntimeCoordinator:
         self._approval_manager = approval_manager
         self._evolution_memory = evolution_memory
 
+        # --- Phase 10.0: Transient metrics reference for Stage 13 ---
+        self._current_metrics: PipelineMetrics | None = None
+
     # ------------------------------------------------------------------
     # Public API — the single entry point for all cognitive processing
     # ------------------------------------------------------------------
@@ -158,134 +161,162 @@ class RuntimeCoordinator:
         stages: list[StageResult] = []
         pipeline_path: list[str] = []
 
+        # --- Phase 10.0: Make metrics accessible to Stage 13 during this run ---
+        self._current_metrics = metrics
+
         stage_definitions = self._build_stage_definitions()
 
-        for stage_type, stage_fn in stage_definitions:
-            stage_start = time.perf_counter()
-            stage_path_name = stage_type.name.lower()
+        try:
+            for stage_type, stage_fn in stage_definitions:
+                stage_start = time.perf_counter()
+                stage_path_name = stage_type.name.lower()
 
-            try:
-                result = stage_fn(state)
-                duration = (time.perf_counter() - stage_start) * 1000
+                try:
+                    result = stage_fn(state)
+                    duration = (time.perf_counter() - stage_start) * 1000
 
-                if result.status == StageStatus.SUCCESS:
-                    metrics.success_count += 1
-                    pipeline_path.append(stage_path_name)
-                elif result.status == StageStatus.FAILED:
+                    if result.status == StageStatus.SUCCESS:
+                        metrics.success_count += 1
+                        pipeline_path.append(stage_path_name)
+                    elif result.status == StageStatus.FAILED:
+                        metrics.failed_count += 1
+                        pipeline_path.append(f"{stage_path_name}:failed")
+                    else:
+                        metrics.skipped_count += 1
+                        pipeline_path.append(f"{stage_path_name}:skipped")
+
+                    result.duration_ms = round(duration, 2)
+                    stages.append(result)
+
+                except Exception as exc:
+                    duration = (time.perf_counter() - stage_start) * 1000
+                    stages.append(StageResult(
+                        stage=stage_type,
+                        status=StageStatus.FAILED,
+                        duration_ms=round(duration, 2),
+                        error=str(exc),
+                    ))
                     metrics.failed_count += 1
-                    pipeline_path.append(f"{stage_path_name}:failed")
-                else:
-                    metrics.skipped_count += 1
-                    pipeline_path.append(f"{stage_path_name}:skipped")
+                    pipeline_path.append(f"{stage_path_name}:error")
+                    break
 
-                result.duration_ms = round(duration, 2)
-                stages.append(result)
+            # Finalize metrics
+            metrics.stage_count = len(stages)
+            metrics.pipeline_path = pipeline_path
+            metrics.completed_at = datetime.now()
+            metrics.total_duration_ms = round(
+                (metrics.completed_at - metrics.started_at).total_seconds() * 1000, 2
+            )
 
-            except Exception as exc:
-                duration = (time.perf_counter() - stage_start) * 1000
-                stages.append(StageResult(
-                    stage=stage_type,
-                    status=StageStatus.FAILED,
-                    duration_ms=round(duration, 2),
-                    error=str(exc),
-                ))
-                metrics.failed_count += 1
-                pipeline_path.append(f"{stage_path_name}:error")
-                break
+            # Collect tool usage
+            if state.tool_result and state.tool_result.get("tool_name"):
+                metrics.tool_usage.append(state.tool_result["tool_name"])
 
-        # Finalize metrics
-        metrics.stage_count = len(stages)
-        metrics.pipeline_path = pipeline_path
-        metrics.completed_at = datetime.now()
-        metrics.total_duration_ms = round(
-            (metrics.completed_at - metrics.started_at).total_seconds() * 1000, 2
-        )
+            metrics.understanding_insights = len(state.understanding_insights)
 
-        # Collect tool usage
-        if state.tool_result and state.tool_result.get("tool_name"):
-            metrics.tool_usage.append(state.tool_result["tool_name"])
+            # Build intermediate data
+            intermediate = {
+                "user_input": state.user_input,
+                "memories_count": len(state.memories),
+                "knowledge_count": len(state.knowledge),
+                "understanding_insights_count": len(state.understanding_insights),
+                "concepts_count": len(state.concepts),
+                "patterns_count": len(state.patterns),
+                "has_world_model_state": bool(state.world_model_state),
+                "has_reasoning": bool(state.reasoning_result),
+                "has_planning": bool(state.planning_result),
+                "has_tool_result": bool(state.tool_result),
+                "has_reflection": bool(state.reflection_suggestions),
+                "has_learning": bool(state.learning_result),
+                "has_learning_engine": bool(state.learning_engine_result),
+                "evolution_observations_count": len(state.evolution_observations),
+            }
 
-        metrics.understanding_insights = len(state.understanding_insights)
+            overall_success = all(
+                s.status != StageStatus.FAILED for s in stages
+            )
 
-        # Build intermediate data
-        intermediate = {
-            "user_input": state.user_input,
-            "memories_count": len(state.memories),
-            "knowledge_count": len(state.knowledge),
-            "understanding_insights_count": len(state.understanding_insights),
-            "concepts_count": len(state.concepts),
-            "patterns_count": len(state.patterns),
-            "has_world_model_state": bool(state.world_model_state),
-            "has_reasoning": bool(state.reasoning_result),
-            "has_planning": bool(state.planning_result),
-            "has_tool_result": bool(state.tool_result),
-            "has_reflection": bool(state.reflection_suggestions),
-            "has_learning": bool(state.learning_result),
-            "has_learning_engine": bool(state.learning_engine_result),
-            "evolution_observations_count": len(state.evolution_observations),
-        }
+            result = PipelineResult(
+                success=overall_success,
+                final_response=state.ai_response,
+                stages=stages,
+                metrics=metrics,
+                intermediate_data=intermediate,
+            )
 
-        overall_success = all(
-            s.status != StageStatus.FAILED for s in stages
-        )
+            # --- Phase 8.2: Cognitive Feedback Loop ---
+            if self._feedback_coordinator is not None:
+                self._feedback_coordinator.process_feedback(state, result)
 
-        result = PipelineResult(
-            success=overall_success,
-            final_response=state.ai_response,
-            stages=stages,
-            metrics=metrics,
-            intermediate_data=intermediate,
-        )
+            # --- Phase 9.0: Experience Accumulation & Self-Model Update ---
+            if self._experience_accumulator is not None:
+                self._experience_accumulator.record(state, result)
+            if self._self_model_engine is not None:
+                self._self_model_engine.update()
 
-        # --- Phase 8.2: Cognitive Feedback Loop ---
-        if self._feedback_coordinator is not None:
-            self._feedback_coordinator.process_feedback(state, result)
+            # --- Phase 9.2a: Feed accumulated experiences into Understanding Engine ---
+            if (
+                self._experience_accumulator is not None
+                and self._understanding_engine is not None
+            ):
+                repo = self._experience_accumulator.repository
+                recent_experiences = repo.get_experiences(n=50)
+                if recent_experiences:
+                    self._understanding_engine.process_experiences(
+                        experiences=recent_experiences,
+                        source="runtime_coordinator",
+                    )
 
-        # --- Phase 9.0: Experience Accumulation & Self-Model Update ---
-        if self._experience_accumulator is not None:
-            self._experience_accumulator.record(state, result)
-        if self._self_model_engine is not None:
-            self._self_model_engine.update()
+            # --- Phase 10.0.1: Feed self-model snapshot trends into GoalIntelligence ---
+            if (
+                self._goal_intelligence_engine is not None
+                and self._self_model_engine is not None
+            ):
+                snapshot = self._self_model_engine.get_snapshot()
+                if snapshot is not None:
+                    trends = {
+                        "self_model_trends": {
+                            "success_rate_trend": getattr(snapshot, "trend_summary", ""),
+                            "persistent_challenges": getattr(snapshot, "persistent_challenges", []),
+                        },
+                        "identity_summary": {},
+                        "world_model_summary": {},
+                        "learning_insights": {},
+                        "reflection_suggestions": [],
+                        "capability_profiles": {},
+                    }
+                    self._goal_intelligence_engine.analyze(trends)
 
-        # --- Phase 9.2a: Feed accumulated experiences into Understanding Engine ---
-        if (
-            self._experience_accumulator is not None
-            and self._understanding_engine is not None
-        ):
-            repo = self._experience_accumulator.repository
-            recent_experiences = repo.get_experiences(n=50)
-            if recent_experiences:
-                self._understanding_engine.process_experiences(
-                    experiences=recent_experiences,
-                    source="runtime_coordinator",
+            # --- Phase 10.0: Evolution Pipeline ---
+            if self._improvement_planner is not None and self._evolution_observation_engine is not None:
+                observations = self._evolution_observation_engine.recent_observations(n=100)
+                if observations:
+                    weaknesses = self._improvement_planner.detect_weaknesses(observations)
+                    if weaknesses:
+                        plan = self._improvement_planner.create_improvement_plan(weaknesses)
+                        if plan is not None and self._proposal_generator is not None:
+                            proposal = self._proposal_generator.generate_proposal(plan)
+                            if self._approval_manager is not None:
+                                approval_request = self._approval_manager.create_approval_request(proposal)
+                                if self._evolution_memory is not None:
+                                    self._evolution_memory.store_proposal(proposal)
+                                    self._evolution_memory.store_approval_request(approval_request)
+
+            # Publish pipeline completion event
+            if self._event_bus is not None:
+                self._event_bus.publish(
+                    "runtime.pipeline.completed",
+                    {
+                        "success": overall_success,
+                        "stages_executed": metrics.stage_count,
+                        "total_duration_ms": metrics.total_duration_ms,
+                        "pipeline_path": pipeline_path,
+                    },
                 )
 
-        # --- Phase 10.0: Evolution Pipeline ---
-        if self._improvement_planner is not None and self._evolution_observation_engine is not None:
-            observations = self._evolution_observation_engine.recent_observations(n=100)
-            if observations:
-                weaknesses = self._improvement_planner.detect_weaknesses(observations)
-                if weaknesses:
-                    plan = self._improvement_planner.create_improvement_plan(weaknesses)
-                    if plan is not None and self._proposal_generator is not None:
-                        proposal = self._proposal_generator.generate_proposal(plan)
-                        if self._approval_manager is not None:
-                            approval_request = self._approval_manager.create_approval_request(proposal)
-                            if self._evolution_memory is not None:
-                                self._evolution_memory.store_proposal(proposal)
-                                self._evolution_memory.store_approval_request(approval_request)
-
-        # Publish pipeline completion event
-        if self._event_bus is not None:
-            self._event_bus.publish(
-                "runtime.pipeline.completed",
-                {
-                    "success": overall_success,
-                    "stages_executed": metrics.stage_count,
-                    "total_duration_ms": metrics.total_duration_ms,
-                    "pipeline_path": pipeline_path,
-                },
-            )
+        finally:
+            # --- Phase 10.0: Clear transient metrics reference after pipeline completes ---
+            self._current_metrics = None
 
         return result
 
@@ -828,10 +859,19 @@ class RuntimeCoordinator:
                 status=StageStatus.SKIPPED,
             )
 
+        # Compute current pipeline elapsed time and failure count from
+        # the transient metrics reference set at the start of process().
+        elapsed_ms = 0.0
+        error_count = 0
+        if self._current_metrics is not None:
+            elapsed = (datetime.now() - self._current_metrics.started_at).total_seconds()
+            elapsed_ms = elapsed * 1000.0
+            error_count = self._current_metrics.failed_count
+
         obs = self._evolution_observation_engine.observe_runtime_metrics(
-            avg_response_time_ms=0.0,
+            avg_response_time_ms=round(elapsed_ms, 2),
             request_count=1,
-            error_count=0,
+            error_count=error_count,
             source="runtime_coordinator",
         )
 
@@ -1461,3 +1501,24 @@ class RuntimeCoordinator:
     @property
     def engine(self):
         return self._engine
+
+    @property
+    def improvement_planner(self):
+        return self._improvement_planner
+
+    @property
+    def proposal_generator(self):
+        return self._proposal_generator
+
+    @property
+    def approval_manager(self):
+        return self._approval_manager
+
+    @property
+    def evolution_memory(self):
+        return self._evolution_memory
+
+    @property
+    def current_metrics(self):
+        """Return the transient metrics reference for the current pipeline run, or None."""
+        return self._current_metrics

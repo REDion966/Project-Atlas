@@ -3,12 +3,54 @@ Atlas Evolution — Data Models
 
 Pure data models for the self-evolution subsystem.
 Phase 7.0 — Self-Evolution Foundation.
+Phase 11.0 — Added ExecutionLevel enum and ExecutionResult dataclass.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum, IntEnum, auto
 from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Execution capability levels (Phase 11.0+)
+# ---------------------------------------------------------------------------
+
+
+class ExecutionLevel(IntEnum):
+    """Capability level for the EvolutionExecutionEngine.
+
+    Each level is a superset of all lower levels.
+    Phase 11 implements ADMINISTRATIVE only.
+    """
+
+    ADMINISTRATIVE = 0  # Phase 11: record-keeping only
+    SELF_CONFIG = 1     # Phase 12+: modify internal Atlas configuration
+    INFORMATION = 2     # Phase 12+: modify memory, knowledge, world model
+    CODE_ARTIFACT = 3   # Phase 13+: generate code patches
+    SANDBOXED = 4       # Phase 14+: apply changes in sandbox, test, rollback
+    AUTONOMOUS = 5      # Future: self-directed improvement within constitutional bounds
+
+
+@dataclass(slots=True)
+class ExecutionResult:
+    """Result of a single proposal execution by EvolutionExecutionEngine.
+
+    Attributes:
+        success: Whether the execution completed without error.
+        proposal_id: The ID of the executed proposal.
+        status: The new status of the proposal after execution.
+        record_id: The ID of the EvolutionRecord created, if any.
+        tracked_goal_id: The ID of the TrackedGoal created, if any.
+        error: Error message if execution failed.
+    """
+
+    success: bool
+    proposal_id: str = ""
+    status: str = ""
+    record_id: str = ""
+    tracked_goal_id: str = ""
+    error: str = ""
 
 
 # ---------------------------------------------------------------------------

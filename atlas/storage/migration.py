@@ -1,5 +1,5 @@
 """
-Atlas Storage Migration Framework — Phase 9.1 / 9.2b
+Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3
 
 Simple additive migration system for SQLite-backed storage. Each migration
 is a tuple of (sql_statement, description). Migrations are applied in
@@ -14,9 +14,9 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
-# Migration chain: version_from -> list of (sql, description)
+# Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
     2: [
         ("""
@@ -106,6 +106,74 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
                 timestamp TEXT NOT NULL
             )
         """, "Create understanding_signals table"),
+    ],
+    3: [
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_proposals (
+                proposal_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                expected_benefit TEXT NOT NULL,
+                risks TEXT NOT NULL,
+                impact_analysis TEXT NOT NULL,
+                implementation_approach TEXT NOT NULL,
+                plan_id TEXT DEFAULT '',
+                plan_title TEXT DEFAULT '',
+                plan_description TEXT DEFAULT '',
+                plan_priority TEXT DEFAULT '',
+                plan_weaknesses TEXT DEFAULT '[]',
+                plan_expected_benefit TEXT DEFAULT '',
+                plan_complexity TEXT DEFAULT 'medium',
+                plan_target_components TEXT DEFAULT '[]',
+                status TEXT NOT NULL,
+                rejection_reason TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                approved_at TEXT,
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_proposals table"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_proposals_status
+                ON evolution_proposals(status)
+        """, "Index on evolution proposal status"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_approval_requests (
+                request_id TEXT PRIMARY KEY,
+                proposal_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                risks TEXT NOT NULL,
+                expected_benefit TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                decision_comment TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                decided_at TEXT
+            )
+        """, "Create evolution_approval_requests table"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_approval_proposal
+                ON evolution_approval_requests(proposal_id)
+        """, "Index on approval request proposal_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_records (
+                record_id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                related_ids TEXT DEFAULT '[]',
+                timestamp TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_records table"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_records_event_type
+                ON evolution_records(event_type)
+        """, "Index on evolution record event type"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_records_timestamp
+                ON evolution_records(timestamp DESC)
+        """, "Index on evolution record timestamp"),
     ],
 }
 

@@ -65,10 +65,11 @@ from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 from atlas.goals.goal_repository import GoalRepository
 
-# --- Phase 9.1: Experience & Self-Model ---
+# --- Phase 9.0: Experience & Self-Model ---
 from atlas.experience.experience_repository import ExperienceRepository
 from atlas.experience.experience_accumulator import ExperienceAccumulator
 from atlas.experience.self_model_engine import SelfModelEngine
+from atlas.experience.outcome_tracker import OutcomeTracker
 from atlas.experience.serialization import snapshot_to_dict
 from atlas.storage.experience_storage import SQLiteExperienceStorage
 from atlas.storage.understanding_storage import SQLiteUnderstandingStorage
@@ -78,6 +79,12 @@ from atlas.evolution.improvement_planner import ImprovementPlanner
 from atlas.evolution.proposal_generator import ProposalGenerator
 from atlas.evolution.approval_manager import ApprovalManager
 from atlas.evolution.evolution_memory import EvolutionMemory
+
+# --- Phase 11.0: Evolution Execution Engine ---
+from atlas.evolution.execution_engine import EvolutionExecutionEngine
+
+# --- Phase 11.3: Evolution Persistence ---
+from atlas.storage.evolution_storage import SQLiteEvolutionStorage
 
 
 class Atlas:
@@ -127,6 +134,13 @@ class Atlas:
         self._proposal_generator: ProposalGenerator | None = None
         self._approval_manager: ApprovalManager | None = None
         self._evolution_memory: EvolutionMemory | None = None
+
+        # --- Phase 11.0: Evolution Execution Engine ---
+        self._outcome_tracker: OutcomeTracker | None = None
+        self._execution_engine: EvolutionExecutionEngine | None = None
+
+        # --- Phase 11.3: Evolution Persistence ---
+        self._evolution_storage: SQLiteEvolutionStorage | None = None
 
         # --- Reasoning pipeline ---
         self._reasoning_controller: ReasoningController | None = None
@@ -180,6 +194,16 @@ class Atlas:
     def runtime_coordinator(self):
         """Return the unified RuntimeCoordinator (Phase 7.5)."""
         return self._runtime_coordinator
+
+    @property
+    def execution_engine(self):
+        """Return the EvolutionExecutionEngine (Phase 11.0)."""
+        return self._execution_engine
+
+    @property
+    def outcome_tracker(self):
+        """Return the shared OutcomeTracker (Phase 11.0)."""
+        return self._outcome_tracker
 
     @property
     def started(self):
@@ -317,8 +341,15 @@ class Atlas:
         )
         self._experience_accumulator.seed_counter(restore_result.max_experience_id or 0)
 
+        # --- Phase 11.0: Create shared OutcomeTracker for SelfModelEngine
+        #     and EvolutionExecutionEngine ---
+        self._outcome_tracker = OutcomeTracker(
+            repository=self._experience_repository,
+        )
+
         self._self_model_engine = SelfModelEngine(
             repository=self._experience_repository,
+            outcome_tracker=self._outcome_tracker,
             identity_engine=self._identity_engine,
             understanding_engine=self._understanding_engine,
             goal_intelligence_engine=self._goal_intelligence_engine,
@@ -365,11 +396,34 @@ class Atlas:
             learning_engine=self._learning_engine,
         )
 
-        # --- Phase 10.0: Evolution Pipeline ---
+        # --- Phase 11.3: Create and initialize evolution storage ---
+        self._evolution_storage = SQLiteEvolutionStorage()
+        evolution_storage = self._evolution_storage
+        evolution_storage.initialize()
+        if evolution_storage.is_available():
+            self._event_bus.publish(
+                "evolution.storage.initialized",
+                {"db_path": str(evolution_storage.db_path)},
+            )
+        else:
+            self._event_bus.publish(
+                "evolution.storage.unavailable",
+                {"mode": "memory_only"},
+            )
+
+        # --- Phase 10.0: Evolution Pipeline with Phase 11.3 persistence ---
         self._improvement_planner = ImprovementPlanner()
         self._proposal_generator = ProposalGenerator()
         self._approval_manager = ApprovalManager()
-        self._evolution_memory = EvolutionMemory()
+        self._evolution_memory = EvolutionMemory(storage=evolution_storage)
+        self._evolution_memory.restore()
+
+        # --- Phase 11.0: Create the EvolutionExecutionEngine ---
+        self._execution_engine = EvolutionExecutionEngine(
+            approval_manager=self._approval_manager,
+            evolution_memory=self._evolution_memory,
+            outcome_tracker=self._outcome_tracker,
+        )
 
         # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
         self._runtime_coordinator = RuntimeCoordinator(
