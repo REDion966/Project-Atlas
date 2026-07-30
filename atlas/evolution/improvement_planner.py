@@ -6,6 +6,8 @@ opportunities, and produces structured improvement plans.
 Never modifies anything.
 
 Phase 7.0 — Self-Evolution Foundation.
+Phase 12.4 — Added evolution feedback integration. Planner can optionally
+receive EvolutionInsight objects to adjust planning based on past outcomes.
 """
 
 from collections import Counter
@@ -13,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from atlas.evolution.models import (
+    EvolutionInsight,
     ImprovementPlan,
     ImprovementPriority,
     Observation,
@@ -28,6 +31,9 @@ class ImprovementPlanner:
     This is a pure logic component with no infrastructure dependencies.
     It receives observations as input and returns plans as output.
     It never modifies the system or calls external services.
+
+    Phase 12.4 — When optional insights are provided, historical evolution
+    outcomes influence weakness severity and plan prioritisation.
     """
 
     def __init__(self) -> None:
@@ -46,12 +52,20 @@ class ImprovementPlanner:
     def detect_weaknesses(
         self,
         observations: list[Observation],
+        insights: list[EvolutionInsight] | None = None,
     ) -> list[Weakness]:
         """
         Analyze observations and produce a list of detected weaknesses.
 
+        When past evolution insights are provided, weakness severity is
+        adjusted based on historical outcomes:
+          - Similar areas with successful past outcomes → higher confidence
+          - Similar areas with failed past outcomes → cautious treatment
+
         Args:
             observations: A list of Observation instances to analyze.
+            insights: Optional list of EvolutionInsight instances from
+                past evolution outcome analysis.
 
         Returns:
             A list of Weakness instances. Returns an empty list when no
@@ -82,7 +96,155 @@ class ImprovementPlanner:
         if health_weakness is not None:
             weaknesses.append(health_weakness)
 
+        # Phase 12.4: Adjust weaknesses based on historical evolution insights
+        if insights:
+            weaknesses = self._apply_evolution_feedback(weaknesses, insights)
+
         return weaknesses
+
+    # ------------------------------------------------------------------
+    # Evolution feedback integration (Phase 12.4+)
+    # ------------------------------------------------------------------
+
+    def _apply_evolution_feedback(
+        self,
+        weaknesses: list[Weakness],
+        insights: list[EvolutionInsight],
+    ) -> list[Weakness]:
+        """
+        Adjust weakness severity based on historical evolution outcomes.
+
+        Rules:
+          - Insights with outcome="success" and effectiveness >= 0.75 in a
+            matching area → boost priority one level.
+          - Insights with outcome="failure" and regression_risk >= 0.5 in a
+            matching area → reduce priority one level.
+          - Insights with confidence < 0.3 → ignored (low confidence).
+          - No match → unchanged.
+
+        Args:
+            weaknesses: Detected weaknesses to adjust.
+            insights: Historical evolution insights.
+
+        Returns:
+            Adjusted list of Weakness instances.
+        """
+        if not weaknesses or not insights:
+            return weaknesses
+
+        # Build a map of area → list of relevant insights
+        area_feedback: dict[str, list[EvolutionInsight]] = {}
+        for insight in insights:
+            # Skip low-confidence insights
+            if insight.confidence < 0.3:
+                continue
+
+            # Derive area from proposal_title/summary keywords
+            area = self._insight_to_area(insight)
+            if area is None:
+                continue
+
+            if area not in area_feedback:
+                area_feedback[area] = []
+            area_feedback[area].append(insight)
+
+        if not area_feedback:
+            return weaknesses
+
+        # Adjust each weakness
+        adjusted: list[Weakness] = []
+        for weakness in weaknesses:
+            matching_insights = area_feedback.get(weakness.area, [])
+            if matching_insights:
+                weakness = self._adjust_weakness(weakness, matching_insights)
+            adjusted.append(weakness)
+
+        return adjusted
+
+    @staticmethod
+    def _insight_to_area(insight: EvolutionInsight) -> str | None:
+        """
+        Map an evolution insight to a weakness area.
+
+        Uses keyword matching against proposal title/summary.
+        Returns one of: "runtime", "reasoning", "tools", "memory",
+        "system_health", or None.
+        """
+        text = f"{insight.proposal_title} {insight.proposal_summary}".lower()
+
+        # Area keyword mapping
+        area_keywords = {
+            "runtime": ["runtime", "performance", "response", "latency"],
+            "reasoning": ["reasoning", "capability", "analysis"],
+            "tools": ["tool", "executor", "selector"],
+            "memory": ["memory", "retrieval", "ranking", "context"],
+            "system_health": ["health", "stability", "component", "reliability"],
+        }
+
+        for area, keywords in area_keywords.items():
+            if any(kw in text for kw in keywords):
+                return area
+
+        return None
+
+    @staticmethod
+    def _adjust_weakness(
+        weakness: Weakness,
+        matching_insights: list[EvolutionInsight],
+    ) -> Weakness:
+        """
+        Adjust a single weakness based on matching evolution insights.
+
+        Majority vote among matching insights determines direction:
+        - More successes than failures → boost
+        - More failures than successes → reduce
+        """
+        successes = sum(
+            1 for ins in matching_insights
+            if ins.outcome == "success" and ins.effectiveness_score >= 0.75
+        )
+        failures = sum(
+            1 for ins in matching_insights
+            if ins.outcome == "failure" and ins.regression_risk >= 0.5
+        )
+
+        if successes > failures:
+            # Boost: increase severity one level if possible
+            new_severity = _boost_priority(weakness.severity)
+            if new_severity != weakness.severity:
+                return Weakness(
+                    area=weakness.area,
+                    description=(
+                        f"{weakness.description} "
+                        f"[Evolution feedback: similar past improvements "
+                        f"succeeded with {successes} successful outcomes]"
+                    ),
+                    severity=new_severity,
+                    supporting_observations=weakness.supporting_observations,
+                    detected_at=weakness.detected_at,
+                )
+
+        elif failures > successes:
+            # Reduce: decrease severity one level if possible
+            new_severity = _reduce_priority(weakness.severity)
+            if new_severity != weakness.severity:
+                return Weakness(
+                    area=weakness.area,
+                    description=(
+                        f"{weakness.description} "
+                        f"[Evolution feedback: similar past improvements "
+                        f"failed with {failures} failed outcomes]"
+                    ),
+                    severity=new_severity,
+                    supporting_observations=weakness.supporting_observations,
+                    detected_at=weakness.detected_at,
+                )
+
+        return weakness
+
+    # ------------------------------------------------------------------
+    # Weakness detection methods (unchanged)
+    # ------------------------------------------------------------------
 
     def _detect_runtime_weakness(
         self,
@@ -312,14 +474,20 @@ class ImprovementPlanner:
     def create_improvement_plan(
         self,
         weaknesses: list[Weakness],
+        insights: list[EvolutionInsight] | None = None,
     ) -> ImprovementPlan | None:
         """
         Create a single improvement plan from a list of weaknesses.
+
+        When past evolution insights are provided, the plan description
+        and expected benefit may reference historical outcomes.
 
         If no weaknesses are provided, returns None.
 
         Args:
             weaknesses: A list of Weakness instances to address.
+            insights: Optional list of EvolutionInsight instances for
+                enriched planning context.
 
         Returns:
             An ImprovementPlan targeting the most critical weaknesses,
@@ -353,17 +521,26 @@ class ImprovementPlanner:
             w.area for w in sorted_weaknesses
         ))
 
+        # Enrich with evolution feedback if available
+        feedback_note = ""
+        if insights:
+            feedback_note = self._build_feedback_note(primary.area, insights)
+
+        description = (
+            f"Address {len(sorted_weaknesses)} identified weakness(es) "
+            f"in {', '.join(target_components)}. "
+            f"Primary issue: {primary.description}"
+        )
+        if feedback_note:
+            description += f" {feedback_note}"
+
         return ImprovementPlan(
             plan_id=self._next_plan_id(),
             title=f"Improve {area_name}",
-            description=(
-                f"Address {len(sorted_weaknesses)} identified weakness(es) "
-                f"in {', '.join(target_components)}. "
-                f"Primary issue: {primary.description}"
-            ),
+            description=description,
             priority=primary.severity,
             weaknesses=sorted_weaknesses,
-            expected_benefit=self._estimate_benefit(primary),
+            expected_benefit=self._estimate_benefit(primary, insights),
             complexity_estimate=self._estimate_complexity(sorted_weaknesses),
             target_components=target_components,
         )
@@ -371,12 +548,14 @@ class ImprovementPlanner:
     def create_all_plans(
         self,
         weaknesses: list[Weakness],
+        insights: list[EvolutionInsight] | None = None,
     ) -> list[ImprovementPlan]:
         """
         Create improvement plans for each distinct area with weaknesses.
 
         Args:
             weaknesses: A list of Weakness instances.
+            insights: Optional list of EvolutionInsight instances.
 
         Returns:
             A list of ImprovementPlan instances, one per affected area.
@@ -392,18 +571,57 @@ class ImprovementPlanner:
 
         plans: list[ImprovementPlan] = []
         for area, area_weaknesses in by_area.items():
-            plan = self.create_improvement_plan(area_weaknesses)
+            plan = self.create_improvement_plan(area_weaknesses, insights=insights)
             if plan is not None:
                 plans.append(plan)
 
         plans.sort(key=lambda p: p.priority.value)
         return plans
 
+    # ------------------------------------------------------------------
+    # Feedback enrichment helpers (Phase 12.4+)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_feedback_note(
+        area: str,
+        insights: list[EvolutionInsight],
+    ) -> str:
+        """Build a short feedback note from historical insights for an area."""
+        relevant = [
+            ins for ins in insights
+            if ImprovementPlanner._insight_to_area(ins) == area
+        ]
+        if not relevant:
+            return ""
+
+        successes = sum(1 for ins in relevant if ins.outcome == "success")
+        failures = sum(1 for ins in relevant if ins.outcome == "failure")
+        total = len(relevant)
+
+        if successes > failures:
+            return (
+                f"Evolution history: {successes}/{total} similar improvements "
+                f"succeeded."
+            )
+        elif failures > successes:
+            return (
+                f"Evolution history: {failures}/{total} similar improvements "
+                f"had challenges. Proceed with caution."
+            )
+        return ""
+
     def _estimate_benefit(
         self,
         weakness: Weakness,
+        insights: list[EvolutionInsight] | None = None,
     ) -> str:
-        """Estimate the expected benefit of addressing a weakness."""
+        """Estimate the expected benefit of addressing a weakness.
+
+        When insights are available, use measured outcomes from past
+        improvements in the same area to provide data-driven estimates.
+        """
+        # Default estimates by area
         estimates = {
             "runtime": (
                 "Improved response times and reduced error rates "
@@ -424,7 +642,27 @@ class ImprovementPlanner:
                 "Improved system stability and reduced component failures."
             ),
         }
-        return estimates.get(weakness.area, "Improved system behavior.")
+
+        base = estimates.get(weakness.area, "Improved system behavior.")
+
+        # Enrich with measured outcomes from past insights
+        if insights:
+            area_insights = [
+                ins for ins in insights
+                if ImprovementPlanner._insight_to_area(ins) == weakness.area
+            ]
+            if area_insights:
+                avg_effectiveness = (
+                    sum(ins.effectiveness_score for ins in area_insights)
+                    / len(area_insights)
+                )
+                if avg_effectiveness >= 0.7:
+                    base += (
+                        f" Past similar improvements averaged "
+                        f"{avg_effectiveness:.0%} effectiveness."
+                    )
+
+        return base
 
     def _estimate_complexity(
         self,
@@ -444,3 +682,30 @@ class ImprovementPlanner:
         elif high_severity >= 1:
             return "medium"
         return "low"
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers for priority adjustment
+# ---------------------------------------------------------------------------
+
+
+def _boost_priority(priority: ImprovementPriority) -> ImprovementPriority:
+    """Increase severity one level."""
+    mapping = {
+        ImprovementPriority.LOW: ImprovementPriority.MEDIUM,
+        ImprovementPriority.MEDIUM: ImprovementPriority.HIGH,
+        ImprovementPriority.HIGH: ImprovementPriority.CRITICAL,
+        ImprovementPriority.CRITICAL: ImprovementPriority.CRITICAL,
+    }
+    return mapping.get(priority, priority)
+
+
+def _reduce_priority(priority: ImprovementPriority) -> ImprovementPriority:
+    """Decrease severity one level."""
+    mapping = {
+        ImprovementPriority.CRITICAL: ImprovementPriority.HIGH,
+        ImprovementPriority.HIGH: ImprovementPriority.MEDIUM,
+        ImprovementPriority.MEDIUM: ImprovementPriority.LOW,
+        ImprovementPriority.LOW: ImprovementPriority.LOW,
+    }
+    return mapping.get(priority, priority)

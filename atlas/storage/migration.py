@@ -1,11 +1,13 @@
 """
-Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3
+Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3
 
 Simple additive migration system for SQLite-backed storage. Each migration
 is a tuple of (sql_statement, description). Migrations are applied in
 ascending version order inside a transaction.
 
 No destructive migrations are permitted.
+
+Phase 12.3 — Added evolution_insights table (schema version 4).
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 # Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
@@ -174,6 +176,42 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_evolution_records_timestamp
                 ON evolution_records(timestamp DESC)
         """, "Index on evolution record timestamp"),
+    ],
+    4: [
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_insights (
+                insight_id TEXT PRIMARY KEY,
+                proposal_id TEXT NOT NULL,
+                execution_record_id TEXT NOT NULL,
+                tracked_goal_id TEXT NOT NULL,
+
+                outcome TEXT NOT NULL,
+
+                confidence REAL NOT NULL,
+                effectiveness_score REAL NOT NULL,
+
+                evidence_summary TEXT NOT NULL,
+                evidence_count INTEGER NOT NULL DEFAULT 0,
+
+                evidence_quality REAL NOT NULL,
+                regression_risk REAL NOT NULL DEFAULT 0.0,
+
+                analyzed_at TEXT NOT NULL,
+
+                proposal_title TEXT DEFAULT '',
+                proposal_summary TEXT DEFAULT '',
+
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_insights table for Phase 12.3 evolution outcome analysis"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_insights_proposal
+                ON evolution_insights(proposal_id)
+        """, "Index on evolution insight proposal_id"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_insights_analyzed_at
+                ON evolution_insights(analyzed_at DESC)
+        """, "Index on evolution insight analyzed_at"),
     ],
 }
 

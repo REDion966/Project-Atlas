@@ -230,8 +230,8 @@ class TestSQLiteEvolutionStorage:
         assert storage.load_records() == []
 
     def test_schema_version(self, storage):
-        """Schema version is 3 after migration."""
-        assert storage.get_schema_version() == 3
+        """Schema version is 4 after migration."""
+        assert storage.get_schema_version() == 4
 
 
 # ---------------------------------------------------------------------------

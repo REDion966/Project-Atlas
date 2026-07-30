@@ -10,6 +10,7 @@ from datetime import datetime
 from atlas.evolution.models import (
     ApprovalDecision,
     ApprovalRequest,
+    EvolutionInsight,
     EvolutionProposal,
     EvolutionRecord,
     ImprovementPlan,
@@ -282,3 +283,140 @@ class TestEvolutionRecord:
         assert rec.description == "A new proposal was created"
         assert rec.related_ids == []
         assert isinstance(rec.timestamp, datetime)
+
+
+class TestEvolutionInsight:
+
+    def test_create_minimal(self):
+        """Create an EvolutionInsight with only required fields."""
+        insight = EvolutionInsight(
+            insight_id="INS-001",
+            proposal_id="PROP-001",
+            execution_record_id="EVR-001",
+            tracked_goal_id="TRK-001",
+        )
+        assert insight.insight_id == "INS-001"
+        assert insight.proposal_id == "PROP-001"
+        assert insight.execution_record_id == "EVR-001"
+        assert insight.tracked_goal_id == "TRK-001"
+        assert insight.outcome == "inconclusive"
+        assert insight.confidence == 0.0
+        assert insight.effectiveness_score == 0.0
+        assert insight.evidence_summary == ""
+        assert insight.evidence_count == 0
+        assert insight.evidence_quality == 0.0
+        assert insight.regression_risk == 0.0
+        assert isinstance(insight.analyzed_at, datetime)
+        assert insight.proposal_title == ""
+        assert insight.proposal_summary == ""
+
+    def test_create_full(self):
+        """Create an EvolutionInsight with all fields populated."""
+        now = datetime.now()
+        insight = EvolutionInsight(
+            insight_id="INS-002",
+            proposal_id="PROP-002",
+            execution_record_id="EVR-002",
+            tracked_goal_id="TRK-002",
+            outcome="success",
+            confidence=0.85,
+            effectiveness_score=0.72,
+            evidence_summary="Reduced retrieval corrections by 40%",
+            evidence_count=15,
+            evidence_quality=0.9,
+            regression_risk=0.15,
+            analyzed_at=now,
+            proposal_title="Improve Memory Retrieval Ranking",
+            proposal_summary="Improve the ranking algorithm for memory retrieval",
+            metadata={"source": "trend_analysis", "window_size": 50},
+        )
+        assert insight.insight_id == "INS-002"
+        assert insight.proposal_id == "PROP-002"
+        assert insight.execution_record_id == "EVR-002"
+        assert insight.tracked_goal_id == "TRK-002"
+        assert insight.outcome == "success"
+        assert insight.confidence == 0.85
+        assert insight.effectiveness_score == 0.72
+        assert insight.evidence_summary == "Reduced retrieval corrections by 40%"
+        assert insight.evidence_count == 15
+        assert insight.evidence_quality == 0.9
+        assert insight.regression_risk == 0.15
+        assert insight.analyzed_at == now
+        assert insight.proposal_title == "Improve Memory Retrieval Ranking"
+        assert insight.proposal_summary == "Improve the ranking algorithm for memory retrieval"
+        assert insight.metadata == {"source": "trend_analysis", "window_size": 50}
+
+    def test_slots(self):
+        """EvolutionInsight uses __slots__ and rejects unknown attributes."""
+        insight = EvolutionInsight(
+            insight_id="INS-003",
+            proposal_id="PROP-003",
+            execution_record_id="EVR-003",
+            tracked_goal_id="TRK-003",
+        )
+        with pytest.raises(AttributeError):
+            insight.new_attr = "test"
+
+    def test_default_outcome_is_inconclusive(self):
+        """Default outcome is 'inconclusive' when no value is provided."""
+        insight = EvolutionInsight(
+            insight_id="INS-004",
+            proposal_id="PROP-004",
+            execution_record_id="EVR-004",
+            tracked_goal_id="TRK-004",
+        )
+        assert insight.outcome == "inconclusive"
+
+    def test_default_confidence_is_zero(self):
+        """Default confidence is 0.0 when no value is provided."""
+        insight = EvolutionInsight(
+            insight_id="INS-005",
+            proposal_id="PROP-005",
+            execution_record_id="EVR-005",
+            tracked_goal_id="TRK-005",
+        )
+        assert insight.confidence == 0.0
+
+    def test_default_evidence_count_is_zero(self):
+        """Default evidence_count is 0 when no value is provided."""
+        insight = EvolutionInsight(
+            insight_id="INS-006",
+            proposal_id="PROP-006",
+            execution_record_id="EVR-006",
+            tracked_goal_id="TRK-006",
+        )
+        assert insight.evidence_count == 0
+
+    def test_analyzed_at_defaults_to_now(self):
+        """analyzed_at defaults to current datetime when not provided."""
+        before = datetime.now()
+        insight = EvolutionInsight(
+            insight_id="INS-007",
+            proposal_id="PROP-007",
+            execution_record_id="EVR-007",
+            tracked_goal_id="TRK-007",
+        )
+        after = datetime.now()
+        assert before <= insight.analyzed_at <= after
+
+    def test_partial_outcome_values(self):
+        """EvolutionInsight accepts any string outcome value."""
+        insight = EvolutionInsight(
+            insight_id="INS-008",
+            proposal_id="PROP-008",
+            execution_record_id="EVR-008",
+            tracked_goal_id="TRK-008",
+            outcome="partial",
+        )
+        assert insight.outcome == "partial"
+
+    def test_failure_outcome_values(self):
+        """EvolutionInsight accepts failure as a valid outcome value."""
+        insight = EvolutionInsight(
+            insight_id="INS-009",
+            proposal_id="PROP-009",
+            execution_record_id="EVR-009",
+            tracked_goal_id="TRK-009",
+            outcome="failure",
+        )
+        assert insight.outcome == "failure"

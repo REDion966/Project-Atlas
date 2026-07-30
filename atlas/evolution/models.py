@@ -4,6 +4,7 @@ Atlas Evolution — Data Models
 Pure data models for the self-evolution subsystem.
 Phase 7.0 — Self-Evolution Foundation.
 Phase 11.0 — Added ExecutionLevel enum and ExecutionResult dataclass.
+Phase 12.0 — Added EvolutionInsight dataclass for evolution outcome analysis.
 """
 
 from dataclasses import dataclass, field
@@ -336,4 +337,70 @@ class EvolutionRecord:
     description: str
     related_ids: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Evolution insight types (Phase 12.0+)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class EvolutionInsight:
+    """
+    A structured analysis of whether a previous evolution proposal succeeded.
+
+    Connects a proposal to its execution record, tracked goal outcome, and
+    supporting evidence. Produced by EvolutionIntelligenceEngine (Phase 12+)
+    and consumed by ImprovementPlanner to inform future planning.
+
+    Pure data. No infrastructure or engine dependencies.
+
+    Attributes:
+        insight_id: Unique identifier for this insight.
+        proposal_id: The ID of the original EvolutionProposal.
+        execution_record_id: The ID of the EvolutionRecord documenting
+            the execution event.
+        tracked_goal_id: The ID of the TrackedGoal created by
+            OutcomeTracker for outcome verification.
+
+        outcome: Overall assessment of the proposal's result
+            (e.g. "success", "partial", "failure", "inconclusive").
+        confidence: Confidence in the outcome assessment, from 0.0
+            (no confidence) to 1.0 (high confidence).
+        effectiveness_score: How much the change actually helped, from
+            0.0 (no improvement) to 1.0 (significant improvement).
+
+        evidence_summary: Human-readable explanation of the evidence
+            supporting this insight.
+        evidence_count: Number of data points supporting the assessment.
+        evidence_quality: Quality assessment of the evidence, from 0.0
+            (poor) to 1.0 (strong).
+        regression_risk: Estimated probability that the change introduced
+            negative side effects, from 0.0 (no risk) to 1.0 (high risk).
+
+        analyzed_at: When the analysis was performed.
+        proposal_title: Denormalized title of the original proposal for
+            convenient querying.
+        proposal_summary: Denormalized summary of the original proposal.
+        metadata: Optional additional context.
+    """
+
+    insight_id: str
+    proposal_id: str
+    execution_record_id: str
+    tracked_goal_id: str
+
+    outcome: str = "inconclusive"
+    confidence: float = 0.0
+    effectiveness_score: float = 0.0
+
+    evidence_summary: str = ""
+    evidence_count: int = 0
+    evidence_quality: float = 0.0
+    regression_risk: float = 0.0
+
+    analyzed_at: datetime = field(default_factory=datetime.now)
+    proposal_title: str = ""
+    proposal_summary: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)

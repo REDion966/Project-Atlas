@@ -9,11 +9,13 @@ All components are pure logic with no AI provider dependencies.
 Atlas intelligence owns evolution. AI models are only reasoning resources.
 
 Phase 11.0 — Added EvolutionExecutionEngine and ExecutionLevel.
+Phase 12.0 — Added EvolutionInsight dataclass for evolution outcome analysis.
 """
 
 from atlas.evolution.models import (
     ApprovalDecision,
     ApprovalRequest,
+    EvolutionInsight,
     EvolutionProposal,
     EvolutionRecord,
     ExecutionLevel,
@@ -40,6 +42,7 @@ __all__ = [
     "ApprovalManager",
     "ApprovalRequest",
     "EvolutionExecutionEngine",
+    "EvolutionInsight",
     "EvolutionMemory",
     "EvolutionProposal",
     "EvolutionRecord",

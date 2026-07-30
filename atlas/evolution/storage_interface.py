@@ -1,11 +1,14 @@
 """
-Atlas EvolutionStorage Interface — Phase 11.3
+Atlas EvolutionStorage Interface — Phase 11.3 / 12.3
 
 Abstract interface for persistent evolution storage. Defined in the pure
 logic layer so infrastructure adapters in atlas/storage/ can implement it
 without leaking infrastructure imports into the domain layer.
 
 No infrastructure imports. No database imports. Pure contract only.
+
+Phase 12.3 — Added store_insight() and load_insights() for evolution
+outcome persistence.
 """
 
 from abc import ABC, abstractmethod
@@ -81,6 +84,31 @@ class EvolutionStorage(ABC):
     @abstractmethod
     def load_records(self) -> list[dict]:
         """Load all stored evolution records, oldest first."""
+
+    # ------------------------------------------------------------------
+    # Evolution insights (Phase 12.3+)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def store_insight(self, data: dict) -> None:
+        """Persist a single evolution insight dictionary."""
+
+    @abstractmethod
+    def load_insights(
+        self,
+        proposal_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        Load persisted evolution insights.
+
+        Args:
+            proposal_id: Optional filter by proposal_id.
+            limit: Maximum number of insights to return.
+
+        Returns:
+            A list of insight dictionaries, newest first.
+        """
 
     # ------------------------------------------------------------------
     # Administration

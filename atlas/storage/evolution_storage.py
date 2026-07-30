@@ -1,11 +1,15 @@
 """
-Atlas SQLite Evolution Storage — Phase 11.3
+Atlas SQLite Evolution Storage — Phase 11.3 / 12.3
 
 Infrastructure adapter implementing the EvolutionStorage interface with
 SQLite. Reuses the existing atlas_experience.db database and migration
 framework. Owns connection lifecycle, serialization, and graceful failure.
 
-This module is the only place in Phase 11.3 that imports sqlite3.
+This module is the only place in the evolution persistence layer that
+imports sqlite3.
+
+Phase 12.3 — Added store_insight() and load_insights() for evolution
+insight persistence.
 """
 
 from __future__ import annotations
@@ -298,6 +302,87 @@ class SQLiteEvolutionStorage(EvolutionStorage):
         }
 
     # ------------------------------------------------------------------
+    # Evolution insights (Phase 12.3+)
+    # ------------------------------------------------------------------
+
+    def store_insight(self, data: dict) -> None:
+        """Persist a single evolution insight dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_insights (
+                insight_id, proposal_id, execution_record_id,
+                tracked_goal_id, outcome, confidence,
+                effectiveness_score, evidence_summary, evidence_count,
+                evidence_quality, regression_risk, analyzed_at,
+                proposal_title, proposal_summary, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("insight_id"),
+            data.get("proposal_id"),
+            data.get("execution_record_id"),
+            data.get("tracked_goal_id", ""),
+            data.get("outcome", "inconclusive"),
+            data.get("confidence", 0.0),
+            data.get("effectiveness_score", 0.0),
+            data.get("evidence_summary", ""),
+            data.get("evidence_count", 0),
+            data.get("evidence_quality", 0.0),
+            data.get("regression_risk", 0.0),
+            data.get("analyzed_at", ""),
+            data.get("proposal_title", ""),
+            data.get("proposal_summary", ""),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_insights(
+        self,
+        proposal_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Load persisted evolution insights, newest first."""
+        if proposal_id is not None:
+            cursor = self._execute(
+                """
+                SELECT * FROM evolution_insights
+                WHERE proposal_id = ?
+                ORDER BY analyzed_at DESC
+                LIMIT ?
+                """,
+                (proposal_id, limit),
+            )
+        else:
+            cursor = self._execute(
+                """
+                SELECT * FROM evolution_insights
+                ORDER BY analyzed_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        return [self._row_to_insight(row) for row in cursor.fetchall()]
+
+    def _row_to_insight(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to an insight dictionary."""
+        return {
+            "insight_id": row["insight_id"],
+            "proposal_id": row["proposal_id"],
+            "execution_record_id": row["execution_record_id"],
+            "tracked_goal_id": row["tracked_goal_id"],
+            "outcome": row["outcome"],
+            "confidence": row["confidence"],
+            "effectiveness_score": row["effectiveness_score"],
+            "evidence_summary": row["evidence_summary"],
+            "evidence_count": row["evidence_count"],
+            "evidence_quality": row["evidence_quality"],
+            "regression_risk": row["regression_risk"],
+            "analyzed_at": row["analyzed_at"],
+            "proposal_title": row["proposal_title"],
+            "proposal_summary": row["proposal_summary"],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    # ------------------------------------------------------------------
     # Administration
     # ------------------------------------------------------------------
 
@@ -313,6 +398,7 @@ class SQLiteEvolutionStorage(EvolutionStorage):
                 conn.execute("DELETE FROM evolution_proposals")
                 conn.execute("DELETE FROM evolution_approval_requests")
                 conn.execute("DELETE FROM evolution_records")
+                conn.execute("DELETE FROM evolution_insights")
         except sqlite3.Error:
             self._available = False
             raise
