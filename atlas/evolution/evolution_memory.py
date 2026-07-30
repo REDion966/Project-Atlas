@@ -358,6 +358,9 @@ class EvolutionMemory:
         if new_status == ProposalStatus.APPROVED:
             proposal.approved_at = datetime.now()
 
+        # Persist the updated proposal to storage (best-effort)
+        self._try_storage_write("store_proposal", _proposal_to_dict(proposal))
+
         return True
 
     @property

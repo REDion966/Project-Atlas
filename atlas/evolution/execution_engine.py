@@ -306,6 +306,10 @@ class EvolutionExecutionEngine:
         proposal.status = ProposalStatus.IMPLEMENTED
         proposal.metadata["executed_at"] = datetime.now().isoformat()
 
+        # Persist the updated proposal so status is not lost on restart
+        if self._evolution_memory is not None:
+            self._evolution_memory.store_proposal(proposal)
+
         # Create and store the execution record
         record = self._create_execution_record(proposal)
         if self._evolution_memory is not None:
