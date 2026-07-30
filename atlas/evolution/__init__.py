@@ -42,10 +42,20 @@ from atlas.evolution.insight_scorer import InsightScorer
 from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
 from atlas.evolution.research_coordinator import ResearchCoordinator
 
+# --- Phase 13.1: Governance ---
+from atlas.evolution.governance import (
+    ConstraintRegistry,
+    GovernanceDecision,
+    GovernanceRule,
+    RuleEngine,
+    ScopeType,
+)
+
 __all__ = [
     "ApprovalDecision",
     "ApprovalManager",
     "ApprovalRequest",
+    "ConstraintRegistry",
     "EvolutionExecutionEngine",
     "EvolutionInsight",
     "EvolutionIntelligenceEngine",
@@ -54,6 +64,8 @@ __all__ = [
     "EvolutionRecord",
     "ExecutionLevel",
     "ExecutionResult",
+    "GovernanceDecision",
+    "GovernanceRule",
     "ImprovementPlan",
     "ImprovementPlanner",
     "ImprovementPriority",
@@ -66,6 +78,8 @@ __all__ = [
     "ResearchCoordinator",
     "ResearchQuery",
     "ResearchResult",
+    "RuleEngine",
+    "ScopeType",
     "SelfObservationEngine",
     "Weakness",
 ]
