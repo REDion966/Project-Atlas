@@ -86,6 +86,10 @@ from atlas.evolution.execution_engine import EvolutionExecutionEngine
 # --- Phase 11.3: Evolution Persistence ---
 from atlas.storage.evolution_storage import SQLiteEvolutionStorage
 
+# --- Phase 12.1 / 12.2: Evolution Intelligence ---
+from atlas.evolution.insight_scorer import InsightScorer
+from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
+
 
 class Atlas:
     """
@@ -141,6 +145,10 @@ class Atlas:
 
         # --- Phase 11.3: Evolution Persistence ---
         self._evolution_storage: SQLiteEvolutionStorage | None = None
+
+        # --- Phase 12.1 / 12.2: Evolution Intelligence ---
+        self._insight_scorer: InsightScorer | None = None
+        self._intelligence_engine: EvolutionIntelligenceEngine | None = None
 
         # --- Reasoning pipeline ---
         self._reasoning_controller: ReasoningController | None = None
@@ -199,6 +207,11 @@ class Atlas:
     def execution_engine(self):
         """Return the EvolutionExecutionEngine (Phase 11.0)."""
         return self._execution_engine
+
+    @property
+    def intelligence_engine(self):
+        """Return the EvolutionIntelligenceEngine (Phase 12.2)."""
+        return self._intelligence_engine
 
     @property
     def outcome_tracker(self):
@@ -418,6 +431,15 @@ class Atlas:
         self._evolution_memory = EvolutionMemory(storage=evolution_storage)
         self._evolution_memory.restore()
 
+        # --- Phase 12.1 / 12.2: Create the Evolution Intelligence Engine ---
+        self._insight_scorer = InsightScorer()
+        self._intelligence_engine = EvolutionIntelligenceEngine(
+            evolution_memory=self._evolution_memory,
+            experience_repository=self._experience_repository,
+            insight_scorer=self._insight_scorer,
+            storage=evolution_storage,
+        )
+
         # --- Phase 11.0: Create the EvolutionExecutionEngine ---
         self._execution_engine = EvolutionExecutionEngine(
             approval_manager=self._approval_manager,
@@ -520,6 +542,8 @@ class Atlas:
         self._container.register("experience_repository", self._experience_repository)
         self._container.register("experience_accumulator", self._experience_accumulator)
         self._container.register("self_model_engine", self._self_model_engine)
+        # --- Phase 12.2: Register evolution intelligence engine ---
+        self._container.register("intelligence_engine", self._intelligence_engine)
 
         self._container.start_all()
         self._started = True
@@ -597,6 +621,10 @@ class Atlas:
         self._self_observation_engine = None
         self._learning_engine = None
         self._identity_engine = None
+
+        # --- Phase 12.2: Cleanup ---
+        self._intelligence_engine = None
+        self._insight_scorer = None
 
         self._learning_manager = None
         self._knowledge_feedback = None

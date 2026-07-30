@@ -10,6 +10,8 @@ Atlas intelligence owns evolution. AI models are only reasoning resources.
 
 Phase 11.0 — Added EvolutionExecutionEngine and ExecutionLevel.
 Phase 12.0 — Added EvolutionInsight dataclass for evolution outcome analysis.
+Phase 12.1 — Added InsightScorer for deterministic outcome scoring.
+Phase 12.2 — Added EvolutionIntelligenceEngine for proposal analysis.
 """
 
 from atlas.evolution.models import (
@@ -36,6 +38,9 @@ from atlas.evolution.proposal_generator import ProposalGenerator
 from atlas.evolution.approval_manager import ApprovalManager
 from atlas.evolution.evolution_memory import EvolutionMemory
 from atlas.evolution.execution_engine import EvolutionExecutionEngine
+from atlas.evolution.insight_scorer import InsightScorer
+from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
+from atlas.evolution.research_coordinator import ResearchCoordinator
 
 __all__ = [
     "ApprovalDecision",
@@ -43,6 +48,7 @@ __all__ = [
     "ApprovalRequest",
     "EvolutionExecutionEngine",
     "EvolutionInsight",
+    "EvolutionIntelligenceEngine",
     "EvolutionMemory",
     "EvolutionProposal",
     "EvolutionRecord",
@@ -52,10 +58,12 @@ __all__ = [
     "ImprovementPlanner",
     "ImprovementPriority",
     "ImprovementStatus",
+    "InsightScorer",
     "Observation",
     "ObservationCategory",
     "ProposalGenerator",
     "ProposalStatus",
+    "ResearchCoordinator",
     "ResearchQuery",
     "ResearchResult",
     "SelfObservationEngine",
