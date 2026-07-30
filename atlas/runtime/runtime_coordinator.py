@@ -83,6 +83,7 @@ class RuntimeCoordinator:
         proposal_generator: Any = None,
         approval_manager: Any = None,
         evolution_memory: Any = None,
+        intelligence_engine: Any = None,
     ):
         self._engine = engine or CognitionEngine()
 
@@ -118,6 +119,9 @@ class RuntimeCoordinator:
         self._proposal_generator = proposal_generator
         self._approval_manager = approval_manager
         self._evolution_memory = evolution_memory
+
+        # --- Phase 12.2: Evolution Intelligence Engine ---
+        self._intelligence_engine = intelligence_engine
 
         # --- Phase 10.0: Transient metrics reference for Stage 13 ---
         self._current_metrics: PipelineMetrics | None = None
@@ -291,9 +295,19 @@ class RuntimeCoordinator:
             if self._improvement_planner is not None and self._evolution_observation_engine is not None:
                 observations = self._evolution_observation_engine.recent_observations(n=100)
                 if observations:
-                    weaknesses = self._improvement_planner.detect_weaknesses(observations)
+                    # Phase 12.5.2: Feed evolution insights into planning
+                    insights = None
+                    if self._intelligence_engine is not None:
+                        insights = self._intelligence_engine.get_insights()
+                    weaknesses = self._improvement_planner.detect_weaknesses(
+                        observations,
+                        insights=insights,
+                    )
                     if weaknesses:
-                        plan = self._improvement_planner.create_improvement_plan(weaknesses)
+                        plan = self._improvement_planner.create_improvement_plan(
+                            weaknesses,
+                            insights=insights,
+                        )
                         if plan is not None and self._proposal_generator is not None:
                             proposal = self._proposal_generator.generate_proposal(plan)
                             if self._approval_manager is not None:

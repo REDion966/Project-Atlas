@@ -475,6 +475,7 @@ class Atlas:
             proposal_generator=self._proposal_generator,
             approval_manager=self._approval_manager,
             evolution_memory=self._evolution_memory,
+            intelligence_engine=self._intelligence_engine,
         )
 
         # Inject Phase 9.0 components after RuntimeCoordinator construction
