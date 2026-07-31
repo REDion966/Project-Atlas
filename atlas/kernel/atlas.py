@@ -99,6 +99,11 @@ from atlas.evolution.governance.rule_engine import RuleEngine
 # --- Phase 13.3: Evolution Scheduler ---
 from atlas.evolution.scheduler import EvolutionScheduler
 
+# --- Phase 13.5: Persistent Evolution Knowledge ---
+from atlas.evolution.knowledge.consolidator import EvolutionKnowledgeConsolidator
+from atlas.evolution.knowledge.repository import EvolutionKnowledgeRepository
+from atlas.evolution.knowledge.query import EvolutionKnowledgeQuery
+
 # --- Phase 13.2: Component Registry ---
 from atlas.lifecycle import (
     ComponentMetadata,
@@ -202,6 +207,11 @@ class Atlas:
         # --- Phase 13.3: Evolution Scheduler ---
         self._evolution_scheduler: EvolutionScheduler | None = None
 
+        # --- Phase 13.5: Persistent Evolution Knowledge ---
+        self._knowledge_consolidator: EvolutionKnowledgeConsolidator | None = None
+        self._knowledge_repository: EvolutionKnowledgeRepository | None = None
+        self._knowledge_query: EvolutionKnowledgeQuery | None = None
+
     @property
     def container(self):
         return self._container
@@ -250,6 +260,16 @@ class Atlas:
     def intelligence_engine(self):
         """Return the EvolutionIntelligenceEngine (Phase 12.2)."""
         return self._intelligence_engine
+
+    @property
+    def evolution_knowledge(self):
+        """
+        Return the EvolutionKnowledgeQuery (Phase 13.5).
+
+        The query is the read-only surface for the persistent evolution
+        knowledge layer.
+        """
+        return self._knowledge_query
 
     @property
     def outcome_tracker(self):
@@ -478,6 +498,16 @@ class Atlas:
             storage=evolution_storage,
         )
 
+        # --- Phase 13.5: Create the Persistent Evolution Knowledge layer ---
+        self._knowledge_repository = EvolutionKnowledgeRepository(
+            storage=evolution_storage,
+        )
+        self._knowledge_repository.restore()
+        self._knowledge_consolidator = EvolutionKnowledgeConsolidator()
+        self._knowledge_query = EvolutionKnowledgeQuery(
+            repository=self._knowledge_repository,
+        )
+
         # --- Phase 11.0: Create the EvolutionExecutionEngine ---
         self._execution_engine = EvolutionExecutionEngine(
             approval_manager=self._approval_manager,
@@ -618,6 +648,8 @@ class Atlas:
         self._container.register("intelligence_engine", self._intelligence_engine)
         # --- Phase 13.4: Register evolution execution gateway ---
         self._container.register("execution_gateway", self._execution_gateway)
+        # --- Phase 13.5: Register persistent evolution knowledge ---
+        self._container.register("evolution_knowledge", self._knowledge_query)
 
         self._container.start_all()
         self._started = True

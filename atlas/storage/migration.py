@@ -1,5 +1,5 @@
 """
-Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3
+Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3 / 13.5
 
 Simple additive migration system for SQLite-backed storage. Each migration
 is a tuple of (sql_statement, description). Migrations are applied in
@@ -8,6 +8,8 @@ ascending version order inside a transaction.
 No destructive migrations are permitted.
 
 Phase 12.3 — Added evolution_insights table (schema version 4).
+Phase 13.5 — Added evolution_observations and evolution_knowledge_*
+tables for the Persistent Evolution Knowledge layer (schema version 5).
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 # Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
@@ -212,6 +214,105 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_evolution_insights_analyzed_at
                 ON evolution_insights(analyzed_at DESC)
         """, "Index on evolution insight analyzed_at"),
+    ],
+    5: [
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_observations (
+                observation_id TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                metric_name TEXT NOT NULL,
+                value TEXT DEFAULT '{}',
+                unit TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                timestamp TEXT NOT NULL,
+                source TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_observations table for Phase 13.5"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_observations_timestamp
+                ON evolution_observations(timestamp DESC)
+        """, "Index on evolution observation timestamp"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_knowledge_patterns (
+                pattern_id TEXT PRIMARY KEY,
+                area TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                occurrence_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                partial_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                inconclusive_count INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                related_ids TEXT DEFAULT '[]',
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_knowledge_patterns table for Phase 13.5"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_knowledge_patterns_area
+                ON evolution_knowledge_patterns(area)
+        """, "Index on knowledge pattern area"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_knowledge_strategies (
+                strategy_key TEXT PRIMARY KEY,
+                strategy_name TEXT DEFAULT '',
+                success_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                occurrence_count INTEGER NOT NULL DEFAULT 0,
+                effectiveness REAL NOT NULL DEFAULT 0.0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                avg_regression_risk REAL NOT NULL DEFAULT 0.0,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                related_ids TEXT DEFAULT '[]',
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_knowledge_strategies table for Phase 13.5"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_knowledge_capabilities (
+                capability_name TEXT PRIMARY KEY,
+                assessments TEXT DEFAULT '[]',
+                observed_count INTEGER NOT NULL DEFAULT 0,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                related_ids TEXT DEFAULT '[]',
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_knowledge_capabilities table for Phase 13.5"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_knowledge_bottlenecks (
+                bottleneck_id TEXT PRIMARY KEY,
+                area TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                recurrence_count INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                related_ids TEXT DEFAULT '[]',
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_knowledge_bottlenecks table for Phase 13.5"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_knowledge_bottlenecks_area
+                ON evolution_knowledge_bottlenecks(area)
+        """, "Index on knowledge bottleneck area"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_knowledge_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                pattern_count INTEGER NOT NULL DEFAULT 0,
+                strategy_count INTEGER NOT NULL DEFAULT 0,
+                capability_count INTEGER NOT NULL DEFAULT 0,
+                bottleneck_count INTEGER NOT NULL DEFAULT 0,
+                summary_text TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}'
+            )
+        """, "Create evolution_knowledge_snapshots table for Phase 13.5"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_knowledge_snapshots_timestamp
+                ON evolution_knowledge_snapshots(timestamp DESC)
+        """, "Index on knowledge snapshot timestamp"),
     ],
 }
 

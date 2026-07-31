@@ -284,8 +284,57 @@ class EvolutionMemory:
     # ------------------------------------------------------------------
 
     def store_observation(self, observation: Observation) -> None:
-        """Store an observation."""
+        """Store an observation in memory only."""
         self._observations.append(observation)
+
+    def persist_observation(self, observation: Observation) -> None:
+        """
+        Persist an observation to the injected storage adapter.
+
+        The observation is stored in memory (via store_observation) and
+        written to storage best-effort. Storage failures never break the
+        in-memory path. No-op when no storage is configured.
+
+        Phase 13.5 — Persistent Evolution Memory Integration.
+
+        Args:
+            observation: The Observation to persist.
+        """
+        self.store_observation(observation)
+        if self._storage is None or not self._storage.is_available():
+            return
+        try:
+            self._storage.store_observation(
+                {
+                    "observation_id": (
+                        observation.metadata.get("observation_id", "")
+                        if isinstance(observation.metadata, dict)
+                        else ""
+                    ) or (
+                        f"{observation.timestamp.isoformat()}:{observation.metric_name}"
+                    ),
+                    "category": (
+                        observation.category.name
+                        if hasattr(observation.category, "name")
+                        else str(observation.category)
+                    ),
+                    "metric_name": observation.metric_name,
+                    "value": observation.value,
+                    "unit": observation.unit,
+                    "description": observation.description,
+                    "timestamp": observation.timestamp.isoformat()
+                    if hasattr(observation.timestamp, "isoformat")
+                    else str(observation.timestamp),
+                    "source": observation.source,
+                    "metadata": dict(observation.metadata),
+                }
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to persist observation %s",
+                observation.metric_name,
+            )
 
     def get_observations(
         self,

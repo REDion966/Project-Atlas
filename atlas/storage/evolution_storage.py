@@ -1,5 +1,5 @@
 """
-Atlas SQLite Evolution Storage — Phase 11.3 / 12.3
+Atlas SQLite Evolution Storage — Phase 11.3 / 12.3 / 13.5
 
 Infrastructure adapter implementing the EvolutionStorage interface with
 SQLite. Reuses the existing atlas_experience.db database and migration
@@ -10,6 +10,10 @@ imports sqlite3.
 
 Phase 12.3 — Added store_insight() and load_insights() for evolution
 insight persistence.
+Phase 13.5 — Added store_observation()/load_observations() and the
+evolution knowledge persistence methods (patterns, strategies,
+capabilities, bottlenecks, snapshots) for the Persistent Evolution
+Knowledge layer.
 """
 
 from __future__ import annotations
@@ -383,6 +387,276 @@ class SQLiteEvolutionStorage(EvolutionStorage):
         }
 
     # ------------------------------------------------------------------
+    # Evolution observations (Phase 13.5+)
+    # ------------------------------------------------------------------
+
+    def store_observation(self, data: dict) -> None:
+        """Persist a single evolution observation dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_observations (
+                observation_id, category, metric_name, value, unit,
+                description, timestamp, source, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("observation_id", ""),
+            data.get("category", ""),
+            data.get("metric_name", ""),
+            self._to_json(data.get("value", {})),
+            data.get("unit", ""),
+            data.get("description", ""),
+            data.get("timestamp", ""),
+            data.get("source", ""),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_observations(self) -> list[dict]:
+        """Load all stored evolution observations, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM evolution_observations ORDER BY timestamp ASC"
+        )
+        return [self._row_to_observation(row) for row in cursor.fetchall()]
+
+    def _row_to_observation(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to an observation dictionary."""
+        return {
+            "observation_id": row["observation_id"],
+            "category": row["category"],
+            "metric_name": row["metric_name"],
+            "value": self._from_json(row["value"]) or {},
+            "unit": row["unit"],
+            "description": row["description"],
+            "timestamp": row["timestamp"],
+            "source": row["source"],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    # ------------------------------------------------------------------
+    # Evolution knowledge (Phase 13.5+)
+    # ------------------------------------------------------------------
+
+    def store_knowledge_pattern(self, data: dict) -> None:
+        """Persist a single recurring outcome pattern dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_knowledge_patterns (
+                pattern_id, area, outcome, occurrence_count,
+                success_count, partial_count, failure_count,
+                inconclusive_count, confidence, first_seen, last_seen,
+                related_ids, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("pattern_id"),
+            data.get("area", ""),
+            data.get("outcome", "inconclusive"),
+            data.get("occurrence_count", 0),
+            data.get("success_count", 0),
+            data.get("partial_count", 0),
+            data.get("failure_count", 0),
+            data.get("inconclusive_count", 0),
+            data.get("confidence", 0.0),
+            data.get("first_seen", ""),
+            data.get("last_seen", ""),
+            self._to_json(data.get("related_ids", [])),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_knowledge_patterns(self) -> list[dict]:
+        """Load all stored knowledge patterns, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM evolution_knowledge_patterns ORDER BY first_seen ASC"
+        )
+        return [self._row_to_knowledge_pattern(row) for row in cursor.fetchall()]
+
+    def _row_to_knowledge_pattern(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a knowledge pattern dictionary."""
+        return {
+            "pattern_id": row["pattern_id"],
+            "area": row["area"],
+            "outcome": row["outcome"],
+            "occurrence_count": row["occurrence_count"],
+            "success_count": row["success_count"],
+            "partial_count": row["partial_count"],
+            "failure_count": row["failure_count"],
+            "inconclusive_count": row["inconclusive_count"],
+            "confidence": row["confidence"],
+            "first_seen": row["first_seen"],
+            "last_seen": row["last_seen"],
+            "related_ids": self._from_json(row["related_ids"]) or [],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    def store_knowledge_strategy(self, data: dict) -> None:
+        """Persist a single strategy knowledge dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_knowledge_strategies (
+                strategy_key, strategy_name, success_count, failure_count,
+                occurrence_count, effectiveness, confidence,
+                avg_regression_risk, first_seen, last_seen,
+                related_ids, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("strategy_key"),
+            data.get("strategy_name", ""),
+            data.get("success_count", 0),
+            data.get("failure_count", 0),
+            data.get("occurrence_count", 0),
+            data.get("effectiveness", 0.0),
+            data.get("confidence", 0.0),
+            data.get("avg_regression_risk", 0.0),
+            data.get("first_seen", ""),
+            data.get("last_seen", ""),
+            self._to_json(data.get("related_ids", [])),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_knowledge_strategies(self) -> list[dict]:
+        """Load all stored knowledge strategies, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM evolution_knowledge_strategies ORDER BY first_seen ASC"
+        )
+        return [self._row_to_knowledge_strategy(row) for row in cursor.fetchall()]
+
+    def _row_to_knowledge_strategy(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a strategy knowledge dictionary."""
+        return {
+            "strategy_key": row["strategy_key"],
+            "strategy_name": row["strategy_name"],
+            "success_count": row["success_count"],
+            "failure_count": row["failure_count"],
+            "occurrence_count": row["occurrence_count"],
+            "effectiveness": row["effectiveness"],
+            "confidence": row["confidence"],
+            "avg_regression_risk": row["avg_regression_risk"],
+            "first_seen": row["first_seen"],
+            "last_seen": row["last_seen"],
+            "related_ids": self._from_json(row["related_ids"]) or [],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    def store_knowledge_capability(self, data: dict) -> None:
+        """Persist a single capability evolution dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_knowledge_capabilities (
+                capability_name, assessments, observed_count,
+                first_seen, last_seen, related_ids, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("capability_name"),
+            self._to_json(data.get("assessments", [])),
+            data.get("observed_count", 0),
+            data.get("first_seen", ""),
+            data.get("last_seen", ""),
+            self._to_json(data.get("related_ids", [])),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_knowledge_capabilities(self) -> list[dict]:
+        """Load all stored knowledge capabilities, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM evolution_knowledge_capabilities ORDER BY first_seen ASC"
+        )
+        return [self._row_to_knowledge_capability(row) for row in cursor.fetchall()]
+
+    def _row_to_knowledge_capability(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a capability evolution dictionary."""
+        return {
+            "capability_name": row["capability_name"],
+            "assessments": self._from_json(row["assessments"]) or [],
+            "observed_count": row["observed_count"],
+            "first_seen": row["first_seen"],
+            "last_seen": row["last_seen"],
+            "related_ids": self._from_json(row["related_ids"]) or [],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    def store_knowledge_bottleneck(self, data: dict) -> None:
+        """Persist a single bottleneck profile dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_knowledge_bottlenecks (
+                bottleneck_id, area, description, recurrence_count,
+                first_seen, last_seen, related_ids, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("bottleneck_id"),
+            data.get("area", ""),
+            data.get("description", ""),
+            data.get("recurrence_count", 1),
+            data.get("first_seen", ""),
+            data.get("last_seen", ""),
+            self._to_json(data.get("related_ids", [])),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_knowledge_bottlenecks(self) -> list[dict]:
+        """Load all stored knowledge bottlenecks, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM evolution_knowledge_bottlenecks ORDER BY first_seen ASC"
+        )
+        return [self._row_to_knowledge_bottleneck(row) for row in cursor.fetchall()]
+
+    def _row_to_knowledge_bottleneck(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a bottleneck profile dictionary."""
+        return {
+            "bottleneck_id": row["bottleneck_id"],
+            "area": row["area"],
+            "description": row["description"],
+            "recurrence_count": row["recurrence_count"],
+            "first_seen": row["first_seen"],
+            "last_seen": row["last_seen"],
+            "related_ids": self._from_json(row["related_ids"]) or [],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    def store_knowledge_snapshot(self, data: dict) -> None:
+        """Persist a single knowledge snapshot dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO evolution_knowledge_snapshots (
+                snapshot_id, timestamp, pattern_count, strategy_count,
+                capability_count, bottleneck_count, summary_text, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("snapshot_id"),
+            data.get("timestamp", ""),
+            data.get("pattern_count", 0),
+            data.get("strategy_count", 0),
+            data.get("capability_count", 0),
+            data.get("bottleneck_count", 0),
+            data.get("summary_text", ""),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_knowledge_snapshots(self) -> list[dict]:
+        """Load all stored knowledge snapshots, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM evolution_knowledge_snapshots ORDER BY timestamp ASC"
+        )
+        return [self._row_to_knowledge_snapshot(row) for row in cursor.fetchall()]
+
+    def _row_to_knowledge_snapshot(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a knowledge snapshot dictionary."""
+        return {
+            "snapshot_id": row["snapshot_id"],
+            "timestamp": row["timestamp"],
+            "pattern_count": row["pattern_count"],
+            "strategy_count": row["strategy_count"],
+            "capability_count": row["capability_count"],
+            "bottleneck_count": row["bottleneck_count"],
+            "summary_text": row["summary_text"],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    # ------------------------------------------------------------------
     # Administration
     # ------------------------------------------------------------------
 
@@ -399,6 +673,12 @@ class SQLiteEvolutionStorage(EvolutionStorage):
                 conn.execute("DELETE FROM evolution_approval_requests")
                 conn.execute("DELETE FROM evolution_records")
                 conn.execute("DELETE FROM evolution_insights")
+                conn.execute("DELETE FROM evolution_observations")
+                conn.execute("DELETE FROM evolution_knowledge_patterns")
+                conn.execute("DELETE FROM evolution_knowledge_strategies")
+                conn.execute("DELETE FROM evolution_knowledge_capabilities")
+                conn.execute("DELETE FROM evolution_knowledge_bottlenecks")
+                conn.execute("DELETE FROM evolution_knowledge_snapshots")
         except sqlite3.Error:
             self._available = False
             raise

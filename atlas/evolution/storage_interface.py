@@ -1,5 +1,5 @@
 """
-Atlas EvolutionStorage Interface — Phase 11.3 / 12.3
+Atlas EvolutionStorage Interface — Phase 11.3 / 12.3 / 13.5
 
 Abstract interface for persistent evolution storage. Defined in the pure
 logic layer so infrastructure adapters in atlas/storage/ can implement it
@@ -9,6 +9,9 @@ No infrastructure imports. No database imports. Pure contract only.
 
 Phase 12.3 — Added store_insight() and load_insights() for evolution
 outcome persistence.
+Phase 13.5 — Added observation, knowledge pattern, strategy, capability,
+bottleneck, and snapshot persistence for the Persistent Evolution
+Knowledge layer.
 """
 
 from abc import ABC, abstractmethod
@@ -109,6 +112,62 @@ class EvolutionStorage(ABC):
         Returns:
             A list of insight dictionaries, newest first.
         """
+
+    # ------------------------------------------------------------------
+    # Evolution observations (Phase 13.5+)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def store_observation(self, data: dict) -> None:
+        """Persist a single evolution observation dictionary."""
+
+    @abstractmethod
+    def load_observations(self) -> list[dict]:
+        """Load all stored evolution observations, oldest first."""
+
+    # ------------------------------------------------------------------
+    # Evolution knowledge (Phase 13.5+)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def store_knowledge_pattern(self, data: dict) -> None:
+        """Persist a single recurring outcome pattern dictionary."""
+
+    @abstractmethod
+    def load_knowledge_patterns(self) -> list[dict]:
+        """Load all stored knowledge patterns, oldest first."""
+
+    @abstractmethod
+    def store_knowledge_strategy(self, data: dict) -> None:
+        """Persist a single strategy knowledge dictionary."""
+
+    @abstractmethod
+    def load_knowledge_strategies(self) -> list[dict]:
+        """Load all stored knowledge strategies, oldest first."""
+
+    @abstractmethod
+    def store_knowledge_capability(self, data: dict) -> None:
+        """Persist a single capability evolution dictionary."""
+
+    @abstractmethod
+    def load_knowledge_capabilities(self) -> list[dict]:
+        """Load all stored knowledge capabilities, oldest first."""
+
+    @abstractmethod
+    def store_knowledge_bottleneck(self, data: dict) -> None:
+        """Persist a single bottleneck profile dictionary."""
+
+    @abstractmethod
+    def load_knowledge_bottlenecks(self) -> list[dict]:
+        """Load all stored knowledge bottlenecks, oldest first."""
+
+    @abstractmethod
+    def store_knowledge_snapshot(self, data: dict) -> None:
+        """Persist a single knowledge snapshot dictionary."""
+
+    @abstractmethod
+    def load_knowledge_snapshots(self) -> list[dict]:
+        """Load all stored knowledge snapshots, oldest first."""
 
     # ------------------------------------------------------------------
     # Administration
