@@ -120,6 +120,9 @@ class RuntimeCoordinator:
         self._approval_manager = approval_manager
         self._evolution_memory = evolution_memory
 
+        # --- Phase 13.3: Evolution Scheduler (optional) ---
+        self._evolution_scheduler = None
+
         # --- Phase 12.2: Evolution Intelligence Engine ---
         self._intelligence_engine = intelligence_engine
 
@@ -291,30 +294,9 @@ class RuntimeCoordinator:
                     }
                     self._goal_intelligence_engine.analyze(trends)
 
-            # --- Phase 10.0: Evolution Pipeline ---
-            if self._improvement_planner is not None and self._evolution_observation_engine is not None:
-                observations = self._evolution_observation_engine.recent_observations(n=100)
-                if observations:
-                    # Phase 12.5.2: Feed evolution insights into planning
-                    insights = None
-                    if self._intelligence_engine is not None:
-                        insights = self._intelligence_engine.get_insights()
-                    weaknesses = self._improvement_planner.detect_weaknesses(
-                        observations,
-                        insights=insights,
-                    )
-                    if weaknesses:
-                        plan = self._improvement_planner.create_improvement_plan(
-                            weaknesses,
-                            insights=insights,
-                        )
-                        if plan is not None and self._proposal_generator is not None:
-                            proposal = self._proposal_generator.generate_proposal(plan)
-                            if self._approval_manager is not None:
-                                approval_request = self._approval_manager.create_approval_request(proposal)
-                                if self._evolution_memory is not None:
-                                    self._evolution_memory.store_proposal(proposal)
-                                    self._evolution_memory.store_approval_request(approval_request)
+            # --- Phase 13.3: Evolution Scheduler tick (replaces inline analysis) ---
+            if self._evolution_scheduler is not None:
+                self._evolution_scheduler.tick()
 
             # Publish pipeline completion event
             if self._event_bus is not None:
@@ -1483,6 +1465,15 @@ class RuntimeCoordinator:
     @property
     def identity_engine(self):
         return self._identity_engine
+
+    @property
+    def evolution_scheduler(self):
+        """Return the injected EvolutionScheduler, or None."""
+        return self._evolution_scheduler
+
+    def set_evolution_scheduler(self, scheduler: Any) -> None:
+        """Inject an EvolutionScheduler after construction."""
+        self._evolution_scheduler = scheduler
 
     @property
     def feedback_coordinator(self):

@@ -25,6 +25,9 @@ from atlas.evolution.models import (
 )
 from atlas.runtime.runtime_coordinator import RuntimeCoordinator
 
+# --- Phase 13.3: Evolution Scheduler (used instead of inline analysis) ---
+from atlas.evolution.scheduler import EvolutionScheduler
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,8 +58,26 @@ def make_observation_engine(observations=None):
     return engine
 
 
+def _make_scheduler(observation_engine, improvement_planner,
+                    proposal_generator, approval_manager, evolution_memory):
+    """Create a scheduler with tick_interval=1 and min_observations=1."""
+    return EvolutionScheduler(
+        observation_engine=observation_engine,
+        improvement_planner=improvement_planner,
+        proposal_generator=proposal_generator,
+        approval_manager=approval_manager,
+        evolution_memory=evolution_memory,
+        tick_interval=1,
+        min_observations=1,
+    )
+
+
 def make_coordinator(**overrides):
-    """Create a RuntimeCoordinator with test defaults."""
+    """Create a RuntimeCoordinator with test defaults.
+
+    Phase 13.3: Also creates and injects an EvolutionScheduler so that
+    evolution analysis runs during process() via the scheduler tick.
+    """
     defaults = {
         "improvement_planner": ImprovementPlanner(),
         "proposal_generator": ProposalGenerator(),
@@ -64,7 +85,31 @@ def make_coordinator(**overrides):
         "evolution_memory": EvolutionMemory(),
     }
     defaults.update(overrides)
-    return RuntimeCoordinator(**defaults)
+    coordinator = RuntimeCoordinator(**defaults)
+
+    # Phase 13.3: Inject a scheduler only if all evolution components
+    # are present. Missing components mean no scheduler is created,
+    # preserving graceful degradation behavior.
+    if all([
+        defaults.get("improvement_planner") is not None,
+        defaults.get("proposal_generator") is not None,
+        defaults.get("approval_manager") is not None,
+        defaults.get("evolution_memory") is not None,
+    ]):
+        # Use the observation engine from overrides or create a default mock
+        obs_engine = overrides.get("evolution_observation_engine") or MagicMock()
+        scheduler = EvolutionScheduler(
+            observation_engine=obs_engine,
+            improvement_planner=defaults.get("improvement_planner"),
+            proposal_generator=defaults.get("proposal_generator"),
+            approval_manager=defaults.get("approval_manager"),
+            evolution_memory=defaults.get("evolution_memory"),
+            tick_interval=1,
+            min_observations=1,
+        )
+        coordinator.set_evolution_scheduler(scheduler)
+
+    return coordinator
 
 
 # ---------------------------------------------------------------------------

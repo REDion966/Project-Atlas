@@ -209,8 +209,8 @@ class TestAtlasKernelPlanningWiring(unittest.TestCase):
         atlas = Atlas()
         try:
             atlas.start()
-            # Only the 9 public service keys should be registered
             expected_keys = {
+                "component_registry",
                 "ai", "conversation", "memory", "knowledge",
                 "cognition", "cognitive", "cognition_service",
                 "cognition_api", "tasks",

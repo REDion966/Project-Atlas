@@ -51,6 +51,9 @@ from atlas.evolution.governance import (
     ScopeType,
 )
 
+# --- Phase 13.3: Evolution Scheduler ---
+from atlas.evolution.scheduler import EvolutionScheduler, EvolutionSchedulerResult
+
 __all__ = [
     "ApprovalDecision",
     "ApprovalManager",
@@ -62,6 +65,8 @@ __all__ = [
     "EvolutionMemory",
     "EvolutionProposal",
     "EvolutionRecord",
+    "EvolutionScheduler",
+    "EvolutionSchedulerResult",
     "ExecutionLevel",
     "ExecutionResult",
     "GovernanceDecision",

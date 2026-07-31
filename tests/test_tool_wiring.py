@@ -212,6 +212,7 @@ class TestAtlasKernelToolWiring(unittest.TestCase):
         try:
             atlas.start()
             expected_keys = {
+                "component_registry",
                 "ai", "conversation", "memory", "knowledge",
                 "cognition", "cognitive", "cognition_service",
                 "cognition_api", "tasks",

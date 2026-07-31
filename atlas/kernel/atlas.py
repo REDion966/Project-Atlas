@@ -90,6 +90,17 @@ from atlas.storage.evolution_storage import SQLiteEvolutionStorage
 from atlas.evolution.insight_scorer import InsightScorer
 from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
 
+# --- Phase 13.3: Evolution Scheduler ---
+from atlas.evolution.scheduler import EvolutionScheduler
+
+# --- Phase 13.2: Component Registry ---
+from atlas.lifecycle import (
+    ComponentMetadata,
+    ComponentRegistry,
+    ComponentStatus,
+    CORE_COMPONENTS,
+)
+
 
 class Atlas:
     """
@@ -173,6 +184,12 @@ class Atlas:
         self._learning_manager: LearningManager | None = None
         self._knowledge_feedback: KnowledgeFeedback | None = None
         self._started = False
+
+        # --- Phase 13.2: Component Registry ---
+        self._component_registry = ComponentRegistry()
+
+        # --- Phase 13.3: Evolution Scheduler ---
+        self._evolution_scheduler: EvolutionScheduler | None = None
 
     @property
     def container(self):
@@ -478,6 +495,19 @@ class Atlas:
             intelligence_engine=self._intelligence_engine,
         )
 
+        # --- Phase 13.3: Create the EvolutionScheduler and inject into RuntimeCoordinator ---
+        self._evolution_scheduler = EvolutionScheduler(
+            observation_engine=self._self_observation_engine,
+            improvement_planner=self._improvement_planner,
+            proposal_generator=self._proposal_generator,
+            approval_manager=self._approval_manager,
+            evolution_memory=self._evolution_memory,
+            intelligence_engine=self._intelligence_engine,
+            tick_interval=10,
+            min_observations=5,
+        )
+        self._runtime_coordinator.set_evolution_scheduler(self._evolution_scheduler)
+
         # Inject Phase 9.0 components after RuntimeCoordinator construction
         self._runtime_coordinator.set_experience_accumulator(self._experience_accumulator)
         self._runtime_coordinator.set_self_model_engine(self._self_model_engine)
@@ -519,7 +549,11 @@ class Atlas:
         # Wire conversation into the runtime coordinator
         self._runtime_coordinator._conversation_service = self._conversation
 
+        # --- Phase 13.2: Register core components in the registry ---
+        self._register_components()
+
         # --- Service container registration ---
+        self._container.register("component_registry", self._component_registry)
         self._container.register("ai", self._ai_manager.service)
         self._container.register("conversation", self._conversation)
         self._container.register("memory", self._memory_service)
@@ -554,6 +588,8 @@ class Atlas:
 
     def tick(self):
         self._task_manager.tick()
+        if self._evolution_scheduler is not None:
+            self._evolution_scheduler.tick()
 
     def chat(self, text: str):
         if not self._started:
@@ -579,6 +615,38 @@ class Atlas:
         if not self._started:
             raise RuntimeError("Atlas has not been started.")
         return self._conversation.saved_conversations()  # type: ignore[union-attr]
+
+    # ------------------------------------------------------------------
+    # Phase 13.2: Component Registry
+    # ------------------------------------------------------------------
+
+    @property
+    def component_registry(self) -> ComponentRegistry:
+        """Return the ComponentRegistry for structural self-observation."""
+        return self._component_registry
+
+    def _register_components(self) -> None:
+        """Register all core components in the ComponentRegistry.
+
+        Iterates over CORE_COMPONENTS definitions and registers each
+        one. This is purely observational — the registry never modifies,
+        restarts, or repairs any component.
+        """
+        for metadata in CORE_COMPONENTS:
+            try:
+                self._component_registry.register(metadata)
+            except ValueError:
+                # Duplicate registration should not happen with the
+                # predefined definitions, but is safely ignored if it does.
+                pass
+
+        # Mark all registered components as HEALTHY since they were
+        # successfully created during startup.
+        for component in self._component_registry.get_all():
+            self._component_registry.update_status(
+                component.name,
+                ComponentStatus.HEALTHY,
+            )
 
     def shutdown(self):
         if not self._started:
@@ -626,6 +694,9 @@ class Atlas:
         # --- Phase 12.2: Cleanup ---
         self._intelligence_engine = None
         self._insight_scorer = None
+
+        # --- Phase 13.3: Cleanup ---
+        self._evolution_scheduler = None
 
         self._learning_manager = None
         self._knowledge_feedback = None
