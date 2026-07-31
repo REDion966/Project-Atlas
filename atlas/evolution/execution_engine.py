@@ -85,6 +85,7 @@ class EvolutionExecutionEngine:
         evolution_memory: Any = None,
         outcome_tracker: Any = None,
         execution_level: ExecutionLevel = ExecutionLevel.ADMINISTRATIVE,
+        knowledge_pipeline: Any = None,
     ):
         """
         Initialise the execution engine.
@@ -98,11 +99,15 @@ class EvolutionExecutionEngine:
                 TrackedGoal records. Optional — if None, tracking is skipped.
             execution_level: The capability level for this engine instance.
                 Phase 11 uses ADMINISTRATIVE.
+            knowledge_pipeline: Optional EvolutionKnowledgePipeline for
+                automatic consolidation of execution records.
+                Skipped if None.
         """
         self._approval_manager = approval_manager
         self._evolution_memory = evolution_memory
         self._outcome_tracker = outcome_tracker
         self._execution_level = execution_level
+        self._knowledge_pipeline = knowledge_pipeline
         self._record_counter = 0
 
     # ------------------------------------------------------------------
@@ -314,6 +319,13 @@ class EvolutionExecutionEngine:
         record = self._create_execution_record(proposal)
         if self._evolution_memory is not None:
             self._evolution_memory.store_record(record)
+
+        # Feed execution record into knowledge pipeline for consolidation
+        if self._knowledge_pipeline is not None:
+            try:
+                self._knowledge_pipeline.consolidate()
+            except Exception:
+                pass
 
         # Create a TrackedGoal for outcome verification
         tracked_goal_id = ""

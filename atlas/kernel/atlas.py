@@ -104,6 +104,9 @@ from atlas.evolution.knowledge.consolidator import EvolutionKnowledgeConsolidato
 from atlas.evolution.knowledge.repository import EvolutionKnowledgeRepository
 from atlas.evolution.knowledge.query import EvolutionKnowledgeQuery
 
+# --- Phase 13.6: Automatic Evolution Knowledge Consolidation Pipeline ---
+from atlas.evolution.knowledge.pipeline import EvolutionKnowledgePipeline
+
 # --- Phase 13.2: Component Registry ---
 from atlas.lifecycle import (
     ComponentMetadata,
@@ -211,6 +214,9 @@ class Atlas:
         self._knowledge_consolidator: EvolutionKnowledgeConsolidator | None = None
         self._knowledge_repository: EvolutionKnowledgeRepository | None = None
         self._knowledge_query: EvolutionKnowledgeQuery | None = None
+
+        # --- Phase 13.6: Automatic Evolution Knowledge Consolidation Pipeline ---
+        self._knowledge_pipeline: EvolutionKnowledgePipeline | None = None
 
     @property
     def container(self):
@@ -496,6 +502,7 @@ class Atlas:
             experience_repository=self._experience_repository,
             insight_scorer=self._insight_scorer,
             storage=evolution_storage,
+            knowledge_pipeline=self._knowledge_pipeline,
         )
 
         # --- Phase 13.5: Create the Persistent Evolution Knowledge layer ---
@@ -508,11 +515,18 @@ class Atlas:
             repository=self._knowledge_repository,
         )
 
+        # --- Phase 13.6: Create the automatic knowledge consolidation pipeline ---
+        self._knowledge_pipeline = EvolutionKnowledgePipeline(
+            consolidator=self._knowledge_consolidator,
+            repository=self._knowledge_repository,
+        )
+
         # --- Phase 11.0: Create the EvolutionExecutionEngine ---
         self._execution_engine = EvolutionExecutionEngine(
             approval_manager=self._approval_manager,
             evolution_memory=self._evolution_memory,
             outcome_tracker=self._outcome_tracker,
+            knowledge_pipeline=self._knowledge_pipeline,
         )
 
         # --- Phase 13.1: Governance (ConstraintRegistry → RuleEngine) ---
@@ -570,6 +584,7 @@ class Atlas:
             approval_manager=self._approval_manager,
             evolution_memory=self._evolution_memory,
             intelligence_engine=self._intelligence_engine,
+            knowledge_pipeline=self._knowledge_pipeline,
             tick_interval=10,
             min_observations=5,
         )
@@ -772,6 +787,9 @@ class Atlas:
         # --- Phase 13.4: Cleanup ---
         self._execution_gateway = None
         self._rule_engine = None
+
+        # --- Phase 13.6: Cleanup ---
+        self._knowledge_pipeline = None
 
         self._learning_manager = None
         self._knowledge_feedback = None

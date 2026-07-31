@@ -223,6 +223,7 @@ class TestAtlasKernelToolWiring(unittest.TestCase):
                 "experience_repository", "experience_accumulator", "self_model_engine",
                 "intelligence_engine",
                 "execution_gateway",
+                "evolution_knowledge",
             }
             self.assertEqual(
                 set(atlas.container.names()),

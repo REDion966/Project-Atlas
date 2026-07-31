@@ -183,7 +183,7 @@ class TestSQLiteUnderstandingLifecycle(unittest.TestCase):
             cursor = conn.execute(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
             )
-            self.assertEqual(cursor.fetchone()[0], 4)
+            self.assertEqual(cursor.fetchone()[0], 5)
         storage.close()
         # Release the extra connection reference so Windows can delete
         # the temp directory during tearDown without PermissionError.

@@ -31,8 +31,10 @@ from atlas.evolution.knowledge.normalizer import (
 from atlas.evolution.knowledge.consolidator import EvolutionKnowledgeConsolidator
 from atlas.evolution.knowledge.repository import EvolutionKnowledgeRepository
 from atlas.evolution.knowledge.query import EvolutionKnowledgeQuery
+from atlas.evolution.knowledge.pipeline import EvolutionKnowledgePipeline
 
 __all__ = [
+    "EvolutionKnowledgePipeline",
     "BottleneckProfile",
     "CapabilityEvolution",
     "EvolutionKnowledgeConsolidator",

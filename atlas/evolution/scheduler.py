@@ -77,6 +77,7 @@ class EvolutionScheduler:
         evolution_memory: EvolutionMemory,
         intelligence_engine: Any = None,
         governance_engine: Any = None,
+        knowledge_pipeline: Any = None,
         tick_interval: int = 10,
         min_observations: int = 5,
     ) -> None:
@@ -94,6 +95,9 @@ class EvolutionScheduler:
             governance_engine: Optional RuleEngine for governance validation.
                 Currently analysis-only; does not gate execution.
                 Skipped if None.
+            knowledge_pipeline: Optional EvolutionKnowledgePipeline for
+                automatic consolidation of weaknesses and insights.
+                Skipped if None.
             tick_interval: How many tick() calls between analysis runs.
                 Default 10. Minimum 1.
             min_observations: Minimum new observations needed to trigger
@@ -106,6 +110,7 @@ class EvolutionScheduler:
         self._evolution_memory = evolution_memory
         self._intelligence_engine = intelligence_engine
         self._governance_engine = governance_engine
+        self._knowledge_pipeline = knowledge_pipeline
 
         self._tick_interval = max(1, tick_interval)
         self._min_observations = max(1, min_observations)
@@ -255,6 +260,14 @@ class EvolutionScheduler:
         # Store in evolution memory
         self._evolution_memory.store_proposal(proposal)
         self._evolution_memory.store_approval_request(approval_request)
+
+        # Feed weaknesses into knowledge pipeline for consolidation
+        if self._knowledge_pipeline is not None:
+            try:
+                self._knowledge_pipeline.record_weaknesses(weaknesses)
+                self._knowledge_pipeline.consolidate()
+            except Exception:
+                pass
 
         # Update last observation count for next cycle
         self._last_observation_count = current_count

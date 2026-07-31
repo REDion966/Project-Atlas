@@ -62,6 +62,7 @@ class EvolutionIntelligenceEngine:
         experience_repository: Any = None,
         insight_scorer: Any = None,
         storage: Any = None,
+        knowledge_pipeline: Any = None,
     ):
         """
         Initialise the intelligence engine.
@@ -75,11 +76,15 @@ class EvolutionIntelligenceEngine:
                 Optional — if None, scoring produces default values.
             storage: An EvolutionStorage instance for persisting insights.
                 Optional — currently unused, reserved for Phase 12.3+.
+            knowledge_pipeline: Optional EvolutionKnowledgePipeline for
+                automatic consolidation of generated insights.
+                Skipped if None.
         """
         self._evolution_memory = evolution_memory
         self._experience_repository = experience_repository
         self._insight_scorer = insight_scorer
         self._storage = storage
+        self._knowledge_pipeline = knowledge_pipeline
 
         # In-memory insight storage
         self._insights: dict[str, EvolutionInsight] = {}
@@ -220,6 +225,14 @@ class EvolutionIntelligenceEngine:
         # Persist to storage if available (best-effort)
         if self._storage is not None:
             self._persist_insight(insight)
+
+        # Feed into knowledge pipeline for automatic consolidation
+        if self._knowledge_pipeline is not None:
+            try:
+                self._knowledge_pipeline.record_insight(insight)
+                self._knowledge_pipeline.consolidate()
+            except Exception:
+                pass
 
         return insight
 

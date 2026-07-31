@@ -179,21 +179,17 @@ class EvolutionKnowledgeConsolidator:
         Args:
             weakness: The Weakness to aggregate.
         """
-        source_id = weak_source_id(weakness)
-        if source_id in self._seen_weakness_ids:
-            return False
-
-        self._seen_weakness_ids.add(source_id)
-        self._counter += 1
-
-        area = normalize_area(weakness.area)
         key = normalize_weakness_key(weakness)
 
+        # Weaknesses are keyed by their normalized content signature so that
+        # repeated instances of the same bottleneck aggregate together. Each
+        # call with a new weakness object increments the recurrence count;
+        # re-consolidating the same normalized weakness is idempotent.
         group = self._bottleneck_groups.get(key)
         if group is None:
             group = {
                 "key": key,
-                "area": area,
+                "area": normalize_area(weakness.area),
                 "description": weakness.description,
                 "recurrences": 0,
                 "first_seen": weakness.detected_at,
@@ -202,6 +198,15 @@ class EvolutionKnowledgeConsolidator:
             }
             self._bottleneck_groups[key] = group
 
+        source_id = weak_source_id(weakness)
+        # A weakness is new if its source ID has not been seen. When multiple
+        # weakness objects normalize to the same key, they still each count as
+        # a separate recurrence unless the exact same source ID is replayed.
+        if source_id in self._seen_weakness_ids:
+            return False
+        self._seen_weakness_ids.add(source_id)
+
+        self._counter += 1
         group["recurrences"] += 1
         group["last_seen"] = weakness.detected_at
         group["related_ids"].append(source_id)
@@ -596,9 +601,12 @@ def weak_source_id(weakness: Weakness) -> str:
     """
     Build a stable source identifier for a weakness instance.
 
-    Falls back to a deterministic content hash when the weakness lacks
-    an explicit identifier, so idempotency works for both stored and
-    synthesized weaknesses.
+    Because the core Weakness model does not carry a unique id field, the
+    source id combines the normalized content key with a deterministic
+    signature of the concrete instance (description and detection time).
+    This lets multiple distinct Weakness objects that normalize to the same
+    bottleneck key each count as a separate recurrence, while replaying the
+    exact same Weakness object remains idempotent.
 
     Args:
         weakness: The weakness to identify.
@@ -606,7 +614,10 @@ def weak_source_id(weakness: Weakness) -> str:
     Returns:
         A stable string identifier.
     """
-    explicit = getattr(weakness, "weakness_id", None)
-    if explicit:
-        return str(explicit)
-    return normalize_weakness_key(weakness)
+    import hashlib
+
+    base = normalize_weakness_key(weakness)
+    instance_signature = hashlib.sha256(
+        f"{weakness.description}|{weakness.detected_at.isoformat()}".encode("utf-8")
+    ).hexdigest()[:16]
+    return f"{base}:{instance_signature}"
