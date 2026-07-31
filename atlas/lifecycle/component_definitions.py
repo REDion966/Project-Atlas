@@ -272,6 +272,28 @@ CORE_COMPONENTS: list[ComponentMetadata] = [
         dependencies=["evolution_memory", "experience_repository"],
         provided_capabilities=["proposal_analysis", "evolution_insight", "planner_feedback"],
     ),
+    ComponentMetadata(
+        name="rule_engine",
+        package="atlas.evolution.governance",
+        module_path="atlas.evolution.governance.rule_engine.RuleEngine",
+        description="Evaluates evolution proposals against governance constraints.",
+        version=1,
+        dependencies=["constraint_registry"],
+        provided_capabilities=["governance_evaluation", "scope_classification"],
+    ),
+    ComponentMetadata(
+        name="execution_gateway",
+        package="atlas.evolution",
+        module_path="atlas.evolution.execution_gateway.EvolutionExecutionGateway",
+        description="Constitutional execution gate for evolution proposals.",
+        version=1,
+        dependencies=["rule_engine", "execution_engine", "evolution_memory"],
+        provided_capabilities=[
+            "governance_gating",
+            "execution_eligibility",
+            "refusal_auditing",
+        ],
+    ),
     # ------------------------------------------------------------------
     # Runtime
     # ------------------------------------------------------------------

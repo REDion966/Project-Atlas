@@ -38,6 +38,10 @@ from atlas.evolution.proposal_generator import ProposalGenerator
 from atlas.evolution.approval_manager import ApprovalManager
 from atlas.evolution.evolution_memory import EvolutionMemory
 from atlas.evolution.execution_engine import EvolutionExecutionEngine
+from atlas.evolution.execution_gateway import (
+    EvolutionExecutionGateway,
+    GatewayExecutionResult,
+)
 from atlas.evolution.insight_scorer import InsightScorer
 from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
 from atlas.evolution.research_coordinator import ResearchCoordinator
@@ -60,8 +64,10 @@ __all__ = [
     "ApprovalRequest",
     "ConstraintRegistry",
     "EvolutionExecutionEngine",
+    "EvolutionExecutionGateway",
     "EvolutionInsight",
     "EvolutionIntelligenceEngine",
+    "GatewayExecutionResult",
     "EvolutionMemory",
     "EvolutionProposal",
     "EvolutionRecord",

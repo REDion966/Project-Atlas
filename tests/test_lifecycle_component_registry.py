@@ -510,7 +510,7 @@ class TestCoreComponents:
 
     def test_core_component_count(self):
         """Verify the expected number of core components."""
-        assert len(CORE_COMPONENTS) == 26
+        assert len(CORE_COMPONENTS) == 28
 
     def test_core_components_use_unknown_status(self):
         """Core definitions default to UNKNOWN status."""

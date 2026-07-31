@@ -7,6 +7,7 @@ Phase 7.5 — Wires RuntimeCoordinator and all cognitive subsystems.
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from atlas.ai.ai_manager import AIManager
 from atlas.ai.routing.models import ModelProfile
@@ -82,6 +83,7 @@ from atlas.evolution.evolution_memory import EvolutionMemory
 
 # --- Phase 11.0: Evolution Execution Engine ---
 from atlas.evolution.execution_engine import EvolutionExecutionEngine
+from atlas.evolution.execution_gateway import EvolutionExecutionGateway
 
 # --- Phase 11.3: Evolution Persistence ---
 from atlas.storage.evolution_storage import SQLiteEvolutionStorage
@@ -89,6 +91,10 @@ from atlas.storage.evolution_storage import SQLiteEvolutionStorage
 # --- Phase 12.1 / 12.2: Evolution Intelligence ---
 from atlas.evolution.insight_scorer import InsightScorer
 from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
+
+# --- Phase 13.1: Governance ---
+from atlas.evolution.governance.constraint_registry import ConstraintRegistry
+from atlas.evolution.governance.rule_engine import RuleEngine
 
 # --- Phase 13.3: Evolution Scheduler ---
 from atlas.evolution.scheduler import EvolutionScheduler
@@ -153,6 +159,11 @@ class Atlas:
         # --- Phase 11.0: Evolution Execution Engine ---
         self._outcome_tracker: OutcomeTracker | None = None
         self._execution_engine: EvolutionExecutionEngine | None = None
+        self._execution_gateway: EvolutionExecutionGateway | None = None
+
+        # --- Phase 13.1: Governance ---
+        self._constraint_registry: ConstraintRegistry | None = None
+        self._rule_engine: Any | None = None
 
         # --- Phase 11.3: Evolution Persistence ---
         self._evolution_storage: SQLiteEvolutionStorage | None = None
@@ -224,6 +235,16 @@ class Atlas:
     def execution_engine(self):
         """Return the EvolutionExecutionEngine (Phase 11.0)."""
         return self._execution_engine
+
+    @property
+    def execution_gateway(self):
+        """Return the EvolutionExecutionGateway (Phase 13.4)."""
+        return self._execution_gateway
+
+    @property
+    def rule_engine(self):
+        """Return the governance RuleEngine (Phase 13.1)."""
+        return self._rule_engine
 
     @property
     def intelligence_engine(self):
@@ -464,6 +485,22 @@ class Atlas:
             outcome_tracker=self._outcome_tracker,
         )
 
+        # --- Phase 13.1: Governance (ConstraintRegistry → RuleEngine) ---
+        self._constraint_registry = ConstraintRegistry()
+        self._rule_engine = RuleEngine(
+            constraint_registry=self._constraint_registry,
+        )
+
+        # --- Phase 13.4: Create the EvolutionExecutionGateway ---
+        # The gateway is the ONLY future entry point for self-modification.
+        # It sits between approval and execution, validating every proposal
+        # against governance rules. Missing governance fails CLOSED.
+        self._execution_gateway = EvolutionExecutionGateway(
+            execution_engine=self._execution_engine,
+            rule_engine=self._rule_engine,
+            evolution_memory=self._evolution_memory,
+        )
+
         # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
         self._runtime_coordinator = RuntimeCoordinator(
             memory_service=self._memory_service,
@@ -579,6 +616,8 @@ class Atlas:
         self._container.register("self_model_engine", self._self_model_engine)
         # --- Phase 12.2: Register evolution intelligence engine ---
         self._container.register("intelligence_engine", self._intelligence_engine)
+        # --- Phase 13.4: Register evolution execution gateway ---
+        self._container.register("execution_gateway", self._execution_gateway)
 
         self._container.start_all()
         self._started = True
@@ -697,6 +736,10 @@ class Atlas:
 
         # --- Phase 13.3: Cleanup ---
         self._evolution_scheduler = None
+
+        # --- Phase 13.4: Cleanup ---
+        self._execution_gateway = None
+        self._rule_engine = None
 
         self._learning_manager = None
         self._knowledge_feedback = None

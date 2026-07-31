@@ -54,6 +54,37 @@ class ExecutionResult:
     error: str = ""
 
 
+@dataclass(slots=True)
+class GatewayExecutionResult:
+    """Result of a proposal execution attempt through EvolutionExecutionGateway.
+
+    Produced exclusively by EvolutionExecutionGateway. Wraps either a
+    successful delegation to EvolutionExecutionEngine or a governance
+    refusal.
+
+    Attributes:
+        success: Whether execution completed. False for refusals and errors.
+        proposal_id: The ID of the proposal that was evaluated.
+        status: Outcome status: "IMPLEMENTED" when the engine executed
+            the proposal, "REFUSED" when governance denied execution.
+        governance_decision: The GovernanceDecision produced by RuleEngine,
+            or None if no evaluation occurred (e.g. missing dependencies).
+        record_id: The ID of the EvolutionRecord created (execution or
+            refusal), or empty if no record was stored.
+        tracked_goal_id: The ID of the TrackedGoal created by the engine,
+            if any.
+        error: Error message when execution could not proceed.
+    """
+
+    success: bool
+    proposal_id: str = ""
+    status: str = ""
+    governance_decision: Any = None
+    record_id: str = ""
+    tracked_goal_id: str = ""
+    error: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Observation types
 # ---------------------------------------------------------------------------
