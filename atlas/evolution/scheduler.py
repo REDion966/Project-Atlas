@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from atlas.evolution.decision_intelligence import DecisionIntelligenceEngine
 from atlas.evolution.improvement_planner import ImprovementPlanner
 from atlas.evolution.proposal_generator import ProposalGenerator
 from atlas.evolution.approval_manager import ApprovalManager
@@ -78,6 +79,7 @@ class EvolutionScheduler:
         intelligence_engine: Any = None,
         governance_engine: Any = None,
         knowledge_pipeline: Any = None,
+        decision_intelligence: DecisionIntelligenceEngine | None = None,
         tick_interval: int = 10,
         min_observations: int = 5,
     ) -> None:
@@ -98,6 +100,9 @@ class EvolutionScheduler:
             knowledge_pipeline: Optional EvolutionKnowledgePipeline for
                 automatic consolidation of weaknesses and insights.
                 Skipped if None.
+            decision_intelligence: Optional DecisionIntelligenceEngine for
+                adaptive planning based on consolidated evolution
+                knowledge. Skipped if None.
             tick_interval: How many tick() calls between analysis runs.
                 Default 10. Minimum 1.
             min_observations: Minimum new observations needed to trigger
@@ -111,6 +116,7 @@ class EvolutionScheduler:
         self._intelligence_engine = intelligence_engine
         self._governance_engine = governance_engine
         self._knowledge_pipeline = knowledge_pipeline
+        self._decision_intelligence = decision_intelligence
 
         self._tick_interval = max(1, tick_interval)
         self._min_observations = max(1, min_observations)
@@ -221,10 +227,19 @@ class EvolutionScheduler:
             except Exception:
                 pass
 
+        # Phase 14.3: Build planning context once from decision intelligence
+        planning_context = None
+        if self._decision_intelligence is not None:
+            try:
+                planning_context = self._decision_intelligence.get_planning_context()
+            except Exception:
+                planning_context = None
+
         # Detect weaknesses
         weaknesses = self._improvement_planner.detect_weaknesses(
             observations,
             insights=insights,
+            planning_context=planning_context,
         )
 
         if not weaknesses:
@@ -240,6 +255,7 @@ class EvolutionScheduler:
         plan = self._improvement_planner.create_improvement_plan(
             weaknesses,
             insights=insights,
+            planning_context=planning_context,
         )
         if plan is None:
             self._last_observation_count = current_count

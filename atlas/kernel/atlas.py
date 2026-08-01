@@ -107,6 +107,9 @@ from atlas.evolution.knowledge.query import EvolutionKnowledgeQuery
 # --- Phase 13.6: Automatic Evolution Knowledge Consolidation Pipeline ---
 from atlas.evolution.knowledge.pipeline import EvolutionKnowledgePipeline
 
+# --- Phase 14.2 / 14.4: Decision Intelligence ---
+from atlas.evolution.decision_intelligence import DecisionIntelligenceEngine
+
 # --- Phase 13.2: Component Registry ---
 from atlas.lifecycle import (
     ComponentMetadata,
@@ -218,6 +221,9 @@ class Atlas:
         # --- Phase 13.6: Automatic Evolution Knowledge Consolidation Pipeline ---
         self._knowledge_pipeline: EvolutionKnowledgePipeline | None = None
 
+        # --- Phase 14.4: Decision Intelligence ---
+        self._decision_intelligence: DecisionIntelligenceEngine | None = None
+
     @property
     def container(self):
         return self._container
@@ -276,6 +282,16 @@ class Atlas:
         knowledge layer.
         """
         return self._knowledge_query
+
+    @property
+    def decision_intelligence(self):
+        """
+        Return the DecisionIntelligenceEngine (Phase 14.2).
+
+        The engine is the read-only adaptive planning layer that consumes
+        consolidated evolution knowledge and produces PlanningContexts.
+        """
+        return self._decision_intelligence
 
     @property
     def outcome_tracker(self):
@@ -521,6 +537,12 @@ class Atlas:
             repository=self._knowledge_repository,
         )
 
+        # --- Phase 14.4: Create the DecisionIntelligenceEngine ---
+        # Read-only adaptive planning: EvolutionKnowledgeQuery → engine.
+        self._decision_intelligence = DecisionIntelligenceEngine(
+            knowledge_query=self._knowledge_query,
+        )
+
         # --- Phase 11.0: Create the EvolutionExecutionEngine ---
         self._execution_engine = EvolutionExecutionEngine(
             approval_manager=self._approval_manager,
@@ -585,6 +607,7 @@ class Atlas:
             evolution_memory=self._evolution_memory,
             intelligence_engine=self._intelligence_engine,
             knowledge_pipeline=self._knowledge_pipeline,
+            decision_intelligence=self._decision_intelligence,
             tick_interval=10,
             min_observations=5,
         )
@@ -787,6 +810,9 @@ class Atlas:
         # --- Phase 13.4: Cleanup ---
         self._execution_gateway = None
         self._rule_engine = None
+
+        # --- Phase 14.4: Cleanup ---
+        self._decision_intelligence = None
 
         # --- Phase 13.6: Cleanup ---
         self._knowledge_pipeline = None

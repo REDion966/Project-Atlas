@@ -14,6 +14,8 @@ Pure logic tests. No AI. No infrastructure. No storage.
 import pytest
 from datetime import datetime
 
+from atlas.evolution.decision_models import BottleneckAlert, PlanningContext
+from atlas.evolution.decision_intelligence import DecisionIntelligenceEngine
 from atlas.evolution.models import (
     Observation,
     ObservationCategory,
@@ -506,3 +508,108 @@ class TestEdgeCases:
         )
         assert scheduler._tick_interval == 1
         assert scheduler._min_observations == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: EvolutionScheduler — Decision Intelligence Integration
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionIntelligenceIntegration:
+
+    def test_scheduler_queries_decision_intelligence_once(self):
+        """The scheduler builds the planning context exactly once per cycle."""
+        call_count = 0
+
+        class FakeDecisionIntelligence:
+            def get_planning_context(self, weaknesses=None):
+                nonlocal call_count
+                call_count += 1
+                return PlanningContext(
+                    bottleneck_alerts=[
+                        BottleneckAlert(
+                            bottleneck_id="BOT-1",
+                            area="runtime",
+                            recurrence_count=5,
+                        ),
+                    ],
+                )
+
+        scheduler = EvolutionScheduler(
+            observation_engine=SelfObservationEngine(),
+            improvement_planner=ImprovementPlanner(),
+            proposal_generator=ProposalGenerator(),
+            approval_manager=ApprovalManager(),
+            evolution_memory=EvolutionMemory(),
+            tick_interval=1,
+            min_observations=1,
+            decision_intelligence=FakeDecisionIntelligence(),
+        )
+        _seed_observations(scheduler._observation_engine, count=6)
+
+        scheduler.tick()
+
+        assert call_count == 1
+
+    def test_scheduler_passes_context_to_planner(self):
+        """The scheduler passes a PlanningContext into the planner."""
+        detected_contexts = []
+
+        class CapturingPlanner(ImprovementPlanner):
+            def detect_weaknesses(self, observations, insights=None, planning_context=None):
+                detected_contexts.append(planning_context)
+                return super().detect_weaknesses(observations, insights, planning_context)
+
+            def create_improvement_plan(self, weaknesses, insights=None, planning_context=None):
+                detected_contexts.append(planning_context)
+                return super().create_improvement_plan(weaknesses, insights, planning_context)
+
+        class FakeDecisionIntelligence:
+            def get_planning_context(self, weaknesses=None):
+                return PlanningContext(
+                    bottleneck_alerts=[
+                        BottleneckAlert(
+                            bottleneck_id="BOT-1",
+                            area="runtime",
+                            recurrence_count=5,
+                        ),
+                    ],
+                )
+
+        scheduler = EvolutionScheduler(
+            observation_engine=SelfObservationEngine(),
+            improvement_planner=CapturingPlanner(),
+            proposal_generator=ProposalGenerator(),
+            approval_manager=ApprovalManager(),
+            evolution_memory=EvolutionMemory(),
+            tick_interval=1,
+            min_observations=1,
+            decision_intelligence=FakeDecisionIntelligence(),
+        )
+        _seed_observations(scheduler._observation_engine, count=6)
+
+        scheduler.tick()
+
+        assert len(detected_contexts) == 2
+        assert all(ctx is not None for ctx in detected_contexts)
+        assert detected_contexts[0] is detected_contexts[1]
+
+    def test_scheduler_graceful_without_decision_intelligence(self):
+        """The scheduler works unchanged when decision_intelligence is None."""
+        scheduler = EvolutionScheduler(
+            observation_engine=SelfObservationEngine(),
+            improvement_planner=ImprovementPlanner(),
+            proposal_generator=ProposalGenerator(),
+            approval_manager=ApprovalManager(),
+            evolution_memory=EvolutionMemory(),
+            tick_interval=1,
+            min_observations=1,
+            decision_intelligence=None,
+        )
+        _seed_observations(scheduler._observation_engine, count=6)
+
+        result = scheduler.tick()
+
+        assert result is not None
+        assert result.ran_analysis is True
+        assert result.proposals_generated >= 1

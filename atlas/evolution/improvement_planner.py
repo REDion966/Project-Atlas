@@ -14,6 +14,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
+from atlas.evolution.decision_models import PlanningContext
 from atlas.evolution.models import (
     EvolutionInsight,
     ImprovementPlan,
@@ -53,6 +54,7 @@ class ImprovementPlanner:
         self,
         observations: list[Observation],
         insights: list[EvolutionInsight] | None = None,
+        planning_context: PlanningContext | None = None,
     ) -> list[Weakness]:
         """
         Analyze observations and produce a list of detected weaknesses.
@@ -62,10 +64,16 @@ class ImprovementPlanner:
           - Similar areas with successful past outcomes → higher confidence
           - Similar areas with failed past outcomes → cautious treatment
 
+        When a PlanningContext is provided, area adjustments from
+        consolidated evolution knowledge are used in preference to crude
+        keyword matching.
+
         Args:
             observations: A list of Observation instances to analyze.
             insights: Optional list of EvolutionInsight instances from
                 past evolution outcome analysis.
+            planning_context: Optional PlanningContext with consolidated
+                historical evidence.
 
         Returns:
             A list of Weakness instances. Returns an empty list when no
@@ -96,8 +104,14 @@ class ImprovementPlanner:
         if health_weakness is not None:
             weaknesses.append(health_weakness)
 
-        # Phase 12.4: Adjust weaknesses based on historical evolution insights
-        if insights:
+        # Phase 12.4 / 14.3: Adjust weaknesses based on historical evidence.
+        if planning_context is not None:
+            weaknesses = self._apply_evolution_feedback(
+                weaknesses,
+                insights or [],
+                planning_context,
+            )
+        elif insights:
             weaknesses = self._apply_evolution_feedback(weaknesses, insights)
 
         return weaknesses
@@ -110,6 +124,7 @@ class ImprovementPlanner:
         self,
         weaknesses: list[Weakness],
         insights: list[EvolutionInsight],
+        planning_context: PlanningContext | None = None,
     ) -> list[Weakness]:
         """
         Adjust weakness severity based on historical evolution outcomes.
@@ -122,44 +137,97 @@ class ImprovementPlanner:
           - Insights with confidence < 0.3 → ignored (low confidence).
           - No match → unchanged.
 
+        When a PlanningContext is provided, area adjustments from
+        consolidated knowledge are used first; insights are only used as
+        a fallback when no area adjustment is available.
+
         Args:
             weaknesses: Detected weaknesses to adjust.
             insights: Historical evolution insights.
+            planning_context: Optional PlanningContext with consolidated
+                historical evidence.
 
         Returns:
             Adjusted list of Weakness instances.
         """
-        if not weaknesses or not insights:
+        if not weaknesses:
             return weaknesses
 
-        # Build a map of area → list of relevant insights
+        if planning_context is None and not insights:
+            return weaknesses
+
+        # Build a map of area → list of relevant insights (fallback)
         area_feedback: dict[str, list[EvolutionInsight]] = {}
-        for insight in insights:
-            # Skip low-confidence insights
-            if insight.confidence < 0.3:
-                continue
+        if insights:
+            for insight in insights:
+                if insight.confidence < 0.3:
+                    continue
 
-            # Derive area from proposal_title/summary keywords
-            area = self._insight_to_area(insight)
-            if area is None:
-                continue
+                area = self._insight_to_area(insight)
+                if area is None:
+                    continue
 
-            if area not in area_feedback:
-                area_feedback[area] = []
-            area_feedback[area].append(insight)
-
-        if not area_feedback:
-            return weaknesses
+                area_feedback.setdefault(area, []).append(insight)
 
         # Adjust each weakness
         adjusted: list[Weakness] = []
         for weakness in weaknesses:
-            matching_insights = area_feedback.get(weakness.area, [])
-            if matching_insights:
-                weakness = self._adjust_weakness(weakness, matching_insights)
+            adjustment = None
+            if planning_context is not None:
+                adjustment = planning_context.area_adjustments.get(weakness.area)
+
+            if adjustment is not None and adjustment.occurrence_count > 0:
+                weakness = self._adjust_weakness_from_context(
+                    weakness,
+                    adjustment,
+                )
+            else:
+                matching_insights = area_feedback.get(weakness.area, [])
+                if matching_insights:
+                    weakness = self._adjust_weakness(weakness, matching_insights)
             adjusted.append(weakness)
 
         return adjusted
+
+    @staticmethod
+    def _adjust_weakness_from_context(
+        weakness: Weakness,
+        adjustment,
+    ) -> Weakness:
+        """Adjust a weakness using a consolidated AreaAdjustment."""
+        recommendation = adjustment.recommendation
+        if recommendation == "prefer":
+            new_severity = _boost_priority(weakness.severity)
+            if new_severity != weakness.severity:
+                return Weakness(
+                    area=weakness.area,
+                    description=(
+                        f"{weakness.description} "
+                        f"[Evolution feedback: historical success rate "
+                        f"{adjustment.historical_success_rate:.0%} across "
+                        f"{adjustment.occurrence_count} occurrences]"
+                    ),
+                    severity=new_severity,
+                    supporting_observations=weakness.supporting_observations,
+                    detected_at=weakness.detected_at,
+                )
+        elif recommendation == "avoid":
+            new_severity = _reduce_priority(weakness.severity)
+            if new_severity != weakness.severity:
+                return Weakness(
+                    area=weakness.area,
+                    description=(
+                        f"{weakness.description} "
+                        f"[Evolution feedback: historical failures across "
+                        f"{adjustment.occurrence_count} occurrences; "
+                        f"proceed with caution]"
+                    ),
+                    severity=new_severity,
+                    supporting_observations=weakness.supporting_observations,
+                    detected_at=weakness.detected_at,
+                )
+
+        return weakness
 
     @staticmethod
     def _insight_to_area(insight: EvolutionInsight) -> str | None:
@@ -475,6 +543,7 @@ class ImprovementPlanner:
         self,
         weaknesses: list[Weakness],
         insights: list[EvolutionInsight] | None = None,
+        planning_context: PlanningContext | None = None,
     ) -> ImprovementPlan | None:
         """
         Create a single improvement plan from a list of weaknesses.
@@ -482,12 +551,17 @@ class ImprovementPlanner:
         When past evolution insights are provided, the plan description
         and expected benefit may reference historical outcomes.
 
+        When a PlanningContext is provided, bottleneck alerts and strategy
+        suggestions enrich the plan description and benefit estimate.
+
         If no weaknesses are provided, returns None.
 
         Args:
             weaknesses: A list of Weakness instances to address.
             insights: Optional list of EvolutionInsight instances for
                 enriched planning context.
+            planning_context: Optional PlanningContext with consolidated
+                historical evidence.
 
         Returns:
             An ImprovementPlan targeting the most critical weaknesses,
@@ -526,6 +600,14 @@ class ImprovementPlanner:
         if insights:
             feedback_note = self._build_feedback_note(primary.area, insights)
 
+        # Phase 14.3: enrich with bottleneck alerts when available
+        bottleneck_note = ""
+        if planning_context is not None:
+            bottleneck_note = self._build_bottleneck_note(
+                primary.area,
+                planning_context,
+            )
+
         description = (
             f"Address {len(sorted_weaknesses)} identified weakness(es) "
             f"in {', '.join(target_components)}. "
@@ -533,6 +615,14 @@ class ImprovementPlanner:
         )
         if feedback_note:
             description += f" {feedback_note}"
+        if bottleneck_note:
+            description += f" {bottleneck_note}"
+
+        expected_benefit = self._estimate_benefit(
+            primary,
+            insights=insights,
+            planning_context=planning_context,
+        )
 
         return ImprovementPlan(
             plan_id=self._next_plan_id(),
@@ -540,7 +630,7 @@ class ImprovementPlanner:
             description=description,
             priority=primary.severity,
             weaknesses=sorted_weaknesses,
-            expected_benefit=self._estimate_benefit(primary, insights),
+            expected_benefit=expected_benefit,
             complexity_estimate=self._estimate_complexity(sorted_weaknesses),
             target_components=target_components,
         )
@@ -549,6 +639,7 @@ class ImprovementPlanner:
         self,
         weaknesses: list[Weakness],
         insights: list[EvolutionInsight] | None = None,
+        planning_context: PlanningContext | None = None,
     ) -> list[ImprovementPlan]:
         """
         Create improvement plans for each distinct area with weaknesses.
@@ -556,6 +647,8 @@ class ImprovementPlanner:
         Args:
             weaknesses: A list of Weakness instances.
             insights: Optional list of EvolutionInsight instances.
+            planning_context: Optional PlanningContext with consolidated
+                historical evidence.
 
         Returns:
             A list of ImprovementPlan instances, one per affected area.
@@ -571,7 +664,11 @@ class ImprovementPlanner:
 
         plans: list[ImprovementPlan] = []
         for area, area_weaknesses in by_area.items():
-            plan = self.create_improvement_plan(area_weaknesses, insights=insights)
+            plan = self.create_improvement_plan(
+                area_weaknesses,
+                insights=insights,
+                planning_context=planning_context,
+            )
             if plan is not None:
                 plans.append(plan)
 
@@ -615,11 +712,15 @@ class ImprovementPlanner:
         self,
         weakness: Weakness,
         insights: list[EvolutionInsight] | None = None,
+        planning_context: PlanningContext | None = None,
     ) -> str:
         """Estimate the expected benefit of addressing a weakness.
 
         When insights are available, use measured outcomes from past
         improvements in the same area to provide data-driven estimates.
+
+        When a PlanningContext is available, preferred strategies for the
+        area are mentioned without overriding deterministic logic.
         """
         # Default estimates by area
         estimates = {
@@ -662,7 +763,31 @@ class ImprovementPlanner:
                         f"{avg_effectiveness:.0%} effectiveness."
                     )
 
+        # Phase 14.3: enrich with preferred strategies from context
+        if planning_context is not None:
+            suggestions = planning_context.strategy_suggestions.get(weakness.area, [])
+            preferred = [
+                s for s in suggestions if s.recommendation == "prefer"
+            ]
+            if preferred:
+                names = ", ".join(s.strategy_name or s.strategy_key for s in preferred[:3])
+                base += f" Preferred strategies: {names}."
+
         return base
+
+    @staticmethod
+    def _build_bottleneck_note(
+        area: str,
+        planning_context: PlanningContext,
+    ) -> str:
+        """Build a note about recurring bottlenecks for an area."""
+        for alert in planning_context.bottleneck_alerts:
+            if alert.area == area:
+                return (
+                    f"Recurring bottleneck detected "
+                    f"({alert.recurrence_count} historical occurrences)."
+                )
+        return ""
 
     def _estimate_complexity(
         self,

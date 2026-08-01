@@ -250,7 +250,7 @@ def test_scheduler_feeds_weaknesses_into_pipeline(pipeline, base_weakness):
 
     planner = ImprovementPlanner()
 
-    def detect_weaknesses(observations, insights=None):
+    def detect_weaknesses(observations, insights=None, planning_context=None):
         return [base_weakness]
 
     planner.detect_weaknesses = detect_weaknesses

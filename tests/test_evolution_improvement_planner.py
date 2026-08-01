@@ -4,6 +4,12 @@ Phase 7.0 — Self-Evolution Foundation: ImprovementPlanner Tests.
 
 import pytest
 
+from atlas.evolution.decision_models import (
+    AreaAdjustment,
+    BottleneckAlert,
+    PlanningContext,
+    StrategySuggestion,
+)
 from atlas.evolution.improvement_planner import ImprovementPlanner
 from atlas.evolution.models import (
     ImprovementPriority,
@@ -221,3 +227,169 @@ class TestImprovementPlannerPlanGeneration:
         assert plan.description != ""
         assert plan.expected_benefit != ""
         assert plan.complexity_estimate in ("low", "medium", "high")
+
+
+class TestImprovementPlannerPlanningContext:
+
+    def test_context_none_behaves_as_before(self):
+        """Without a PlanningContext, detection works exactly as before."""
+        planner = ImprovementPlanner()
+        obs = [
+            make_observation(
+                ObservationCategory.RUNTIME_METRICS, "runtime_summary",
+                {"avg_response_time_ms": 6000, "request_count": 50, "error_count": 5, "error_rate_percent": 10.0},
+                source="test",
+            ),
+        ]
+        weaknesses_without = planner.detect_weaknesses(obs)
+        weaknesses_with_none = planner.detect_weaknesses(obs, planning_context=None)
+
+        assert [w.area for w in weaknesses_without] == [w.area for w in weaknesses_with_none]
+        assert [w.severity for w in weaknesses_without] == [w.severity for w in weaknesses_with_none]
+
+    def test_context_adjusts_weakness_severity(self):
+        """A 'prefer' area adjustment boosts the weakness severity."""
+        planner = ImprovementPlanner()
+        obs = [
+            make_observation(
+                ObservationCategory.RUNTIME_METRICS, "runtime_summary",
+                {"avg_response_time_ms": 6000, "request_count": 50, "error_count": 5, "error_rate_percent": 10.0},
+                source="test",
+            ),
+        ]
+        context = PlanningContext(
+            area_adjustments={
+                "runtime": AreaAdjustment(
+                    area="runtime",
+                    historical_success_rate=1.0,
+                    pattern_confidence=0.8,
+                    occurrence_count=10,
+                    adjustment_factor=1.4,
+                    recommendation="prefer",
+                ),
+            },
+        )
+
+        weaknesses = planner.detect_weaknesses(obs, planning_context=context)
+        runtime_w = [w for w in weaknesses if w.area == "runtime"][0]
+
+        assert runtime_w.severity == ImprovementPriority.CRITICAL
+        assert "historical success rate" in runtime_w.description
+
+    def test_context_avoid_reduces_severity(self):
+        """An 'avoid' area adjustment reduces the weakness severity."""
+        planner = ImprovementPlanner()
+        obs = [
+            make_observation(
+                ObservationCategory.RUNTIME_METRICS, "runtime_summary",
+                {"avg_response_time_ms": 6000, "request_count": 50, "error_count": 5, "error_rate_percent": 10.0},
+                source="test",
+            ),
+        ]
+        context = PlanningContext(
+            area_adjustments={
+                "runtime": AreaAdjustment(
+                    area="runtime",
+                    historical_success_rate=0.0,
+                    pattern_confidence=0.8,
+                    occurrence_count=10,
+                    adjustment_factor=0.6,
+                    recommendation="avoid",
+                ),
+            },
+        )
+
+        weaknesses = planner.detect_weaknesses(obs, planning_context=context)
+        runtime_w = [w for w in weaknesses if w.area == "runtime"][0]
+
+        # Original severity for response time > 5000 and error rate 10% is HIGH;
+        # "avoid" reduces it one level to MEDIUM.
+        assert runtime_w.severity == ImprovementPriority.MEDIUM
+        assert "historical failures" in runtime_w.description
+
+    def test_bottleneck_alert_enriches_plan_description(self):
+        """A bottleneck alert enriches the generated plan description."""
+        planner = ImprovementPlanner()
+        obs = [
+            make_observation(
+                ObservationCategory.RUNTIME_METRICS, "runtime_summary",
+                {"avg_response_time_ms": 6000, "request_count": 50, "error_count": 5, "error_rate_percent": 10.0},
+                source="test",
+            ),
+        ]
+        context = PlanningContext(
+            bottleneck_alerts=[
+                BottleneckAlert(
+                    bottleneck_id="BOT-1",
+                    area="runtime",
+                    recurrence_count=5,
+                    description="Slow runtime.",
+                    severity_boost=0.2,
+                ),
+            ],
+        )
+
+        weaknesses = planner.detect_weaknesses(obs)
+        plan = planner.create_improvement_plan(weaknesses, planning_context=context)
+
+        assert "Recurring bottleneck detected" in plan.description
+        assert "5 historical occurrences" in plan.description
+
+    def test_strategy_suggestion_enriches_benefit(self):
+        """Preferred strategies enrich the expected benefit text."""
+        planner = ImprovementPlanner()
+        obs = [
+            make_observation(
+                ObservationCategory.RUNTIME_METRICS, "runtime_summary",
+                {"avg_response_time_ms": 6000, "request_count": 50, "error_count": 5, "error_rate_percent": 10.0},
+                source="test",
+            ),
+        ]
+        context = PlanningContext(
+            strategy_suggestions={
+                "runtime": [
+                    StrategySuggestion(
+                        strategy_key="cache_results",
+                        strategy_name="Cache expensive results",
+                        effectiveness=0.85,
+                        confidence=0.6,
+                        occurrence_count=5,
+                        recommendation="prefer",
+                    ),
+                ],
+            },
+        )
+
+        weaknesses = planner.detect_weaknesses(obs)
+        plan = planner.create_improvement_plan(weaknesses, planning_context=context)
+
+        assert "Preferred strategies" in plan.expected_benefit
+        assert "Cache expensive results" in plan.expected_benefit
+
+    def test_no_matching_area_falls_back_to_existing_behavior(self):
+        """Context adjustments for other areas do not affect unmapped areas."""
+        planner = ImprovementPlanner()
+        obs = [
+            make_observation(
+                ObservationCategory.RUNTIME_METRICS, "runtime_summary",
+                {"avg_response_time_ms": 6000, "request_count": 50, "error_count": 5, "error_rate_percent": 10.0},
+                source="test",
+            ),
+        ]
+        context = PlanningContext(
+            area_adjustments={
+                "memory": AreaAdjustment(
+                    area="memory",
+                    historical_success_rate=1.0,
+                    pattern_confidence=0.8,
+                    occurrence_count=10,
+                    adjustment_factor=1.4,
+                    recommendation="prefer",
+                ),
+            },
+        )
+
+        weaknesses = planner.detect_weaknesses(obs, planning_context=context)
+        runtime_w = [w for w in weaknesses if w.area == "runtime"][0]
+
+        assert runtime_w.severity == ImprovementPriority.HIGH

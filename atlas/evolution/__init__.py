@@ -46,6 +46,16 @@ from atlas.evolution.insight_scorer import InsightScorer
 from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
 from atlas.evolution.research_coordinator import ResearchCoordinator
 
+# --- Phase 14.1/14.2: Decision Intelligence ---
+from atlas.evolution.decision_models import (
+    AreaAdjustment,
+    BottleneckAlert,
+    CapabilitySignal,
+    PlanningContext,
+    StrategySuggestion,
+)
+from atlas.evolution.decision_intelligence import DecisionIntelligenceEngine
+
 # --- Phase 13.1: Governance ---
 from atlas.evolution.governance import (
     ConstraintRegistry,
@@ -62,11 +72,20 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalManager",
     "ApprovalRequest",
+    "AreaAdjustment",
+    "BottleneckAlert",
+    "CapabilitySignal",
     "ConstraintRegistry",
     "EvolutionExecutionEngine",
     "EvolutionExecutionGateway",
     "EvolutionInsight",
     "EvolutionIntelligenceEngine",
+    "DecisionIntelligenceEngine",
+    "PlanningContext",
+    "StrategySuggestion",
+    "AreaAdjustment",
+    "BottleneckAlert",
+    "CapabilitySignal",
     "GatewayExecutionResult",
     "EvolutionMemory",
     "EvolutionProposal",

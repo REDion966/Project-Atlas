@@ -3,6 +3,9 @@ import unittest
 from atlas.kernel.atlas import Atlas
 from atlas.evolution.insight_scorer import InsightScorer
 from atlas.evolution.intelligence_engine import EvolutionIntelligenceEngine
+from atlas.evolution.decision_intelligence import DecisionIntelligenceEngine
+from atlas.evolution.knowledge.query import EvolutionKnowledgeQuery
+from atlas.evolution.scheduler import EvolutionScheduler
 
 
 class TestKernel(unittest.TestCase):
@@ -163,6 +166,94 @@ class TestKernel(unittest.TestCase):
         atlas.shutdown()
 
         self.assertFalse(atlas.container.has("intelligence_engine"))
+
+    # ------------------------------------------------------------------
+    # Phase 14.4 — Decision Intelligence Kernel Wiring
+    # ------------------------------------------------------------------
+
+    def test_kernel_creates_decision_intelligence_engine(self):
+        """Atlas.start() creates a DecisionIntelligenceEngine."""
+        atlas = Atlas()
+        try:
+            atlas.start()
+
+            self.assertIsNotNone(atlas._decision_intelligence)
+            self.assertIsInstance(
+                atlas._decision_intelligence,
+                DecisionIntelligenceEngine,
+            )
+        finally:
+            atlas.shutdown()
+
+    def test_decision_intelligence_property(self):
+        """decision_intelligence property returns the engine instance."""
+        atlas = Atlas()
+        try:
+            atlas.start()
+
+            engine = atlas.decision_intelligence
+            self.assertIsInstance(engine, DecisionIntelligenceEngine)
+            self.assertIs(engine, atlas._decision_intelligence)
+        finally:
+            atlas.shutdown()
+
+    def test_decision_intelligence_receives_knowledge_query(self):
+        """DecisionIntelligenceEngine receives EvolutionKnowledgeQuery."""
+        atlas = Atlas()
+        try:
+            atlas.start()
+
+            knowledge = atlas._decision_intelligence.knowledge_query
+            self.assertIsInstance(knowledge, EvolutionKnowledgeQuery)
+            self.assertIs(knowledge, atlas._knowledge_query)
+        finally:
+            atlas.shutdown()
+
+    def test_scheduler_receives_decision_intelligence(self):
+        """EvolutionScheduler receives the DecisionIntelligenceEngine."""
+        atlas = Atlas()
+        try:
+            atlas.start()
+
+            self.assertIsInstance(atlas._evolution_scheduler, EvolutionScheduler)
+            self.assertIs(
+                atlas._evolution_scheduler._decision_intelligence,
+                atlas._decision_intelligence,
+            )
+        finally:
+            atlas.shutdown()
+
+    def test_decision_intelligence_cleared_on_shutdown(self):
+        """DecisionIntelligenceEngine is cleaned up during shutdown."""
+        atlas = Atlas()
+        atlas.start()
+        atlas.shutdown()
+
+        self.assertIsNone(atlas._decision_intelligence)
+
+    def test_decision_intelligence_not_in_service_container(self):
+        """DecisionIntelligenceEngine is a private dependency, not in container."""
+        atlas = Atlas()
+        try:
+            atlas.start()
+
+            expected_keys = {
+                "component_registry",
+                "ai", "conversation", "memory", "knowledge",
+                "cognition", "cognitive", "cognition_service",
+                "cognition_api", "tasks",
+                "runtime_coordinator", "understanding",
+                "world_model", "evolution_observer", "learning_engine",
+                "identity", "feedback_coordinator",
+                "goal_repository", "goal_intelligence",
+                "experience_repository", "experience_accumulator", "self_model_engine",
+                "intelligence_engine",
+                "execution_gateway",
+                "evolution_knowledge",
+            }
+            self.assertEqual(set(atlas.container.names()), expected_keys)
+        finally:
+            atlas.shutdown()
 
 
 if __name__ == "__main__":

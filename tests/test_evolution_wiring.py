@@ -59,14 +59,19 @@ def make_observation_engine(observations=None):
 
 
 def _make_scheduler(observation_engine, improvement_planner,
-                    proposal_generator, approval_manager, evolution_memory):
-    """Create a scheduler with tick_interval=1 and min_observations=1."""
+                    proposal_generator, approval_manager, evolution_memory,
+                    decision_intelligence=None):
+    """Create a scheduler with tick_interval=1 and min_observations=1.
+
+    Phase 14.4: Optionally inject a DecisionIntelligenceEngine.
+    """
     return EvolutionScheduler(
         observation_engine=observation_engine,
         improvement_planner=improvement_planner,
         proposal_generator=proposal_generator,
         approval_manager=approval_manager,
         evolution_memory=evolution_memory,
+        decision_intelligence=decision_intelligence,
         tick_interval=1,
         min_observations=1,
     )
@@ -104,6 +109,7 @@ def make_coordinator(**overrides):
             proposal_generator=defaults.get("proposal_generator"),
             approval_manager=defaults.get("approval_manager"),
             evolution_memory=defaults.get("evolution_memory"),
+            decision_intelligence=overrides.get("decision_intelligence"),
             tick_interval=1,
             min_observations=1,
         )
