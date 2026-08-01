@@ -110,6 +110,11 @@ from atlas.evolution.knowledge.pipeline import EvolutionKnowledgePipeline
 # --- Phase 14.2 / 14.4: Decision Intelligence ---
 from atlas.evolution.decision_intelligence import DecisionIntelligenceEngine
 
+# --- Phase 15.0: Goal Execution ---
+from atlas.goals.goal_execution_engine import GoalExecutionEngine
+from atlas.goals.execution_action_binders import ExecutionActionBinderRegistry
+from atlas.tools.execution_action_binder import ToolExecutionActionBinder
+
 # --- Phase 13.2: Component Registry ---
 from atlas.lifecycle import (
     ComponentMetadata,
@@ -224,6 +229,10 @@ class Atlas:
         # --- Phase 14.4: Decision Intelligence ---
         self._decision_intelligence: DecisionIntelligenceEngine | None = None
 
+        # --- Phase 15.0: Goal Execution ---
+        self._goal_executor: GoalExecutionEngine | None = None
+        self._binder_registry: ExecutionActionBinderRegistry | None = None
+
     @property
     def container(self):
         return self._container
@@ -297,6 +306,11 @@ class Atlas:
     def outcome_tracker(self):
         """Return the shared OutcomeTracker (Phase 11.0)."""
         return self._outcome_tracker
+
+    @property
+    def goal_executor(self):
+        """Return the GoalExecutionEngine (Phase 15.0)."""
+        return self._goal_executor
 
     @property
     def started(self):
@@ -511,16 +525,6 @@ class Atlas:
         self._evolution_memory = EvolutionMemory(storage=evolution_storage)
         self._evolution_memory.restore()
 
-        # --- Phase 12.1 / 12.2: Create the Evolution Intelligence Engine ---
-        self._insight_scorer = InsightScorer()
-        self._intelligence_engine = EvolutionIntelligenceEngine(
-            evolution_memory=self._evolution_memory,
-            experience_repository=self._experience_repository,
-            insight_scorer=self._insight_scorer,
-            storage=evolution_storage,
-            knowledge_pipeline=self._knowledge_pipeline,
-        )
-
         # --- Phase 13.5: Create the Persistent Evolution Knowledge layer ---
         self._knowledge_repository = EvolutionKnowledgeRepository(
             storage=evolution_storage,
@@ -532,9 +536,21 @@ class Atlas:
         )
 
         # --- Phase 13.6: Create the automatic knowledge consolidation pipeline ---
+        # Created before the EvolutionIntelligenceEngine so that the engine
+        # receives a fully-constructed pipeline (Phase 14 review finding).
         self._knowledge_pipeline = EvolutionKnowledgePipeline(
             consolidator=self._knowledge_consolidator,
             repository=self._knowledge_repository,
+        )
+
+        # --- Phase 12.1 / 12.2: Create the Evolution Intelligence Engine ---
+        self._insight_scorer = InsightScorer()
+        self._intelligence_engine = EvolutionIntelligenceEngine(
+            evolution_memory=self._evolution_memory,
+            experience_repository=self._experience_repository,
+            insight_scorer=self._insight_scorer,
+            storage=evolution_storage,
+            knowledge_pipeline=self._knowledge_pipeline,
         )
 
         # --- Phase 14.4: Create the DecisionIntelligenceEngine ---
@@ -613,6 +629,22 @@ class Atlas:
         )
         self._runtime_coordinator.set_evolution_scheduler(self._evolution_scheduler)
 
+        # --- Phase 15.0: Goal Execution Engine ---
+        # Create binder registry with the single Phase 15 binder
+        self._binder_registry = ExecutionActionBinderRegistry()
+        tool_binder = ToolExecutionActionBinder(tool_engine=self._tool_engine)
+        self._binder_registry.register(tool_binder)
+
+        self._goal_executor = GoalExecutionEngine(
+            repository=self._goal_repository,
+            execution_gateway=self._execution_gateway,
+            binder_registry=self._binder_registry,
+            outcome_tracker=self._outcome_tracker,
+            evolution_memory=self._evolution_memory,
+            decision_intelligence=self._decision_intelligence,
+            event_bus=self._event_bus,
+        )
+
         # Inject Phase 9.0 components after RuntimeCoordinator construction
         self._runtime_coordinator.set_experience_accumulator(self._experience_accumulator)
         self._runtime_coordinator.set_self_model_engine(self._self_model_engine)
@@ -688,6 +720,8 @@ class Atlas:
         self._container.register("execution_gateway", self._execution_gateway)
         # --- Phase 13.5: Register persistent evolution knowledge ---
         self._container.register("evolution_knowledge", self._knowledge_query)
+        # --- Phase 15.0: Register goal execution engine ---
+        self._container.register("goal_execution", self._goal_executor)
 
         self._container.start_all()
         self._started = True
@@ -699,6 +733,8 @@ class Atlas:
         self._task_manager.tick()
         if self._evolution_scheduler is not None:
             self._evolution_scheduler.tick()
+        if self._goal_executor is not None:
+            self._goal_executor.settle()
 
     def chat(self, text: str):
         if not self._started:
@@ -810,6 +846,10 @@ class Atlas:
         # --- Phase 13.4: Cleanup ---
         self._execution_gateway = None
         self._rule_engine = None
+
+        # --- Phase 15.0: Cleanup ---
+        self._goal_executor = None
+        self._binder_registry = None
 
         # --- Phase 14.4: Cleanup ---
         self._decision_intelligence = None

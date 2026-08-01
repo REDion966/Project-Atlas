@@ -5,6 +5,19 @@ Converts improvement plans into human-readable engineering proposals.
 Includes rationale, expected benefit, risks, and required approval.
 
 Phase 7.0 — Self-Evolution Foundation.
+
+NOTE — Rendering/formatting layer only (intentional separation):
+  This module is deliberately a formatting layer. It takes an
+  already-computed ``ImprovementPlan`` and renders it into a
+  human-readable ``EvolutionProposal`` document. It does NOT:
+    - detect weaknesses (ImprovementPlanner's job)
+    - plan or prioritise improvements (ImprovementPlanner's job)
+    - make planning decisions (DecisionIntelligenceEngine's job)
+    - approve, reject, or execute anything (ApprovalManager /
+      EvolutionExecutionEngine's job)
+  Keeping ProposalGenerator a pure, deterministic formatter allows the
+  planning logic above it to evolve independently without coupling the
+  rendered proposal text to planning internals.
 """
 
 from datetime import datetime
@@ -23,7 +36,10 @@ class ProposalGenerator:
 
     This is a pure logic component with no infrastructure dependencies.
     It converts structured plans into proposals suitable for user review
-    and approval.
+    and approval. It is intentionally a rendering/formatting layer only —
+    all analysis, detection, and planning decisions are made upstream by
+    ImprovementPlanner and DecisionIntelligenceEngine before a plan
+    reaches this generator.
     """
 
     def __init__(self) -> None:

@@ -36,8 +36,6 @@ from atlas.evolution.knowledge.query import EvolutionKnowledgeQuery
 # Tunable defaults (constants, not runtime configuration)
 # ---------------------------------------------------------------------------
 
-_DEFAULT_RANKING_CONFIDENCE_MIN = 0.4
-_DEFAULT_RANKING_ADJUSTMENT_WEIGHT = 0.2
 _DEFAULT_RANKING_BOTTLENECK_WEIGHT = 0.3
 _DEFAULT_RANKING_CAPABILITY_WEIGHT = 0.1
 

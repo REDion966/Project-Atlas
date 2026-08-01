@@ -1,0 +1,52 @@
+"""
+Atlas ToolExecutionActionBinder — Phase 15.0
+
+Translates a generic ``ExecutionAction`` envelope into a
+``ToolRequest`` for the ToolEngine — the sole Phase 15 executor.
+
+This binder owns all tool-request construction. It never knows about
+proposals or the execution gateway.
+
+Pure logic. No infrastructure. No AI. Deterministic.
+"""
+
+from atlas.goals.execution_models import ExecutionAction
+from atlas.tools.models import ToolRequest
+
+
+class ToolExecutionActionBinder:
+    """
+    Binds TOOL_INVOCATION actions to ToolRequests.
+
+    The ToolRequest goal is derived from the action payload description
+    and the action context is forwarded so the ToolSelector can rank
+    tools deterministically.
+    """
+
+    def bind(
+        self,
+        action: ExecutionAction,
+    ) -> ToolRequest:
+        """
+        Translate an action into a ToolRequest.
+
+        Args:
+            action: The TOOL_INVOCATION ExecutionAction to translate.
+
+        Returns:
+            A ToolRequest targeting the goal's description with the
+            action context attached.
+        """
+        description = action.payload.get("description", "")
+        goal = description or f"Goal execution: {action.goal_id}"
+
+        context = dict(action.context)
+        context["action_id"] = action.action_id
+        context["expected_impact"] = action.expected_impact
+        context["risk"] = action.risk
+        context["confidence"] = action.confidence
+
+        return ToolRequest(
+            goal=goal,
+            context=context,
+        )

@@ -250,6 +250,7 @@ class TestKernel(unittest.TestCase):
                 "intelligence_engine",
                 "execution_gateway",
                 "evolution_knowledge",
+                "goal_execution",
             }
             self.assertEqual(set(atlas.container.names()), expected_keys)
         finally:

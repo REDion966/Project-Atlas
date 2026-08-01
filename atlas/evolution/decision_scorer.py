@@ -45,7 +45,6 @@ _MIN_STRATEGY_CONFIDENCE = 0.4
 # Capability signal thresholds.
 _CAPABILITY_DEFER_ASSESSMENT_MIN = 0.7
 _CAPABILITY_INTERVENE_ASSESSMENT_MAX = 0.4
-_CAPABILITY_TRAJECTORY_THRESHOLD = 0.1
 
 # Bottleneck boost curve parameters.
 # The curve is calibrated so that 3 recurrences yields a 0.1 boost and

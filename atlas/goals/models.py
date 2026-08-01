@@ -32,7 +32,15 @@ class GoalPriority(Enum):
 
 
 class GoalStatus(Enum):
-    """Lifecycle status of an improvement goal."""
+    """
+    Lifecycle status of an improvement goal.
+
+    Phase 15 additions:
+      ``FAILED`` — execution was attempted and did not complete. This is
+      distinct from ``REJECTED`` (a user declined the goal before
+      execution). A failed goal requires explicit re-authorization before
+      any retry.
+    """
     PROPOSED = auto()
     ANALYZED = auto()
     RECOMMENDED = auto()
@@ -41,6 +49,7 @@ class GoalStatus(Enum):
     COMPLETED = auto()
     REJECTED = auto()
     DEFERRED = auto()
+    FAILED = auto()
 
 
 @dataclass(frozen=True, slots=True)

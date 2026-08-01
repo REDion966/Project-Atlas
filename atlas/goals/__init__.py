@@ -26,6 +26,31 @@ from atlas.goals.dependency_resolver import DependencyResolver
 from atlas.goals.recommendation_engine import RecommendationEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 
+# --- Phase 15.0: Execution models ---
+from atlas.goals.execution_models import (
+    ActionType,
+    ExecutionAction,
+    ExecutionOutcome,
+    GoalAuthorization,
+    GoalExecutionRecord,
+    GoalExecutorResult,
+)
+
+# --- Phase 15.1: Request adapter ---
+from atlas.goals.execution_request_adapter import ExecutionRequestAdapter
+
+# --- Phase 15.2: Binder registry ---
+from atlas.goals.execution_action_binders import (
+    ExecutionActionBinder,
+    ExecutionActionBinderRegistry,
+)
+
+# --- Phase 15.2: Goal execution engine ---
+from atlas.goals.goal_execution_engine import (
+    ActionFactory,
+    GoalExecutionEngine,
+)
+
 __all__ = [
     "GoalCategory",
     "GoalPriority",
@@ -43,4 +68,16 @@ __all__ = [
     "DependencyResolver",
     "RecommendationEngine",
     "GoalIntelligenceEngine",
+    # Phase 15 execution
+    "ActionType",
+    "ExecutionAction",
+    "ExecutionOutcome",
+    "GoalAuthorization",
+    "GoalExecutionRecord",
+    "GoalExecutorResult",
+    "ExecutionRequestAdapter",
+    "ExecutionActionBinder",
+    "ExecutionActionBinderRegistry",
+    "ActionFactory",
+    "GoalExecutionEngine",
 ]
