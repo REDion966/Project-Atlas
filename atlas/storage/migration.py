@@ -1,5 +1,5 @@
 """
-Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3 / 13.5
+Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3 / 13.5 / 16.4
 
 Simple additive migration system for SQLite-backed storage. Each migration
 is a tuple of (sql_statement, description). Migrations are applied in
@@ -10,6 +10,9 @@ No destructive migrations are permitted.
 Phase 12.3 — Added evolution_insights table (schema version 4).
 Phase 13.5 — Added evolution_observations and evolution_knowledge_*
 tables for the Persistent Evolution Knowledge layer (schema version 5).
+Phase 16.4 — Added evolution_requests, evolution_versions, evolution_receipts,
+evolution_snapshots, evolution_outcomes, and staged_config tables for the
+Governed Autonomous Evolution persistence layer (schema version 6).
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 # Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
@@ -313,6 +316,134 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_evolution_knowledge_snapshots_timestamp
                 ON evolution_knowledge_snapshots(timestamp DESC)
         """, "Index on knowledge snapshot timestamp"),
+    ],
+    6: [
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_requests (
+                request_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                target_scope TEXT NOT NULL,
+                change_payload TEXT NOT NULL DEFAULT '{}',
+                intended_level TEXT NOT NULL,
+                status TEXT NOT NULL,
+                validation TEXT,
+                risk TEXT,
+                authorization TEXT,
+                schedule TEXT,
+                version_target TEXT,
+                rollback TEXT,
+                receipt TEXT,
+                verification TEXT,
+                outcome TEXT,
+                parent_request_ids TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create evolution_requests table for Phase 16.4 autonomous evolution"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_requests_status
+                ON evolution_requests(status)
+        """, "Index on evolution request status"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_requests_updated_at
+                ON evolution_requests(updated_at DESC)
+        """, "Index on evolution request updated_at"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_requests_target_scope
+                ON evolution_requests(target_scope)
+        """, "Index on evolution request target_scope"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_versions (
+                manifest_id TEXT PRIMARY KEY,
+                major INTEGER NOT NULL DEFAULT 1,
+                minor INTEGER NOT NULL DEFAULT 0,
+                patch INTEGER NOT NULL DEFAULT 0,
+                applied_request_ids TEXT NOT NULL DEFAULT '[]',
+                parent_version TEXT NOT NULL DEFAULT '',
+                scope_versions TEXT NOT NULL DEFAULT '{}',
+                tags TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            )
+        """, "Create evolution_versions table for Phase 16.4 version manifests"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_versions_created_at
+                ON evolution_versions(created_at DESC)
+        """, "Index on evolution version created_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_receipts (
+                receipt_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                changed_keys TEXT NOT NULL DEFAULT '[]',
+                before_refs TEXT NOT NULL DEFAULT '{}',
+                after_refs TEXT NOT NULL DEFAULT '{}',
+                version_delta TEXT NOT NULL DEFAULT '',
+                target_tags TEXT NOT NULL DEFAULT '[]',
+                applied_at TEXT NOT NULL
+            )
+        """, "Create evolution_receipts table for Phase 16.4 change receipts"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_receipts_request
+                ON evolution_receipts(request_id)
+        """, "Index on evolution receipt request_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                snapshot_data TEXT NOT NULL,
+                checksum TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        """, "Create evolution_snapshots table for Phase 16.4 rollback snapshots"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_snapshots_request
+                ON evolution_snapshots(request_id)
+        """, "Index on evolution snapshot request_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS evolution_outcomes (
+                outcome_record_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                area TEXT NOT NULL DEFAULT '',
+                risk_level TEXT NOT NULL,
+                intended_level TEXT NOT NULL,
+                authorization_mode TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                verification_passed INTEGER NOT NULL DEFAULT 0,
+                rollback_occurred INTEGER NOT NULL DEFAULT 0,
+                effectiveness_proxy REAL NOT NULL DEFAULT 0.0,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                related_ids TEXT NOT NULL DEFAULT '[]',
+                strategy_key TEXT NOT NULL DEFAULT '',
+                strategy_name TEXT NOT NULL DEFAULT '',
+                planning_context_version TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create evolution_outcomes table for Phase 16.4 terminal outcomes"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_outcomes_request
+                ON evolution_outcomes(request_id)
+        """, "Index on evolution outcome request_id"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_outcomes_finished_at
+                ON evolution_outcomes(finished_at DESC)
+        """, "Index on evolution outcome finished_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS staged_config (
+                entry_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                schema_status TEXT NOT NULL DEFAULT 'pending',
+                activated_at TEXT,
+                applied_at TEXT NOT NULL
+            )
+        """, "Create staged_config table for Phase 16.4 staged config entries"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_staged_config_request
+                ON staged_config(request_id)
+        """, "Index on staged config request_id"),
     ],
 }
 

@@ -23,6 +23,7 @@ class ScopeType(Enum):
     KNOWLEDGE = auto()   # Knowledge base entries
     CODE = auto()        # Code artifacts / patches
     IDENTITY = auto()    # Identity principles, beliefs, preferences
+    CAPABILITY = auto()  # Capability registry surface (additive, Phase 16)
     UNKNOWN = auto()     # Unclassified
 
 

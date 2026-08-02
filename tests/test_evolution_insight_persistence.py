@@ -254,9 +254,9 @@ class TestInsightStorageAdapter:
         loaded = tmp_storage.load_insights()
         assert loaded == []
 
-    def test_schema_version_5(self, tmp_storage):
-        """Schema version is 5 after Phase 13.5 migration."""
-        assert tmp_storage.get_schema_version() == 5
+    def test_schema_version_6(self, tmp_storage):
+        """Schema version is 6 after Phase 16.4 migration."""
+        assert tmp_storage.get_schema_version() == 6
 
 
 class TestEnginePersistenceIntegration:

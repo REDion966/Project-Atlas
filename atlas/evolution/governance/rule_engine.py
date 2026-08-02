@@ -180,6 +180,9 @@ class RuleEngine:
         if "knowledge" in components_lower:
             return ScopeType.KNOWLEDGE
 
+        if "capability" in components_lower:
+            return ScopeType.CAPABILITY
+
         return ScopeType.UNKNOWN
 
     @staticmethod
@@ -206,4 +209,6 @@ class RuleEngine:
             return ScopeType.MEMORY
         if "knowledge" in components_lower:
             return ScopeType.KNOWLEDGE
+        if "capability" in components_lower:
+            return ScopeType.CAPABILITY
         return ScopeType.UNKNOWN

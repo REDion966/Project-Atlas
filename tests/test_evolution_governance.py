@@ -172,9 +172,9 @@ class TestGovernanceDecision:
 class TestConstraintRegistry:
 
     def test_default_rules_loaded(self):
-        """ConstraintRegistry loads all 4 default rules on construction."""
+        """ConstraintRegistry loads all 5 default rules on construction."""
         registry = ConstraintRegistry()
-        assert registry.rule_count == 4
+        assert registry.rule_count == 5
 
         rules = registry.get_rules()
         rule_ids = {r.rule_id for r in rules}
@@ -192,7 +192,7 @@ class TestConstraintRegistry:
             scope=ScopeType.UNKNOWN,
         )
         registry.register(rule)
-        assert registry.rule_count == 5
+        assert registry.rule_count == 6
 
         fetched = registry.get_rule("GOV-CUSTOM")
         assert fetched is not None
@@ -233,7 +233,7 @@ class TestConstraintRegistry:
     def test_clear_removes_all_rules(self):
         """clear() removes all rules without reloading defaults."""
         registry = ConstraintRegistry()
-        assert registry.rule_count == 4
+        assert registry.rule_count == 5
 
         registry.clear()
         assert registry.rule_count == 0
@@ -295,6 +295,16 @@ class TestScopeDetection:
         """Target component 'knowledge' maps to KNOWLEDGE scope."""
         scope = RuleEngine.classify_scope(["knowledge"])
         assert scope == ScopeType.KNOWLEDGE
+
+    def test_capability_scope(self):
+        """Target component 'capability' maps to CAPABILITY scope."""
+        scope = RuleEngine.classify_scope(["capability"])
+        assert scope == ScopeType.CAPABILITY
+
+    def test_capability_scope_mixed_components(self):
+        """A proposal with 'capability' among other components maps to CAPABILITY."""
+        scope = RuleEngine.classify_scope(["capability", "autonomy:capability"])
+        assert scope == ScopeType.CAPABILITY
 
     def test_unknown_scope(self):
         """Unrecognized components map to UNKNOWN scope."""
@@ -450,6 +460,42 @@ class TestEvaluate:
         decision = engine.evaluate(
             proposal=proposal,
             current_level=ExecutionLevel.INFORMATION,
+        )
+
+        assert decision.approved is True
+
+    def test_capability_modification_rejected_at_administrative(self):
+        """
+        A capability-scope proposal at ADMINISTRATIVE level is rejected.
+        GOV-005 requires SELF_CONFIG level.
+        """
+        proposal = _make_proposal(
+            title="Capability Update",
+            components=["capability"],
+        )
+        engine = RuleEngine()
+
+        decision = engine.evaluate(
+            proposal=proposal,
+            current_level=ExecutionLevel.ADMINISTRATIVE,
+        )
+
+        assert decision.approved is False
+        assert any("GOV-005" in v for v in decision.violated_rules)
+
+    def test_capability_modification_allowed_at_self_config(self):
+        """
+        A capability-scope proposal at SELF_CONFIG level passes.
+        """
+        proposal = _make_proposal(
+            title="Capability Update",
+            components=["capability"],
+        )
+        engine = RuleEngine()
+
+        decision = engine.evaluate(
+            proposal=proposal,
+            current_level=ExecutionLevel.SELF_CONFIG,
         )
 
         assert decision.approved is True

@@ -83,6 +83,26 @@ class ConstraintRegistry:
                 min_execution_level=ExecutionLevel.INFORMATION.value,
             )
         )
+        self.register(
+            GovernanceRule(
+                rule_id="GOV-005",
+                description=(
+                    "Capability registry modifications require SELF_CONFIG "
+                    "execution level."
+                ),
+                scope=ScopeType.CAPABILITY,
+                min_execution_level=ExecutionLevel.SELF_CONFIG.value,
+            )
+        )
+        # GOV-006 is reserved for a future SKILLS scope. It is intentionally
+        # NOT registered here because ScopeType.SKILLS does not yet exist.
+        # When SKILLS is added (additive enum member), register:
+        #   GovernanceRule(
+        #       rule_id="GOV-006",
+        #       description="Skill registry modifications require SELF_CONFIG ...",
+        #       scope=ScopeType.SKILLS,
+        #       min_execution_level=ExecutionLevel.SELF_CONFIG.value,
+        #   )
 
     # ------------------------------------------------------------------
     # Rule management
