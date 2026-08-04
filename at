@@ -1,0 +1,520 @@
+"""Atlas Toolchain — Tool Learning (Phase 18.6).
+
+Consumes :class:`ToolChainResult` outcomes and
+:class:`ToolEffectivenessTracker` aggregates to produce deterministic
+learning recommendations — including skill candidates with
+``kind = LEARNED``.
+
+Pure logic. No storage. No persistence. No evolution. No AI. No randomness.
+The learner is stateless: identical inputs always produce identical
+recommendations.
+
+Recommendations are *suggestions only* — the learner never mutates the
+registry, the tracker, or any Atlas state. Applying a recommendation is the
+caller's responsibility (and, per the Constitution, must route through the
+Evolution Framework).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from atlas.toolchain.catalog import (
+    DEFAULT_EFFECTIVENESS,
+    EFFECTIVENESS_MIN_OBSERVATIONS,
+    SKILL_ID_PREFIX,
+)
+from atlas.toolchain.effectiveness import ToolEffectivenessTracker
+from atlas.toolchain.models import (
+    Skill,
+    SkillKind,
+    SkillStatus,
+    ToolChain,
+    ToolChainResult,
+    ToolEffectivenessScore,
+    ToolStep,
+)
+
+
+# ---------------------------------------------------------------------------
+# Recommendation models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ToolLearningRecommendation:
+    """A single deterministic learning recommendation.
+
+    Attributes:
+        recommendation_id: Stable identifier.
+        kind: Recommendation kind (``promote_tool``, ``demote_tool``,
+            ``compose_skill``, ``retire_skill``).
+        tool_name: Tool the recommendation targets (when applicable).
+        skill: Skill candidate produced by the recommendation (when
+            applicable).
+        reason: Human-readable explanation.
+        confidence: Confidence score (0.0–1.0).
+        evidence: Supporting evidence summary.
+        metadata: Additional recommendation context.
+    """
+
+    recommendation_id: str
+    kind: str
+    tool_name: str = ""
+    skill: Skill | None = None
+    reason: str = ""
+    confidence: float = 0.0
+    evidence: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict."""
+        return {
+            "recommendation_id": self.recommendation_id,
+            "kind": self.kind,
+            "tool_name": self.tool_name,
+            "skill": self.skill.to_dict() if self.skill is not None else None,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "evidence": dict(self.evidence),
+            "metadata": dict(self.metadata),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Deterministic constants
+# ---------------------------------------------------------------------------
+
+#: Effectiveness threshold above which a tool is a promote candidate.
+PROMOTE_EFFECTIVENESS_THRESHOLD: float = 0.75
+
+#: Effectiveness threshold below which a tool is a demote candidate.
+DEMOTE_EFFECTIVENESS_THRESHOLD: float = 0.35
+
+#: Minimum success rate for a tool to be considered for skill composition.
+COMPOSE_MIN_SUCCESS_RATE: float = 0.6
+
+#: Minimum number of steps in a successful chain for a skill candidate.
+COMPOSE_MIN_STEPS: int = 2
+
+#: Confidence assigned when a tool has enough observations to be reliable.
+HIGH_CONFIDENCE: float = 0.9
+
+#: Confidence assigned when a tool has some observations but not enough.
+MEDIUM_CONFIDENCE: float = 0.6
+
+#: Confidence assigned when evidence is weak.
+LOW_CONFIDENCE: float = 0.3
+
+
+# ---------------------------------------------------------------------------
+# Learner
+# ---------------------------------------------------------------------------
+
+
+class ToolLearner:
+    """Deterministic tool learning recommendation engine.
+
+    Consumes :class:`ToolChainResult` outcomes and
+    :class:`ToolEffectivenessTracker` aggregates to produce
+    :class:`ToolLearningRecommendation` objects. The learner is stateless
+    and never mutates any input. It never persists, evolves, or applies
+    recommendations — it only computes them.
+
+    No AI. No randomness. No storage. Identical inputs always produce
+    identical recommendations.
+    """
+
+    def __init__(self) -> None:
+        """Initialise the learner (no dependencies)."""
+        pass
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def learn_from_result(
+        self,
+        result: ToolChainResult,
+        tracker: ToolEffectivenessTracker | None = None,
+    ) -> list[ToolLearningRecommendation]:
+        """Produce recommendations from a single chain execution result.
+
+        Args:
+            result: The :class:`ToolChainResult` to learn from.
+            tracker: Optional effectiveness tracker for richer evidence.
+
+        Returns:
+            A list of :class:`ToolLearningRecommendation` (possibly empty).
+        """
+        if not isinstance(result, ToolChainResult):
+            return []
+
+        recommendations: list[ToolLearningRecommendation] = []
+
+        # --- Skill composition candidate from successful multi-step chains ---
+        if result.success and len(result.step_results) >= COMPOSE_MIN_STEPS:
+            skill_rec = self._compose_skill_candidate(result, tracker)
+            if skill_rec is not None:
+                recommendations.append(skill_rec)
+
+        # --- Per-tool observations from step results ---
+        for step_result in result.step_results:
+            tool_name: str = step_result.get("tool_name", "")
+            if not tool_name:
+                continue
+            rec = self._tool_recommendation_from_step(
+                result, step_result, tracker
+            )
+            if rec is not None:
+                recommendations.append(rec)
+
+        return recommendations
+
+    def learn_from_tracker(
+        self,
+        tracker: ToolEffectivenessTracker,
+    ) -> list[ToolLearningRecommendation]:
+        """Produce recommendations from aggregated effectiveness scores.
+
+        Args:
+            tracker: The :class:`ToolEffectivenessTracker` to learn from.
+
+        Returns:
+            A list of :class:`ToolLearningRecommendation` (possibly empty).
+        """
+        if not isinstance(tracker, ToolEffectivenessTracker):
+            return []
+
+        recommendations: list[ToolLearningRecommendation] = []
+        scores: list[ToolEffectivenessScore] = tracker.score_all()
+
+        for score in scores:
+            rec = self._score_recommendation(score)
+            if rec is not None:
+                recommendations.append(rec)
+
+        return recommendations
+
+    def learn(
+        self,
+        results: list[ToolChainResult],
+        tracker: ToolEffectivenessTracker | None = None,
+    ) -> list[ToolLearningRecommendation]:
+        """Produce recommendations from multiple results and the tracker.
+
+        Combines per-result recommendations with aggregate tracker
+        recommendations. Deterministic: identical inputs always produce
+        identical output (order is stable).
+
+        Args:
+            results: A list of :class:`ToolChainResult` outcomes.
+            tracker: Optional effectiveness tracker.
+
+        Returns:
+            A list of :class:`ToolLearningRecommendation`.
+        """
+        if not isinstance(results, list):
+            return []
+
+        recommendations: list[ToolLearningRecommendation] = []
+
+        for result in results:
+            if isinstance(result, ToolChainResult):
+                recommendations.extend(
+                    self.learn_from_result(result, tracker)
+                )
+
+        if tracker is not None and isinstance(tracker, ToolEffectivenessTracker):
+            recommendations.extend(self.learn_from_tracker(tracker))
+
+        return recommendations
+
+    # ------------------------------------------------------------------
+    # Internals — skill composition
+    # ------------------------------------------------------------------
+
+    def _compose_skill_candidate(
+        self,
+        result: ToolChainResult,
+        tracker: ToolEffectivenessTracker | None,
+    ) -> ToolLearningRecommendation | None:
+        """Build a LEARNED skill candidate from a successful multi-step chain."""
+        step_results: tuple[dict[str, Any], ...] = result.step_results
+        if len(step_results) < COMPOSE_MIN_STEPS:
+            return None
+
+        # All steps must have succeeded for a composition candidate.
+        all_succeeded: bool = all(
+            sr.get("success", False) for sr in step_results
+        )
+        if not all_succeeded:
+            return None
+
+        tool_names: list[str] = [
+            sr.get("tool_name", "") for sr in step_results
+        ]
+        tool_names = [n for n in tool_names if n]
+        if len(tool_names) < COMPOSE_MIN_STEPS:
+            return None
+
+        # Build a deterministic chain from the step results.
+        steps: tuple[ToolStep, ...] = tuple(
+            ToolStep(
+                step_id=sr.get("step_id", f"step:{index:04d}"),
+                tool_name=sr.get("tool_name", ""),
+                parameters=dict(sr.get("output", {})),
+                description=f"Learned step for {sr.get('tool_name', '')}",
+            )
+            for index, sr in enumerate(step_results)
+        )
+
+        chain: ToolChain = ToolChain(
+            chain_id=f"chain::learned::{result.chain_id}",
+            goal=f"Learned chain from {result.chain_id}",
+            steps=steps,
+            strategy="sequential",
+            metadata={
+                "source_result": result.chain_id,
+                "learned": True,
+            },
+        )
+
+        skill_id: str = f"{SKILL_ID_PREFIX}::learned::{result.chain_id}"
+        skill: Skill = Skill(
+            skill_id=skill_id,
+            name=f"Learned Skill ({result.chain_id})",
+            description=(
+                f"Composed from successful execution of "
+                f"{len(step_results)} steps."
+            ),
+            kind=SkillKind.LEARNED,
+            category="utility",
+            chain=chain,
+            tags=("learned", "auto-composed"),
+            status=SkillStatus.DRAFT,
+            metadata={
+                "source_result": result.chain_id,
+                "step_count": len(step_results),
+            },
+        )
+
+        # Confidence from tracker if available.
+        confidence: float = MEDIUM_CONFIDENCE
+        evidence: dict[str, Any] = {
+            "source_result": result.chain_id,
+            "step_count": len(step_results),
+            "tool_names": tuple(tool_names),
+        }
+        if tracker is not None:
+            avg_effectiveness: float = self._average_effectiveness(
+                tracker, tool_names
+            )
+            evidence["avg_effectiveness"] = avg_effectiveness
+            confidence = min(1.0, MEDIUM_CONFIDENCE + avg_effectiveness * 0.3)
+
+        return ToolLearningRecommendation(
+            recommendation_id=f"rec::compose::{result.chain_id}",
+            kind="compose_skill",
+            skill=skill,
+            reason=(
+                f"Successful {len(step_results)}-step chain detected; "
+                f"candidate for LEARNED skill."
+            ),
+            confidence=confidence,
+            evidence=evidence,
+            metadata={"strategy": "sequential"},
+        )
+
+    # ------------------------------------------------------------------
+    # Internals — per-step recommendations
+    # ------------------------------------------------------------------
+
+    def _tool_recommendation_from_step(
+        self,
+        result: ToolChainResult,
+        step_result: dict[str, Any],
+        tracker: ToolEffectivenessTracker | None,
+    ) -> ToolLearningRecommendation | None:
+        """Build a per-tool recommendation from a single step result."""
+        tool_name: str = step_result.get("tool_name", "")
+        success: bool = step_result.get("success", False)
+
+        if tracker is not None:
+            score: ToolEffectivenessScore = tracker.score(tool_name)
+            return self._score_based_step_recommendation(
+                result, step_result, score
+            )
+
+        # Without a tracker, use the single step outcome.
+        if success:
+            return None  # single success is not enough evidence
+
+        return ToolLearningRecommendation(
+            recommendation_id=f"rec::step::{result.chain_id}::{tool_name}",
+            kind="observe_failure",
+            tool_name=tool_name,
+            reason=(
+                f"Step failed in chain '{result.chain_id}': "
+                f"{step_result.get('error', 'unknown')}."
+            ),
+            confidence=LOW_CONFIDENCE,
+            evidence={
+                "chain_id": result.chain_id,
+                "step_id": step_result.get("step_id", ""),
+                "error": step_result.get("error", ""),
+            },
+            metadata={"single_observation": True},
+        )
+
+    def _score_based_step_recommendation(
+        self,
+        result: ToolChainResult,
+        step_result: dict[str, Any],
+        score: ToolEffectivenessScore,
+    ) -> ToolLearningRecommendation | None:
+        """Build a recommendation combining step outcome and tracker score."""
+        tool_name: str = step_result.get("tool_name", "")
+        success: bool = step_result.get("success", False)
+
+        evidence: dict[str, Any] = {
+            "chain_id": result.chain_id,
+            "step_id": step_result.get("step_id", ""),
+            "step_success": success,
+            "total_observations": score.total_observations,
+            "success_rate": score.success_rate,
+            "effectiveness": score.effectiveness,
+        }
+
+        confidence: float = self._confidence_from_observations(
+            score.total_observations
+        )
+
+        # Promote high-effectiveness tools.
+        if (
+            score.total_observations >= EFFECTIVENESS_MIN_OBSERVATIONS
+            and score.effectiveness >= PROMOTE_EFFECTIVENESS_THRESHOLD
+        ):
+            return ToolLearningRecommendation(
+                recommendation_id=f"rec::promote::{tool_name}",
+                kind="promote_tool",
+                tool_name=tool_name,
+                reason=(
+                    f"Tool '{tool_name}' has high effectiveness "
+                    f"({score.effectiveness:.2f}) over "
+                    f"{score.total_observations} observations."
+                ),
+                confidence=confidence,
+                evidence=evidence,
+                metadata={"threshold": PROMOTE_EFFECTIVENESS_THRESHOLD},
+            )
+
+        # Demote low-effectiveness tools.
+        if (
+            score.total_observations >= EFFECTIVENESS_MIN_OBSERVATIONS
+            and score.effectiveness <= DEMOTE_EFFECTIVENESS_THRESHOLD
+        ):
+            return ToolLearningRecommendation(
+                recommendation_id=f"rec::demote::{tool_name}",
+                kind="demote_tool",
+                tool_name=tool_name,
+                reason=(
+                    f"Tool '{tool_name}' has low effectiveness "
+                    f"({score.effectiveness:.2f}) over "
+                    f"{score.total_observations} observations."
+                ),
+                confidence=confidence,
+                evidence=evidence,
+                metadata={"threshold": DEMOTE_EFFECTIVENESS_THRESHOLD},
+            )
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Internals — aggregate score recommendations
+    # ------------------------------------------------------------------
+
+    def _score_recommendation(
+        self,
+        score: ToolEffectivenessScore,
+    ) -> ToolLearningRecommendation | None:
+        """Build a recommendation from a single effectiveness score."""
+        if score.total_observations < EFFECTIVENESS_MIN_OBSERVATIONS:
+            return None
+
+        confidence: float = self._confidence_from_observations(
+            score.total_observations
+        )
+
+        evidence: dict[str, Any] = {
+            "total_observations": score.total_observations,
+            "success_count": score.success_count,
+            "failure_count": score.failure_count,
+            "success_rate": score.success_rate,
+            "effectiveness": score.effectiveness,
+            "avg_execution_time_ms": score.avg_execution_time_ms,
+        }
+
+        if score.effectiveness >= PROMOTE_EFFECTIVENESS_THRESHOLD:
+            return ToolLearningRecommendation(
+                recommendation_id=f"rec::promote::{score.tool_name}",
+                kind="promote_tool",
+                tool_name=score.tool_name,
+                reason=(
+                    f"Tool '{score.tool_name}' has high effectiveness "
+                    f"({score.effectiveness:.2f}) over "
+                    f"{score.total_observations} observations."
+                ),
+                confidence=confidence,
+                evidence=evidence,
+                metadata={"threshold": PROMOTE_EFFECTIVENESS_THRESHOLD},
+            )
+
+        if score.effectiveness <= DEMOTE_EFFECTIVENESS_THRESHOLD:
+            return ToolLearningRecommendation(
+                recommendation_id=f"rec::demote::{score.tool_name}",
+                kind="demote_tool",
+                tool_name=score.tool_name,
+                reason=(
+                    f"Tool '{score.tool_name}' has low effectiveness "
+                    f"({score.effectiveness:.2f}) over "
+                    f"{score.total_observations} observations."
+                ),
+                confidence=confidence,
+                evidence=evidence,
+                metadata={"threshold": DEMOTE_EFFECTIVENESS_THRESHOLD},
+            )
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Internals — helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _average_effectiveness(
+        tracker: ToolEffectivenessTracker,
+        tool_names: list[str],
+    ) -> float:
+        """Compute the average effectiveness across a list of tools."""
+        if not tool_names:
+            return DEFAULT_EFFECTIVENESS
+        scores: list[float] = []
+        for name in tool_names:
+            if not name:
+                continue
+            score: ToolEffectivenessScore = tracker.score(name)
+            scores.append(score.effectiveness)
+        if not scores:
+            return DEFAULT_EFFECTIVENESS
+        return sum(scores) / len(scores)
+
+    @staticmethod
+    def _confidence_from_observations(total: int) -> float:
+        """Map observation count to a confidence level."""
+        if total >= EFFECTIVENESS_MIN_OBSERVATIONS * 3:
+            return HIGH_CONFIDENCE
+        if total >= EFFECTIVENESS_MIN_OBSERVATIONS:
+            return MEDIUM_CONFIDENCE
+        return LOW_CONFIDENCE

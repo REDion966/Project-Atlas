@@ -1,8 +1,8 @@
-"""Atlas Toolchain Package (Phase 18.1–18.4, Track B Batch 1).
+"""Atlas Toolchain Package (Phase 18.1–18.6, Track B Batch 1–2).
 
 Toolchain data models, skill catalog constants, skill registry, tool chain
-planner, tool effectiveness tracker, and lightweight wiring metadata for
-Capability Track B.
+planner, tool effectiveness tracker, safe execution, tool learning, and
+lightweight wiring metadata for Capability Track B.
 
 Pure logic: no kernel, runtime, AI, events, storage, providers, gateway,
 dispatcher, or scheduler imports.
@@ -26,6 +26,17 @@ from atlas.toolchain.catalog import (
     SKILL_STATUS_NAMES,
 )
 from atlas.toolchain.effectiveness import ToolEffectivenessTracker
+from atlas.toolchain.executor import (
+    RiskPolicy,
+    SUPPORTED_STRATEGIES,
+    ToolChainExecutor,
+    ToolInvoker,
+    UNSUPPORTED_STRATEGIES,
+)
+from atlas.toolchain.learner import (
+    ToolLearner,
+    ToolLearningRecommendation,
+)
 from atlas.toolchain.models import (
     ChainStrategy,
     Skill,
@@ -81,6 +92,15 @@ __all__ = [
     "ToolProvider",
     # Effectiveness tracker
     "ToolEffectivenessTracker",
+    # Executor (18.5)
+    "RiskPolicy",
+    "SUPPORTED_STRATEGIES",
+    "ToolChainExecutor",
+    "ToolInvoker",
+    "UNSUPPORTED_STRATEGIES",
+    # Learner (18.6)
+    "ToolLearner",
+    "ToolLearningRecommendation",
     # Wiring
     "register_toolchain_component",
     "toolchain_component",
