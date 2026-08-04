@@ -1,5 +1,5 @@
 """
-Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3 / 13.5 / 16.4
+Atlas Storage Migration Framework — Phase 9.1 / 9.2b / 11.3 / 12.3 / 13.5 / 16.4 / 17.6 / 18.8
 
 Simple additive migration system for SQLite-backed storage. Each migration
 is a tuple of (sql_statement, description). Migrations are applied in
@@ -13,6 +13,8 @@ tables for the Persistent Evolution Knowledge layer (schema version 5).
 Phase 16.4 — Added evolution_requests, evolution_versions, evolution_receipts,
 evolution_snapshots, evolution_outcomes, and staged_config tables for the
 Governed Autonomous Evolution persistence layer (schema version 6).
+Phase 17.6 — Added research_* tables for Track A research storage (schema version 7).
+Phase 18.8 — Added toolchain_* tables for Track B toolchain storage (schema version 8).
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 # Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
@@ -523,6 +525,100 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_staged_config_request
                 ON staged_config(request_id)
         """, "Index on staged config request_id"),
+    ],
+    8: [
+        ("""
+            CREATE TABLE IF NOT EXISTS toolchain_skills (
+                skill_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'utility',
+                tool_name TEXT NOT NULL DEFAULT '',
+                chain TEXT,
+                tags TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create toolchain_skills table for Phase 18.8 toolchain storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_skills_category
+                ON toolchain_skills(category)
+        """, "Index on toolchain skill category"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_skills_status
+                ON toolchain_skills(status)
+        """, "Index on toolchain skill status"),
+        ("""
+            CREATE TABLE IF NOT EXISTS toolchain_chains (
+                chain_id TEXT PRIMARY KEY,
+                goal TEXT NOT NULL,
+                steps TEXT NOT NULL DEFAULT '[]',
+                strategy TEXT NOT NULL DEFAULT 'sequential',
+                created_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create toolchain_chains table for Phase 18.8 toolchain storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_chains_created_at
+                ON toolchain_chains(created_at DESC)
+        """, "Index on toolchain chain created_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS toolchain_effectiveness_records (
+                record_id TEXT PRIMARY KEY,
+                tool_name TEXT NOT NULL,
+                success INTEGER NOT NULL DEFAULT 0,
+                execution_time_ms REAL NOT NULL DEFAULT 0.0,
+                context_hash TEXT NOT NULL DEFAULT '',
+                skill_id TEXT NOT NULL DEFAULT '',
+                recorded_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create toolchain_effectiveness_records table for Phase 18.8 toolchain storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_effectiveness_records_tool
+                ON toolchain_effectiveness_records(tool_name)
+        """, "Index on toolchain effectiveness record tool_name"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_effectiveness_records_recorded_at
+                ON toolchain_effectiveness_records(recorded_at DESC)
+        """, "Index on toolchain effectiveness record recorded_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS toolchain_plans (
+                plan_id TEXT PRIMARY KEY,
+                goal TEXT NOT NULL,
+                steps TEXT NOT NULL DEFAULT '[]',
+                strategy TEXT NOT NULL DEFAULT 'sequential',
+                max_depth INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create toolchain_plans table for Phase 18.8 toolchain storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_plans_created_at
+                ON toolchain_plans(created_at DESC)
+        """, "Index on toolchain plan created_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS toolchain_reports (
+                result_id TEXT PRIMARY KEY,
+                chain_id TEXT NOT NULL,
+                success INTEGER NOT NULL DEFAULT 0,
+                step_results TEXT NOT NULL DEFAULT '[]',
+                error TEXT NOT NULL DEFAULT '',
+                execution_time_ms REAL NOT NULL DEFAULT 0.0,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                stored_at TEXT NOT NULL
+            )
+        """, "Create toolchain_reports table for Phase 18.8 toolchain storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_reports_chain_id
+                ON toolchain_reports(chain_id)
+        """, "Index on toolchain report chain_id"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_toolchain_reports_stored_at
+                ON toolchain_reports(stored_at DESC)
+        """, "Index on toolchain report stored_at"),
     ],
 }
 

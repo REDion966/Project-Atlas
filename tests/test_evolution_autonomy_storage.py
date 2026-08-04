@@ -87,8 +87,8 @@ class TestSchemaMigration(StorageTestCase):
     """Storage initializes the Phase 16.4 schema."""
 
     def test_schema_version_is_current(self):
-        # Phase 17.6 added additive research tables (migration version 7).
-        self.assertEqual(self.storage.schema_version(), 7)
+        # Phase 18.8 added additive toolchain tables (migration version 8).
+        self.assertEqual(self.storage.schema_version(), 8)
 
     def test_tables_exist(self):
         cursor = self.storage._execute(
