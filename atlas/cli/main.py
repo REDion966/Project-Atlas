@@ -22,9 +22,20 @@ from atlas.cli.commands import (
     tag_remove,
     workspace_create,
 )
+from atlas.reasoning.execution.models import ExecutionResult
+from atlas.research.capability_handlers import ResearchCapabilityFactory
 from atlas.workspace.loader import (
     load_workspace_service,
 )
+
+
+def _print_result(result: ExecutionResult) -> int:
+    """Print an ExecutionResult and return a process exit code."""
+    if not result.success:
+        print(f"error: {result.error}")
+        return 1
+    print(result.output)
+    return 0
 
 
 def main() -> None:
@@ -176,6 +187,51 @@ def main() -> None:
         nargs="?",
     )
 
+    # -------------------------
+    # Research Commands (Phase 17.9)
+    # -------------------------
+
+    research_parser = subparsers.add_parser(
+        "research",
+        help="Research commands",
+    )
+
+    research_parser.add_argument(
+        "action",
+        choices=[
+            "query",
+            "verify",
+            "summarize",
+        ],
+    )
+
+    research_parser.add_argument(
+        "question",
+        nargs="?",
+    )
+
+    research_parser.add_argument(
+        "--query-id",
+        default="cli",
+    )
+
+    research_parser.add_argument(
+        "--source",
+        action="append",
+        default=[],
+    )
+
+    research_parser.add_argument(
+        "--claim",
+        action="append",
+        default=[],
+    )
+
+    research_parser.add_argument(
+        "--report-id",
+        default="",
+    )
+
     args = parser.parse_args()
 
     service = load_workspace_service()
@@ -312,6 +368,57 @@ def main() -> None:
                 args.name,
             )
             return
+
+    # -------------------------
+    # Research (presentation-only; Phase 17.9)
+    # -------------------------
+
+    if args.command == "research":
+        _run_research(args)
+
+
+def _run_research(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas research query|verify|summarize``.
+
+    Presentation-only: delegates to the Track A capability handlers. Never
+    mutates state, never writes knowledge, never touches the evolution
+    pipeline directly.
+    """
+    factory = ResearchCapabilityFactory()
+
+    if args.action == "query":
+        if not args.question:
+            print("error: research query requires a question")
+            return
+        handler = factory.handlers()["research.query"]
+        _print_result(
+            handler(
+                {
+                    "question": args.question,
+                    "query_id": args.query_id,
+                    "sources": args.source,
+                }
+            )
+        )
+        return
+
+    if args.action == "verify":
+        if not args.claim:
+            print("error: research verify requires at least one --claim")
+            return
+        from atlas.research.cli_commands import run_verify
+
+        _print_result(run_verify(factory, args.claim, args.source))
+        return
+
+    if args.action == "summarize":
+        if args.report_id:
+            from atlas.research.cli_commands import run_summarize
+
+            _print_result(run_summarize(factory, args.report_id))
+            return
+        print({"summary": "no report id provided (research persistence is additive)"})
+        return
 
 
 if __name__ == "__main__":

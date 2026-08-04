@@ -9,7 +9,7 @@ Verifies ``AutonomySQLiteStorage`` persistence of:
 - Snapshot artifacts.
 - EvolutionOutcomeRecords.
 - StagedConfigEntry records.
-- Schema migration to version 6.
+- Schema migration to the current version.
 - Atomic CAS status updates.
 - Version-safe serialization round-trips.
 
@@ -86,8 +86,9 @@ class StorageTestCase(unittest.TestCase):
 class TestSchemaMigration(StorageTestCase):
     """Storage initializes the Phase 16.4 schema."""
 
-    def test_schema_version_is_6(self):
-        self.assertEqual(self.storage.schema_version(), 6)
+    def test_schema_version_is_current(self):
+        # Phase 17.6 added additive research tables (migration version 7).
+        self.assertEqual(self.storage.schema_version(), 7)
 
     def test_tables_exist(self):
         cursor = self.storage._execute(

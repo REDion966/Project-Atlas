@@ -21,7 +21,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 # Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
@@ -316,6 +316,85 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_evolution_knowledge_snapshots_timestamp
                 ON evolution_knowledge_snapshots(timestamp DESC)
         """, "Index on knowledge snapshot timestamp"),
+    ],
+    7: [
+        ("""
+            CREATE TABLE IF NOT EXISTS research_sources (
+                uri TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                retrieved_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create research_sources table for Phase 17.6 research storage"),
+        ("""
+            CREATE TABLE IF NOT EXISTS research_claims (
+                claim_id TEXT PRIMARY KEY,
+                statement TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                extracted_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                citations TEXT NOT NULL DEFAULT '[]'
+            )
+        """, "Create research_claims table for Phase 17.6 research storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_research_claims_extracted_at
+                ON research_claims(extracted_at DESC)
+        """, "Index on research claim extracted_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS research_verifications (
+                verification_id TEXT PRIMARY KEY,
+                claim_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                score REAL NOT NULL DEFAULT 0.0,
+                evidence_summary TEXT NOT NULL DEFAULT '',
+                verified_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create research_verifications table for Phase 17.6 research storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_research_verifications_claim
+                ON research_verifications(claim_id)
+        """, "Index on research verification claim_id"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_research_verifications_verified_at
+                ON research_verifications(verified_at DESC)
+        """, "Index on research verification verified_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS research_citations (
+                record_id TEXT PRIMARY KEY,
+                source_uri TEXT NOT NULL DEFAULT '',
+                source_title TEXT NOT NULL DEFAULT '',
+                source_kind TEXT NOT NULL DEFAULT 'DOCUMENT',
+                section TEXT NOT NULL DEFAULT '',
+                page_or_line TEXT NOT NULL DEFAULT '',
+                retrieved_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create research_citations table for Phase 17.6 research storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_research_citations_source
+                ON research_citations(source_uri)
+        """, "Index on research citation source_uri"),
+        ("""
+            CREATE TABLE IF NOT EXISTS research_reports (
+                report_id TEXT PRIMARY KEY,
+                plan_id TEXT NOT NULL DEFAULT '',
+                query_id TEXT NOT NULL DEFAULT '',
+                question TEXT NOT NULL DEFAULT '',
+                findings TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                claims TEXT NOT NULL DEFAULT '[]',
+                verifications TEXT NOT NULL DEFAULT '[]',
+                citations TEXT NOT NULL DEFAULT '[]'
+            )
+        """, "Create research_reports table for Phase 17.6 research storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_research_reports_created_at
+                ON research_reports(created_at DESC)
+        """, "Index on research report created_at"),
     ],
     6: [
         ("""

@@ -183,7 +183,9 @@ class TestSQLiteUnderstandingLifecycle(unittest.TestCase):
             cursor = conn.execute(
                 "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
             )
-            self.assertEqual(cursor.fetchone()[0], 6)
+            # Phase 17.6 bumped the additive schema version from 6 to 7
+            # (research_* tables).
+            self.assertEqual(cursor.fetchone()[0], 7)
         storage.close()
         # Release the extra connection reference so Windows can delete
         # the temp directory during tearDown without PermissionError.
