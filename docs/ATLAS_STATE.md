@@ -81,10 +81,10 @@ CLI / Presentation
 
 | Field | Value |
 |---|---|
-| Milestone | Phase 17 — Track A (Research & Knowledge) complete; Phase 16 locked |
-| Version tag | **v0.17.0-track-a** |
-| Test suite | **Full suite passing — 2001+ tests (Phase 17 adds research tests)** |
-| Architecture status | Phase 16 locked; Track A architecturally complete |
+| Milestone | Phase 18 — Track B Batch 1–4 (Phases 18.1–18.10) complete; Phase 16 locked; Track A complete |
+| Version tag | **v0.18.0-track-b** |
+| Test suite | **Full suite passing — 2000+ tests (Phase 18 adds toolchain tests)** |
+| Architecture status | Phase 16 locked; Track A architecturally complete; Track B architecturally complete |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy in progress via Phase 16) |
 | Era | **Capability Track Era** (post-core roadmap; see §13) |
 
@@ -116,6 +116,7 @@ CLI / Presentation
 | 15.0 | Goal execution engine + ToolExecutionActionBinder; `GoalExecutionRecord` evidence contract |
 | 16.0 | **Governed autonomous evolution**: AutonomyPolicy envelope, EvolutionRequest lifecycle (16 states), six deterministic gates, sole-owner dispatcher, staged config + boot activation + SAFE_MODE, rollback + versioning, `EvolutionOutcomeRecord` evidence contract |
 | 17.0–17.9 | **Track A — Research & Knowledge (complete)**: research models, local source adapters (document/workspace/codebase), deterministic planner, knowledge extractor, claim verifier, `research_*` SQLite storage (migration v7), capability handlers (`research.query/verify/summarize`), governed KNOWLEDGE ingest bridge + GOV-008, component metadata + `atlas research` CLI |
+| 18.1–18.10 | **Track B — Tool Ecosystem (Batch 1–4, complete)**: toolchain models + catalog, skill registry, deterministic tool-chain planner, safe executor + risk policy, effectiveness tracker, tool learner, `toolchain.*` capability handlers, `toolchain_*` SQLite storage (migration v8), governed skill-activation ingest bridge + GOV-009, `atlas toolchain` / `atlas skill` CLI |
 
 ### 2.2 Current Non-Goals (unchanged)
 
@@ -335,6 +336,11 @@ All SQLite adapters share one database file: **`atlas_data/atlas_experience.db`*
 | | `evolution_snapshots` | Store-level rollback snapshot artifacts (checksummed) |
 | | `evolution_outcomes` | `EvolutionOutcomeRecord` evidence contract |
 | | `staged_config` | Staged config entries awaiting boot activation |
+| `ToolchainSQLiteStorage` (Phase 18.8, additive) | `toolchain_skills` | Registered skills (nested chain JSON) |
+| | `toolchain_chains` | Tool chains (steps JSON) |
+| | `toolchain_effectiveness_records` | Effectiveness observations (append-only) |
+| | `toolchain_plans` | Planned tool chains |
+| | `toolchain_reports` | Executed chain results (append-only log) |
 | `SQLiteUnderstandingStorage` | `understanding_concepts` | Extracted/consolidated concepts |
 | | `understanding_relationships` | Concept relationships |
 | | `understanding_patterns` | Detected patterns |
@@ -427,6 +433,7 @@ Immutable-once-registered `GovernanceRule`s, keyed by `rule_id`. Registry and ga
 | GOV-005 | `CAPABILITY` | `SELF_CONFIG` level |
 | GOV-006 | `SKILLS` (reserved) | `SELF_CONFIG` level (registered when `ScopeType.SKILLS` is added) |
 | GOV-008 | `KNOWLEDGE` (RESEARCH_INGEST) | `INFORMATION` level — Track A research results enter knowledge only via the governed evolution path |
+| GOV-009 | `KNOWLEDGE` (TOOLCHAIN_INGEST) | `INFORMATION` level — Track B skill activation / toolchain ingest enters Atlas state only via the governed evolution path |
 
 **Constitutional invariants:** identity and code are untouchable; a request can never alter `AutonomyPolicy`, `ConstraintRegistry`, or gateway level; UNKNOWN scope can never execute; autonomy-envelope membership (GOV-007) is policy enforced in `AuthorizationManager`, never a registry rule.
 
@@ -504,7 +511,7 @@ Post-core development is organized into **Capability Tracks** (roadmap units, no
 | Track | Name | Direction (summary only) |
 |---|---|---|
 | **A** | Research & Knowledge | **COMPLETE (Phase 17.1–17.9)**: research models, local source adapters, deterministic planner, knowledge extractor, claim verifier, `research_*` storage, `research.*` capabilities, governed KNOWLEDGE ingest (GOV-008), CLI. Remaining: knowledge-graph expansion, web adapter, coordinator implementation |
-| **B** | Tool Ecosystem | Skills activation, tool chaining, skill authoring, learned tool effectiveness, constrained execution |
+| **B** | Tool Ecosystem | **COMPLETE (Phase 18.1–18.10)**: toolchain models, skill registry, tool-chain planning, safe execution, effectiveness tracking, tool learning, `toolchain_*` storage, `toolchain.*` capabilities, governed skill-activation ingest (GOV-009), CLI. Remaining: skill authoring, PARALLEL/CONDITIONAL execution, learned-skill promotion |
 | **C** | Long-Term Learning | Episodic memory, procedural memory, cross-session loading, consolidation + principled forgetting |
 | **D** | Advanced Reasoning | Multi-step reasoning, causal/counterfactual reasoning, hypothesis generation, self-verification, meta-reasoning |
 | **E** | Multi-Agent Collaboration | Agent registry, task decomposition, inter-agent messaging, result synthesis (in-process only; single-process assumption maintained) |

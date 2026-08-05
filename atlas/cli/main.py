@@ -232,6 +232,90 @@ def main() -> None:
         default="",
     )
 
+    # -------------------------
+    # Toolchain Commands (Phase 18.10)
+    # -------------------------
+
+    toolchain_parser = subparsers.add_parser(
+        "toolchain",
+        help="Toolchain commands",
+    )
+
+    toolchain_parser.add_argument(
+        "action",
+        choices=[
+            "plan",
+            "execute",
+        ],
+    )
+
+    toolchain_parser.add_argument(
+        "goal",
+        nargs="?",
+    )
+
+    toolchain_parser.add_argument(
+        "--category",
+        default="",
+    )
+
+    toolchain_parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=8,
+    )
+
+    toolchain_parser.add_argument(
+        "--parameter",
+        action="append",
+        default=[],
+    )
+
+    # -------------------------
+    # Skill Commands (Phase 18.10)
+    # -------------------------
+
+    skill_parser = subparsers.add_parser(
+        "skill",
+        help="Skill commands",
+    )
+
+    skill_parser.add_argument(
+        "action",
+        choices=[
+            "list",
+            "lookup",
+            "activate",
+        ],
+    )
+
+    skill_parser.add_argument(
+        "--active-only",
+        action="store_true",
+    )
+
+    skill_parser.add_argument(
+        "--category",
+        default="",
+    )
+
+    skill_parser.add_argument(
+        "--tag",
+        default="",
+    )
+
+    skill_parser.add_argument(
+        "--id",
+        dest="skill_id",
+        default="",
+    )
+
+    skill_parser.add_argument(
+        "--name",
+        dest="skill_name",
+        default="",
+    )
+
     args = parser.parse_args()
 
     service = load_workspace_service()
