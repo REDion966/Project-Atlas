@@ -459,6 +459,25 @@ def main() -> None:
 
     if args.command == "research":
         _run_research(args)
+        return
+
+    # -------------------------
+    # Toolchain (presentation-only; Phase 18.10)
+    # -------------------------
+
+    if args.command == "toolchain":
+        _run_toolchain(args)
+        return
+
+    # -------------------------
+    # Skill (presentation-only; Phase 18.10)
+    # -------------------------
+
+    if args.command == "skill":
+        _run_skill(args)
+        return
+
+    parser.print_help()
 
 
 def _run_research(args: argparse.Namespace) -> None:
@@ -502,6 +521,78 @@ def _run_research(args: argparse.Namespace) -> None:
             _print_result(run_summarize(factory, args.report_id))
             return
         print({"summary": "no report id provided (research persistence is additive)"})
+        return
+
+
+def _parameters(pairs: list[str]) -> dict[str, str]:
+    """Parse ``key=value`` CLI parameters into a dict."""
+    parameters: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            continue
+        key, _, value = pair.partition("=")
+        if key.strip():
+            parameters[key.strip()] = value
+    return parameters
+
+
+def _run_toolchain(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas toolchain plan|execute``.
+
+    Presentation-only: delegates to the Track B capability factory. Never
+    mutates state, never mutates the skill registry, never touches the
+    evolution pipeline directly.
+    """
+    from atlas.toolchain.capability_handlers import ToolchainCapabilityFactory
+
+    factory = ToolchainCapabilityFactory()
+
+    if args.action == "plan":
+        if not args.goal:
+            print("error: toolchain plan requires a goal")
+            return
+        from atlas.toolchain.cli_commands import run_plan
+
+        _print_result(run_plan(factory, args.goal, args.category, args.max_steps))
+        return
+
+    if args.action == "execute":
+        if not args.goal:
+            print("error: toolchain execute requires a goal")
+            return
+        from atlas.toolchain.cli_commands import run_execute
+
+        _print_result(run_execute(factory, args.goal, _parameters(args.parameter)))
+        return
+
+
+def _run_skill(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas skill list|lookup|activate``.
+
+    Presentation-only: delegates to the Track B capability factory. Skill
+    activation is governed — it builds a KNOWLEDGE EvolutionRequest and
+    passes it through the ingest bridge, never mutating the registry.
+    """
+    from atlas.toolchain.capability_handlers import ToolchainCapabilityFactory
+
+    factory = ToolchainCapabilityFactory()
+
+    if args.action == "list":
+        from atlas.toolchain.cli_commands import run_skill_list
+
+        _print_result(run_skill_list(factory, args.active_only, args.category, args.tag))
+        return
+
+    if args.action == "lookup":
+        from atlas.toolchain.cli_commands import run_skill_lookup
+
+        _print_result(run_skill_lookup(factory, args.skill_id, args.skill_name))
+        return
+
+    if args.action == "activate":
+        from atlas.toolchain.cli_commands import run_skill_activate
+
+        _print_result(run_skill_activate(factory, args.skill_id, args.skill_name))
         return
 
 

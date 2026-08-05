@@ -123,6 +123,21 @@ from atlas.lifecycle import (
     CORE_COMPONENTS,
 )
 
+# --- Track A: Research & Knowledge (Phase 17 integration) ---
+from atlas.research.capability_handlers import ResearchCapabilityFactory
+from atlas.research.evolution_integration import register_gov_008
+from atlas.research.wiring import register_research_component
+from atlas.storage.research_storage import ResearchSQLiteStorage
+
+# --- Track B: Tool Ecosystem (Phase 18 integration) ---
+from atlas.storage.toolchain_storage import ToolchainSQLiteStorage
+from atlas.toolchain.capability_handlers import ToolchainCapabilityFactory
+from atlas.toolchain.evolution_integration import register_gov_009
+from atlas.toolchain.wiring import (
+    register_toolchain_component,
+    register_toolchain_evolution_component,
+)
+
 
 class Atlas:
     """
@@ -232,6 +247,14 @@ class Atlas:
         # --- Phase 15.0: Goal Execution ---
         self._goal_executor: GoalExecutionEngine | None = None
         self._binder_registry: ExecutionActionBinderRegistry | None = None
+
+        # --- Track A: Research & Knowledge ---
+        self._research_storage: ResearchSQLiteStorage | None = None
+        self._research_factory: ResearchCapabilityFactory | None = None
+
+        # --- Track B: Tool Ecosystem ---
+        self._toolchain_storage: ToolchainSQLiteStorage | None = None
+        self._toolchain_factory: ToolchainCapabilityFactory | None = None
 
     @property
     def container(self):
@@ -397,6 +420,14 @@ class Atlas:
         for capability_name, handler in DEFAULT_HANDLERS.items():
             self._capability_registry.register(capability_name, handler)
 
+        # --- Track A: Register research capability handlers (Phase 17.7) ---
+        self._research_factory = ResearchCapabilityFactory()
+        self._research_factory.register(self._capability_registry)
+
+        # --- Track B: Register toolchain capability handlers (Phase 18.7) ---
+        self._toolchain_factory = ToolchainCapabilityFactory()
+        self._toolchain_factory.register(self._capability_registry)
+
         self._reasoning_controller = ReasoningController()
         self._capability_analyzer = CapabilityAnalyzer()
         self._capability_router = CapabilityRouter(self._capability_registry)
@@ -518,6 +549,34 @@ class Atlas:
                 {"mode": "memory_only"},
             )
 
+        # --- Track A: Instantiate and initialize research storage (Phase 17.6) ---
+        self._research_storage = ResearchSQLiteStorage()
+        self._research_storage.initialize()
+        if self._research_storage.is_available():
+            self._event_bus.publish(
+                "research.storage.initialized",
+                {"db_path": str(self._research_storage.db_path)},
+            )
+        else:
+            self._event_bus.publish(
+                "research.storage.unavailable",
+                {"mode": "memory_only"},
+            )
+
+        # --- Track B: Instantiate and initialize toolchain storage (Phase 18.8) ---
+        self._toolchain_storage = ToolchainSQLiteStorage()
+        self._toolchain_storage.initialize()
+        if self._toolchain_storage.is_available():
+            self._event_bus.publish(
+                "toolchain.storage.initialized",
+                {"db_path": str(self._toolchain_storage.db_path)},
+            )
+        else:
+            self._event_bus.publish(
+                "toolchain.storage.unavailable",
+                {"mode": "memory_only"},
+            )
+
         # --- Phase 10.0: Evolution Pipeline with Phase 11.3 persistence ---
         self._improvement_planner = ImprovementPlanner()
         self._proposal_generator = ProposalGenerator()
@@ -569,6 +628,10 @@ class Atlas:
 
         # --- Phase 13.1: Governance (ConstraintRegistry → RuleEngine) ---
         self._constraint_registry = ConstraintRegistry()
+        # --- Track A: Register GOV-008 (RESEARCH_INGEST) additively ---
+        register_gov_008(self._constraint_registry)
+        # --- Track B: Register GOV-009 (TOOLCHAIN_INGEST) additively ---
+        register_gov_009(self._constraint_registry)
         self._rule_engine = RuleEngine(
             constraint_registry=self._constraint_registry,
         )
@@ -784,6 +847,22 @@ class Atlas:
                 # Duplicate registration should not happen with the
                 # predefined definitions, but is safely ignored if it does.
                 pass
+
+        # --- Track A: Register research component metadata (Phase 17.9) ---
+        try:
+            register_research_component(self._component_registry)
+        except ValueError:
+            pass
+
+        # --- Track B: Register toolchain component metadata (Phase 18.10) ---
+        try:
+            register_toolchain_component(self._component_registry)
+        except ValueError:
+            pass
+        try:
+            register_toolchain_evolution_component(self._component_registry)
+        except ValueError:
+            pass
 
         # Mark all registered components as HEALTHY since they were
         # successfully created during startup.
