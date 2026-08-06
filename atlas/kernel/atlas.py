@@ -138,6 +138,23 @@ from atlas.toolchain.wiring import (
     register_toolchain_evolution_component,
 )
 
+# --- Track C: Long-Term Learning (Phase 19 integration) ---
+from atlas.longterm.capability_handlers import LongTermCapabilityFactory
+from atlas.longterm.consolidator import Consolidator
+from atlas.longterm.episode_recorder import EpisodicRecorder
+from atlas.longterm.episode_repository import EpisodicRepository
+from atlas.longterm.evolution_integration import (
+    LongTermIngestBridge,
+    register_gov_010,
+)
+from atlas.longterm.procedure_extractor import ProcedureExtractor
+from atlas.longterm.procedure_repository import ProceduralRepository
+from atlas.longterm.wiring import (
+    register_longterm_component,
+    register_longterm_evolution_component,
+)
+from atlas.storage.longterm_storage import LongTermSQLiteStorage
+
 
 class Atlas:
     """
@@ -255,6 +272,16 @@ class Atlas:
         # --- Track B: Tool Ecosystem ---
         self._toolchain_storage: ToolchainSQLiteStorage | None = None
         self._toolchain_factory: ToolchainCapabilityFactory | None = None
+
+        # --- Track C: Long-Term Learning ---
+        self._longterm_storage: LongTermSQLiteStorage | None = None
+        self._episodic_repository: EpisodicRepository | None = None
+        self._procedural_repository: ProceduralRepository | None = None
+        self._longterm_recorder: EpisodicRecorder | None = None
+        self._procedure_extractor: ProcedureExtractor | None = None
+        self._longterm_consolidator: Consolidator | None = None
+        self._longterm_factory: LongTermCapabilityFactory | None = None
+        self._longterm_ingest_bridge: LongTermIngestBridge | None = None
 
     @property
     def container(self):
@@ -577,6 +604,54 @@ class Atlas:
                 {"mode": "memory_only"},
             )
 
+        # --- Track C: Instantiate and initialize long-term storage (Phase 19) ---
+        self._longterm_storage = LongTermSQLiteStorage()
+        self._longterm_storage.initialize()
+        if self._longterm_storage.is_available():
+            self._event_bus.publish(
+                "longterm.storage.initialized",
+                {"db_path": str(self._longterm_storage.db_path)},
+            )
+        else:
+            self._event_bus.publish(
+                "longterm.storage.unavailable",
+                {"mode": "memory_only"},
+            )
+
+        # --- Track C: Long-term repositories with persistent storage ---
+        self._episodic_repository = EpisodicRepository(
+            storage=self._longterm_storage,
+        )
+        self._procedural_repository = ProceduralRepository(
+            storage=self._longterm_storage,
+        )
+        self._episodic_repository.restore()
+        self._procedural_repository.restore()
+
+        # --- Track C: Episodic recorder + procedure extractor (additive
+        #     consumers of the existing ExperienceAccumulator output) ---
+        self._longterm_recorder = EpisodicRecorder()
+        self._procedure_extractor = ProcedureExtractor()
+        self._event_bus.subscribe(
+            "runtime.pipeline.completed",
+            self._record_longterm_from_pipeline,
+        )
+
+        # --- Track C: Consolidator + governed ingest bridge (fail-closed) ---
+        self._longterm_consolidator = Consolidator()
+        # The Phase 16 ingest sink is not yet kernel-wired (same as Tracks A
+        # and B); the bridge therefore fails closed until a sink is provided.
+        self._longterm_ingest_bridge = LongTermIngestBridge()
+
+        # --- Track C: Register long-term capability handlers (Phase 19.4) ---
+        self._longterm_factory = LongTermCapabilityFactory(
+            episodes=self._episodic_repository,
+            procedures=self._procedural_repository,
+            consolidator=self._longterm_consolidator,
+            evolve_bridge=self._longterm_ingest_bridge,
+        )
+        self._longterm_factory.register(self._capability_registry)
+
         # --- Phase 10.0: Evolution Pipeline with Phase 11.3 persistence ---
         self._improvement_planner = ImprovementPlanner()
         self._proposal_generator = ProposalGenerator()
@@ -632,6 +707,8 @@ class Atlas:
         register_gov_008(self._constraint_registry)
         # --- Track B: Register GOV-009 (TOOLCHAIN_INGEST) additively ---
         register_gov_009(self._constraint_registry)
+        # --- Track C: Register GOV-010 (LONGTERM_INGEST) additively ---
+        register_gov_010(self._constraint_registry)
         self._rule_engine = RuleEngine(
             constraint_registry=self._constraint_registry,
         )
@@ -799,6 +876,39 @@ class Atlas:
         if self._goal_executor is not None:
             self._goal_executor.settle()
 
+    def _record_longterm_from_pipeline(self, payload: Any) -> None:
+        """Track C additive consumer: record the latest experience as an episode.
+
+        Subscribed to ``runtime.pipeline.completed`` (published by the
+        RuntimeCoordinator after experience accumulation). This is an
+        additive consumer — the 14-stage pipeline order is untouched.
+        Failures are swallowed so the pipeline event never breaks.
+        """
+        if self._experience_accumulator is None or self._longterm_recorder is None:
+            return
+        if (
+            self._episodic_repository is None
+            or self._procedure_extractor is None
+            or self._procedural_repository is None
+        ):
+            return
+        try:
+            experiences = self._experience_accumulator.repository.get_experiences(n=1)
+            if not experiences:
+                return
+            episode = self._longterm_recorder.record(experiences[0])
+            self._episodic_repository.store_episode(episode)
+            procedures = self._procedure_extractor.extract(
+                self._episodic_repository.get_episodes(n=500)
+            )
+            for procedure in procedures:
+                self._procedural_repository.store_procedure(procedure)
+        except Exception:
+            self._event_bus.publish(
+                "longterm.recording.failed",
+                {"source": "runtime.pipeline.completed"},
+            )
+
     def chat(self, text: str):
         if not self._started:
             raise RuntimeError("Atlas has not been started.")
@@ -861,6 +971,16 @@ class Atlas:
             pass
         try:
             register_toolchain_evolution_component(self._component_registry)
+        except ValueError:
+            pass
+
+        # --- Track C: Register long-term component metadata (Phase 19.5) ---
+        try:
+            register_longterm_component(self._component_registry)
+        except ValueError:
+            pass
+        try:
+            register_longterm_evolution_component(self._component_registry)
         except ValueError:
             pass
 
@@ -935,6 +1055,21 @@ class Atlas:
 
         # --- Phase 13.6: Cleanup ---
         self._knowledge_pipeline = None
+
+        # --- Track C: Cleanup ---
+        if self._longterm_storage is not None:
+            try:
+                self._longterm_storage.close()
+            except Exception:
+                pass
+        self._longterm_storage = None
+        self._episodic_repository = None
+        self._procedural_repository = None
+        self._longterm_recorder = None
+        self._procedure_extractor = None
+        self._longterm_consolidator = None
+        self._longterm_factory = None
+        self._longterm_ingest_bridge = None
 
         self._learning_manager = None
         self._knowledge_feedback = None
