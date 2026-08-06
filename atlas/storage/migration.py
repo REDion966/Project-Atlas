@@ -15,6 +15,8 @@ evolution_snapshots, evolution_outcomes, and staged_config tables for the
 Governed Autonomous Evolution persistence layer (schema version 6).
 Phase 17.6 — Added research_* tables for Track A research storage (schema version 7).
 Phase 18.8 — Added toolchain_* tables for Track B toolchain storage (schema version 8).
+Phase 19.x — Added episodic_*, procedural_*, memory_consolidation_records
+tables for Track C long-term learning storage (schema version 9).
 """
 
 from __future__ import annotations
@@ -23,7 +25,8 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
+
 
 # Migration chain: version -> list of (sql, description)
 MIGRATIONS: dict[int, list[tuple[str, str]]] = {
@@ -620,7 +623,97 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
                 ON toolchain_reports(stored_at DESC)
         """, "Index on toolchain report stored_at"),
     ],
+    9: [
+        ("""
+            CREATE TABLE IF NOT EXISTS episodic_episodes (
+                episode_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                outcome TEXT NOT NULL DEFAULT '',
+                source_experience_id TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                importance REAL NOT NULL DEFAULT 0.5,
+                tags TEXT NOT NULL DEFAULT '[]',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create episodic_episodes table for Track C long-term storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_episodic_episodes_started_at
+                ON episodic_episodes(started_at DESC)
+        """, "Index on episodic episode started_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS episodic_episode_events (
+                event_id TEXT PRIMARY KEY,
+                episode_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL DEFAULT 0,
+                event_type TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                occurred_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create episodic_episode_events table for Track C long-term storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_episodic_events_episode
+                ON episodic_episode_events(episode_id)
+        """, "Index on episodic episode event episode_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS procedural_procedures (
+                procedure_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'utility',
+                source_episode_ids TEXT NOT NULL DEFAULT '[]',
+                success_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                tags TEXT NOT NULL DEFAULT '[]',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create procedural_procedures table for Track C long-term storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_procedural_procedures_category
+                ON procedural_procedures(category)
+        """, "Index on procedural procedure category"),
+        ("""
+            CREATE TABLE IF NOT EXISTS procedural_procedure_steps (
+                procedure_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                tool_name TEXT NOT NULL DEFAULT '',
+                parameters TEXT NOT NULL DEFAULT '{}',
+                depends_on TEXT NOT NULL DEFAULT '[]',
+                PRIMARY KEY (procedure_id, step_id)
+            )
+        """, "Create procedural_procedure_steps table for Track C long-term storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_procedural_steps_tool
+                ON procedural_procedure_steps(tool_name)
+        """, "Index on procedural procedure step tool_name"),
+        ("""
+            CREATE TABLE IF NOT EXISTS memory_consolidation_records (
+                record_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                operation TEXT NOT NULL DEFAULT '',
+                target_type TEXT NOT NULL DEFAULT '',
+                target_ids TEXT NOT NULL DEFAULT '[]',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                applied_at TEXT,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create memory_consolidation_records table for Track C long-term storage"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_memory_consolidation_records_created_at
+                ON memory_consolidation_records(created_at DESC)
+        """, "Index on memory consolidation record created_at"),
+    ],
 }
+
 
 
 def _create_initial_schema() -> list[str]:

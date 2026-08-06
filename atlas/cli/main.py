@@ -272,6 +272,55 @@ def main() -> None:
     )
 
     # -------------------------
+    # Memory Commands (Track C)
+    # -------------------------
+
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Long-term memory commands",
+    )
+
+    memory_parser.add_argument(
+        "action",
+        choices=[
+            "episodes",
+            "procedures",
+            "consolidate",
+        ],
+    )
+
+    memory_parser.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+    )
+
+    memory_parser.add_argument(
+        "--outcome",
+        default="",
+    )
+
+    memory_parser.add_argument(
+        "--since",
+        default="",
+    )
+
+    memory_parser.add_argument(
+        "--category",
+        default="",
+    )
+
+    memory_parser.add_argument(
+        "--tool",
+        default="",
+    )
+
+    memory_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+    )
+
+    # -------------------------
     # Skill Commands (Phase 18.10)
     # -------------------------
 
@@ -477,6 +526,14 @@ def main() -> None:
         _run_skill(args)
         return
 
+    # -------------------------
+    # Memory (presentation-only; Track C)
+    # -------------------------
+
+    if args.command == "memory":
+        _run_memory(args)
+        return
+
     parser.print_help()
 
 
@@ -593,6 +650,50 @@ def _run_skill(args: argparse.Namespace) -> None:
         from atlas.toolchain.cli_commands import run_skill_activate
 
         _print_result(run_skill_activate(factory, args.skill_id, args.skill_name))
+        return
+
+
+def _run_memory(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas memory episodes|procedures|consolidate``.
+
+    Presentation-only: delegates to the Track C capability handlers. Query
+    commands are read-only; ``consolidate`` is governed — it builds a MEMORY
+    EvolutionRequest and passes it through the ingest bridge, never mutating
+    the repositories directly.
+    """
+    from atlas.longterm.capability_handlers import LongTermCapabilityFactory
+    from atlas.longterm.cli_commands import (
+        run_consolidate,
+        run_episodes,
+        run_procedures,
+    )
+
+    factory = LongTermCapabilityFactory()
+
+    if args.action == "episodes":
+        _print_result(
+            run_episodes(
+                factory,
+                args.limit,
+                args.outcome,
+                args.since,
+            )
+        )
+        return
+
+    if args.action == "procedures":
+        _print_result(
+            run_procedures(
+                factory,
+                args.limit,
+                args.category,
+                args.tool,
+            )
+        )
+        return
+
+    if args.action == "consolidate":
+        _print_result(run_consolidate(factory, dry_run=args.dry_run))
         return
 
 
