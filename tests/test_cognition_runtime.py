@@ -6,8 +6,9 @@ Validates the complete cognition pipeline end-to-end:
 """
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from atlas.ai.ai_manager import AIManager
 from atlas.kernel.atlas import Atlas
 from atlas.cognition.api import CognitionAPI
 from atlas.cognition.decision import CognitionDecision
@@ -32,11 +33,36 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
         - Memory context reached cognition
         - Knowledge context reached cognition
         - Final response completed
+
+        This test drives the full conversation pipeline, which ends in an AI
+        provider call. The configured provider is Ollama (config.toml), so it
+        is replaced with the Mock Provider following the existing convention in
+        tests/test_conversation_service.py. No production code is changed.
         """
 
         atlas = Atlas()
 
-        atlas.start()
+        original_initialize = AIManager.initialize
+
+        def initialize_with_mock(
+            manager: AIManager,
+            provider: str,
+            model: str,
+            timeout: int,
+            model_router=None,
+            api_keys=None,
+        ):
+            original_initialize(
+                manager,
+                "Mock Provider",
+                "atlas-mock-v1",
+                timeout,
+                model_router=model_router,
+                api_keys=api_keys,
+            )
+
+        with patch.object(AIManager, "initialize", initialize_with_mock):
+            atlas.start()
 
         # --- Verify CognitionService is running ---
         cognition_service = atlas.container.get("cognition_service")

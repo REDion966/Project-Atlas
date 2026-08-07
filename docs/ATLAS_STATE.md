@@ -81,10 +81,10 @@ CLI / Presentation
 
 | Field | Value |
 |---|---|
-| Milestone | Phase 19 — Track C (Long-Term Learning) complete; Track B (Phases 18.1–18.10) complete; Phase 16 locked; Track A complete |
-| Version tag | **v0.19.0** |
-| Test suite | **Full suite passing — 2600+ tests (Phase 19 adds long-term learning tests)** |
-| Architecture status | Phase 16 locked; Tracks A, B, and C architecturally complete |
+| Milestone | Phase 19 — Track C (Long-Term Learning) complete and runtime-integrated; Track B (Phases 18.1–18.10) complete; Phase 16 locked; Track A complete |
+| Version tag | **v0.19.1** |
+| Test suite | **Full suite passing — 2619 passed, 57 subtests passed, 0 failures** |
+| Architecture status | Phase 16 locked; Tracks A, B, and C architecturally complete; Track C wired into Atlas kernel runtime |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy in progress via Phase 16) |
 | Era | **Capability Track Era** (post-core roadmap; see §13) |
 
@@ -521,7 +521,7 @@ Post-core development is organized into **Capability Tracks** (roadmap units, no
 |---|---|---|
 | **A** | Research & Knowledge | **COMPLETE (Phase 17.1–17.9)**: research models, local source adapters, deterministic planner, knowledge extractor, claim verifier, `research_*` storage, `research.*` capabilities, governed KNOWLEDGE ingest (GOV-008), CLI. Remaining: knowledge-graph expansion, web adapter, coordinator implementation |
 | **B** | Tool Ecosystem | **COMPLETE (Phase 18.1–18.10)**: toolchain models, skill registry, tool-chain planning, safe execution, effectiveness tracking, tool learning, `toolchain_*` storage, `toolchain.*` capabilities, governed skill-activation ingest (GOV-009), CLI. Remaining: skill authoring, PARALLEL/CONDITIONAL execution, learned-skill promotion |
-| **C** | Long-Term Learning | **COMPLETE (Phase 19, v0.19.0)**: episodic recorder, procedure extractor, consolidator (dedup/merge/principled forgetting), episodic/procedural repositories, `episodic_*`/`procedural_*`/`memory_consolidation_records` storage (migration v9), `memory.*` capabilities, governed LONGTERM_INGEST (GOV-010), CLI. Remaining: feeding episodic context into working memory/`ContextEngine` (deferred — requires RuntimeCoordinator review), semantic memory upgrades, forgetting-policy tuning |
+| **C** | Long-Term Learning | **COMPLETE (Phase 19, v0.19.1, runtime-integrated)**: episodic recorder, procedure extractor, consolidator (dedup/merge/principled forgetting), episodic/procedural repositories, `episodic_*`/`procedural_*`/`memory_consolidation_records` storage (migration v9), `memory.*` capabilities, governed LONGTERM_INGEST (GOV-010), CLI, kernel wiring (GOV-010 + capability handlers + lifecycle metadata inside `Atlas.start()`). Remaining: feeding episodic context into working memory/`ContextEngine` (deferred — requires RuntimeCoordinator review), semantic memory upgrades, forgetting-policy tuning |
 | **D** | Advanced Reasoning | Multi-step reasoning, causal/counterfactual reasoning, hypothesis generation, self-verification, meta-reasoning |
 | **E** | Multi-Agent Collaboration | Agent registry, task decomposition, inter-agent messaging, result synthesis (in-process only; single-process assumption maintained) |
 | **F** | Human Collaboration | Unified approval center, audit/explainability surfaces, rich CLI, workspace sharing, optional API/plugin surfaces |
@@ -550,4 +550,4 @@ Post-core development is organized into **Capability Tracks** (roadmap units, no
 
 ---
 
-*Document created: 2026-08-02 · Last updated: 2026-08-07 (v0.19.0 — Track C complete) · Project Atlas — docs/ATLAS_STATE.md · Replaces historical ATLAS_STATE as the permanent architecture handbook.*
+*Document created: 2026-08-02 · Last updated: 2026-08-07 (v0.19.1 — Track C runtime-integrated, official stable baseline) · Project Atlas — docs/ATLAS_STATE.md · Replaces historical ATLAS_STATE as the permanent architecture handbook.*

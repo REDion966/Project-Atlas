@@ -6,18 +6,33 @@ governance (GOV-010), capability handlers, lifecycle metadata, and the
 fail-closed ingest bridge.
 """
 
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import patch
 
 from atlas.evolution.governance.models import ScopeType
 from atlas.experience.models import ExperienceOutcome, StructuredExperience
 from atlas.kernel.atlas import Atlas
+from atlas.storage.longterm_storage import LongTermSQLiteStorage
 
 
 class TestLongTermKernelIntegration(unittest.TestCase):
     """Track C registrations after Atlas.start()."""
 
     def setUp(self) -> None:
+        # Isolate long-term persistence from the shared atlas_data DB so
+        # tests never observe episodes recorded by other tests/runs.
+        self._tmp_db = tempfile.TemporaryDirectory()
+        self._db_patcher = patch.object(
+            LongTermSQLiteStorage,
+            "DEFAULT_DB_PATH",
+            Path(self._tmp_db.name) / "atlas_experience.db",
+        )
+        self._db_patcher.start()
+        self.addCleanup(self._db_patcher.stop)
+        self.addCleanup(self._tmp_db.cleanup)
         self.atlas = Atlas()
 
     def tearDown(self) -> None:
