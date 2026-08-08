@@ -5,6 +5,7 @@ The root application object.
 Phase 7.5 — Wires RuntimeCoordinator and all cognitive subsystems.
 """
 
+import hashlib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -155,6 +156,130 @@ from atlas.longterm.wiring import (
 )
 from atlas.storage.longterm_storage import LongTermSQLiteStorage
 
+# --- Track D: Advanced Reasoning (Track D integration) ---
+from atlas.advanced_reasoning.capability_handlers import (
+    AdvancedReasoningCapabilityFactory,
+)
+from atlas.advanced_reasoning.evolution_integration import (
+    ReasoningIngestBridge,
+    register_gov_011,
+)
+from atlas.advanced_reasoning.models import CausalPath
+from atlas.advanced_reasoning.service import AdvancedReasoningService
+from atlas.advanced_reasoning.trace_recorder import ReasoningTraceRecorder
+from atlas.advanced_reasoning.trace_repository import ReasoningTraceRepository
+from atlas.advanced_reasoning.wiring import (
+    register_advanced_reasoning_component,
+    register_advanced_reasoning_evolution_component,
+)
+from atlas.storage.advanced_reasoning_storage import AdvancedReasoningSQLiteStorage
+
+
+class KnowledgeEvidenceProvider:
+    """Kernel-boundary ``EvidenceProvider`` backed by ``KnowledgeManager.query``.
+
+    Read-only: converts each ``KnowledgeEntry`` into a stable
+    ``"source:title"`` reference string. Pure Track D modules never import
+    the knowledge service (TRACK_D §3.4).
+    """
+
+    def __init__(self, knowledge_manager: KnowledgeManager) -> None:
+        self._knowledge_manager = knowledge_manager
+
+    def query(self, query_text: str, limit: int = 10) -> list[str]:
+        """Return up to ``limit`` stable knowledge reference strings."""
+        try:
+            entries = self._knowledge_manager.query(query_text)
+        except Exception:
+            return []
+        references = sorted(
+            f"{entry.source}:{entry.title}" if entry.source else entry.title
+            for entry in entries
+            if getattr(entry, "title", "")
+        )
+        return references[:limit]
+
+
+class WorldModelCausalGraphProvider:
+    """Kernel-boundary ``CausalGraphProvider`` backed by ``WorldModelEngine``.
+
+    Read-only: causal chains come from ``world_model.get_causal_chain``;
+    ``related_entities`` is the deterministic union of direct causes and
+    effects. The provider never mutates the world model.
+    """
+
+    def __init__(self, world_model: WorldModelEngine) -> None:
+        self._world_model = world_model
+
+    def causal_paths(
+        self,
+        source: str,
+        target: str,
+        max_depth: int = 5,
+    ) -> tuple[CausalPath, ...]:
+        """Return causal paths from ``source`` to ``target``."""
+        try:
+            chains = self._world_model.get_causal_chain(source, target)
+        except Exception:
+            return ()
+        paths: list[CausalPath] = []
+        for chain_index, chain in enumerate(chains):
+            bounded = list(chain)[: max(1, max_depth)]
+            if not bounded:
+                continue
+            entity_ids = (source,) + tuple(
+                relation.target_id for relation in bounded
+            )
+            relation_types = tuple(
+                relation.relation_type.name for relation in bounded
+            )
+            confidence = round(
+                sum(relation.confidence for relation in bounded) / len(bounded),
+                4,
+            )
+            path_id = (
+                f"cpath:{hashlib.sha256(source.encode()).hexdigest()[:16]}:"
+                f"{hashlib.sha256(target.encode()).hexdigest()[:16]}:{chain_index:04d}"
+            )
+            paths.append(
+                CausalPath(
+                    path_id=path_id,
+                    source=source,
+                    target=target,
+                    entity_ids=entity_ids,
+                    relation_types=relation_types,
+                    confidence=confidence,
+                    metadata={"source": "world_model"},
+                )
+            )
+        return tuple(
+            sorted(
+                paths,
+                key=lambda p: (round(p.confidence, 6), p.path_id),
+                reverse=True,
+            )
+        )
+
+    def related_entities(
+        self,
+        entity_id: str,
+        max_depth: int = 5,
+    ) -> tuple[str, ...]:
+        """Return entity IDs causally related to ``entity_id``."""
+        try:
+            causes = self._world_model.get_entity_causes(entity_id)
+            effects = self._world_model.get_entity_effects(entity_id)
+        except Exception:
+            return ()
+        related = {
+            relation.source_id for relation in causes if relation.source_id
+        }
+        related.update(
+            relation.target_id for relation in effects if relation.target_id
+        )
+        related.discard(entity_id)
+        return tuple(sorted(related))[: max(1, max_depth) * 10]
+
 
 class Atlas:
     """
@@ -282,6 +407,16 @@ class Atlas:
         self._longterm_consolidator: Consolidator | None = None
         self._longterm_factory: LongTermCapabilityFactory | None = None
         self._longterm_ingest_bridge: LongTermIngestBridge | None = None
+
+        # --- Track D: Advanced Reasoning ---
+        self._advanced_reasoning_storage: AdvancedReasoningSQLiteStorage | None = None
+        self._advanced_reasoning_repository: Any | None = None
+        self._advanced_reasoning_service: AdvancedReasoningService | None = None
+        self._advanced_reasoning_factory: AdvancedReasoningCapabilityFactory | None = None
+        self._advanced_reasoning_recorder: ReasoningTraceRecorder | None = None
+        self._advanced_reasoning_ingest_bridge: ReasoningIngestBridge | None = None
+        self._advanced_reasoning_evidence_provider: Any | None = None
+        self._advanced_reasoning_causal_provider: Any | None = None
 
     @property
     def container(self):
@@ -652,6 +787,59 @@ class Atlas:
         )
         self._longterm_factory.register(self._capability_registry)
 
+        # --- Track D: Instantiate and initialize advanced-reasoning storage ---
+        self._advanced_reasoning_storage = AdvancedReasoningSQLiteStorage()
+        self._advanced_reasoning_storage.initialize()
+        if self._advanced_reasoning_storage.is_available():
+            self._event_bus.publish(
+                "reasoning.storage.initialized",
+                {"db_path": str(self._advanced_reasoning_storage.db_path)},
+            )
+        else:
+            self._event_bus.publish(
+                "reasoning.storage.unavailable",
+                {"mode": "memory_only"},
+            )
+
+        # --- Track D: Provider adapters (kernel-boundary, read-only) ---
+        # EvidenceProvider wraps KnowledgeManager; CausalGraphProvider wraps
+        # WorldModelEngine. Neither adapter is registered in the container.
+        self._advanced_reasoning_evidence_provider = KnowledgeEvidenceProvider(
+            self._knowledge_manager
+        )
+        self._advanced_reasoning_causal_provider = WorldModelCausalGraphProvider(
+            self._world_model_engine
+        )
+
+        # --- Track D: AdvancedReasoningService (private, kernel-owned) ---
+        # Composed with injected engines, dual-write repository, and the
+        # fail-closed ingest bridge. The service is NOT registered in the
+        # ServiceContainer (Track C private-factory precedent).
+        self._advanced_reasoning_ingest_bridge = ReasoningIngestBridge()
+        self._advanced_reasoning_repository = ReasoningTraceRepository(
+            storage=self._advanced_reasoning_storage
+        )
+        self._advanced_reasoning_service = AdvancedReasoningService(
+            repository=self._advanced_reasoning_repository,
+            ingest_bridge=self._advanced_reasoning_ingest_bridge,
+        )
+        self._advanced_reasoning_repository.restore()
+
+        # --- Track D: Trace recorder as additive pipeline-consumer surface ---
+        # The recorder is wired to the existing runtime.pipeline.completed
+        # event (Track C precedent). The subscription itself is kernel-owned.
+        self._advanced_reasoning_recorder = ReasoningTraceRecorder()
+        self._event_bus.subscribe(
+            "runtime.pipeline.completed",
+            self._record_reasoning_from_pipeline,
+        )
+
+        # --- Track D: Register reasoning capability handlers ---
+        self._advanced_reasoning_factory = AdvancedReasoningCapabilityFactory(
+            service=self._advanced_reasoning_service
+        )
+        self._advanced_reasoning_factory.register(self._capability_registry)
+
         # --- Phase 10.0: Evolution Pipeline with Phase 11.3 persistence ---
         self._improvement_planner = ImprovementPlanner()
         self._proposal_generator = ProposalGenerator()
@@ -709,6 +897,8 @@ class Atlas:
         register_gov_009(self._constraint_registry)
         # --- Track C: Register GOV-010 (LONGTERM_INGEST) additively ---
         register_gov_010(self._constraint_registry)
+        # --- Track D: Register GOV-011 (REASONING_INGEST) additively ---
+        register_gov_011(self._constraint_registry)
         self._rule_engine = RuleEngine(
             constraint_registry=self._constraint_registry,
         )
@@ -909,6 +1099,48 @@ class Atlas:
                 {"source": "runtime.pipeline.completed"},
             )
 
+    def _record_reasoning_from_pipeline(self, payload: Any) -> None:
+        """Track D additive consumer: record the latest experience as a trace.
+
+        Subscribed to ``runtime.pipeline.completed`` (published by the
+        RuntimeCoordinator after experience accumulation). This is an
+        additive consumer — the 14-stage pipeline order is untouched.
+        Failures are swallowed so the pipeline event never breaks.
+        """
+        if self._advanced_reasoning_recorder is None:
+            return
+        try:
+            if self._experience_accumulator is None:
+                return
+            experiences = self._experience_accumulator.repository.get_experiences(n=1)
+            if not experiences:
+                return
+            experience = experiences[0]
+            from atlas.advanced_reasoning.models import (
+                ReasoningStrategy,
+                ReasoningTrace,
+                TraceStatus,
+            )
+
+            recorded = ReasoningTrace(
+                trace_id=f"trace:pipeline:{experience.experience_id}",
+                question=str(getattr(experience, "user_input", "") or "pipeline experience"),
+                strategy=ReasoningStrategy.DECOMPOSE,
+                status=TraceStatus.COMPLETED,
+                conclusion="",
+                confidence=0.0,
+                metadata={
+                    "source": "runtime.pipeline.completed",
+                    "experience_id": experience.experience_id,
+                },
+            )
+            self._advanced_reasoning_recorder.record(recorded)
+        except Exception:
+            self._event_bus.publish(
+                "reasoning.recording.failed",
+                {"source": "runtime.pipeline.completed"},
+            )
+
     def chat(self, text: str):
         if not self._started:
             raise RuntimeError("Atlas has not been started.")
@@ -981,6 +1213,16 @@ class Atlas:
             pass
         try:
             register_longterm_evolution_component(self._component_registry)
+        except ValueError:
+            pass
+
+        # --- Track D: Register advanced-reasoning component metadata ---
+        try:
+            register_advanced_reasoning_component(self._component_registry)
+        except ValueError:
+            pass
+        try:
+            register_advanced_reasoning_evolution_component(self._component_registry)
         except ValueError:
             pass
 
@@ -1070,6 +1312,21 @@ class Atlas:
         self._longterm_consolidator = None
         self._longterm_factory = None
         self._longterm_ingest_bridge = None
+
+        # --- Track D: Cleanup ---
+        if self._advanced_reasoning_storage is not None:
+            try:
+                self._advanced_reasoning_storage.close()
+            except Exception:
+                pass
+        self._advanced_reasoning_storage = None
+        self._advanced_reasoning_repository = None
+        self._advanced_reasoning_service = None
+        self._advanced_reasoning_factory = None
+        self._advanced_reasoning_recorder = None
+        self._advanced_reasoning_ingest_bridge = None
+        self._advanced_reasoning_evidence_provider = None
+        self._advanced_reasoning_causal_provider = None
 
         self._learning_manager = None
         self._knowledge_feedback = None

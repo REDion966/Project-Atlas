@@ -255,8 +255,8 @@ class TestInsightStorageAdapter:
         assert loaded == []
 
     def test_schema_version_8(self, tmp_storage):
-        """Schema version is 9 after Phase 19.x additive long-term tables."""
-        assert tmp_storage.get_schema_version() == 9
+        """Schema version is 10 after Track D additive reasoning tables."""
+        assert tmp_storage.get_schema_version() == 10
 
 
 class TestEnginePersistenceIntegration:

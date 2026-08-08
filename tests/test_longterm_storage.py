@@ -84,7 +84,8 @@ class TestLifecycle:
     def test_init_failure_sets_unavailable(self, tmp_path):
         adapter = LongTermSQLiteStorage(db_path=tmp_path / "db.sqlite")
         adapter.initialize()
-        assert adapter.get_schema_version() == 9
+        # Track D added the advanced_reasoning_traces tables (version 10).
+        assert adapter.get_schema_version() == 10
 
 
 class TestEpisodes:

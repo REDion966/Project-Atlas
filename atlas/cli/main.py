@@ -272,6 +272,117 @@ def main() -> None:
     )
 
     # -------------------------
+    # Reasoning Commands (Track D)
+    # -------------------------
+
+    reasoning_parser = subparsers.add_parser(
+        "reasoning",
+        help="Advanced reasoning commands",
+    )
+
+    reasoning_parser.add_argument(
+        "action",
+        choices=[
+            "trace",
+            "causal",
+            "counterfactual",
+            "hypotheses",
+            "verify",
+            "meta",
+            "ingest",
+        ],
+    )
+
+    reasoning_parser.add_argument(
+        "question",
+        nargs="?",
+    )
+
+    reasoning_parser.add_argument(
+        "--source",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--target",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--event",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--assumption",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--claim",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--trace-id",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--content",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--strategy-name",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--confidence",
+        type=float,
+        default=0.0,
+    )
+
+    reasoning_parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+    )
+
+    reasoning_parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=None,
+    )
+
+    reasoning_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+    )
+
+    reasoning_parser.add_argument(
+        "--set-id",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--report-id",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--assessment-id",
+        default="",
+    )
+
+    reasoning_parser.add_argument(
+        "--result-id",
+        default="",
+    )
+
+    # -------------------------
     # Memory Commands (Track C)
     # -------------------------
 
@@ -534,6 +645,14 @@ def main() -> None:
         _run_memory(args)
         return
 
+    # -------------------------
+    # Reasoning (presentation-only; Track D)
+    # -------------------------
+
+    if args.command == "reasoning":
+        _run_reasoning(args)
+        return
+
     parser.print_help()
 
 
@@ -650,6 +769,87 @@ def _run_skill(args: argparse.Namespace) -> None:
         from atlas.toolchain.cli_commands import run_skill_activate
 
         _print_result(run_skill_activate(factory, args.skill_id, args.skill_name))
+        return
+
+
+def _run_reasoning(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas reasoning trace|causal|counterfactual|hypotheses|verify|meta|ingest``.
+
+    Presentation-only: delegates to the Track D capability handlers. Query
+    commands are read-only; ``ingest`` is governed — it builds a KNOWLEDGE
+    EvolutionRequest and passes it through the ingest bridge, never mutating
+    any store directly.
+    """
+    from atlas.advanced_reasoning.cli_commands import (
+        run_causal,
+        run_counterfactual,
+        run_hypotheses,
+        run_ingest,
+        run_meta,
+        run_trace,
+        run_verify,
+    )
+    from atlas.advanced_reasoning.capability_handlers import (
+        AdvancedReasoningCapabilityFactory,
+    )
+
+    factory = AdvancedReasoningCapabilityFactory()
+
+    if args.action == "trace":
+        if not args.question:
+            print("error: reasoning trace requires a question")
+            return
+        _print_result(
+            run_trace(factory, args.question, args.max_steps, args.trace_id)
+        )
+        return
+
+    if args.action == "causal":
+        if not args.source or not args.target:
+            print("error: reasoning causal requires --source and --target")
+            return
+        _print_result(run_causal(factory, args.source, args.target, args.max_depth))
+        return
+
+    if args.action == "counterfactual":
+        if not args.event or not args.assumption:
+            print("error: reasoning counterfactual requires --event and --assumption")
+            return
+        _print_result(
+            run_counterfactual(
+                factory, args.event, args.assumption, args.max_depth, args.result_id
+            )
+        )
+        return
+
+    if args.action == "hypotheses":
+        if not args.question:
+            print("error: reasoning hypotheses requires a claim")
+            return
+        _print_result(run_hypotheses(factory, args.question, args.limit, args.set_id))
+        return
+
+    if args.action == "verify":
+        if not args.trace_id and not args.claim:
+            print("error: reasoning verify requires a --trace-id or --claim")
+            return
+        _print_result(run_verify(factory, args.trace_id, args.claim, args.report_id))
+        return
+
+    if args.action == "meta":
+        _print_result(run_meta(factory, args.limit, args.assessment_id))
+        return
+
+    if args.action == "ingest":
+        _print_result(
+            run_ingest(
+                factory,
+                trace_id=args.trace_id,
+                content=args.content,
+                strategy_name=args.strategy_name,
+                confidence=args.confidence,
+            )
+        )
         return
 
 

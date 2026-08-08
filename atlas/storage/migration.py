@@ -17,6 +17,7 @@ Phase 17.6 — Added research_* tables for Track A research storage (schema vers
 Phase 18.8 — Added toolchain_* tables for Track B toolchain storage (schema version 8).
 Phase 19.x — Added episodic_*, procedural_*, memory_consolidation_records
 tables for Track C long-term learning storage (schema version 9).
+Track D — Added reasoning_* tables for advanced-reasoning storage (schema version 10).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 
 # Migration chain: version -> list of (sql, description)
@@ -711,6 +712,159 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_memory_consolidation_records_created_at
                 ON memory_consolidation_records(created_at DESC)
         """, "Index on memory consolidation record created_at"),
+    ],
+    10: [
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_traces (
+                trace_id TEXT PRIMARY KEY,
+                question TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                status TEXT NOT NULL,
+                conclusion TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                evidence_refs TEXT NOT NULL DEFAULT '[]',
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                reasoner_version TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_traces table for Track D advanced reasoning"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_traces_started_at
+                ON reasoning_traces(started_at DESC)
+        """, "Index on reasoning trace started_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_trace_steps (
+                trace_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL DEFAULT 0,
+                description TEXT NOT NULL DEFAULT '',
+                premise_step_ids TEXT NOT NULL DEFAULT '[]',
+                evidence_refs TEXT NOT NULL DEFAULT '[]',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                conclusion TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (trace_id, step_id)
+            )
+        """, "Create reasoning_trace_steps table for Track D advanced reasoning"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_trace_steps_trace
+                ON reasoning_trace_steps(trace_id)
+        """, "Index on reasoning trace step trace_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_causal_paths (
+                path_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                target TEXT NOT NULL,
+                entity_ids TEXT NOT NULL DEFAULT '[]',
+                relation_types TEXT NOT NULL DEFAULT '[]',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_causal_paths table for Track D causal reasoning"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_counterfactual_results (
+                result_id TEXT PRIMARY KEY,
+                source_event TEXT NOT NULL,
+                assumption TEXT NOT NULL DEFAULT '',
+                paths_before TEXT NOT NULL DEFAULT '[]',
+                paths_after TEXT NOT NULL DEFAULT '[]',
+                changed INTEGER NOT NULL DEFAULT 0,
+                effect_summary TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_counterfactual_results table for Track D counterfactuals"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_hypothesis_sets (
+                set_id TEXT PRIMARY KEY,
+                claim TEXT NOT NULL,
+                top_hypothesis_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_hypothesis_sets table for Track D hypotheses"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_hypothesis_sets_created_at
+                ON reasoning_hypothesis_sets(created_at DESC)
+        """, "Index on reasoning hypothesis set created_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_hypotheses (
+                hypothesis_id TEXT PRIMARY KEY,
+                set_id TEXT NOT NULL DEFAULT '',
+                claim TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                support TEXT NOT NULL DEFAULT 'UNVERIFIED',
+                score REAL NOT NULL DEFAULT 0.0,
+                evidence_refs TEXT NOT NULL DEFAULT '[]',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_hypotheses table for Track D hypotheses"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_hypotheses_set
+                ON reasoning_hypotheses(set_id)
+        """, "Index on reasoning hypothesis set_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_verifications (
+                report_id TEXT PRIMARY KEY,
+                target_id TEXT NOT NULL DEFAULT '',
+                verdict TEXT NOT NULL DEFAULT 'INCONCLUSIVE',
+                confidence_before REAL NOT NULL DEFAULT 0.0,
+                confidence_after REAL NOT NULL DEFAULT 0.0,
+                verified_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_verifications table for Track D verification"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_verifications_verified_at
+                ON reasoning_verifications(verified_at DESC)
+        """, "Index on reasoning verification verified_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_verification_findings (
+                finding_id TEXT PRIMARY KEY,
+                report_id TEXT NOT NULL,
+                check_type TEXT NOT NULL DEFAULT '',
+                passed INTEGER NOT NULL DEFAULT 0,
+                message TEXT NOT NULL DEFAULT '',
+                severity TEXT NOT NULL DEFAULT 'error',
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_verification_findings table for Track D verification"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_verification_findings_report
+                ON reasoning_verification_findings(report_id)
+        """, "Index on reasoning verification finding report_id"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_meta_assessments (
+                assessment_id TEXT PRIMARY KEY,
+                recommended_strategy TEXT NOT NULL DEFAULT 'DECOMPOSE',
+                recommendation_reason TEXT NOT NULL DEFAULT '',
+                assessed_at TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_meta_assessments table for Track D meta-reasoning"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_meta_assessments_assessed_at
+                ON reasoning_meta_assessments(assessed_at DESC)
+        """, "Index on reasoning meta assessment assessed_at"),
+        ("""
+            CREATE TABLE IF NOT EXISTS reasoning_strategy_scores (
+                score_id TEXT PRIMARY KEY,
+                assessment_id TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                total_count INTEGER NOT NULL DEFAULT 0,
+                success_rate REAL NOT NULL DEFAULT 0.0,
+                avg_verification_pass_rate REAL NOT NULL DEFAULT 0.0,
+                avg_steps REAL NOT NULL DEFAULT 0.0,
+                score REAL NOT NULL DEFAULT 0.0,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create reasoning_strategy_scores table for Track D meta-reasoning"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_strategy_scores_assessment
+                ON reasoning_strategy_scores(assessment_id)
+        """, "Index on reasoning strategy score assessment_id"),
     ],
 }
 

@@ -87,8 +87,9 @@ class TestSchemaMigration(StorageTestCase):
     """Storage initializes the Phase 16.4 schema."""
 
     def test_schema_version_is_current(self):
-        # Phase 19.x added additive long-term tables (migration version 9).
-        self.assertEqual(self.storage.schema_version(), 9)
+        # Phase 19.x added additive long-term tables (migration version 9);
+        # Track D added the advanced_reasoning_traces tables (version 10).
+        self.assertEqual(self.storage.schema_version(), 10)
 
     def test_tables_exist(self):
         cursor = self.storage._execute(
