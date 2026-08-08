@@ -1,211 +1,145 @@
-# Atlas Roadmap
+# ATLAS ROADMAP — Authoritative Future Direction
 
----
-> ⚠️ HISTORICAL / REFERENCE DOCUMENT
->
-> This document is preserved for detailed context, history, and architectural reference.
->
-> Canonical AI startup files:
->
-> 1. docs/ATLAS_CORE.md
-> 2. docs/ATLAS_STATE.md
->
-> Authority order:
->
-> - Source code = actual runtime behavior truth
-> - ATLAS_CORE.md = permanent architectural principles and rules
-> - ATLAS_STATE.md = current operational state and resume point
-> - Historical documents = supplementary context only
->
-> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
----
+**Current reference for where Atlas is going next.**
 
-**Future development roadmap for Project Atlas.**
+This is the authoritative forward-planning document. Status categories are used
+strictly:
 
-**Last updated:** July 2026
+- **COMPLETED** — shipped and verified
+- **CURRENT** — actively in progress
+- **NEXT** — the immediate next item with an existing plan
+- **PLANNED** — agreed direction with a supporting plan
+- **DEFERRED** — agreed but intentionally postponed
+- **PROPOSED** — possible future direction, **not yet an approved design**
+
+> **Rule for future AI agents:** anything PROPOSED below is not implemented and
+> not approved. Do not build from a PROPOSED item as if it were a plan.
+> *Never treat archived documents as current architecture.*
 
 ---
 
-## Current Phase
+## COMPLETED — Shipped Work
 
-### Phase 6 — Adaptive Intelligence Foundation
+### Tracks A, B, C
+| Track | Capability | Delivered |
+|---|---|---|
+| **A** | Research & Knowledge | Complete (`v0.17.0`) — `atlas/research/`, migration v7, `research.*`, GOV-008, CLI |
+| **B** | Tool Ecosystem | Complete (`v0.18.0`) — `atlas/toolchain/`, migration v8, GOV-009, CLI |
+| **C** | Long-Term Learning | Complete & runtime-integrated (`v0.19.1`) — `atlas/longterm/`, migration v9, `memory.*`, GOV-010, CLI |
 
-Phase 6 is the current major development cycle. Sub-phases:
-
-| Sub-Phase | Description | Status |
-|-----------|-------------|--------|
-| 6.1 | Reasoning foundation — `ReasoningController`, `ReasoningPlan` | Complete |
-| 6.2 | Capability selection — `CapabilityAnalyzer`, `Capability` models | Complete |
-| 6.3 | Capability execution layer — `CapabilityRegistry`, `CapabilityDispatcher` | Complete |
-| 6.4 | Adaptive execution routing — `CapabilityRouter`, `ExecutionRoute` | Complete |
-| **6.5** | **Documentation Memory Foundation** — permanent documentation layer | **Complete** |
-| 6.5.1 | Reasoning Runtime Integration — default handlers, CognitionService integration, Atlas wiring | Complete |
-| 6.5.2 | Reasoning Outcome Recording & Observability — in-memory ring buffer for reasoning outcomes | Complete |
-
----
-
-## Documentation Memory Layer Completed
-
-The Documentation Memory Foundation has been completed.
-
-This milestone established Atlas's permanent documentation memory consisting of:
-
-- ATLAS_MASTER_CONTEXT.md (historical reference context)
-- CURRENT_STATE.md (historical reference state snapshot)
-- ARCHITECTURE.md
-- DEVELOPMENT_LOG.md
-- ROADMAP.md
-- ARCHITECTURE_DECISIONS.md
-- CODING_GUIDELINES.md
-- MODEL_STRATEGY.md
-- AI_WORKFLOW_PROTOCOL.md
-- FUTURE_DIRECTION.md
-
-The canonical AI memory entry points are now ATLAS_CORE.md and ATLAS_STATE.md. This documentation layer provides long-term project continuity and allows future AI models, providers, and developers to understand Atlas without relying on previous conversations.
+### Track D — Advanced Reasoning (completed work)
+- Multi-step reasoning, causal/counterfactual analysis, hypothesis generation,
+  self-verification, meta-reasoning
+- `atlas/advanced_reasoning/` package + kernel-private `AdvancedReasoningService`
+- `reasoning_*` persistence (migration **v10**)
+- `reasoning.*` capability handlers + `atlas reasoning` CLI
+- GOV-011 (additive) + component metadata + trace-recorder pipeline integration
+- Verified Track D Batch 2: **2973 passed, 57 subtests, 0 failed, 0 errors**
+- Implemented **post-`v0.19.1`** and currently **unreleased**
 
 ---
 
-## Future Phases
+## CURRENT — Active Work
 
-### Phase 6.5.2 — Reasoning Outcome Recording & Observability
+**Post-Track-D stabilization and release preparation.**
 
-**Goal:** Record completed reasoning pipeline outcomes for future reflection and observability.
+The active focus is stabilizing and finalizing the Track D integration and
+preparing a release decision:
+- Review / finalize the Track D integration (persistence, capability handlers,
+  CLI, kernel wiring)
+- Finalize release scope and make the next release decision (no `v0.20` has
+  been created yet)
+- Keep `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` synchronized
 
-**Key features:**
-- `ReasoningOutcome` dataclass for reasoning pipeline snapshots
-- `ReasoningRecorder` bounded in-memory ring buffer (default max 100)
-- Optional injection into `CognitionService`
-- Private Atlas-owned dependency (not in ServiceContainer)
-- Backward compatible when recorder is missing
-
-**Status:** Complete
-
----
-
-### Phase 6.6 — Model Routing
-
-**Goal:** Select the optimal AI model per request based on complexity, latency, and cost constraints.
-
-**Key features:**
-- Model capability profiling
-- Request complexity analysis
-- Latency and cost optimization
-- Fallback strategies when preferred models are unavailable
-
-**Status:** Planned
+> The governed `ReasoningIngestSink` is a **pending/deferred dependency** for
+> Track D — **not** an actively approved implementation task. Do not treat it as
+> one; see DEFERRED below. `reasoning.ingest` is expected to remain fail-closed
+> until that dependency is resolved.
 
 ---
 
-### Phase 6.7 — Reflection System
+## NEXT — Immediate Next Work
 
-**Goal:** Allow Atlas to evaluate its own decisions and adjust future reasoning strategies.
+Based on the existing repository already recording these deferred follow-ups:
 
-**Key features:**
-- Decision evaluation engine
-- Strategy adjustment based on outcomes
-- Configurable reflection depth
-- Integration with learning feedback loop
+- **Track A** follow-ups: knowledge-graph expansion, web source adapter, research
+  coordinator implementation
+- **Track B** follow-ups: skill authoring, PARALLEL / CONDITIONAL tool-chain
+  execution, learned-skill promotion
+- **Track C** follow-ups: feeding episodic context into working memory /
+  `ContextEngine` (requires RuntimeCoordinator review before scheduling),
+  semantic-memory upgrades, forgetting-policy tuning
 
-**Status:** Planned
-
----
-
-### Phase 6.8 — Planning Engine
-
-**Goal:** Decompose complex goals into ordered sub-tasks before execution.
-
-**Key features:**
-- Goal decomposition algorithms
-- Dependency-aware task ordering
-- Parallel execution planning
-- Plan validation and recovery
-
-**Status:** Planned
+These are the concrete, already-recorded next items. They are not new inventions.
 
 ---
 
-### Phase 6.9 — Tool Intelligence
+## PLANNED
 
-**Goal:** Dynamically choose from available tools and skills based on cognition decisions.
-
-**Key features:**
-- Tool capability registry
-- Context-aware tool selection
-- Tool chaining and composition
-- Skill discovery and integration
-
-**Status:** Planned
+There are no additional **PLANNED** (approved-design) items beyond the deferred
+Track A/B/C follow-ups listed under NEXT. Any new capability must first receive
+an approved design and be added to this document before implementation.
 
 ---
 
-### Phase 6.10+ — Continuous Improvement
+## DEFERRED — Agreed But Postponed
 
-**Goal:** Enable safe, bounded optimisation of internal cognition parameters through feedback analysis.
-
-**Key features:**
-- Performance metrics collection
-- Bounded parameter optimisation
-- Safety constraints and oversight
-- Approval-based improvement cycles
-
-**Status:** Conceptual
-
----
-
-## Long-Term Vision Beyond Phase 6
-
-### Memory System Expansion
-
-- **Long-term memory** — persistent recollections across sessions and restarts
-- **Short-term memory** — session-aware context with decay
-- **Episodic memory** — event-sequence recollection
-- **Semantic memory** — structured knowledge representation
-
-### Knowledge System
-
-- **Project knowledge** — structured domain expertise per project
-- **Code understanding** — structured comprehension of the Atlas codebase
-- **User preferences** — learned behaviour and configuration over time
-- **Cross-session learning** — knowledge transfer between sessions
-
-### Intelligence Layer
-
-- **Multi-model orchestration** — strategic use of different models for different tasks
-- **Self-directed research** — ability to gather and synthesise information autonomously
-- **Controlled self-modification** — safe, approved modification of internal systems
-- **Collaborative problem-solving** — multi-agent coordination
-
-### User Interface
-
-- **Rich CLI** — enhanced command-line interface with visual elements
-- **Web interface** — browser-based Atlas interaction
-- **API server** — programmatic access to Atlas services
-- **Plugin system** — extensible user-contributed capabilities
-
-### Reliability and Operations
-
-- **Health monitoring** — comprehensive system health tracking
-- **Automated recovery** — self-healing on failure
-- **Backup and restore** — full system state preservation
-- **Audit logging** — complete action history for accountability
+- **Runtime wiring of the governed `ReasoningIngestSink` is deferred.** It
+  depends on the Phase 16 schedule-store/dispatcher queue hand-off being
+  finalized in the kernel, and was intentionally deferred from Track D Batch 2.
+  Until that dependency is resolved, `reasoning.ingest` remains **fail-closed**
+  by design.
+- `ContextEngine` episodic-context integration (Track C) is deferred pending a
+  RuntimeCoordinator review, because it could touch the locked pipeline order.
+- Autonomous (CODE scope / AUTONOMOUS level) evolution remains unreachable by
+  constitutional design.
 
 ---
 
-## Planning Notes
+## DEPENDENCIES
 
-- This roadmap is a **living document** and will evolve as Atlas develops.
-- Phase ordering may change based on technical dependencies and priorities.
-- Each phase should be implemented as an **optional middleware layer** where possible.
-- No phase should require rebuilding Atlas or breaking existing APIs.
-- **Backward compatibility** is always maintained.
+- Every state mutation depends on the **Evolution Framework** (gateway +
+  sole-owner dispatcher). No capability bypasses governance.
+- New persistence must be **additive** via `atlas/storage/migration.py`
+  (currently schema **v10**).
+- Adding a capability handler or component requires following the
+  `CapabilityRegistry` factory + `ComponentMetadata` patterns.
+- Track-private services stay **outside** the ServiceContainer
+  (kernel-private, constructor-injected).
+- Pure logic layers must never gain infrastructure imports (import-boundary
+  invariant).
 
 ---
 
-## Guiding Principles for All Future Work
+## PROPOSED — Not Approved (Do Not Implement)
 
-1. **Provider independence** — never depend on a single AI provider
-2. **Modular design** — each feature is independently replaceable
-3. **Pure logic separation** — keep reasoning free of infrastructure dependencies
-4. **Test coverage** — all new features require tests
-5. **Additive changes** — prefer adding over refactoring
-6. **Documentation** — document every phase as it is completed
+The broader Capability Track roadmap references further tracks. **These are
+PROPOSED only and have no approved architecture:**
+
+| Label | Direction (as referenced in existing roadmap) | Status |
+|---|---|---|
+| E | Multi-Agent Collaboration | PROPOSED |
+| F | Human Collaboration | PROPOSED |
+| G | Self-Improvement | PROPOSED |
+
+No Track E/F/G module, design, or milestone exists in source. They must not be
+implemented, and must not be presented as committed direction, until an approved
+design exists and this document is updated.
+
+---
+
+## Roadmap Maintenance Rule
+
+When a major implementation milestone is completed:
+
+1. Update `docs/ATLAS_STATE.md` (current state becomes reality)
+2. Update `docs/ROADMAP.md` (move the item to COMPLETED, set the next CURRENT)
+3. Update `README.md` if the public status changed
+
+Never archive/delete without moving to `docs/archive/`, and never treat archived
+documents as current.
+
+---
+
+*Authoritative re-write: 2026-08-08 (post-Track-D, schema v10, ahead of
+v0.19.1). Project Atlas — docs/ROADMAP.md.*

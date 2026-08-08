@@ -1,52 +1,112 @@
-# ATLAS STATE — Permanent Architecture Handbook
+# ATLAS STATE — Authoritative Current Architecture Handbook
 
 **Canonical entry point for all future Atlas development.**
 
-This document is the single source of truth for Atlas architecture. Future implementation prompts should say: **"Read ATLAS_STATE.md and only the files directly related to the task."**
+This document is the single source of truth for the **current** state of the
+Project Atlas codebase. Future implementation prompts should say: *"Read
+ATLAS_STATE.md and only the files directly related to the task."*
 
 ---
 
-## 0. Document Authority
+## 0. Source of Truth & Document Authority
 
 Priority order when interpreting Atlas:
 
 1. **Source code** — actual runtime behavior truth
-2. **`ATLAS_CONSTITUTION.md`** — immutable engineering laws
-3. **`ATLAS_VISION.md`** — permanent North Star
-4. **`ATLAS_CORE.md`** — permanent architectural principles
-5. **`ATLAS_STATE.md`** *(this file)* — current architecture handbook
-6. **Historical documents** — supplementary reference only
+2. **Git history** — completed milestones, releases, and implementation record
+3. **`ATLAS_STATE.md`** *(this file)* — current authoritative state
+4. **`ROADMAP.md`** — authoritative forward direction
+5. **Historical / archived documents** (`docs/archive/`) — reference only; NEVER
+   treated as current architecture
 
-If source code and this document conflict: preserve backward compatibility and report the conflict. Never silently choose one over the other.
+If source code and this document conflict, source code wins. Report the
+conflict and preserve backward compatibility; never silently choose one over
+the other.
+
+> **Rule for future AI agents:** archived documents (`docs/archive/`) describe
+> how Atlas looked at earlier points in time. They are historical context, not
+> current architecture. Do not reintroduce archived designs without an explicit
+> new decision.
 
 ---
 
-## 1. Project Overview
+## 1. Current Project Identity
 
-### 1.1 Vision
+Project Atlas is a long-term, Python-based, modular **AI operating framework** —
+not a chatbot, not a model wrapper, not a demo. Atlas coordinates memory,
+knowledge, reasoning, planning, learning, tools, and AI providers into a unified
+system that grows more capable over time while remaining under human ownership.
 
-Project Atlas is a long-term, Python-based modular AI operating framework — **not a chatbot, not a model wrapper, not a demo**. Atlas coordinates memory, knowledge, reasoning, planning, learning, tools, and AI providers into a unified system that grows more capable over time while remaining under human ownership.
+> **Core identity:** AI models are tools. Atlas is the intelligence. Models may
+> change. Atlas remains.
 
-> **Core identity:** AI models are tools. Atlas is the intelligence. Models may change. Atlas remains.
+The system is modular, AI-independent, and event-driven. Layers are
+module-owner and constructor-injected; the Evolution Framework is the only
+mechanism by which Atlas may change its own operational state.
 
-### 1.2 Philosophy
+---
 
-| Principle | Meaning |
-|-----------|---------|
-| **Foundation first** | Core infrastructure before peripheral features |
-| **Understanding over storage** | A memory system that understands what it stores is more valuable than one that merely stores everything |
-| **Knowledge ≠ Understanding ≠ Intelligence** | Knowledge is stored information; Understanding is the ability to reason about it; Intelligence is the ability to improve understanding over time |
-| **Never rebuild — always extend** | Existing working architecture is protected; additive changes only |
-| **Provider independence** | No single AI provider is ever a permanent dependency |
-| **Evidence over hype** | Technologies evaluated by measurable performance |
-| **Human partnership** | Atlas augments people; human judgment is final |
-| **Test-first** | No feature is complete without tests |
+## 2. Current Release & Version State
 
-### 1.3 Kernel-First Architecture
+| Field | Value |
+|---|---|
+| Released baseline | **v0.19.1** (stable; Track C runtime-integrated) |
+| Current HEAD | `35299c7` (branch `phase5-memory-evolution`) |
+| In-development work | **Track D — Advanced Reasoning** (post-`v0.19.1`) |
+| Track D release | **Unreleased** — no `v0.20` exists in git history |
+| Current schema version | **10** |
+| Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
+| Era | **Capability Track Era** |
 
-The kernel (`atlas/kernel/atlas.py`) is the root application object and the only place where the whole system is wired. A permanent `ServiceContainer` registers public shared services; a `RuntimeCoordinator` orchestrates the 14-stage cognitive pipeline; private Atlas-owned dependencies (reasoning pipeline, tool engine) are injected directly and are **not** registered in the container.
+**CURRENT IMPLEMENTATION:** Track D is implemented and runtime-integrated, but it
+is **post-`v0.19.1` and therefore unreleased**. Do not claim a `v0.20` release.
 
-Layer rules:
+---
+
+## 3. Current Implementation Milestone
+
+The current milestone is **Track D — Advanced Reasoning**, implemented as an
+additive capability track on top of the locked core (`v0.19.1` baseline), with a
+private kernel-owned service, `reasoning_*` persistence (schema **v10**), and
+governed ingestion (**GOV-011**).
+
+### Track Status Summary
+
+| Track | Capability | Status | Baseline |
+|---|---|---|---|
+| **A** | Research & Knowledge | **COMPLETE** | `v0.17.0` (Phase 17) |
+| **B** | Tool Ecosystem | **COMPLETE** | `v0.18.0` (Phase 18) |
+| **C** | Long-Term Learning | **COMPLETE & runtime-integrated** | `v0.19.1` (Phase 19) |
+| **D** | Advanced Reasoning | **IMPLEMENTED & runtime-integrated** | post-`v0.19.1` (unreleased) |
+
+### 3.1 Track A — Research & Knowledge (COMPLETE)
+`atlas/research/` — research models, local source adapters (document/workspace/
+codebase), deterministic planner, knowledge extractor, claim verifier,
+`research_*` tables (migration v7), `research.query/verify/summarize` capability
+handlers, governed KNOWLEDGE ingest (**GOV-008**), `atlas research` CLI.
+
+### 3.2 Track B — Tool Ecosystem (COMPLETE)
+`atlas/toolchain/` — toolchain models + catalog, skill registry, deterministic
+tool-chain planner, safe executor + risk policy, effectiveness tracker, tool
+learner, `toolchain_*` tables (migration v8), `toolchain.*` capability handlers,
+governed skill-activation ingest (**GOV-009**), `atlas toolchain` / `atlas skill`
+CLI.
+
+### 3.3 Track C — Long-Term Learning (COMPLETE, runtime-integrated, v0.19.1)
+`atlas/longterm/` — episodic recorder, procedure extractor, consolidator
+(dedup/merge/principled forgetting), episodic/procedural repositories,
+`LongTermSQLiteStorage` (`episodic_*`/`procedural_*`/`memory_consolidation_records`,
+migration v9), `memory.*` capability handlers, governed LONGTERM_INGEST
+(**GOV-010**), `atlas memory` CLI, and kernel wiring inside `Atlas.start()`.
+
+### 3.4 Track D — Advanced Reasoning (IMPLEMENTED & runtime-integrated)
+See §18–§20 for the full architecture description.
+
+---
+
+## 4. Current Architecture
+
+Atlas is a clean, layered, modular system. Layer rules:
 
 ```
 CLI / Presentation
@@ -63,491 +123,388 @@ CLI / Presentation
 - Each layer communicates only with adjacent layers
 - Business logic must never access storage directly
 - Circular dependencies are prohibited
-- Models are plain data (`@dataclass`) with no business logic beyond serialization
+- Models are plain data (`@dataclass`, often `frozen=True, slots=True`) with no
+  business logic beyond serialization
+- Pure logic layers never import infrastructure
 
-### 1.4 Evolution-First Mutation Policy
+**ARCHITECTURAL INVARIANT** — pure-logic layers (reasoning, cognition,
+understanding, goals, experience, learning models/engines) contain no AI calls,
+no memory/knowledge access, no EventBus, no service imports, and no `sqlite3`.
 
-**Atlas may only change its own operational state through the Evolution Framework.** No component may write Atlas state (config, memory, knowledge, capabilities) directly.
+## 5. Kernel & Runtime Architecture
 
-- The `EvolutionExecutionGateway` is the **only** entry point for mutation
-- Phase 16 added a typed `execute_request()` path for governed `EvolutionRequest`s — the only applied-evolution path
-- `EvolutionAutonomyDispatcher` is the sole caller of `execute_request()` (one request per tick, atomic CAS claim)
-- All mutations are validated, risk-assessed, authorized, versioned, verified, and rollbackable
-- Fail-closed: missing governance, UNKNOWN scope, or missing dependencies ⇒ refusal, never execution
+### 5.1 Kernel — Composition Boundary
+`atlas/kernel/atlas.py` (`Atlas`) is the root application object and **the only
+place where the whole system is wired**. `Atlas.start()` constructs every
+service and runtime dependency and injects them via constructor — there is no
+internal instantiation of services. Track-specific private dependencies are
+built in the kernel and held as private attributes — **not** registered in the
+container (see §6).
 
----
-
-## 2. Current Completion Status
-
-| Field | Value |
-|---|---|
-| Milestone | Phase 19 — Track C (Long-Term Learning) complete and runtime-integrated; Track B (Phases 18.1–18.10) complete; Phase 16 locked; Track A complete |
-| Version tag | **v0.19.1** |
-| Test suite | **Full suite passing — 2619 passed, 57 subtests passed, 0 failures** |
-| Architecture status | Phase 16 locked; Tracks A, B, and C architecturally complete; Track C wired into Atlas kernel runtime |
-| Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy in progress via Phase 16) |
-| Era | **Capability Track Era** (post-core roadmap; see §13) |
-
-### 2.1 Completed Major Capabilities (Phase 1–16)
-
-| Phase | Capability |
-|---|---|
-| 1–4 | Foundation: kernel, service container, AI abstraction, conversation |
-| 5 | Memory system evolution (repository, ranking, search, service) |
-| 5.6 | Conversation-cognition integration |
-| 6.1–6.4 | Reasoning foundation: controller, capability selection, execution layer, adaptive routing |
-| 6.5–6.5.2 | Documentation memory layer; reasoning runtime integration; outcome recording (ReasoningRecorder) |
-| 6.6 | Model routing (ModelRouter, ModelProfileRegistry) |
-| 6.7 | Reflection engine (bounded analysis → suggestions) |
-| 6.8 | Planning engine (goal decomposition) |
-| 6.9 | Tool intelligence (ToolEngine: registry, selector, executor) |
-| 6.10 | Multi-provider AI layer (OpenAI, Anthropic, LM Studio + Ollama, Mock) |
-| 7.0 | Self-evolution foundation (SelfObservationEngine, ImprovementPlanner, ProposalGenerator, ApprovalManager, EvolutionMemory, ResearchCoordinator ABC) |
-| 7.1–7.3 | Understanding engine; integrated cognitive pipeline; learning engine |
-| 7.4–7.5 | World model; unified cognitive runtime (RuntimeCoordinator, 14 stages) |
-| 8.0–8.2.1 | Cognitive identity; runtime integration; feedback coordinator; understanding consolidation |
-| 8.3 | Goal intelligence & self-directed improvement planning |
-| 9.0–9.2 | Persistent self-model, experience accumulation + SQLite persistence, understanding persistence |
-| 10.0 | Evolution pipeline completed |
-| 11.0–11.3 | Evolution execution engine; execution levels; persistence |
-| 12.0–12.3 | Evolution insights; InsightScorer; EvolutionIntelligenceEngine; insight persistence |
-| 13.1–13.6 | Governance (RuleEngine, ConstraintRegistry); component registry; evolution scheduler; execution gateway; persistent evolution knowledge; automatic knowledge consolidation pipeline |
-| 14.1–14.4 | Decision intelligence (PlanningContext, strategy suggestions, adaptive planning) |
-| 15.0 | Goal execution engine + ToolExecutionActionBinder; `GoalExecutionRecord` evidence contract |
-| 16.0 | **Governed autonomous evolution**: AutonomyPolicy envelope, EvolutionRequest lifecycle (16 states), six deterministic gates, sole-owner dispatcher, staged config + boot activation + SAFE_MODE, rollback + versioning, `EvolutionOutcomeRecord` evidence contract |
-| 17.0–17.9 | **Track A — Research & Knowledge (complete)**: research models, local source adapters (document/workspace/codebase), deterministic planner, knowledge extractor, claim verifier, `research_*` SQLite storage (migration v7), capability handlers (`research.query/verify/summarize`), governed KNOWLEDGE ingest bridge + GOV-008, component metadata + `atlas research` CLI |
-| 18.1–18.10 | **Track B — Tool Ecosystem (Batch 1–4, complete)**: toolchain models + catalog, skill registry, deterministic tool-chain planner, safe executor + risk policy, effectiveness tracker, tool learner, `toolchain.*` capability handlers, `toolchain_*` SQLite storage (migration v8), governed skill-activation ingest bridge + GOV-009, `atlas toolchain` / `atlas skill` CLI |
-| 19.1–19.5 | **Track C — Long-Term Learning (complete)**: `atlas/longterm/` package — episodic recorder, procedure extractor, consolidator (dedup/merge/principled forgetting), episodic/procedural repositories, `LongTermSQLiteStorage` (migration v9), `memory.*` capability handlers, governed LONGTERM_INGEST bridge + GOV-010, component metadata + `atlas memory` CLI |
-
-### 2.2 Current Non-Goals (unchanged)
-
-Atlas currently does **not** autonomously modify source code (`CODE` scope is unreachable), does not alter its identity autonomously, does not perform autonomous reflection/strategy adjustment without approval, and has no distributed multi-process execution.
-
----
-
-## 3. Package Map
-
-All packages under `atlas/`. "Locked" = do not redesign; extend additively.
-
-| Package | Responsibility | Status |
-|---|---|---|
-| `atlas/kernel/` | Root `Atlas` application object, `ServiceContainer` wiring, startup/shutdown, `Atlas.tick()` | Core, locked |
-| `atlas/core/` | Boot, startup, application lifecycle | Core |
-| `atlas/services/` | High-level orchestration (`CognitionService`, `AIService`) | Core |
-| `atlas/cognition/` | Cognition API, context, engine, decisions, pipeline, state | Core, pure logic |
-| `atlas/reasoning/` | Reasoning controller, models, capabilities, execution registry/routing/dispatch, planning, reflection | Core, pure logic |
-| `atlas/tools/` | Tool registry, selector, executor, engine, builtins, execution action binder | Core |
-| `atlas/ai/` | AI provider abstraction; providers (Ollama, OpenAI, Anthropic, LM Studio, Mock); AIRouter; model routing (`atlas/ai/routing/`) | Infrastructure |
-| `atlas/memory/` | Memory models, repository, ranking, search, service, context engine | Core |
-| `atlas/knowledge/` | Knowledge base, entries, search, ranker, query, manager | Core |
-| `atlas/understanding/` | Concept extraction, pattern analysis, understanding graph/memory, consolidation layer, experience bridge, serialization | Core |
-| `atlas/world_model/` | World model engine, world graph, behavior model, prediction engine | Core |
-| `atlas/learning_engine/` | Learning engine, strategy analyzer, insight consolidator, learning memory | Core |
-| `atlas/longterm/` | Long-term learning (Track C): episodic recorder, procedure extractor, consolidator, episodic/procedural repositories, storage protocol, capability handlers, evolution ingest bridge | Core — Track C, stable |
-| `atlas/experience/` | Experience repository, accumulator, trend analyzer, outcome tracker, self-model engine, serialization | Core |
-| `atlas/identity/` | Identity engine (beliefs, capability profiles, decision style) | Core |
-| `atlas/goals/` | Goal repository, intelligence engine, opportunity analyzer, priority engine, dependency resolver, recommendation engine, execution engine, binders | Core |
-| `atlas/evolution/` | Self-observation, improvement planning, proposal generation, approval, evolution memory, execution engine, gateway, intelligence engine, research coordinator, scheduler, decision intelligence, knowledge layer (`atlas/evolution/knowledge/`), governance (`atlas/evolution/governance/`), autonomy (`atlas/evolution/autonomy/`) | Core, locked |
-| `atlas/runtime/` | RuntimeCoordinator (14-stage orchestration), FeedbackCoordinator | Core |
-| `atlas/events/` | EventBus | Infrastructure |
-| `atlas/config/` | Configuration system (`config.toml`) | Infrastructure |
-| `atlas/state/` | StateManager | Infrastructure |
-| `atlas/task/` | TaskManager | Infrastructure |
-| `atlas/storage/` | Generic storage utilities + all SQLite adapters + migration framework | Infrastructure |
-| `atlas/conversation/` | ConversationService, history, prompt builder | Capability |
-| `atlas/workspace/` | Workspace/project/resource management, permissions, members, tags | Capability |
-| `atlas/learning/` | Legacy learning manager + knowledge feedback (bounded feedback storage) | Capability, preserved |
-| `atlas/lifecycle/` | ComponentRegistry + component metadata definitions | Active scaffold |
-| `atlas/agents/` | Agent abstractions and orchestration | Scaffold, not fully wired |
-| `atlas/automation/` | Automation workflows | Scaffold, not fully wired |
-| `atlas/skills/` | Skill abstractions | Scaffold, not fully wired |
-| `atlas/scheduler/` | Scheduling components | Scaffold, not fully wired |
-| `atlas/interfaces/` | Contracts and abstractions | Scaffold, not fully wired |
-| `atlas/models/` | Shared domain models | Scaffold, not fully wired |
-| `atlas/utils/` | Shared utilities | Utility |
-| `atlas/state/` | State management | Utility |
-| `atlas/cli/` | CLI commands (evolution, goal, etc.) | Presentation |
-| `atlas/intelligence/` | **LEGACY** `CognitiveLoop`, `CognitiveService` — preserved, do not modify | Legacy |
-
-**Runtime data locations:** `atlas_data/` (conversations, `atlas_experience.db`), `data/` (memory/knowledge JSON storage).
-
----
-
-## 4. Service Registry
-
-The `ServiceContainer` registers public shared services. Everything is constructed in `Atlas.start()` and injected via constructor — there is no internal instantiation of services.
-
-### 4.1 Registered Kernel Service Keys
-
-| Key | Instance | Purpose | Lifecycle | Dependencies |
-|---|---|---|---|---|
-| `component_registry` | `ComponentRegistry` | Structural metadata of all core components | Registered at startup; observational only | — |
-| `ai` | `AIService` | AI provider abstraction + chat/stream/complete + model routing | Started at `Atlas.start()`, stopped on shutdown | `AIRouter`, providers, `ModelRouter` |
-| `conversation` | `ConversationService` | Chat/stream, history, prompt building, delegates to cognition | Started/stopped via container | `AIService`, `ContextEngine`, `CognitionAPI` |
-| `memory` | `MemoryManagerService` | Memory CRUD, search, ranking | Started/stopped | `MemoryRepository`, `RankingEngine`, `MemorySearchEngine` |
-| `knowledge` | `KnowledgeManager` | Knowledge base query and store | Started/stopped | `KnowledgeBase`, `KnowledgeSearch`, `KnowledgeRanker` |
-| `cognition` | `CognitiveLoop` | Legacy preserved | Started/stopped | `MemoryManagerService`, `KnowledgeManager` |
-| `cognitive` | `CognitiveService` | Legacy preserved | Started/stopped | `CognitiveLoop` |
-| `cognition_service` | `CognitionService` | Modern cognition orchestration; delegates to RuntimeCoordinator + reasoning pipeline | Started/stopped | Memory, knowledge, reasoning, reflection, planning, tools, learning, `RuntimeCoordinator` |
-| `cognition_api` | `CognitionAPI` | Orchestration-facing API boundary | Started/stopped | `CognitionService` |
-| `tasks` | `TaskManager` | Task management | Started/stopped | — |
-| `runtime_coordinator` | `RuntimeCoordinator` | Single permanent orchestrator, 14-stage cognitive pipeline | Started/stopped | All cognitive subsystems (injected) |
-| `understanding` | `UnderstandingEngine` | Concept extraction, consolidation, understanding graph/memory, persistence | Started/stopped; storage restored at boot | `SQLiteUnderstandingStorage`, consolidation components |
-| `world_model` | `WorldModelEngine` | Entities, causal graph, predictions, behavior rules | Started/stopped | `WorldModelMemory`, `WorldGraph`, `PredictionEngine`, `BehaviorModel` |
-| `evolution_observer` | `SelfObservationEngine` | Produces structured observations of Atlas behavior | Started/stopped | — |
-| `learning_engine` | `LearningEngine` | Pipeline learning → insights → recommendations | Started/stopped | `LearningMemory`, `StrategyAnalyzer`, `InsightConsolidator` |
-| `identity` | `IdentityEngine` | Beliefs, capability profiles, decision style | Started/stopped; initialized at boot | internal managers |
-| `feedback_coordinator` | `FeedbackCoordinator` | Routes cognitive feedback to identity/world/understanding/learning | Started/stopped | identity, world model, understanding, learning |
-| `goal_repository` | `GoalRepository` | Goal/candidate/opportunity/report persistence | Started/stopped | — |
-| `goal_intelligence` | `GoalIntelligenceEngine` | Evidence → opportunities → prioritized recommendations | Started/stopped | `GoalRepository`, analyzers/resolvers |
-| `experience_repository` | `ExperienceRepository` | Structured experience CRUD + persistence | Started/stopped; restored from SQLite at boot | `SQLiteExperienceStorage` |
-| `experience_accumulator` | `ExperienceAccumulator` | `CognitionState`/`PipelineResult` → `StructuredExperience` | Started/stopped | `ExperienceRepository` |
-| `self_model_engine` | `SelfModelEngine` | Trend analysis, goal tracking, self-model snapshots, evidence feeds | Started/stopped; counter seeded at boot | Experience, outcome tracker, identity, understanding, goals |
-| `intelligence_engine` | `EvolutionIntelligenceEngine` | Evolution outcome analysis → `EvolutionInsight` | Started/stopped | `EvolutionMemory`, `ExperienceRepository`, `InsightScorer`, storage, knowledge pipeline |
-| `execution_gateway` | `EvolutionExecutionGateway` | Constitutional execution gate (governance choke point) | Started/stopped; level set at startup | `RuleEngine`, `EvolutionExecutionEngine`, `EvolutionMemory` |
-| `evolution_knowledge` | `EvolutionKnowledgeQuery` | Read-only surface for durable evolution knowledge | Started/stopped | `EvolutionKnowledgeRepository` |
-| `goal_execution` | `GoalExecutionEngine` | Goal activation → authorization → execution via binders | Started/stopped; `settle()` on tick | `GoalRepository`, gateway, binder registry, outcome tracker, evolution memory, decision intelligence, event bus |
-
-### 4.2 Private Atlas-Owned Dependencies (NOT in ServiceContainer)
-
-Created and injected directly during `Atlas.start()`:
-
-- `ReasoningController`, `CapabilityAnalyzer`, `CapabilityRegistry`, `CapabilityRouter`, `CapabilityDispatcher`, `ReasoningRecorder`, `ReflectionEngine`, `PlanningEngine`
-- `ToolRegistry`, `ToolSelector`, `ToolExecutor`, `ToolEngine`
-- `ModelProfileRegistry`, `ModelRouter`
-- `EvolutionScheduler` (ticked by `Atlas.tick()`), `EvolutionExecutionEngine`, `RuleEngine`, `ConstraintRegistry`, `InsightScorer`, `EvolutionKnowledgeRepository/Consolidator/Pipeline`
-- Phase 16 autonomy stack (constructed only when `[evolution.autonomy] enabled=true`): policy, factory, validator, risk assessor, authorizer, schedule store, appliers, application engine, verification, rollback, versioning, adapter, dispatcher
-
-### 4.3 Phase 16 Container Keys (when autonomy enabled)
-
-`evolution_autonomy`, `evolution_requests`, `evolution_application`, `evolution_rollback`, `evolution_versioning`, `capability_upgrades`, `evolution_dispatcher`.
-
----
-
-## 5. Evolution Framework Summary
-
-The Evolution Framework is the **spine** of Atlas. Every capability track reports into it. It deepens understanding rather than merely accumulating changes.
-
-### 5.1 The Pipeline
+### 5.2 RuntimeCoordinator
+`atlas/runtime/runtime_coordinator.py` is the single permanent orchestrator of
+the 14-stage cognitive pipeline:
 
 ```
-Observation
-    ↓
-Evidence
-    ↓
-Proposal
-    ↓
-Validation
-    ↓
-Risk Assessment
-    ↓
-Authorization
-    ↓
-Gateway
-    ↓
-Application
-    ↓
-Verification
-    ↓
-Versioning
-    ↓
-Rollback
-    ↓
-Knowledge Pipeline
+Conversation Context → Memory Retrieval → Knowledge Retrieval → Understanding →
+World Model → Reasoning → Planning → Tool Decision → Tool Execution → AI Response →
+Reflection → Learning → Evolution Observation → Goal Intelligence → Memory Storage
 ```
 
-### 5.2 Stage Explanations
+The stage order is **locked**. A `runtime.pipeline.completed` event is published
+on the EventBus at the end of `process()`.
 
-| Stage | Component(s) | Responsibility |
-|---|---|---|
-| **Observation** | `SelfObservationEngine` | Produces structured `Observation`s (runtime metrics, reasoning quality, tool usage, memory quality, system health). Fed by the RuntimeCoordinator post-pipeline; persisted via `evolution_observations`. |
-| **Evidence** | `ExperienceAccumulator`, `OutcomeTracker`, `EvolutionIntelligenceEngine`, `LearningEngine` | Raw outcomes become structured evidence: `StructuredExperience`, tracked goals, `EvolutionInsight`, learning insights. Evidence is never applied — it informs planning. |
-| **Proposal** | `ImprovementPlanner`, `ProposalGenerator`, `EvolutionScheduler` | `EvolutionScheduler` (rate-limited, threshold-gated, driven by `Atlas.tick()`) detects weaknesses from observations + insights + planning context, creates an `ImprovementPlan`, and generates an `EvolutionProposal`. |
-| **Validation** | `Validator` (Phase 16) | Per-scope payload schema + precondition checks for `EvolutionRequest`. Fail → `REJECTED`, never auto-retried. |
-| **Risk Assessment** | `RiskAssessor` (Phase 16) | Deterministic risk score (LOW/MEDIUM/HIGH/CRITICAL) consuming planning context + goal signals. HIGH/CRITICAL requires user approval. |
-| **Authorization** | `AuthorizationManager` + `ApprovalManager` | `user:cli` explicit, `user:policy` declarative, or `system:autonomy` inside the policy envelope. Every authorization has a TTL. |
-| **Gateway** | `EvolutionExecutionGateway` | Constitutional choke point. Two entry points: `execute(proposal)` (administrative path, Phase 13.4) and `execute_request()` (only applied-evolution path). Six deterministic gates, all fail-closed. `EvolutionAutonomyDispatcher` is the sole caller of `execute_request()`. |
-| **Application** | `ApplicationEngine` + scope appliers | `config_applier` (staged, never live), `information_applier` (memory/knowledge/world-model via repository interfaces), `capability_applier` (register/enhance/deprecate via upgrade registry). Snapshot captured before any mutation. |
-| **Verification** | `VerificationService` | Per-scope probes; `COMPLETED` only when a change is effective **and** verified (in-session for INFORMATION/CAPABILITY; at boot for staged CONFIG). Failure → rollback. |
-| **Versioning** | `VersionManager` | Append-only `evolution_versions` manifest with parent chain; `AtlasStateVersion major.minor.patch`; optimistic-concurrency anchors prevent double application. |
-| **Rollback** | `RollbackManager` | Mandatory rollback plan per applied request; store-level checksummed snapshots; LIFO cascade for dependent requests; rollback failure ⇒ `EVOLUTION_HOLD`. |
-| **Knowledge Pipeline** | `EvolutionKnowledgePipeline` | Consolidates insights/weaknesses/outcomes into durable knowledge: `RecurringOutcomePattern`, `StrategyKnowledge`, `CapabilityEvolution`, `BottleneckProfile`, snapshots. Consumed read-only by `DecisionIntelligenceEngine` and `EvolutionKnowledgeQuery`. |
+**ARCHITECTURAL INVARIANT:** the RuntimeCoordinator stage order is fixed.
+Track D **did not modify** RuntimeCoordinator; it consumes
+`runtime.pipeline.completed` additively via a kernel-owned trace recorder (§20).
 
-### 5.3 EvolutionRequest Lifecycle (16 states)
+## 6. ServiceContainer & Dependency Injection
 
-`DRAFTED → VALIDATED → RISK_ASSESSED → PENDING_AUTHORIZATION → AUTHORIZED → SCHEDULED → APPLIED → PENDING_EFFECTIVE → COMPLETED`, with terminal states `FAILED`, `ROLLED_BACK`, `SUPERSEDED`, `CANCELLED`, `EXPIRED`, `REJECTED`, `EVOLUTION_HOLD`. Revival requires a fresh draft.
+`ServiceContainer` (registered key → instance) registers **public shared
+services**. Everything is constructed in `Atlas.start()` and constructor-injected.
 
-### 5.4 Evidence Contracts
+Representative public service keys: `ai` (`AIService`), `conversation`,
+`memory`, `knowledge`, `cognition_service`, `cognition_api`,
+`runtime_coordinator`, `understanding`, `world_model`, `evolution_observer`,
+`learning_engine`, `identity`, `feedback_coordinator`, `goal_repository`,
+`goal_intelligence`, `experience_repository`, `experience_accumulator`,
+`self_model_engine`, `intelligence_engine`, `execution_gateway`, etc. (see the
+service keys actually registered in `Atlas.start()`).
 
-- `GoalExecutionRecord` (Phase 15) — typed execution feedback per executed goal
-- `EvolutionOutcomeRecord` (Phase 16) — structured terminal outcome per applied request
-Both are persisted only; aggregation happens in the Phase 13.6 knowledge pipeline / future Track G analytics.
+**DI rules:**
+- All cross-module edges are constructor-injected; domain logic never uses a
+  service locator
+- No component may import the container to fetch a dependency at runtime
+- Track-private services (e.g. Track C longterm, Track D
+  `AdvancedReasoningService`) are **NOT** in the ServiceContainer
 
----
+> **CURRENT IMPLEMENTATION:** `AdvancedReasoningService` is a **kernel-private**
+> dependency. It is composed directly in the kernel and verified by
+> `test_kernel_advanced_reasoning_integration.py` to be absent from the
+> container (`assertNotIn("advanced_reasoning", container._services)`).
 
-## 6. Capability Registry
+## 7. Storage Architecture
 
-### 6.1 Capability Registration
+- All SQLite adapters live in `atlas/storage/` and are the **only** modules that
+  import `sqlite3`
+- Additive migrations are defined in `atlas/storage/migration.py`; applied in
+  ascending version order inside a transaction; **no destructive migrations**
+- Each track adds its own `*_*` table families additively:
+  - v7 `research_*` (Track A)
+  - v8 `toolchain_*` (Track B)
+  - v9 `episodic_*` / `procedural_*` / `memory_consolidation_records` (Track C)
+  - v10 `reasoning_*` (Track D)
+- Storage exposes a read protocol; prototypes (e.g.
+  `AdvancedReasoningStorage`) define the surface, adapters implement it
+- **Database files are runtime artifacts.** They live in `atlas_data/`
+  (e.g. `atlas_experience.db`) and `data/`, are gitignored, and are not source.
 
-Two registries:
+## 8. Current Schema Version
 
-1. **Reasoning `CapabilityRegistry`** (`atlas/reasoning/execution/registry.py`) — routes cognition decisions to handler functions. `DEFAULT_HANDLERS` are registered during `Atlas.start()`; new capabilities register new handlers here.
-2. **`ComponentRegistry`** (`atlas/lifecycle/`) — structural metadata registry of all core components (`ComponentMetadata` in `atlas/lifecycle/component_definitions.py`). Purely observational; never modifies/restarts/repairs components.
+**`CURRENT_SCHEMA_VERSION = 10`** (`atlas/storage/migration.py`).
 
-### 6.2 Capability Lifecycle
+This is confirmed by source and by the migration tests
+(`test_evolution_autonomy_storage`, `test_evolution_persistence`,
+`test_experience_storage`, `test_longterm_storage`,
+`test_understanding_storage`), which assert schema version **10** after the
+Track D additive `reasoning_*` tables.
 
-`REGISTER → ENHANCE → DEPRECATE` (Phase 16 `upgrade_kind`). Capability changes are **not** a separate artifact — they are `EvolutionRequest`s with `target_scope=CAPABILITY`.
+## 9. Capability Architecture
 
-### 6.3 Capability Mutation Path
+Capabilities are exposed through the reasoning `CapabilityRegistry` via the
+`CapabilityHandler = Callable[[dict], ExecutionResult]` contract. Each track
+provides a capability **factory** that registers its handlers additively:
 
-```
-CapabilityUpgradeApplier (upgrade_kind dispatch)
-    ← ApplicationEngine (behind Gateway.execute_request())
-        ← EvolutionAutonomyDispatcher (sole caller; atomic CAS claim)
-            ← request_factory (sources: proposal, goal transcription, scheduler, CLI)
-```
-No CLI or component ever applies a capability change directly. `CAPABILITY` scope requires `SELF_CONFIG` execution level (GOV-005).
+- Track A: `research.query / verify / summarize`
+- Track B: `toolchain.*`
+- Track C: `memory.*`
+- Track D: `reasoning.trace / causal / counterfactual / hypotheses / verify /
+  meta / ingest` (from `AdvancedReasoningCapabilityFactory`)
 
-### 6.4 ApplierRegistry
+Handlers are **pure bridges**: they delegate to an injected composed service;
+they never mutate state, never import the kernel/container, and never touch
+`sqlite3`.
 
-`ApplierRegistry` (`atlas/evolution/autonomy/applier_registry.py`) maps `ScopeType → Applier` implementing the `Applier` protocol: `validate / apply / revert / verify / capture_snapshot`. New scopes (e.g. future `SKILLS`, `AGENT`, `TASK`) are additive — a new applier registered without touching existing ones.
+> **COMPONENT METADATA / WIRING:** each track also registers observational
+> `ComponentMetadata` with the lifecycle `ComponentRegistry`. Track D registers
+> `advanced_reasoning` and `advanced_reasoning_evolution` (GOV-011) via
+> `atlas/advanced_reasoning/wiring.py` (`register_advanced_reasoning_component`,
+> `register_advanced_reasoning_evolution_component`). Registration is additive.
 
----
+## 10. CLI Architecture
 
-## 7. Storage Overview
+`atlas/cli/` implements a subcommand-style CLI. Track CLIs are added
+additively. Track D adds `atlas reasoning` with actions: `trace`, `causal`,
+`counterfactual`, `hypotheses`, `verify`, `meta`, `ingest` (see
+`atlas/advanced_reasoning/cli_commands.py`).
 
-All SQLite adapters share one database file: **`atlas_data/atlas_experience.db`** (WAL mode, FK on, schema managed by `atlas/storage/migration.py`). Nested fields are JSON-serialized. Every adapter degrades gracefully — failures mark the adapter unavailable and Atlas falls back to memory-only operation.
+Other current subcommands include: `workspace`, `project`, `resource`,
+`permission`, `member`, `tag`, `research` (A), `toolchain` / `skill` (B),
+`memory` (C), `evolution`, `goal`.
 
-| Adapter | Tables | Contents |
-|---|---|---|
-| `SQLiteExperienceStorage` | `experiences` | Structured pipeline execution records (outcome, reasoning, planning, tools, understanding counts) |
-| | `trend_analyses` | Windowed trend analysis results (success/reasoning/understanding/planning/tool/learning trends) |
-| | `tracked_goals` | Recommendation/goal outcome tracking |
-| | `self_model_snapshots` | Point-in-time self-model snapshots |
-| `SQLiteEvolutionStorage` | `evolution_proposals`, `evolution_approval_requests`, `evolution_records` | Classic evolution pipeline history |
-| | `evolution_insights` | Outcome analysis insights |
-| | `evolution_observations` | Persisted observations |
-| | `evolution_knowledge_patterns` | Recurring outcome patterns |
-| | `evolution_knowledge_strategies` | Strategy effectiveness knowledge |
-| | `evolution_knowledge_capabilities` | Capability trajectories |
-| | `evolution_knowledge_bottlenecks` | Recurring bottleneck profiles |
-| | `evolution_knowledge_snapshots` | Knowledge-layer point-in-time summaries |
-| `AutonomySQLiteStorage` (Phase 16, additive) | `evolution_requests` | `EvolutionRequest` lifecycle rows (JSON payloads) |
-| | `evolution_versions` | Append-only state version manifest (parent chain) |
-| | `evolution_receipts` | Applied change receipts |
-| | `evolution_snapshots` | Store-level rollback snapshot artifacts (checksummed) |
-| | `evolution_outcomes` | `EvolutionOutcomeRecord` evidence contract |
-| | `staged_config` | Staged config entries awaiting boot activation |
-| `ToolchainSQLiteStorage` (Phase 18.8, additive) | `toolchain_skills` | Registered skills (nested chain JSON) |
-| | `toolchain_chains` | Tool chains (steps JSON) |
-| | `toolchain_effectiveness_records` | Effectiveness observations (append-only) |
-| | `toolchain_plans` | Planned tool chains |
-| | `toolchain_reports` | Executed chain results (append-only log) |
-| `LongTermSQLiteStorage` (Phase 19, additive) | `episodic_episodes` | Event-sequence episodes (idempotent upsert by episode_id) |
-| | `episodic_episode_events` | Per-episode events (append-only, INSERT OR IGNORE by event_id) |
-| | `procedural_procedures` | Distilled reusable methods (idempotent upsert by procedure_id) |
-| | `procedural_procedure_steps` | Procedure steps (idempotent upsert) |
-| | `memory_consolidation_records` | Consolidation/forgetting audit log (append-only) |
-| `SQLiteUnderstandingStorage` | `understanding_concepts` | Extracted/consolidated concepts |
-| | `understanding_relationships` | Concept relationships |
-| | `understanding_patterns` | Detected patterns |
-| | `understanding_insights` | Generated understanding insights |
-| | `understanding_signals` | Behavioral signals |
+## 11. Governance / Evolution Framework Boundaries
 
-**JSON stores:** `data/` holds memory and knowledge JSON; `atlas_data/conversations/` holds saved conversations.
+The **Evolution Framework** (`atlas/evolution/`) is the only channel by which
+Atlas may change its own operational state. `EvolutionExecutionGateway` is the
+single execution choke point; the `EvolutionAutonomyDispatcher` is the sole
+caller of `execute_request()`.
 
-**Migration rule:** new tables are additive; existing tables are never redesigned; schema versioning via `atlas/storage/migration.py`.
+- **Execution levels:** `ADMINISTRATIVE` (0), `SELF_CONFIG` (1), `INFORMATION`
+  (2), `CODE_ARTIFACT` (3, unreachable), `SANDBOXED` (4, locked), `AUTONOMOUS`
+  (5, locked)
+- **Scope types:** `CONFIG`, `MEMORY`, `KNOWLEDGE`, `CODE`, `IDENTITY`,
+  `CAPABILITY`, `UNKNOWN` (never executes)
+- **Six gates** (Phase 16): RuleEngine, Validator, RiskAssessor,
+  AuthorizationManager, dispatcher pre-check, gateway translation — all fail
+  closed
+- **Constitutional invariants:** identity and code are untouchable; a request
+  can never alter the AutonomyPolicy, ConstraintRegistry, or gateway level
 
----
-
-## 8. Memory Architecture
-
-| Layer | Component | Description |
-|---|---|---|
-| **Working memory** | `CognitionState`, `ContextEngine`, conversation history | Active session context assembled per request; exchanged across the 14-stage pipeline; assembled from memory retrieval + conversation history |
-| **Long-term memory** | `MemoryManagerService` (`MemoryRepository`, `RankingEngine`, `MemorySearchEngine`) | Persistent recollection with search, tags, importance ranking, and keyword retrieval |
-| **Knowledge** | `KnowledgeManager` (`KnowledgeBase`, `KnowledgeSearch`, `KnowledgeRanker`) | Structured project/domain knowledge entries with source attribution and ranked query |
-| **Understanding** | `UnderstandingEngine` (concept graph + memory + consolidation) | Concepts, relationships, patterns, insights, behavioral signals; consolidation prevents duplicate accumulation. Persisted to SQLite |
-| **Experience** | `ExperienceRepository` + `ExperienceAccumulator` + `SelfModelEngine` + `OutcomeTracker` | Structured per-pipeline experiences, trend windows, self-model snapshots, tracked goal outcomes. Persists cross-session |
-| **Evolution memory** | `EvolutionMemory` + `EvolutionKnowledgeQuery` | Proposals, approvals, records, insights, and durable consolidated evolution knowledge |
-| **Episodic memory** | `atlas/longterm/` — `EpisodicRecorder`, `EpisodicRepository`, `Episode` | Event-sequence recollection of what Atlas did and observed; built from existing `StructuredExperience` output; consolidated and persisted via `LongTermSQLiteStorage` |
-| **Procedural memory** | `atlas/longterm/` — `ProcedureExtractor`, `ProceduralRepository`, `Procedure` | Reusable task/method patterns distilled from repeated episodes; consolidated (dedup/merge/principled forgetting) and persisted via `LongTermSQLiteStorage` |
-
----
-
-## 9. Understanding Layer
-
-The **permanent foundation** upon which reasoning, planning, learning, memory, and tool use operate. Architecture law: no component prioritizes raw knowledge accumulation over deepening understanding.
-
-```
- UnderstandingLayer (permanent)
-      ↓
-   Reasoning
-      ↓
-  Observation
-      ↓
-  Reflection
-      ↓
-   Learning
-      ↓
-  Adaptation
-      ↓
-Self-improvement
-```
-
-| Subsystem | Component | Responsibility |
-|---|---|---|
-| **Concept Graph** | `UnderstandingGraph` + `UnderstandingMemory` | Concepts, relationships (auto-connected, consolidated), patterns, insights; consolidation layer (Concept/Relationship/Pattern/Insight consolidators, `UnderstandingScorer`, `AbstractionRegistry`) |
-| **Identity** | `IdentityEngine` | Long-term cognitive identity: core beliefs (evidence-strengthened/weakened), capability profiles, decision style. Identity changes are evidence-based and approval-safe |
-| **World Model** | `WorldModelEngine` | Entities, events, state snapshots, causal relations/chains, behavior rules, predictions |
-| **Learning** | `LearningEngine` (strategy analyzer, insight consolidator, learning memory) | Distills pipeline executions into reusable insights and improvement recommendations |
-| **Intelligence** | `EvolutionIntelligenceEngine`, `DecisionIntelligenceEngine`, `EvolutionKnowledgeQuery` | Outcome analysis → insights; adaptive planning contexts from consolidated evolution knowledge; read-only durable knowledge surface |
-
----
-
-## 10. Governance
-
-### 10.1 Rule Engine
-
-`RuleEngine` evaluates proposals/requests against the `ConstraintRegistry` and produces a `GovernanceDecision` (approved, reason, violated_rules). Pure logic, deterministic, auditable. Missing RuleEngine ⇒ **fail closed**.
-
-### 10.2 Constraint Registry
-
-Immutable-once-registered `GovernanceRule`s, keyed by `rule_id`. Registry and gateway level are user-mutable only — no request, applier, or engine may modify them.
-
-### 10.3 Execution Levels
-
-| Level | Value | Meaning |
-|---|---|---|
-| `ADMINISTRATIVE` | 0 | Record-keeping only |
-| `SELF_CONFIG` | 1 | Modify internal Atlas configuration |
-| `INFORMATION` | 2 | Modify memory, knowledge, world model |
-| `CODE_ARTIFACT` | 3 | Generate code patches (currently unreachable) |
-| `SANDBOXED` | 4 | Apply changes in sandbox, test, rollback (locked) |
-| `AUTONOMOUS` | 5 | Self-directed evolution within constitutional bounds (locked) |
-
-### 10.4 Scope Types
-
-`CONFIG`, `MEMORY`, `KNOWLEDGE`, `CODE`, `IDENTITY`, `CAPABILITY`, `UNKNOWN`. **UNKNOWN scope never executes at any level** (unconditional gateway refusal).
-
-### 10.5 GOV Rules
-
+### Governance rules (additive)
 | Rule | Scope | Requirement |
 |---|---|---|
-| GOV-001 | `IDENTITY` | `AUTONOMOUS` level (unreachable) |
-| GOV-002 | `CODE` | `CODE_ARTIFACT` level (unreachable) |
-| GOV-003 | `CONFIG` | `SELF_CONFIG` level |
-| GOV-004 | `MEMORY` / `KNOWLEDGE` | `INFORMATION` level |
-| GOV-005 | `CAPABILITY` | `SELF_CONFIG` level |
-| GOV-006 | `SKILLS` (reserved) | `SELF_CONFIG` level (registered when `ScopeType.SKILLS` is added) |
-| GOV-008 | `KNOWLEDGE` (RESEARCH_INGEST) | `INFORMATION` level — Track A research results enter knowledge only via the governed evolution path |
-| GOV-009 | `KNOWLEDGE` (TOOLCHAIN_INGEST) | `INFORMATION` level — Track B skill activation / toolchain ingest enters Atlas state only via the governed evolution path |
-| GOV-010 | `MEMORY` (LONGTERM_INGEST) | `INFORMATION` level — Track C memory consolidation / long-term ingest enters Atlas state only via the governed evolution path (`register_gov_010` in `atlas/longterm/evolution_integration.py`) |
+| GOV-001 | IDENTITY | AUTONOMOUS (unreachable) |
+| GOV-002 | CODE | CODE_ARTIFACT (unreachable) |
+| GOV-003 | CONFIG | SELF_CONFIG |
+| GOV-004 | MEMORY / KNOWLEDGE | INFORMATION |
+| GOV-008 | KNOWLEDGE (RESEARCH_INGEST) | INFORMATION — Track A |
+| GOV-009 | KNOWLEDGE (TOOLCHAIN_INGEST) | INFORMATION — Track B |
+| GOV-010 | MEMORY (LONGTERM_INGEST) | INFORMATION — Track C |
+| **GOV-011** | KNOWLEDGE (REASONING_INGEST) | INFORMATION — **Track D** (additive) |
 
-**Constitutional invariants:** identity and code are untouchable; a request can never alter `AutonomyPolicy`, `ConstraintRegistry`, or gateway level; UNKNOWN scope can never execute; autonomy-envelope membership (GOV-007) is policy enforced in `AuthorizationManager`, never a registry rule.
+**ARCHITECTURAL INVARIANT:** GOV-011 is additive — no constitutional change, no
+gateway redesign. Track D never calls `EvolutionExecutionGateway.execute_request()`
+directly; the kernel wires a governed ingest sink (`ReasoningIngestSink`
+protocol) into the bridge.
 
-### 10.6 The Six Gates (Phase 16)
+> **PROPOSED (not implemented):** GOV-006 (`SKILLS`, reserved) and GOV-007
+> (autonomy-envelope membership, policy-enforced in `AuthorizationManager`) are
+> referenced by design only; they are not additive registrations present in the
+> current registry beyond design notes.
 
-1. `RuleEngine` at gateway level
-2. `Validator` (per-scope schema/preconditions)
-3. `RiskAssessor` (≤ policy max risk)
-4. `AuthorizationManager` (valid, unexpired authorization)
-5. Dispatcher level pre-check (`intended_level` ≤ effective level)
-6. Gateway translation + UNKNOWN-close
+## 12. Advanced Reasoning Architecture (Track D)
 
-All gates fail closed; every transition audited via `phase16.*` events.
+`atlas/advanced_reasoning/` implements Track D. It is a **separate package**
+that consumes, but does not modify, the core `atlas/reasoning/` package.
+
+Components:
+
+- **`multi_step.py`** — `MultiStepReasoner`: deterministic decomposition of an
+  input into chained, dependency-ordered inference steps; confidence propagates
+  forward through the chain; produces immutable `ReasoningTrace`s
+- **`causal.py`** — `CausalReasoner`: causal path analysis and counterfactual
+  ("what-if") evaluation built on a `CausalGraphProvider` protocol
+- **`hypotheses.py`** — `HypothesisGenerator`: generates and deterministically
+  ranks competing hypotheses for an observation/claim
+- **`verify.py`** — `SelfVerifier`: step-level premise/support/contradiction/
+  circularity checks; produces `VerificationReport`s
+- **`meta.py`** — `MetaReasoningEngine`: strategy effectiveness scoring over
+  reasoning trace history (read-only recommendations)
+- **`models.py`** — immutable `@dataclass` reasoning artifacts and enums
+- **`protocols.py`** — `ReasoningModel` / `VerificationModel` / `HypothesisModel`
+  / `EvidenceProvider` / `CausalGraphProvider` (optional, protocol-injected
+  large-model enhancement; not required)
+- **`trace_recorder.py`** — `ReasoningTraceRecorder`: bounded in-memory surface
+  (duck-types the existing `ReasoningRecorder`), additively subscribed by the
+  kernel to `runtime.pipeline.completed`
+- **`trace_repository.py`** — `ReasoningTraceRepository`: in-memory + storage
+  dual-write repository
+- **`capability_handlers.py`** — `AdvancedReasoningCapabilityFactory`: pure
+  bridge handlers for `reasoning.*`
+- **`cli_commands.py`** — `atlas reasoning` CLI actions
+- **`storage_protocol.py`** — `AdvancedReasoningStorage` persistence protocol
+- **`evolution_integration.py`** — `ReasoningEvolutionTracker` +
+  `ReasoningIngestBridge` + `register_gov_011`
+- **`service.py`** — `AdvancedReasoningService`: constructor-injected
+  composition root owning the engines, repository, and ingest bridge
+- **`wiring.py`** — Track D `ComponentMetadata` + registration helpers
+
+**ARCHITECTURAL INVARIANT — pure module:** reasoning itself is pure
+computation. Only `atlas/storage/advanced_reasoning_storage.py` imports
+`sqlite3`; no Track D pure module imports kernel, runtime, dispatcher, gateway,
+AI providers, EventBus, scheduler, storage adapters, or `atlas.reasoning`
+internals beyond stable public models.
+
+## 13. Advanced Reasoning Persistence
+
+- Adapter: `atlas/storage/advanced_reasoning_storage.py`
+  (`AdvancedReasoningSQLiteStorage`) — the **only** Track D module importing
+  `sqlite3`
+- Implements the `AdvancedReasoningStorage` protocol (idempotent upserts for
+  traces; append-only logs for steps; fail-closed when unavailable)
+- Adds `reasoning_*` tables via the shared migration framework ->
+  **schema version 10**
+- Opens the shared `atlas_data/atlas_experience.db`; `initialize()` applies
+  additive migrations; no existing table is altered or dropped
+- `ReasoningTraceRepository` dual-writes to storage and keeps an in-memory
+  working set
+
+## 14. Advanced Reasoning Runtime Integration
+
+Verified in `test_kernel_advanced_reasoning_integration.py` and the kernel
+(`atlas/kernel/atlas.py`, Track D block):
+
+1. `AdvancedReasoningSQLiteStorage` initialized and injected
+2. `ReasoningTraceRepository` built over storage; `restore()` called
+3. `ReasoningIngestBridge` constructed (sink via `ReasoningIngestSink` protocol)
+4. `AdvancedReasoningService` constructed (private, kernel-owned) — **NOT**
+   registered in the ServiceContainer
+5. Provider adapters built in-kernel: `KnowledgeEvidenceProvider` wraps
+   `KnowledgeManager`; `WorldModelCausalGraphProvider` wraps `WorldModelEngine`
+   (neither registered in the container)
+6. `ReasoningTraceRecorder` subscribed by the kernel to
+   `runtime.pipeline.completed` (additive; RuntimeCoordinator unchanged)
+7. `AdvancedReasoningCapabilityFactory.register(...)` adds `reasoning.*` handlers
+8. `register_gov_011(...)` adds GOV-011 additively alongside GOV-008/009/010
+9. `register_advanced_reasoning_component` /
+   `register_advanced_reasoning_evolution_component` add ComponentMetadata
+
+Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
+
+## 15. Current Test / Verification State
+
+**Verified Track D Batch 2 execution** (decision-gate result, ~9 minutes):
+
+```
+2973 passed
+57 subtests passed
+0 failed
+0 errors
+```
+
+> **Precision rule:** Only an actually-executed number may be stated as a test
+> result. The figure above is the verified execution for Track D Batch 2. Any
+> snapshot from the Phase 1 repository inventory is a **"current test
+> inventory"**, not a result — do not call an inventory count a passing test
+> count.
+
+**Current test inventory (not a result):** 178 test files, 766 test classes,
+2958 test methods (+ parameterized subtests).
+
+Track D test coverage includes: storage, CLI, capability handlers, service,
+trace recorder, repositories, causal/hypotheses/verify/meta engines, models,
+protocols, wiring, evolution integration, import-boundary scans, and
+kernel integration.
+
+## 16. Architectural Invariants
+
+- **CURRENT IMPLEMENTATION** vs **ARCHITECTURAL INVARIANT** vs **DEFERRED** vs
+  **PROPOSED** are distinguished throughout this document; proposals are never
+  presented as implementation.
+- The RuntimeCoordinator stage order is fixed (Track D did not modify it).
+- Track-private services are never added to the ServiceContainer.
+- Pure logic never imports infrastructure; only `atlas/storage/` adapters import
+  `sqlite3`.
+- All cross-module edges are constructor-injected.
+- All state mutation goes through the Evolution Framework; the gateway is the
+  only execution entry point and the dispatcher its sole caller.
+- All changes are additive; no destructive migrations; no redesign of locked
+  packages.
+- Systems fail closed: missing governance, validation, or sink ⇒ refusal with a
+  meaningful error, never silent success.
+
+## 17. Protected / Locked Components
+
+Do **not** redesign these; extend additively only:
+
+- `atlas/kernel/` — root application + ServiceContainer wiring
+- `atlas/runtime/` — RuntimeCoordinator (14-stage order)
+- `atlas/reasoning/` — core reasoning (controller, capabilities, planning,
+  reflection); Track D may *consume* public models/outputs additively
+- `atlas/cognition/`, `atlas/ai/` — no Track D pipeline/provider changes
+- `atlas/memory/`, `atlas/knowledge/`, `atlas/understanding/`,
+  `atlas/world_model/`, `atlas/learning_engine/`, `atlas/goals/`,
+  `atlas/experience/`, `atlas/identity/`
+- `atlas/evolution/` — Evolution Framework (governance, autonomy, gateway,
+  dispatcher); GOV-011 is only additive rule registration
+- `atlas/storage/` migration framework (additive migrations only)
+- `atlas/intelligence/` — **LEGACY**, preserved, never modified
+
+## 18. Import Boundaries (prohibited dependencies)
+
+Pure-logic layers (`atlas/reasoning/**`, `atlas/advanced_reasoning/**`,
+`atlas/cognition/**`, evolution pure logic, etc.) **must never import**:
+
+- `atlas/kernel/`
+- `atlas/runtime/` (RuntimeCoordinator)
+- `atlas/evolution/autonomy/dispatcher.py` (only `Atlas.tick()` calls it)
+- `atlas/evolution/execution_gateway.py` (autonomy never imports it)
+- `atlas/ai/providers/` (only `AIManager` and the router touch providers)
+- `atlas/events/` (EventBus)
+- `atlas/storage/` adapters (storage modules own `sqlite3`)
+- `atlas/evolution/scheduler.py`
+
+Additionally, `atlas/evolution/autonomy/**` never imports the gateway, kernel,
+services, ai, or EventBus. These boundaries are enforced by import-boundary
+tests (e.g. `test_advanced_reasoning_import_scan.py`).
+
+## 19. Deferred Functionality (DEFERRED)
+
+- **`reasoning.ingest` sink is not wired at runtime.** The
+  `ReasoningIngestBridge` is constructed without a real governed sink, so
+  `reasoning.ingest` fails closed until the kernel wires a real sink into the
+  Phase 16 schedule-store/dispatcher queue. Reasoning artifacts are persisted
+  regardless; only *ingestion of distilled insights into Atlas state* is
+  deferred.
+- Track A deferred follow-ups: knowledge-graph expansion, web adapter,
+  coordinator implementation.
+- Track B deferred follow-ups: skill authoring, PARALLEL/CONDITIONAL execution,
+  learned-skill promotion.
+- Track C deferred follow-ups: feeding episodic context into working memory /
+  `ContextEngine` (requires RuntimeCoordinator review), semantic memory
+  upgrades, forgetting-policy tuning.
+- Phase 16: boot activation of staged config + SAFE_MODE rollback are part of
+  the governed-autonomy design but remain governed-path behavior; CODE scope is
+  unreachable by constitutional design.
+
+## 20. Current Known Limitations
+
+- CODE scope (`CODE_ARTIFACT`, `AUTONOMOUS` levels) is **unreachable** — Atlas
+  does not autonomously modify source code or its identity.
+- No distributed / multi-process execution (single-process assumption).
+- No autonomous reflection/strategy adjustment without approval.
+- Large-model enhancement in Track D is optional and protocol-injected; the
+  deterministic engine is the primary mechanism.
+- `docs/CHANGELOG.md` is not maintained past the early releases; git history is
+  the authoritative change log for later work.
+
+## 21. Rules Future AI Agents MUST Follow
+
+1. **Read this file first.** Do not perform repository-wide analysis. Read
+   `ATLAS_STATE.md`, then read only the modules directly related to the task
+   (verify service keys, models, and conventions above and in source).
+2. **Read before writing.** Touching an existing module requires reading it
+   first to learn its interface, exports, and patterns. Never guess signatures
+   or import paths.
+3. **Never redesign Atlas.** Kernel, Core Services, Memory, Workspace,
+   Evolution, and Governance are locked. Build additively on top of them.
+4. **Preserve backward compatibility.** Existing public APIs and service keys
+   must not break without explicit review. `atlas/intelligence/` is never
+   modified.
+5. **Preserve architecture.** Follow the layer rules (§4) and
+   prohibited-dependency rules (§18).
+6. **Follow dependency direction.** Pure logic never imports infrastructure;
+   storage adapters own all `sqlite3`; all cross-module edges are
+   constructor-injected.
+7. **Register new capabilities.** New handlers → `CapabilityRegistry`
+   (`DEFAULT_HANDLERS`/factory pattern). New components → `ComponentMetadata`
+   + container key only if shared. New storage tables → additive via
+   `atlas/storage/migration.py`.
+8. **Route every mutation through the Evolution Framework.** Never write Atlas
+   state directly. Track-private services are not added to the ServiceContainer.
+9. **Fail closed.** Missing dependency, governance, or sink ⇒ refusal with a
+   meaningful error and audit record.
+10. **Test first.** Write tests alongside implementation; run the full suite
+    before finishing; fix failures, never hide them.
+11. **One focused change at a time.** Prefer new files over edits; do not modify
+    unrelated code.
+12. **Record changes.** When a major milestone completes, update
+    `ATLAS_STATE.md`, then `ROADMAP.md`, then `README.md` if the public status
+    changed. Never treat archived docs as current architecture.
 
 ---
 
-## 11. Coding Standards
-
-### 11.1 Architecture
-
-- **Clean architecture:** layered `CLI → Services → Managers → Repositories → Storage`; business logic never touches storage directly
-- **SOLID:** single-responsibility modules; dependency inversion via constructor injection; interfaces in pure layers, implementations in adapters
-- **Dependency injection:** all cross-module edges are constructor-injected; no internal instantiation of services; no service locator in domain logic
-- **Pure logic vs infrastructure:** reasoning/cognition/evolution/understanding/goals/experience/learning models and engines are pure — no AI calls, no memory/knowledge access, no EventBus, no service imports (see §12)
-- **Fail closed:** missing governance, validation, or authorization ⇒ refusal, never silent success
-- **Test first:** every feature requires tests before completion; tests are mandatory, order-independent, run against the full suite; never modify tests to hide failures
-- **Additive changes only:** prefer new files over modifying existing ones; extend, never redesign
-- **No kernel rewrites:** `atlas/kernel/`, core services, and legacy `atlas/intelligence/` are protected
-- **No architecture drift:** every new capability must fit existing module boundaries and the Evolution Framework mutation path
-
-### 11.2 Code Style
-
-| Element | Convention |
-|---|---|
-| Classes | `PascalCase` |
-| Methods / functions | `snake_case` |
-| Data models | `@dataclass` (often `frozen=True, slots=True`) |
-| Type hints | Required on all signatures; `list[...]`/`dict[...]`/`X | None` |
-| Booleans | predicates (`is_loaded`) |
-| Arrays | plurals (`users`) |
-| Imports | Explicit only, grouped stdlib → third-party → atlas; pure logic must not import infrastructure |
-| Errors | Execution layer returns result objects with errors rather than raising; services wrap as needed |
-| Constants | Magic numbers/strings become named constants |
-
-### 11.3 Documentation
-
-Every module/class/method has a docstring explaining **what and why**. Architecture changes update this file and relevant ADRs.
-
----
-
-## 12. Prohibited Dependencies
-
-### 12.1 Pure Logic Layers MUST NEVER import
-
-- **kernel** (`atlas/kernel/`)
-- **runtime** (`atlas/runtime/`)
-- **dispatcher** (`atlas/evolution/autonomy/dispatcher.py` — no component other than `Atlas.tick()` calls it)
-- **gateway** (`atlas/evolution/execution_gateway.py` — autonomy modules never import it; it injects the application engine downward)
-- **AI providers** (`atlas/ai/providers/` — only `AIManager` and the router touch providers)
-- **EventBus** (`atlas/events/`)
-- **scheduler runtime** (`atlas/evolution/scheduler.py` is constructed and ticked only from the kernel; pure logic never imports it)
-
-Additionally, `atlas/evolution/autonomy/**` never imports `execution_gateway`, `kernel`, `services`, `ai`, or `EventBus`. `CognitionAPI` may depend on `CognitionService`; `CognitionEngine`/`CognitionContext`/`CognitionDecision` may not.
-
-### 12.2 Violation consequence
-
-Any import that crosses these boundaries is an architecture violation and must be rejected in review. Infrastructure adapters (in `atlas/storage/`) are the *only* modules that import `sqlite3`.
-
----
-
-## 13. Current Roadmap — Capability Track Era
-
-Post-core development is organized into **Capability Tracks** (roadmap units, not runtime constructs). The runtime remains capability-based; the Evolution Framework is the spine every track reports through. Tracks must not bypass the Evolution Framework.
-
-| Track | Name | Direction (summary only) |
-|---|---|---|
-| **A** | Research & Knowledge | **COMPLETE (Phase 17.1–17.9)**: research models, local source adapters, deterministic planner, knowledge extractor, claim verifier, `research_*` storage, `research.*` capabilities, governed KNOWLEDGE ingest (GOV-008), CLI. Remaining: knowledge-graph expansion, web adapter, coordinator implementation |
-| **B** | Tool Ecosystem | **COMPLETE (Phase 18.1–18.10)**: toolchain models, skill registry, tool-chain planning, safe execution, effectiveness tracking, tool learning, `toolchain_*` storage, `toolchain.*` capabilities, governed skill-activation ingest (GOV-009), CLI. Remaining: skill authoring, PARALLEL/CONDITIONAL execution, learned-skill promotion |
-| **C** | Long-Term Learning | **COMPLETE (Phase 19, v0.19.1, runtime-integrated)**: episodic recorder, procedure extractor, consolidator (dedup/merge/principled forgetting), episodic/procedural repositories, `episodic_*`/`procedural_*`/`memory_consolidation_records` storage (migration v9), `memory.*` capabilities, governed LONGTERM_INGEST (GOV-010), CLI, kernel wiring (GOV-010 + capability handlers + lifecycle metadata inside `Atlas.start()`). Remaining: feeding episodic context into working memory/`ContextEngine` (deferred — requires RuntimeCoordinator review), semantic memory upgrades, forgetting-policy tuning |
-| **D** | Advanced Reasoning | Multi-step reasoning, causal/counterfactual reasoning, hypothesis generation, self-verification, meta-reasoning |
-| **E** | Multi-Agent Collaboration | Agent registry, task decomposition, inter-agent messaging, result synthesis (in-process only; single-process assumption maintained) |
-| **F** | Human Collaboration | Unified approval center, audit/explainability surfaces, rich CLI, workspace sharing, optional API/plugin surfaces |
-| **G** | Self-Improvement | Bounded optimization under policy, capability trajectory monitoring, strategy-effectiveness analytics, verification benchmarks |
-
-**Era principles:** capabilities not phases; evolution is the only mutation channel; evidence over accumulation; pure logic preserved; additive packaging; fail-closed by default. Full designs for each track live in the approved architecture proposal; Tracks are summarized here by design and not fully designed in this document.
-
----
-
-## 14. Future Implementation Guidance
-
-> These instructions bind every future coding model working on Atlas.
-
-1. **Read this file first.** Do not perform repository-wide analysis. Read `docs/ATLAS_STATE.md`, then read only the modules directly related to the task (verify their service keys, models, and conventions in §3–§9).
-2. **Read before writing.** Any code that touches an existing module requires reading that module first to learn its interface, exports, and patterns. Never guess signatures or import paths.
-3. **Never redesign Atlas.** The Kernel, Core Services, Memory, Workspace, Evolution, and Governance are locked. Build on top of them with additive modules.
-4. **Preserve backward compatibility.** Existing public APIs and service keys must not break without explicit review. Legacy `atlas/intelligence/` is never modified.
-5. **Preserve architecture.** Follow the layered rules (§11.1) and prohibited-dependency rules (§12).
-6. **Follow dependency direction.** High-level modules depend on abstractions; pure logic never imports infrastructure; storage adapters own all `sqlite3` imports; all cross-module edges are constructor-injected.
-7. **Register all new capabilities.** New reasoning handlers → `CapabilityRegistry` (`DEFAULT_HANDLERS` pattern). New components → `ComponentMetadata` in `atlas/lifecycle/component_definitions.py` + container key if shared. New storage tables → additive tables via `atlas/storage/migration.py`.
-8. **Route every mutation through the Evolution Framework.** Never write Atlas state directly. Knowledge/memory ingest = `INFORMATION`-scope `EvolutionRequest`; capability changes = `CAPABILITY`-scope; config = `CONFIG`-scope (staged, boot-activated). The gateway is the only execution entry point.
-9. **Fail closed.** Missing dependencies, missing governance, invalid input ⇒ refusal with a meaningful error/audit record — never a silent success, never a 500-style crash in the reasoning layer.
-10. **Test first.** Write tests alongside implementation; run the full suite before finishing; fix failures, never hide them.
-11. **One focused change at a time.** Do not modify unrelated code. Prefer new files over edits.
-12. **Record changes.** Update this document and relevant ADRs when architecture changes; report format: summary, files created/modified, test results, assumptions, issues.
-
----
-
-*Document created: 2026-08-02 · Last updated: 2026-08-07 (v0.19.1 — Track C runtime-integrated, official stable baseline) · Project Atlas — docs/ATLAS_STATE.md · Replaces historical ATLAS_STATE as the permanent architecture handbook.*
+*Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
+implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
+Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative current
+architecture handbook and replaces all earlier ATLAS_STATE revisions.*
