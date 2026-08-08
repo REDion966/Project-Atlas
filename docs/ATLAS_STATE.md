@@ -50,16 +50,17 @@ mechanism by which Atlas may change its own operational state.
 
 | Field | Value |
 |---|---|
-| Released baseline | **v0.19.1** (stable; Track C runtime-integrated) |
-| Current HEAD | `9de5ba4` (branch `phase5-memory-evolution`) |
-| In-development work | **Track D — Advanced Reasoning** (post-`v0.19.1`) |
-| Track D release | **Unreleased** — no `v0.20` exists in git history |
+| Released baseline | **v0.20** (stable; Track D — Advanced Reasoning released) |
+| Current HEAD | `6d0416c` (branch `phase5-memory-evolution`) |
+| In-development work | **Post-Track-D — none committed** (next: roadmap CURRENT/NEXT items) |
+| Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **10** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
 | Era | **Capability Track Era** |
 
-**CURRENT IMPLEMENTATION:** Track D is implemented and runtime-integrated, but it
-is **post-`v0.19.1` and therefore unreleased**. Do not claim a `v0.20` release.
+**CURRENT IMPLEMENTATION:** Track D is implemented, runtime-integrated, and
+released in **v0.20** (annotated tag, full suite verified: 2973 passed, 57
+subtests, 0 failed, 0 errors). Do not claim any later release.
 
 ---
 
@@ -77,7 +78,7 @@ governed ingestion (**GOV-011**).
 | **A** | Research & Knowledge | **COMPLETE** | `v0.17.0` (Phase 17) |
 | **B** | Tool Ecosystem | **COMPLETE** | `v0.18.0` (Phase 18) |
 | **C** | Long-Term Learning | **COMPLETE & runtime-integrated** | `v0.19.1` (Phase 19) |
-| **D** | Advanced Reasoning | **IMPLEMENTED & runtime-integrated** | post-`v0.19.1` (unreleased) |
+| **D** | Advanced Reasoning | **RELEASED (`v0.20`)** — implemented & runtime-integrated | `v0.20` |
 
 ### 3.1 Track A — Research & Knowledge (COMPLETE)
 `atlas/research/` — research models, local source adapters (document/workspace/
@@ -506,5 +507,7 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
-Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative current
-architecture handbook and replaces all earlier ATLAS_STATE revisions.*
+Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
+2973 passed, 57 subtests, 0 failed, 0 errors) · Project Atlas —
+docs/ATLAS_STATE.md. This document is the authoritative current architecture
+handbook and replaces all earlier ATLAS_STATE revisions.*

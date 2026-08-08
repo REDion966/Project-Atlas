@@ -27,34 +27,34 @@ strictly:
 | **B** | Tool Ecosystem | Complete (`v0.18.0`) — `atlas/toolchain/`, migration v8, GOV-009, CLI |
 | **C** | Long-Term Learning | Complete & runtime-integrated (`v0.19.1`) — `atlas/longterm/`, migration v9, `memory.*`, GOV-010, CLI |
 
-### Track D — Advanced Reasoning (completed work)
+### Track D — Advanced Reasoning (released)
 - Multi-step reasoning, causal/counterfactual analysis, hypothesis generation,
   self-verification, meta-reasoning
 - `atlas/advanced_reasoning/` package + kernel-private `AdvancedReasoningService`
 - `reasoning_*` persistence (migration **v10**)
 - `reasoning.*` capability handlers + `atlas reasoning` CLI
 - GOV-011 (additive) + component metadata + trace-recorder pipeline integration
-- Verified Track D Batch 2: **2973 passed, 57 subtests, 0 failed, 0 errors**
-- Implemented **post-`v0.19.1`** and currently **unreleased**
+- Verified full suite at release gate: **2973 passed, 57 subtests, 0 failed,
+  0 errors**
+- **Released as `v0.20`** (annotated tag)
 
 ---
 
 ## CURRENT — Active Work
 
-**Post-Track-D stabilization and release preparation.**
+**Post-Track-D implementation.** Track D was released as `v0.20`. The active
+focus now moves to the first already-recorded NEXT implementation item:
 
-The active focus is stabilizing and finalizing the Track D integration and
-preparing a release decision:
-- Review / finalize the Track D integration (persistence, capability handlers,
-  CLI, kernel wiring)
-- Finalize release scope and make the next release decision (no `v0.20` has
-  been created yet)
-- Keep `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` synchronized
+- **Track A — research coordinator implementation** (NEXT below): the abstract
+  `ResearchCoordinator` interface exists (`atlas/evolution/research_coordinator.py`);
+  the concrete coordinator that orchestrates the Track A pipeline is the first
+  primed task.
+- Keep `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` synchronized.
 
-> The governed `ReasoningIngestSink` is a **pending/deferred dependency** for
-> Track D — **not** an actively approved implementation task. Do not treat it as
-> one; see DEFERRED below. `reasoning.ingest` is expected to remain fail-closed
-> until that dependency is resolved.
+> The governed `ReasoningIngestSink` is a **pending/deferred dependency** — **not**
+> an actively approved implementation task. Do not treat it as one; see DEFERRED
+> below. `reasoning.ingest` is expected to remain fail-closed until that dependency
+> is resolved.
 
 ---
 

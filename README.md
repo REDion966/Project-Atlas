@@ -14,10 +14,9 @@ human ownership and oversight.
 ## Current Status
 
 Atlas is in the **Capability Track Era**. All four core capability tracks
-(A–D) are implemented; Track D (Advanced Reasoning) is the current milestone,
-implemented after the `v0.19.1` baseline and **unreleased**.
+(A–D) are implemented; Track D (Advanced Reasoning) is **released as `v0.20`**.
 
-**Latest verified test run (Track D Batch 2):** `2973 passed`, `57 subtests passed`, `0 failed`, `0 errors` (~9 min).
+**Latest verified test run (Track D release gate):** `2973 passed`, `57 subtests passed`, `0 failed`, `0 errors` (~10 min).
 *Current test inventory (not a result):* 178 test files, 766 test classes, 2958 test methods.
 
 **Current schema version:** `10`.
@@ -29,7 +28,7 @@ implemented after the `v0.19.1` baseline and **unreleased**.
 | A | Research & Knowledge | **COMPLETE** (`v0.17.0`) |
 | B | Tool Ecosystem | **COMPLETE** (`v0.18.0`) |
 | C | Long-Term Learning | **COMPLETE & runtime-integrated** (`v0.19.1`) |
-| D | Advanced Reasoning | **IMPLEMENTED & runtime-integrated** (post-`v0.19.1`, unreleased) |
+| D | Advanced Reasoning | **RELEASED (`v0.20`)** — implemented & runtime-integrated |
 
 ### Advanced Reasoning (Track D)
 
@@ -126,9 +125,9 @@ docs/                 Documentation
 ## Roadmap (summary)
 
 - **COMPLETED:** Tracks A, B, C, and the Track D foundation/implementation.
-- **CURRENT:** Post-Track-D stabilization and release preparation — finalize
-  Track D integration and release scope, and make the next release decision
-  (no `v0.20` exists yet).
+- **CURRENT:** Post-Track-D — Track D is released (`v0.20`); the first
+  already-recorded NEXT implementation item (Track A research coordinator)
+  is the primed next task.
 - **DEFERRED:** Governed `ReasoningIngestSink` runtime wiring remains
   pending/deferred; it depends on the Phase 16 schedule-store/dispatcher
   hand-off being finalized, so `reasoning.ingest` stays fail-closed (sink not
