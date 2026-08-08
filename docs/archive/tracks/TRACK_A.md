@@ -1,5 +1,7 @@
 # Atlas Capability Track A — Research & Knowledge
 
+> HISTORICAL DOCUMENT — This track record is preserved for historical/design reference. The current implementation status is maintained in `docs/ATLAS_STATE.md` and `docs/ROADMAP.md`.
+
 **Status:** Complete (Phase 17.1–17.9) · **Version tag:** v0.17.0-track-a · **Integration:** Additive, no locked-component redesign
 
 ---

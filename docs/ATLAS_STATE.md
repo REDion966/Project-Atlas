@@ -51,7 +51,7 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.19.1** (stable; Track C runtime-integrated) |
-| Current HEAD | `35299c7` (branch `phase5-memory-evolution`) |
+| Current HEAD | `9de5ba4` (branch `phase5-memory-evolution`) |
 | In-development work | **Track D — Advanced Reasoning** (post-`v0.19.1`) |
 | Track D release | **Unreleased** — no `v0.20` exists in git history |
 | Current schema version | **10** |
@@ -465,8 +465,8 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 - No autonomous reflection/strategy adjustment without approval.
 - Large-model enhancement in Track D is optional and protocol-injected; the
   deterministic engine is the primary mechanism.
-- `docs/CHANGELOG.md` is not maintained past the early releases; git history is
-  the authoritative change log for later work.
+- `docs/archive/releases/CHANGELOG.md` is not maintained past the early
+  releases; git history is the authoritative change log for later work.
 
 ## 21. Rules Future AI Agents MUST Follow
 

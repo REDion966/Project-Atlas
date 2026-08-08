@@ -88,7 +88,7 @@ A phase or task may NOT be marked complete until this gate has been passed.
 - All tests must pass.
 - **The raw terminal output must be pasted, unedited**, as evidence.
 - No phase or task is complete without this evidence.
-- Documentation (`ATLAS_STATE.md`, `task_progress.md`, `README` when applicable) may only be updated AFTER verification succeeds.
+- Documentation (`docs/ATLAS_STATE.md`, `docs/ROADMAP.md`, `README.md` when applicable) may only be updated AFTER verification succeeds.
 
 **Acceptance criteria:**
 - All tests pass (see `docs/ATLAS_STATE.md` for current expected count).

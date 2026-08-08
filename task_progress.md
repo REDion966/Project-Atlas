@@ -1,5 +1,0 @@
-- [x] Complete finalization of Phase 6.8
-- [ ] Remove unused import from engine.py
-- [ ] Update ATLAS_STATE.md
-- [ ] Run ruff check . and pytest -q
-- [ ] Git add, commit

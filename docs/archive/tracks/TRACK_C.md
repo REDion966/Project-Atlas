@@ -1,5 +1,7 @@
 # Atlas Capability Track C — Long-Term Learning
 
+> HISTORICAL DOCUMENT — This track record is preserved for historical/design reference. The current implementation status is maintained in `docs/ATLAS_STATE.md` and `docs/ROADMAP.md`.
+
 **Status:** Approved for implementation · **Integration:** Additive, no locked-component redesign
 
 ---

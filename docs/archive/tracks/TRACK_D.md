@@ -1,5 +1,7 @@
 # Atlas Capability Track D — Advanced Reasoning
 
+> HISTORICAL DOCUMENT — This track record is preserved for historical/design reference. The current implementation status is maintained in `docs/ATLAS_STATE.md` and `docs/ROADMAP.md`.
+
 **Status:** Design phase (pending approval) · **Version tag:** n/a (design only; current baseline v0.19.1) · **Integration:** Additive, no locked-component redesign
 
 ---

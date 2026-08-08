@@ -1,5 +1,7 @@
 # Atlas Capability Track B — Tool Ecosystem
 
+> HISTORICAL DOCUMENT — This track record is preserved for historical/design reference. The current implementation status is maintained in `docs/ATLAS_STATE.md` and `docs/ROADMAP.md`.
+
 **Status:** Phase 18.1–18.10 (Batch 1–4) **· Integration:** Additive, no locked-component redesign
 
 ---

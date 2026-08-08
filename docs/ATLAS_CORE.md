@@ -1,6 +1,8 @@
 # ATLAS CORE — Permanent Operational Memory
 
-**Read this file first, then `ATLAS_STATE.md`.**
+**Supporting document.** The canonical entry points are `README.md`, then
+`docs/ATLAS_STATE.md`, then `docs/ROADMAP.md`; read this file only when deeper
+architectural principles are needed.
 
 ---
 
@@ -496,16 +498,18 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 The complete development workflow is documented in `docs/DEVELOPMENT_WORKFLOW.md`. The canonical per-session workflow is:
 
 ```
-1. Read ATLAS_CORE.md
-2. Read ATLAS_STATE.md
-3. Understand current state and architecture
-4. Confirm the requested task
-5. Implement only approved changes
-6. Verify changes (run the full test suite)
-7. Record updates and report result
+1. Read README.md (public entry point)
+2. Read ATLAS_STATE.md (authoritative current state)
+3. Read ROADMAP.md (authoritative forward direction)
+4. Read ATLAS_CORE.md (supporting/reference) when deeper principles are needed
+5. Understand current state and architecture
+6. Confirm the requested task
+7. Implement only approved changes
+8. Verify changes (run the full test suite)
+9. Record updates and report result
 ```
 
-**Entry-point note:** `ATLAS_CORE.md` and `ATLAS_STATE.md` are the canonical AI startup files. Read original reference documents only when deeper context is required.
+**Entry-point note:** `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` are the canonical hierarchy. `ATLAS_CORE.md` is supporting/reference material and should be read after `ATLAS_STATE.md` when relevant.
 
 > `ATLAS_MASTER_CONTEXT.md` is preserved as historical reference and is no longer the primary AI entry point.
 
@@ -578,7 +582,7 @@ Every report must include:
 Atlas currently contains two ADR numbering systems:
 - **ADR-001 to ADR-010**: primary architecture decisions.
 - **ADR-0001 to ADR-0003**: legacy/early architecture records.
-- **decisions/ADR-001-workspace**: standalone workspace decision record.
+- **docs/adr/ADR-001-workspace**: standalone workspace decision record.
 
 | ID | Decision | Status |
 |---:|----------|--------|
@@ -629,18 +633,17 @@ For deeper context, read these preserved files after ATLAS_CORE.md and ATLAS_STA
 | Topic | File |
 |-------|------|
 | Full constitution | `docs/ATLAS_CONSTITUTION.md` |
-| Detailed architecture | `docs/ARCHITECTURE.md` |
-| Deep cognition architecture | `docs/architecture/cognition.md` |
+| Detailed architecture (historical) | `docs/archive/architecture/ARCHITECTURE_v1.md` |
+| Deep cognition architecture (historical) | `docs/archive/architecture/cognition.md` |
 | Full decision records | `docs/ARCHITECTURE_DECISIONS.md` |
-| Current state | `docs/CURRENT_STATE.md` |
+| Current state (historical) | `docs/archive/context/CURRENT_STATE.md` |
 | Roadmap | `docs/ROADMAP.md` |
-| Development history | `docs/DEVELOPMENT_LOG.md` |
-| Coding guidelines | `docs/CODING_GUIDELINES.md` |
+| Development history (historical) | `docs/archive/development/DEVELOPMENT_LOG.md` |
+| Coding guidelines (historical) | `docs/archive/development/CODING_GUIDELINES.md` |
 | Development workflow | `docs/DEVELOPMENT_WORKFLOW.md` |
-| AI workflow protocol (historical) | `docs/AI_WORKFLOW_PROTOCOL.md` |
-| Model strategy | `docs/MODEL_STRATEGY.md` |
-| Future direction | `docs/FUTURE_DIRECTION.md` |
-| Engineering guide | `docs/ATLAS_ENGINEERING_GUIDE.md` |
-| Engineering handbook | `docs/handbook/ENGINEERING_HANDBOOK.md` |
-| Version history | `docs/CHANGELOG.md` |
+| AI workflow protocol (historical) | `docs/archive/development/AI_WORKFLOW_PROTOCOL.md` |
+| Model strategy (historical) | `docs/archive/development/MODEL_STRATEGY.md` |
+| Future direction (historical) | `docs/archive/roadmaps/FUTURE_DIRECTION.md` |
+| Engineering guide (historical) | `docs/archive/development/ATLAS_ENGINEERING_GUIDE.md` |
+| Version history (historical) | `docs/archive/releases/CHANGELOG.md` |
 | Historical checkpoints | `docs/archive/*` |

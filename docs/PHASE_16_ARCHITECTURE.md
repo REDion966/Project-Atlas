@@ -1,7 +1,20 @@
 # PHASE 16 — GOVERNED AUTONOMOUS EVOLUTION
 ## Architecture Specification v2.0
 
-**Status:** Approved · **Scope:** Architecture only · **Implementation:** Pending · **Supersedes:** v1.0 (74/100, NOT APPROVED) · **Integrates with:** Phase 15
+**Status:** Approved · **Scope:** Architecture reference · **Implementation:** IMPLEMENTED in the current repository (Evolution Framework autonomy stack, GOV-011, `execute_request()`/dispatcher) · **Supersedes:** v1.0 (74/100, NOT APPROVED) · **Integrates with:** Phase 15
+
+> This document is the historical design/reference specification for the Phase 16 governed-autonomy framework. The current implementation status is the authoritative source maintained in `docs/ATLAS_STATE.md` (see §11 Governance / Evolution Framework Boundaries); this document is not a current implementation instruction.
+
+- [x] Pre-flight checks (status, HEAD, doc tree)
+- [x] Phase 3A: Archive moves (19)
+- [x] Phase 3B: Historical banners on TRACK_A/B/C/D
+- [x] Phase 3C: Current-document fixes (ATLAS_STATE, ATLAS_CORE, PHASE_16)
+- [ ] Phase 3D: Deletes (11 files)
+- [ ] Phase 3E: Empty directory cleanup
+- [ ] Phase 3F: Reference integrity search + fixes
+- [ ] Phase 3G/H: Source protection + validation
+- [ ] Phase 3I: Final report (no commit)
+
 
 ---
 
