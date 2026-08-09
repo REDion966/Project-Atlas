@@ -17,6 +17,7 @@ from atlas.evolution.governance.models import ScopeType
 from atlas.experience.models import ExperienceOutcome, StructuredExperience
 from atlas.kernel.atlas import Atlas
 from atlas.storage.advanced_reasoning_storage import AdvancedReasoningSQLiteStorage
+from atlas.world_model.models import EntityCategory, RelationType
 
 
 class TestAdvancedReasoningKernelIntegration(unittest.TestCase):
@@ -61,6 +62,94 @@ class TestAdvancedReasoningKernelIntegration(unittest.TestCase):
         self.atlas.start()
         self.assertIsNotNone(self.atlas._advanced_reasoning_evidence_provider)
         self.assertIsNotNone(self.atlas._advanced_reasoning_causal_provider)
+
+    def test_service_internals_receive_provider_adapters(self) -> None:
+        """The AdvancedReasoningService engines must receive the kernel
+        adapters — not merely that the adapters exist on the kernel."""
+        self.atlas.start()
+        service = self.atlas._advanced_reasoning_service
+        self.assertIsNotNone(service)
+        # The injected MultiStepReasoner must carry the kernel's
+        # KnowledgeEvidenceProvider.
+        self.assertIs(
+            service.multi_step._evidence_provider,
+            self.atlas._advanced_reasoning_evidence_provider,
+        )
+        # The injected CausalReasoner must carry the kernel's
+        # WorldModelCausalGraphProvider.
+        self.assertIs(
+            service.causal._graph_provider,
+            self.atlas._advanced_reasoning_causal_provider,
+        )
+
+    def test_reasoning_trace_can_bind_knowledge_evidence(self) -> None:
+        """A reasoning.trace request against known knowledge produces
+        non-empty evidence_refs."""
+        self.atlas.start()
+        # Seed the in-memory knowledge base backing the evidence provider.
+        # KnowledgeSearch matches the sub-goal text as a substring of the
+        # entry content, so the record must contain the sub-goal verbatim.
+        self.atlas._knowledge_manager.remember(
+            title="Atlas latency",
+            content=(
+                "Atlas is built with Python. "
+                "is latency measured by pipeline yes it is measured "
+                "by the runtime pipeline component."
+            ),
+            source="kernel_test",
+        )
+        handler = self.atlas._capability_registry.get("reasoning.trace")
+        self.assertIsNotNone(handler)
+        result = handler({"question": "is the sky blue and is latency measured by pipeline"})
+        self.assertTrue(result.success, result.error)
+        self.assertTrue(result.output["trace"]["evidence_refs"])
+
+    def test_reasoning_causal_uses_world_model(self) -> None:
+        """reasoning.causal uses a seeded world-model relationship and
+        returns expected causal path information."""
+        self.atlas.start()
+        self.atlas._world_model_engine.register_entity(
+            label="rain", category=EntityCategory.ABSTRACT_CONCEPT, confidence=0.9,
+        )
+        self.atlas._world_model_engine.register_entity(
+            label="wet_ground", category=EntityCategory.ABSTRACT_CONCEPT, confidence=0.9,
+        )
+        self.atlas._world_model_engine.register_entity(
+            label="slippery_road", category=EntityCategory.ABSTRACT_CONCEPT, confidence=0.9,
+        )
+
+        # Locate the seeded entities by id (they were just registered).
+        entities = {
+            e.label: e.entity_id
+            for e in self.atlas._world_model_engine.graph.get_all_entities()
+        }
+        self.atlas._world_model_engine.add_causal_relation(
+            source_id=entities["rain"],
+            target_id=entities["wet_ground"],
+            relation_type=RelationType.CAUSES,
+            description="rain causes wet ground",
+            confidence=0.9,
+        )
+        self.atlas._world_model_engine.add_causal_relation(
+            source_id=entities["wet_ground"],
+            target_id=entities["slippery_road"],
+            relation_type=RelationType.CAUSES,
+            description="wet ground makes the road slippery",
+            confidence=0.8,
+        )
+
+        handler = self.atlas._capability_registry.get("reasoning.causal")
+        self.assertIsNotNone(handler)
+        result = handler({
+            "source": entities["rain"],
+            "target": entities["slippery_road"],
+        })
+        self.assertTrue(result.success, result.error)
+        self.assertGreater(result.output["count"], 0)
+        path = result.output["paths"][0]
+        self.assertEqual(path["source"], entities["rain"])
+        self.assertEqual(path["target"], entities["slippery_road"])
+        self.assertEqual(path["relation_types"], ("CAUSES", "CAUSES"))
 
     def test_reasoning_capabilities_registered(self) -> None:
         self.atlas.start()

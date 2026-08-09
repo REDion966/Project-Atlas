@@ -160,11 +160,13 @@ from atlas.storage.longterm_storage import LongTermSQLiteStorage
 from atlas.advanced_reasoning.capability_handlers import (
     AdvancedReasoningCapabilityFactory,
 )
+from atlas.advanced_reasoning.causal import CausalReasoner
 from atlas.advanced_reasoning.evolution_integration import (
     ReasoningIngestBridge,
     register_gov_011,
 )
 from atlas.advanced_reasoning.models import CausalPath
+from atlas.advanced_reasoning.multi_step import MultiStepReasoner
 from atlas.advanced_reasoning.service import AdvancedReasoningService
 from atlas.advanced_reasoning.trace_recorder import ReasoningTraceRecorder
 from atlas.advanced_reasoning.trace_repository import ReasoningTraceRepository
@@ -813,13 +815,23 @@ class Atlas:
 
         # --- Track D: AdvancedReasoningService (private, kernel-owned) ---
         # Composed with injected engines, dual-write repository, and the
-        # fail-closed ingest bridge. The service is NOT registered in the
-        # ServiceContainer (Track C private-factory precedent).
+        # fail-closed ingest bridge. The engine implementations receive the
+        # kernel-built provider adapters (KnowledgeEvidenceProvider →
+        # MultiStepReasoner; WorldModelCausalGraphProvider → CausalReasoner)
+        # so traces are evidence-aware and causal analysis reads the world
+        # model. The service is NOT registered in the ServiceContainer
+        # (Track C private-factory precedent).
         self._advanced_reasoning_ingest_bridge = ReasoningIngestBridge()
         self._advanced_reasoning_repository = ReasoningTraceRepository(
             storage=self._advanced_reasoning_storage
         )
         self._advanced_reasoning_service = AdvancedReasoningService(
+            multi_step=MultiStepReasoner(
+                evidence_provider=self._advanced_reasoning_evidence_provider
+            ),
+            causal=CausalReasoner(
+                graph_provider=self._advanced_reasoning_causal_provider
+            ),
             repository=self._advanced_reasoning_repository,
             ingest_bridge=self._advanced_reasoning_ingest_bridge,
         )
