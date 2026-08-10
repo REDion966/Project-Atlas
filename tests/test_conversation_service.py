@@ -95,12 +95,14 @@ class TestConversationServiceWithCognition(unittest.TestCase):
 
         response = service.send("Hello with cognition")
 
-        # Verify the cognition service was called with all kwargs
+        # Verify the cognition service was called with all kwargs —
+        # the raw user input is propagated as the processing goal
+        # (Phase 20, Batch 2: goal/intent propagation).
         mock_cognition_service.process.assert_called_once_with(
             user_input="Hello with cognition",
             memory=None,
             metadata=None,
-            goal=None,
+            goal="Hello with cognition",
         )
 
         # Verify response still works
@@ -135,12 +137,14 @@ class TestConversationServiceWithCognition(unittest.TestCase):
 
         response = service.send("Context test")
 
-        # Verify the cognition service was called with the right input
+        # Verify the cognition service was called with the right input —
+        # the raw user input is propagated as the processing goal
+        # (Phase 20, Batch 2: goal/intent propagation).
         mock_cognition_service.process.assert_called_once_with(
             user_input="Context test",
             memory=None,
             metadata=None,
-            goal=None,
+            goal="Context test",
         )
 
         # Verify response still works
@@ -175,11 +179,13 @@ class TestConversationServiceWithCognition(unittest.TestCase):
         chunks = list(service.stream("Stream test"))
 
         self.assertGreater(len(chunks), 0)
+        # The raw user input is propagated as the processing goal
+        # (Phase 20, Batch 2: goal/intent propagation).
         mock_cognition_service.process.assert_called_once_with(
             user_input="Stream test",
             memory=None,
             metadata=None,
-            goal=None,
+            goal="Stream test",
         )
 
 

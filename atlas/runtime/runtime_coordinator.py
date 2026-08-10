@@ -158,6 +158,7 @@ class RuntimeCoordinator:
         """
         state = CognitionState(
             user_input=user_input,
+            goal=goal or "",
             metadata=metadata or {},
         )
 
@@ -511,11 +512,18 @@ class RuntimeCoordinator:
                 status=StageStatus.SKIPPED,
             )
 
+        # The explicit goal (when provided) becomes the decision's
+        # reasoning, which ReasoningController.create_plan carries into
+        # the plan goal ("respond: <goal>"). Without a goal the previous
+        # default is preserved verbatim.
+        reasoning_text = state.goal or f"Process: {state.user_input[:100]}"
+
         decision = CognitionDecision(
             action="respond",
-            reasoning=f"Process: {state.user_input[:100]}",
+            reasoning=reasoning_text,
             data={
                 "input": state.user_input,
+                "goal": state.goal,
                 "understanding_insights": [
                     {"summary": i.summary, "confidence": i.confidence}
                     for i in state.understanding_insights[:10]

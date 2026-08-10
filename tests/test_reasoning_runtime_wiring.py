@@ -11,6 +11,7 @@ import unittest
 from atlas.kernel.atlas import Atlas
 from atlas.services.cognition_service import CognitionService
 from atlas.reasoning.controller import ReasoningController
+from atlas.reasoning.execution.models import ExecutionResult
 from atlas.reasoning.capabilities.analyzer import CapabilityAnalyzer
 from atlas.reasoning.execution.registry import CapabilityRegistry
 from atlas.reasoning.execution.routing import CapabilityRouter
@@ -84,6 +85,48 @@ class TestReasoningRuntimeWiring(unittest.TestCase):
         self.assertIn("results", reasoning)
 
         atlas.shutdown()
+
+    def test_process_propagates_goal_into_reasoning_path(self):
+        """RuntimeCoordinator.process(goal=...) must carry the explicit goal
+        into the reasoning/plan path."""
+        from atlas.runtime.runtime_coordinator import RuntimeCoordinator
+        from atlas.reasoning.planning import PlanningEngine
+        from atlas.reasoning.controller import ReasoningController
+        from atlas.reasoning.capabilities.analyzer import CapabilityAnalyzer
+        from atlas.reasoning.execution.registry import CapabilityRegistry
+        from atlas.reasoning.execution.routing import CapabilityRouter
+        from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
+
+        registry = CapabilityRegistry()
+        registry.register("conversation", lambda params: ExecutionResult(
+            capability="conversation", success=True, output={"ok": True},
+        ))
+
+        coordinator = RuntimeCoordinator(
+            reasoning_controller=ReasoningController(),
+            capability_analyzer=CapabilityAnalyzer(),
+            capability_registry=registry,
+            capability_router=CapabilityRouter(registry),
+            capability_dispatcher=CapabilityDispatcher(registry),
+            planning_engine=PlanningEngine(),
+        )
+
+        result = coordinator.process(
+            user_input="is the sky blue",
+            goal="verify claim X",
+        )
+
+        reasoning = next(
+            s.data for s in result.stages if s.stage.name == "REASONING"
+        )
+        planning = next(
+            s.data for s in result.stages if s.stage.name == "PLANNING"
+        )
+
+        # The explicit goal appears in the reasoning plan goal.
+        self.assertIn("verify claim X", reasoning["goal"])
+        # And it flows through to the planning goal via the reasoning goal.
+        self.assertIn("verify claim X", planning["goal"])
 
     def test_reasoning_results_contain_execution_result(self):
         """Reasoning results contain the fields of an ExecutionResult."""

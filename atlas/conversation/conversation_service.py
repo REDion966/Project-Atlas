@@ -84,9 +84,13 @@ class ConversationService:
         )
 
         # --- Phase 5.6: Optional cognition context ---
+        # The raw user input is propagated as the processing goal (Phase 20,
+        # Batch 2: goal/intent propagation). A future batch may replace this
+        # with richer intent extraction.
         if self._cognition_api is not None:
             decision = self._cognition_api.process(
                 user_input=text,
+                goal=text,
             )
 
             context.append(
@@ -151,9 +155,13 @@ class ConversationService:
         )
 
         # --- Phase 5.6: Optional cognition context ---
+        # The raw user input is propagated as the processing goal (Phase 20,
+        # Batch 2: goal/intent propagation). A future batch may replace this
+        # with richer intent extraction.
         if self._cognition_api is not None:
             decision = self._cognition_api.process(
                 user_input=text,
+                goal=text,
             )
 
             context.append(

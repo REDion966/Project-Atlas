@@ -72,6 +72,7 @@ class TestCognitionState:
     def test_defaults(self):
         state = CognitionState()
         assert state.user_input == ""
+        assert state.goal == ""
         assert state.memories == []
         assert state.knowledge == []
 
