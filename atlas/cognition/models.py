@@ -152,6 +152,7 @@ class CognitionState:
 
     user_input: str = ""
     goal: str = ""
+    reasoning_plan: Any | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
     memories: list[Any] = field(default_factory=list)
     knowledge: list[Any] = field(default_factory=list)

@@ -38,6 +38,7 @@ from atlas.cognition.models import (
     StageStatus,
     StageType,
 )
+from atlas.reasoning.capabilities.models import Capability
 
 
 class RuntimeCoordinator:
@@ -533,36 +534,29 @@ class RuntimeCoordinator:
 
         plan = self._reasoning_controller.create_plan(decision)
         capabilities = self._capability_analyzer.analyze(plan)
-        routes = self._capability_router.route(capabilities)
-        results = self._capability_dispatcher.dispatch(capabilities)
 
+        # Phase 20 Batch 3: capability dispatch no longer executes here.
+        # Only candidate capabilities are recorded; the plan (handed to the
+        # PLANNING stage via state.reasoning_plan) drives selection and
+        # dispatch after PLANNING has executed.
         reasoning_data = {
             "goal": plan.goal,
             "capabilities": [
                 {"name": c.name, "priority": c.priority, "reason": c.reason}
                 for c in capabilities
             ],
-            "routes": [
-                {"capability": r.capability, "handler_name": r.handler_name, "strategy": r.strategy}
-                for r in routes
-            ],
-            "results": [
-                {"capability": r.capability, "success": r.success, "output": r.output, "error": r.error}
-                for r in results
-            ],
+            "routes": [],
+            "results": [],
         }
 
         state.reasoning_result = reasoning_data
-
-        # Record reasoning outcome if recorder available
-        if self._reasoning_recorder is not None:
-            self._record_outcome(decision.action, reasoning_data, results)
+        state.reasoning_plan = plan
 
         return StageResult(
             stage=StageType.REASONING,
             status=StageStatus.SUCCESS,
             data=reasoning_data,
-            confidence=0.8 if results else 0.0,
+            confidence=0.8 if capabilities else 0.0,
         )
 
     # ------------------------------------------------------------------
@@ -588,12 +582,45 @@ class RuntimeCoordinator:
 
         from atlas.reasoning.models import ReasoningPlan
 
-        plan = ReasoningPlan(
+        plan = state.reasoning_plan or ReasoningPlan(
             goal=state.reasoning_result.get("goal", "respond"),
             steps=[],
         )
 
+        # Phase 20 Batch 3: PLANNING executes first, then capability
+        # selection and dispatch are driven by the plan steps — NOT in
+        # REASONING.
         planning_plan = self._planning_engine.decompose(plan)
+
+        # Capability selection is derived from the decomposed plan's steps,
+        # so PLANNING genuinely drives capability selection and dispatch.
+        execution_capabilities = self._select_plan_capabilities(planning_plan)
+        routes = self._capability_router.route(execution_capabilities)
+        results = self._capability_dispatcher.dispatch(execution_capabilities)
+
+        # Rebuild reasoning state with the execution results. A fresh dict
+        # keeps the REASONING stage's StageResult.data (which shares the
+        # original dict) free of execution results — dispatch only appears
+        # in the PLANNING stage and later context.
+        state.reasoning_result = {
+            "goal": state.reasoning_result.get("goal", "respond"),
+            "capabilities": [
+                {"name": c.name, "priority": c.priority, "reason": c.reason}
+                for c in execution_capabilities
+            ],
+            "routes": [
+                {"capability": r.capability, "handler_name": r.handler_name, "strategy": r.strategy}
+                for r in routes
+            ],
+            "results": [
+                {"capability": r.capability, "success": r.success, "output": r.output, "error": r.error}
+                for r in results
+            ],
+        }
+
+        # Record the reasoning outcome now that dispatch has executed.
+        if self._reasoning_recorder is not None:
+            self._record_outcome("respond", state.reasoning_result, results)
 
         planning_data = {
             "goal": planning_plan.goal,
@@ -610,6 +637,18 @@ class RuntimeCoordinator:
             ],
             "status": planning_plan.status,
             "validation_errors": list(planning_plan.validation_errors),
+            "dispatched_capabilities": [
+                {"name": c.name, "priority": c.priority, "reason": c.reason}
+                for c in execution_capabilities
+            ],
+            "routes": [
+                {"capability": r.capability, "handler_name": r.handler_name, "strategy": r.strategy}
+                for r in routes
+            ],
+            "results": [
+                {"capability": r.capability, "success": r.success, "output": r.output, "error": r.error}
+                for r in results
+            ],
         }
 
         state.planning_result = planning_data
@@ -618,7 +657,7 @@ class RuntimeCoordinator:
             stage=StageType.PLANNING,
             status=StageStatus.SUCCESS,
             data=planning_data,
-            confidence=0.7,
+            confidence=0.7 if results else 0.0,
         )
 
     # ------------------------------------------------------------------
@@ -644,7 +683,9 @@ class RuntimeCoordinator:
 
         from atlas.tools.models import ToolRequest
 
-        goal = state.reasoning_result.get("goal", state.user_input)
+        # Prefer the plan-derived goal (carried through reasoning), falling
+        # back to the explicit processing goal, then the raw user input.
+        goal = state.reasoning_result.get("goal") or state.goal or state.user_input
         tool_request = ToolRequest(
             goal=goal,
             context={
@@ -969,6 +1010,31 @@ class RuntimeCoordinator:
             self._capability_router is not None,
             self._capability_dispatcher is not None,
         ])
+
+    def _select_plan_capabilities(self, plan) -> list[Capability]:
+        """Derive execution capabilities from the plan's steps.
+
+        Each step action is first mapped through the CapabilityAnalyzer.
+        When the step action itself names a registered capability (e.g. a
+        Track-level handler such as ``research.query`` or ``toolchain.*``),
+        that capability is used directly so plans can reach registered
+        Track capabilities. Capabilities whose handler is missing remain in
+        the list and the dispatcher fails them soft.
+        """
+        capabilities: list[Capability] = []
+        for step in getattr(plan, "steps", []) or []:
+            cap = self._capability_analyzer.analyze_step(step)
+            action = getattr(step, "action", "") or ""
+            if action and self._capability_registry.has(action):
+                cap = Capability(
+                    name=action,
+                    priority=max(cap.priority, 5),
+                    reason=f"Plan step action: {action}",
+                    metadata=dict(cap.metadata),
+                )
+            capabilities.append(cap)
+        capabilities.sort(key=lambda c: c.priority, reverse=True)
+        return capabilities
 
     def _record_outcome(
         self,

@@ -50,6 +50,27 @@ class CapabilityAnalyzer:
 
         return capabilities
 
+    def analyze_step(
+        self,
+        step,
+    ) -> Capability:
+        """
+        Produce a Capability for a single step-like object.
+
+        The step may be a ``ReasoningStep`` or a ``PlanningStep``; only
+        the ``action`` attribute is needed. This supports plan-driven
+        capability selection (Phase 20, Batch 3) where each plan step is
+        independently mapped to a capability.
+
+        Args:
+            step: A step-like object exposing an ``action`` attribute.
+
+        Returns:
+            The Capability selected for the step's action.
+        """
+
+        return self._select_capability(step)
+
     def _select_capability(
         self,
         step,
