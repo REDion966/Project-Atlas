@@ -593,7 +593,15 @@ class Atlas:
         self._toolchain_factory.register(self._capability_registry)
 
         self._reasoning_controller = ReasoningController()
-        self._capability_analyzer = CapabilityAnalyzer()
+        # --- Phase 20 Batch 4: create the LearningEngine before the
+        #     CapabilityAnalyzer so reflection-derived strategy evidence
+        #     (stored in the kernel-owned LearningMemory) can influence
+        #     capability selection. The exact same LearningMemory instance
+        #     is reused — no second store is created.
+        self._learning_engine = LearningEngine()
+        self._capability_analyzer = CapabilityAnalyzer(
+            learning_provider=self._learning_engine.memory,
+        )
         self._capability_router = CapabilityRouter(self._capability_registry)
         self._capability_dispatcher = CapabilityDispatcher(self._capability_registry)
         self._reasoning_recorder = ReasoningRecorder()
@@ -621,7 +629,9 @@ class Atlas:
 
         self._world_model_engine = WorldModelEngine()
         self._self_observation_engine = SelfObservationEngine()
-        self._learning_engine = LearningEngine()
+        # self._learning_engine is created earlier (Phase 20 Batch 4) so
+        # the CapabilityAnalyzer can reuse the same kernel-owned
+        # LearningMemory instance.
         self._identity_engine = IdentityEngine()
         self._identity_engine.initialize()
 

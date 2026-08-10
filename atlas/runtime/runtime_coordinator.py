@@ -827,6 +827,8 @@ class RuntimeCoordinator:
         self,
         state: CognitionState,
     ) -> StageResult:
+        suggestions = getattr(state, "reflection_suggestions", []) or []
+
         pipeline_data = {
             "user_input": state.user_input,
             "memories_count": len(state.memories),
@@ -835,7 +837,24 @@ class RuntimeCoordinator:
             "has_reasoning": bool(state.reasoning_result),
             "has_planning": bool(state.planning_result),
             "has_tool_result": bool(state.tool_result),
-            "has_reflection": bool(state.reflection_suggestions),
+            "has_reflection": bool(suggestions),
+            # Phase 20 Batch 4: pass reflection output through so the
+            # LearningEngine can turn suggestions into reusable learning
+            # evidence. Suggestions are serialized so the learning engine
+            # stays independent of the reasoning layer.
+            "reflection_suggestions": [
+                {
+                    "pattern": getattr(s, "pattern", ""),
+                    "description": getattr(s, "description", ""),
+                    "suggestion": getattr(s, "suggestion", ""),
+                    "confidence": getattr(s, "confidence", 0.0),
+                    "target_area": getattr(s, "target_area", ""),
+                    "affected_outcomes_count": getattr(
+                        s, "affected_outcomes_count", 0
+                    ),
+                }
+                for s in suggestions
+            ],
         }
 
         insights = self._learning_engine.learn_from_pipeline(pipeline_data)

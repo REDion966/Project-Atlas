@@ -87,6 +87,12 @@ class LearningEngine:
         failure_insights = self._analyzer.generate_failure_insights(all_failures)
         new_insights.extend(failure_insights)
 
+        # 4b. Phase 20 Batch 4: Turn reflection suggestions into reusable
+        #     learning evidence. Additive — pipelines without reflection
+        #     suggestions are unaffected.
+        reflection_insights = self._generate_reflection_insights(pipeline_data)
+        new_insights.extend(reflection_insights)
+
         # 5. Generate understanding insight if applicable
         if pipeline_data.get("understanding_insights_count", 0) > 0:
             understanding_insight = self._generate_understanding_insight(pipeline_data)
@@ -169,6 +175,120 @@ class LearningEngine:
             observation_count=1,
             applicable_areas=["understanding"],
         )
+
+    def _generate_reflection_insights(
+        self,
+        data: dict[str, Any],
+    ) -> list[LearningInsight]:
+        """Generate reusable learning insights from reflection suggestions.
+
+        Phase 20 Batch 4 — closes the feedback path: reflection output
+        becomes structured, reusable strategy/learning evidence in the
+        existing LearningMemory representation.
+
+        Suggestions are passed as serialized dictionaries (the learning
+        engine does not depend on the reasoning layer). When the same
+        suggestion pattern recurs, the InsightConsolidator merges it and
+        strengthens confidence/observation count.
+
+        Backward compatible: no suggestions → no insights.
+        """
+        suggestions = data.get("reflection_suggestions") or []
+        insights: list[LearningInsight] = []
+
+        for index, suggestion in enumerate(suggestions):
+            pattern = str(suggestion.get("pattern", "") or "reflection")
+            confidence = float(suggestion.get("confidence", 0.0))
+            affected = int(suggestion.get("affected_outcomes_count", 0) or 0)
+            description = str(suggestion.get("description", "") or "")
+            suggestion_text = str(suggestion.get("suggestion", "") or "")
+            target_area = str(suggestion.get("target_area", "") or "")
+
+            title = f"Reflection: {pattern}"
+            if description and suggestion_text:
+                body = f"{description} {suggestion_text}"
+            else:
+                body = description or suggestion_text or pattern
+
+            insights.append(LearningInsight(
+                insight_id=f"LRN-REF-{self._pipeline_count:06d}-{index + 1:02d}",
+                category=LearningCategory.OPTIMIZATION,
+                title=title,
+                description=body,
+                importance=(
+                    InsightImportance.HIGH
+                    if confidence >= 0.7
+                    else InsightImportance.MEDIUM
+                ),
+                confidence=max(0.0, min(confidence, 1.0)),
+                observation_count=max(1, affected),
+                applicable_areas=[target_area] if target_area else ["general"],
+                metadata={"source": "reflection"},
+            ))
+
+            # Phase 20 Batch 4: record capability-keyed strategy
+            # performance so the CapabilityAnalyzer can consume the
+            # reflection evidence during later selection.
+            self._record_capability_evidence(suggestion, pattern, confidence)
+
+        return insights
+
+    def _record_capability_evidence(
+        self,
+        suggestion: dict[str, Any],
+        pattern: str,
+        confidence: float,
+    ) -> None:
+        """Record capability-keyed strategy performance from a suggestion.
+
+        Only failure suggestions carry enough signal to deprioritize a
+        capability: the suggestion text names the capability and the
+        confidence is its observed failure rate. The record is stored
+        under the capability name so the CapabilityAnalyzer's
+        ``get_strategy_by_name`` lookup finds it during later selection.
+
+        Deterministic and bounded; no-op when the suggestion does not
+        name a capability.
+        """
+        if pattern != "frequent_failures":
+            return
+
+        description = str(suggestion.get("description", "") or "")
+        suggestion_text = str(suggestion.get("suggestion", "") or "")
+        import re
+
+        match = re.search(r"Capability '([^']+)'", description) or re.search(
+            r"Capability '([^']+)'", suggestion_text
+        )
+        if match is None:
+            return
+
+        capability_name = match.group(1)
+        affected = int(suggestion.get("affected_outcomes_count", 0) or 0)
+        total = max(1, affected)
+
+        # Reflection confidence for frequent_failures IS the failure rate.
+        failure_rate = max(0.0, min(confidence, 1.0))
+        failures = round(total * failure_rate)
+        successes = total - failures
+
+        existing = self._memory.get_strategy_by_name(capability_name)
+        if existing is not None:
+            existing.total_uses += total
+            existing.success_count += successes
+            existing.failure_count += failures
+            existing.last_used = datetime.now()
+            return
+
+        self._memory.store_strategy(StrategyPerformance(
+            strategy_id=f"STRAT-CAP-{capability_name}",
+            strategy_name=capability_name,
+            strategy_type="capability",
+            total_uses=total,
+            success_count=successes,
+            failure_count=failures,
+            avg_confidence=1.0 - failure_rate,
+        ))
 
     def _generate_recommendations(
         self,
