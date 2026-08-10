@@ -219,6 +219,18 @@ class EvolutionScheduler:
                 observation_count=current_count,
             )
 
+        # Phase 20 Batch 5 — Evolution Intelligence feedback closure:
+        # executed proposals are already stored in EvolutionMemory (with
+        # their execution EvolutionRecords) by the time the scheduler runs
+        # an analysis cycle. analyze_all() turns those into EvolutionInsights
+        # that feed the existing knowledge pipeline and get consumed by
+        # get_insights() below. Missing engine stays fail-soft.
+        if self._intelligence_engine is not None:
+            try:
+                self._intelligence_engine.analyze_all()
+            except Exception:
+                pass
+
         # Fetch evolution insights if available
         insights = None
         if self._intelligence_engine is not None:
