@@ -128,6 +128,77 @@ class TestReasoningRuntimeWiring(unittest.TestCase):
         # And it flows through to the planning goal via the reasoning goal.
         self.assertIn("verify claim X", planning["goal"])
 
+    def test_public_cognition_api_exposes_planning_execution_results(self):
+        """Phase 20 regression: the exact public CognitionAPI path exposes
+        executed capability results while the internal stage invariant holds.
+
+        The pre-Phase-20 public contract on CognitionDecision.data["reasoning"]
+        (routes + results present) must survive the Batch 3 move of capability
+        dispatch from REASONING into PLANNING. This test exercises the real
+        public path (CognitionAPI -> CognitionService -> RuntimeCoordinator)
+        and separately asserts the internal stage boundary: REASONING stays
+        dispatch-free (results == []) and PLANNING carries the results.
+        """
+        from atlas.cognition.api import CognitionAPI
+        from atlas.cognition.models import StageType
+        from atlas.services.cognition_service import CognitionService
+        from atlas.runtime.runtime_coordinator import RuntimeCoordinator
+        from atlas.reasoning.capabilities.analyzer import CapabilityAnalyzer
+        from atlas.reasoning.controller import ReasoningController
+        from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
+        from atlas.reasoning.execution.registry import CapabilityRegistry
+        from atlas.reasoning.execution.routing import CapabilityRouter
+        from atlas.reasoning.planning import PlanningEngine
+
+        registry = CapabilityRegistry()
+        calls: list = []
+        registry.register(
+            "conversation",
+            lambda params: calls.append(params) or ExecutionResult(
+                capability="conversation",
+                success=True,
+                output={"ok": True},
+            ),
+        )
+
+        coordinator = RuntimeCoordinator(
+            reasoning_controller=ReasoningController(),
+            capability_analyzer=CapabilityAnalyzer(),
+            capability_registry=registry,
+            capability_router=CapabilityRouter(registry),
+            capability_dispatcher=CapabilityDispatcher(registry),
+            planning_engine=PlanningEngine(),
+        )
+        service = CognitionService(runtime_coordinator=coordinator)
+        service.start()
+        api = CognitionAPI(cognition_service=service)
+
+        decision = api.process("Hello world")
+
+        # Public CognitionAPI contract: executed results are exposed under
+        # the "reasoning" key (with routes), matching pre-Phase-20 shape.
+        results = decision.data["reasoning"]["results"]
+        self.assertGreater(len(results), 0)
+        self.assertEqual(results[0]["capability"], "conversation")
+        self.assertTrue(results[0]["success"])
+        self.assertEqual(len(decision.data["reasoning"]["routes"]), 1)
+
+        # Internal stage invariant (Phase 20 Batch 3): dispatch lives in
+        # PLANNING; the REASONING stage keeps empty route/result lists.
+        run = coordinator.process("Hello world")
+        reasoning = next(
+            s.data for s in run.stages if s.stage.name == "REASONING"
+        )
+        planning = next(
+            s.data for s in run.stages if s.stage.name == "PLANNING"
+        )
+        self.assertEqual(reasoning["results"], [])
+        self.assertEqual(reasoning["routes"], [])
+        self.assertEqual(len(planning["results"]), 1)
+
+        # Each public interaction executed the capability exactly once.
+        self.assertEqual(len(calls), 2)
+
     def test_reasoning_results_contain_execution_result(self):
         """Reasoning results contain the fields of an ExecutionResult."""
 

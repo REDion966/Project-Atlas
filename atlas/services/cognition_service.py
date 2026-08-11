@@ -165,8 +165,35 @@ class CognitionService(Service):
             "understanding_insights_count": intermediate.get("understanding_insights_count", 0),
         }
 
+        # Phase 20 corrective fix: capability dispatch moved from the
+        # REASONING stage into PLANNING. The REASONING stage's route/result
+        # lists are therefore structurally empty, while the executed results
+        # live in the PLANNING stage. The public decision payload must keep
+        # exposing the executed results under the "reasoning" key (the
+        # pre-Phase-20 CognitionAPI contract). This overlay is read-only and
+        # copies the lists, leaving the internal stage data untouched.
         if reasoning_data:
-            data_payload["reasoning"] = reasoning_data
+            public_reasoning = dict(reasoning_data)
+            if planning_data:
+                public_reasoning["capabilities"] = list(
+                    planning_data.get(
+                        "dispatched_capabilities",
+                        public_reasoning.get("capabilities", []),
+                    )
+                )
+                public_reasoning["routes"] = list(
+                    planning_data.get(
+                        "routes",
+                        public_reasoning.get("routes", []),
+                    )
+                )
+                public_reasoning["results"] = list(
+                    planning_data.get(
+                        "results",
+                        public_reasoning.get("results", []),
+                    )
+                )
+            data_payload["reasoning"] = public_reasoning
         if planning_data:
             data_payload["planning"] = planning_data
         if tool_data:
