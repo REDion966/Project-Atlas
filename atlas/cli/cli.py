@@ -50,5 +50,10 @@ class AtlasCLI:
 
                 print("\n")
 
+                # Phase 20 Batch 7: make the runtime tick reachable from the
+                # CLI. Invoked once after each completed user/assistant
+                # interaction (not for slash commands, blank lines, or exit).
+                self._atlas.tick()
+
         finally:
             self._atlas.shutdown()
