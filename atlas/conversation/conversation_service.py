@@ -6,6 +6,7 @@ Coordinates Atlas conversations.
 
 from pathlib import Path
 
+from atlas.ai.routing.models import RoutingRequest
 from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
@@ -118,7 +119,8 @@ class ConversationService:
         )
 
         response = self._ai.chat(
-            prompt
+            prompt,
+            routing_context=self._build_routing_request(text),
         )
 
         assistant_message = Message(
@@ -190,7 +192,10 @@ class ConversationService:
 
         assistant_text = ""
 
-        for chunk in self._ai.stream_chat(prompt):
+        for chunk in self._ai.stream_chat(
+            prompt,
+            routing_context=self._build_routing_request(text),
+        ):
             assistant_text += chunk
             yield chunk
 
@@ -201,6 +206,35 @@ class ConversationService:
 
         self._conversation.add_message(
             assistant_message
+        )
+
+    def _build_routing_request(
+        self,
+        text: str,
+    ) -> RoutingRequest:
+        """Build a minimal deterministic RoutingRequest from the user input.
+
+        Phase 20 Batch 6 — the direct conversation path (send/stream) can
+        bypass the RuntimeCoordinator, so the existing ModelRouter would
+        otherwise stay dormant for CLI chat. Complexity here is a
+        deterministic function of input length so ordinary messages route
+        to the configured Ollama profile (complexity >= 0.5) and longer,
+        more involved requests escalate.
+        """
+        length = max(1, len(text.strip()))
+        if length <= 40:
+            complexity = 0.5
+        elif length <= 120:
+            complexity = 0.6
+        else:
+            complexity = 0.7
+
+        return RoutingRequest(
+            complexity=complexity,
+            latency_requirement="fast",
+            task_type="conversation",
+            context_size=length,
+            metadata={"source": "conversation_service"},
         )
 
     def save(self) -> Path:

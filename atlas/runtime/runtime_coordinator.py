@@ -30,6 +30,7 @@ from typing import Any, Callable
 from atlas.cognition.context import CognitionContext
 from atlas.cognition.decision import CognitionDecision
 from atlas.cognition.engine import CognitionEngine
+from atlas.ai.routing.models import RoutingRequest
 from atlas.cognition.models import (
     CognitionState,
     PipelineMetrics,
@@ -759,7 +760,19 @@ class RuntimeCoordinator:
             )
 
         messages = self._build_messages(state)
-        response = self._ai_service.chat(messages)
+        # Phase 20 Batch 6: the existing ModelRouter is activated by
+        # constructing a RoutingRequest from the plan state and passing it
+        # through AIService.chat(routing_context=...). No routing context is
+        # produced when planning never ran — the AI service then keeps its
+        # existing default behavior.
+        routing_request = self._build_routing_request(state)
+        if routing_request is None:
+            response = self._ai_service.chat(messages)
+        else:
+            response = self._ai_service.chat(
+                messages,
+                routing_context=routing_request,
+            )
 
         state.ai_response = response.text if hasattr(response, "text") else str(response)
 
@@ -1054,6 +1067,58 @@ class RuntimeCoordinator:
             capabilities.append(cap)
         capabilities.sort(key=lambda c: c.priority, reverse=True)
         return capabilities
+
+    def _build_routing_request(
+        self,
+        state: CognitionState,
+    ) -> RoutingRequest | None:
+        """Build a deterministic RoutingRequest from the pipeline's plan state.
+
+        Phase 20 Batch 6 — activates the existing ModelRouter by translating
+        Phase 20 planning output (plan steps and dispatched capabilities)
+        into the existing RoutingRequest schema.
+
+        Complexity derives from how much work the plan implies: a 1-step
+        respond/query plan maps to the low end; deeper plans and tool use
+        escalate. A floor of 0.5 keeps ordinary requests on the configured
+        Ollama profile rather than the 0.3-complexity Mock stub. Returns
+        None when no planning ran, preserving the pre-routing behavior of a
+        request that bypasses the ModelRouter.
+        """
+        planning = state.planning_result or {}
+        steps = planning.get("steps") or []
+        results = planning.get("results") or []
+        if not steps:
+            return None
+
+        # Deterministic complexity: base + plan breadth/depth + tool use,
+        # bounded to the [0.0, 1.0] schema range.
+        step_weight = max(1, len(steps))
+        tool_weight = 1 if any(
+            r.get("tool_name") or r.get("capability", "").startswith("toolchain.")
+            for r in results
+        ) else 0
+        complexity = min(1.0, 0.5 + (step_weight - 1) * 0.1 + tool_weight * 0.1)
+
+        latency_requirement = "fast" if step_weight <= 2 else "medium"
+        task_type = planning.get("goal", "respond") or "respond"
+        context_size = max(
+            0,
+            len(steps) + len(state.understanding_insights),
+        )
+
+        return RoutingRequest(
+            complexity=round(complexity, 2),
+            latency_requirement=latency_requirement,
+            task_type=task_type,
+            context_size=context_size,
+            metadata={
+                "source": "runtime_coordinator",
+                "plan_step_count": len(steps),
+                "dispatched_count": len(results),
+                "has_tool_execution": bool(tool_weight),
+            },
+        )
 
     def _record_outcome(
         self,
