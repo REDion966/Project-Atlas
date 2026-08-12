@@ -17,4 +17,6 @@ MagicMock/
 .continue/agents/new-config.yaml
 .continue/
 .env
-*.envatlas_data/*.db
+
+# Atlas Runtime Data (SQLite databases, conversation exports)
+atlas_data/
