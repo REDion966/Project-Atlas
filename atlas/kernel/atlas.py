@@ -126,7 +126,11 @@ from atlas.lifecycle import (
 
 # --- Track A: Research & Knowledge (Phase 17 integration) ---
 from atlas.research.capability_handlers import ResearchCapabilityFactory
-from atlas.research.evolution_integration import register_gov_008
+from atlas.research.coordinator import ConcreteResearchCoordinator
+from atlas.research.evolution_integration import (
+    ResearchIngestBridge,
+    register_gov_008,
+)
 from atlas.research.wiring import register_research_component
 from atlas.storage.research_storage import ResearchSQLiteStorage
 
@@ -395,6 +399,8 @@ class Atlas:
         # --- Track A: Research & Knowledge ---
         self._research_storage: ResearchSQLiteStorage | None = None
         self._research_factory: ResearchCapabilityFactory | None = None
+        self._research_coordinator: ConcreteResearchCoordinator | None = None
+        self._research_ingest_bridge: ResearchIngestBridge | None = None
 
         # --- Track B: Tool Ecosystem ---
         self._toolchain_storage: ToolchainSQLiteStorage | None = None
@@ -498,6 +504,11 @@ class Atlas:
     def goal_executor(self):
         """Return the GoalExecutionEngine (Phase 15.0)."""
         return self._goal_executor
+
+    @property
+    def research_coordinator(self):
+        """Return the kernel-owned ConcreteResearchCoordinator (Phase 21)."""
+        return self._research_coordinator
 
     @property
     def started(self):
@@ -736,6 +747,26 @@ class Atlas:
                 "research.storage.unavailable",
                 {"mode": "memory_only"},
             )
+
+        # --- Track A (Phase 21): Concrete Research Coordinator ---
+        # Composed from the SAME Track A components owned by the factory
+        # (planner/extractor/verifier + the factory's source resolver) — no
+        # duplicate components. Storage is the kernel-owned research adapter;
+        # ingest is governed and fails closed (sink intentionally unwired
+        # until the Phase 16 hand-off exists). The coordinator is kernel-private
+        # and NOT registered in the ServiceContainer (Track C/D precedent).
+        self._research_ingest_bridge = ResearchIngestBridge()
+        self._research_coordinator = ConcreteResearchCoordinator(
+            planner=self._research_factory.planner,
+            extractor=self._research_factory.extractor,
+            verifier=self._research_factory.verifier,
+            storage=self._research_storage,
+            ingest=self._research_ingest_bridge,
+            resolve_sources=self._research_factory._resolve_sources,
+        )
+        self._research_factory.register_coordinator(
+            self._research_coordinator, self._capability_registry
+        )
 
         # --- Track B: Instantiate and initialize toolchain storage (Phase 18.8) ---
         self._toolchain_storage = ToolchainSQLiteStorage()
@@ -1319,6 +1350,17 @@ class Atlas:
 
         # --- Phase 13.6: Cleanup ---
         self._knowledge_pipeline = None
+
+        # --- Track A: Cleanup (storage close + kernel-private refs) ---
+        if self._research_storage is not None:
+            try:
+                self._research_storage.close()
+            except Exception:
+                pass
+        self._research_storage = None
+        self._research_factory = None
+        self._research_coordinator = None
+        self._research_ingest_bridge = None
 
         # --- Track C: Cleanup ---
         if self._longterm_storage is not None:

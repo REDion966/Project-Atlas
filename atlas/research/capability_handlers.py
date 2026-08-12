@@ -20,6 +20,7 @@ from typing import Callable
 from atlas.evolution.models import ResearchQuery
 from atlas.reasoning.execution.models import ExecutionResult
 from atlas.reasoning.execution.registry import CapabilityRegistry
+from atlas.research.coordinator import ConcreteResearchCoordinator
 from atlas.research.extractor import KnowledgeExtractor
 from atlas.research.models import (
     ClaimVerification,
@@ -41,38 +42,161 @@ CapabilityHandler = Callable[[dict], ExecutionResult]
 
 
 class ResearchCapabilityFactory:
-    """Constructs the three Track A capability handlers with DI."""
+    """Constructs the Track A capability handlers with DI.
+
+    Phase 21 adds an optional ``coordinator``. When injected, a fourth
+    additive capability ``research.coordinate`` is registered that delegates
+    the whole Track A pipeline to the concrete ResearchCoordinator. Without a
+    coordinator the factory is identical to the pre-Phase-21 surface
+    (research.query / research.verify / research.summarize).
+    """
 
     def __init__(
         self,
         planner: ResearchPlanner | None = None,
         extractor: KnowledgeExtractor | None = None,
         verifier: ClaimVerifier | None = None,
+        coordinator: ConcreteResearchCoordinator | None = None,
     ) -> None:
         self._planner = planner or ResearchPlanner()
         self._extractor = extractor or KnowledgeExtractor()
         self._verifier = verifier or ClaimVerifier()
+        self._coordinator = coordinator
 
     @property
     def planner(self) -> ResearchPlanner:
         return self._planner
+
+    @property
+    def extractor(self) -> KnowledgeExtractor:
+        return self._extractor
+
+    @property
+    def verifier(self) -> ClaimVerifier:
+        return self._verifier
+
+    @property
+    def coordinator(self) -> ConcreteResearchCoordinator | None:
+        """Return the injected concrete coordinator, or None."""
+        return self._coordinator
+
+    def set_coordinator(self, coordinator: ConcreteResearchCoordinator) -> None:
+        """Atomically (re)bind the coordinator and expose research.coordinate.
+
+        Additive Phase 21 wiring: called by the kernel after the coordinator
+        is fully constructed (post storage init) so the same factory's
+        planner/extractor/verifier instances are reused — no duplicate
+        Track A components are created.
+        """
+        self._coordinator = coordinator
+
+    def register_coordinator(
+        self,
+        coordinator: ConcreteResearchCoordinator,
+        registry: CapabilityRegistry,
+    ) -> None:
+        """Additively register ``research.coordinate`` into a registry.
+
+        The kernel calls this once the concrete coordinator exists. It never
+        re-registers the existing three research handlers (which would raise
+        ``ValueError`` on duplicate registration); it only adds the new
+        plan-reachable capability if absent.
+        """
+        self.set_coordinator(coordinator)
+        if not registry.has("research.coordinate"):
+            registry.register("research.coordinate", self._coordinate_handler)
 
     # ------------------------------------------------------------------
     # Registration surface
     # ------------------------------------------------------------------
 
     def handlers(self) -> dict[str, CapabilityHandler]:
-        """Return the three research capabilities keyed by name."""
-        return {
+        """Return the research capabilities keyed by name.
+
+        Additive (Phase 21): ``research.coordinate`` is only included when
+        a concrete coordinator has been injected. Without a coordinator the
+        returned map is identical to the pre-Phase-21 three-handler surface.
+        """
+        handlers: dict[str, CapabilityHandler] = {
             "research.query": self._query_handler,
             "research.verify": self._verify_handler,
             "research.summarize": self._summarize_handler,
         }
+        if self._coordinator is not None:
+            handlers["research.coordinate"] = self._coordinate_handler
+        return handlers
 
     def register(self, registry: CapabilityRegistry) -> None:
-        """Register all three handlers into a CapabilityRegistry."""
+        """Register all handlers into a CapabilityRegistry."""
         for name, handler in self.handlers().items():
             registry.register(name, handler)
+
+    # ------------------------------------------------------------------
+    # research.coordinate — plan-driven delegation to the coordinator
+    # ------------------------------------------------------------------
+
+    def _coordinate_handler(self, params: dict) -> ExecutionResult:
+        """Delegate the full Track A pipeline to the injected coordinator.
+
+        Reachable from a planning step whose action is ``research.coordinate``
+        through the existing CapabilityRegistry/Router/Dispatcher path. Invokes
+        the coordinator exactly once. Fail-soft: the coordinator never raises,
+        and a defensive boundary converts unexpected errors into a failed
+        ExecutionResult (same convention as the other research handlers).
+        """
+        coordinator = self._coordinator
+        if coordinator is None:
+            return ExecutionResult(
+                capability="research.coordinate",
+                success=False,
+                error="research coordinator is not injected",
+                metadata={"handler": "research.coordinate"},
+            )
+        question = params.get("question")
+        if not isinstance(question, str) or not question.strip():
+            # Plan steps reach this handler through the capability passthrough,
+            # which delivers the step's action as ``{"action": ...}`` (same
+            # style as the other research handlers). Fall back to the action so
+            # a bare plan step still executes the coordinator deterministically.
+            action = params.get("action")
+            if isinstance(action, str) and action.strip():
+                question = action
+            else:
+                return ExecutionResult(
+                    capability="research.coordinate",
+                    success=False,
+                    error="'question' is required",
+                    metadata={"handler": "research.coordinate"},
+                )
+        query_id = str(params.get("query_id", "cli"))
+        query = ResearchQuery(
+            query_id=query_id,
+            question=question,
+            context=dict(params.get("context", {}) or {}),
+        )
+        try:
+            result = coordinator.run(query)
+            return ExecutionResult(
+                capability="research.coordinate",
+                success=True,
+                output={
+                    "query_id": result.query_id,
+                    "findings": result.findings,
+                    "sources": list(result.sources or []),
+                    "confidence": result.confidence,
+                    "completed_at": result.completed_at.isoformat()
+                    if hasattr(result.completed_at, "isoformat")
+                    else str(result.completed_at),
+                },
+                metadata={"handler": "research.coordinate"},
+            )
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            return ExecutionResult(
+                capability="research.coordinate",
+                success=False,
+                error=str(exc),
+                metadata={"handler": "research.coordinate"},
+            )
 
     # ------------------------------------------------------------------
     # research.query — full pipeline
