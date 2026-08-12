@@ -187,9 +187,17 @@ class CapabilityAnalyzer:
         """
         Adjust a capability's priority from recorded strategy performance.
 
+        Evidence is consulted under the capability's mapped name. When the
+        analyzer mapped an unregistered plan-step action to the generic
+        fallback (``name == "general"``), the step action itself (carried
+        in ``metadata["action"]``) is consulted as well so capability-keyed
+        evidence recorded for plan-reachable Track capabilities (e.g.
+        ``research.coordinate``) can influence later selection (Phase 21
+        Batch 3 research feedback).
+
         The adjustment is deterministic and bounded:
           - no provider → no change
-          - no record for this capability → no change
+          - no record for a consulted key → no change for that key
           - fewer than MIN_EVIDENCE_USES uses → no change
           - otherwise priority shifts by at most MAX_PRIORITY_ADJUSTMENT.
 
@@ -199,25 +207,42 @@ class CapabilityAnalyzer:
         if self._learning_provider is None:
             return
 
-        performance = self._learning_provider.get_strategy_performance(
-            capability.name,
-        )
+        keys = [capability.name]
+        action = capability.metadata.get("action")
+        if capability.name == "general" and isinstance(action, str) and action.strip():
+            keys.append(action.strip())
+
+        delta = 0
+        for key in keys:
+            key_delta = self._evidence_delta_for_key(key)
+            if abs(key_delta) > abs(delta):
+                delta = key_delta
+
+        if delta:
+            capability.priority = capability.priority + delta
+
+    def _evidence_delta_for_key(self, key: str) -> int:
+        """Bounded priority delta from strategy evidence for one key."""
+        provider = self._learning_provider
+        if provider is None:
+            return 0
+        performance = provider.get_strategy_performance(key)
         if performance is None:
-            return
+            return 0
 
         try:
             success_rate = float(getattr(performance, "success_rate", 0.5))
             total_uses = int(getattr(performance, "total_uses", 0))
         except (TypeError, ValueError):
-            return
+            return 0
 
         if total_uses < _MIN_EVIDENCE_USES:
-            return
+            return 0
 
         # Bias proportional to how far from neutral (0.5) the success
         # rate sits, scaled into the bounded adjustment range.
         delta = round((success_rate - 0.5) * 4.0)
-        delta = max(-_MAX_PRIORITY_ADJUSTMENT, min(_MAX_PRIORITY_ADJUSTMENT, delta))
-
-        if delta:
-            capability.priority = capability.priority + delta
+        return max(
+            -_MAX_PRIORITY_ADJUSTMENT,
+            min(_MAX_PRIORITY_ADJUSTMENT, delta),
+        )
