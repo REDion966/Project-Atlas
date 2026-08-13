@@ -51,8 +51,8 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.20** (stable; Track D — Advanced Reasoning released) |
-| Current HEAD | `6d0416c` (branch `phase5-memory-evolution`) |
-| In-development work | **Post-Track-D — none committed** (next: roadmap CURRENT/NEXT items) |
+| Current HEAD | `fee0e32` (branch `phase5-memory-evolution`) |
+| In-development work | **Phase 21 — Track A research coordinator** (implemented: concrete coordinator, plan reachability, research feedback loop) — not released |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **10** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
@@ -70,6 +70,13 @@ The current milestone is **Track D — Advanced Reasoning**, implemented as an
 additive capability track on top of the locked core (`v0.19.1` baseline), with a
 private kernel-owned service, `reasoning_*` persistence (schema **v10**), and
 governed ingestion (**GOV-011**).
+
+**Phase 21 — Track A research coordinator** (in development, not released)
+implements the first already-recorded NEXT item from the roadmap: the concrete
+`ConcreteResearchCoordinator`, its plan-reachable `research.coordinate`
+capability, and the research-output feedback loop into the existing Phase 20
+outcome → ReflectionEngine → LearningEngine boundary. Validation state is
+recorded in §3.5 and §22.
 
 ### Track Status Summary
 
@@ -102,6 +109,29 @@ migration v9), `memory.*` capability handlers, governed LONGTERM_INGEST
 
 ### 3.4 Track D — Advanced Reasoning (IMPLEMENTED & runtime-integrated)
 See §18–§20 for the full architecture description.
+
+### 3.5 Phase 21 — Track A Research Coordinator (in development)
+`atlas/research/coordinator.py` — `ConcreteResearchCoordinator`, the first
+concrete implementation of the legacy `ResearchCoordinator` ABC
+(`atlas/evolution/research_coordinator.py`). It composes the existing Track A
+components (ResearchPlanner, KnowledgeExtractor, ClaimVerifier,
+ResearchSQLiteStorage, governed ResearchIngestBridge) via constructor
+injection — no duplicates, no new subsystems.
+
+- **Plan reachability:** `research.coordinate` is registered additively by the
+  kernel and reached through a plan step via the existing
+  `CapabilityRegistry → CapabilityRouter → CapabilityDispatcher` path in the
+  PLANNING stage. REASONING remains candidate-only.
+- **Feedback loop:** the research ExecutionResult lands in `PLANNING.results`,
+  is recorded as a normal `ReasoningOutcome`, and flows through the existing
+  ReflectionEngine → LearningEngine → capability-keyed `StrategyPerformance` →
+  later CapabilityAnalyzer selection boundary (Phase 20 architecture reused;
+  no research-specific learning subsystem).
+- **Governance:** ResearchIngestBridge remains fail-closed (no sink wired);
+  research results are never injected directly into KnowledgeManager.
+- **Tests:** `tests/test_phase21_research_coordinator.py`,
+  `tests/test_phase21_research_feedback.py`.
+- **Commits:** `7d86a6b` (coordinator + reachability), `fee0e32` (feedback loop).
 
 ---
 

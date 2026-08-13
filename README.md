@@ -15,9 +15,11 @@ human ownership and oversight.
 
 Atlas is in the **Capability Track Era**. All four core capability tracks
 (A–D) are implemented; Track D (Advanced Reasoning) is **released as `v0.20`**.
+Track A's research coordinator (Phase 21) is implemented and plan-reachable
+(`research.coordinate`) but **not yet released/tagged**.
 
-**Latest verified test run (Track D release gate):** `2973 passed`, `57 subtests passed`, `0 failed`, `0 errors` (~10 min).
-*Current test inventory (not a result):* 178 test files, 766 test classes, 2958 test methods.
+**Latest verified test run (Phase 21 acceptance gate):** `3070 passed`, `57 subtests passed`, `1 failed` — the single failure is the pre-existing Ollama-dependency integration test (`localhost:11434` unavailable), reproduced on the pre-Phase-21 baseline.
+*Current test inventory (not a result):* 178+ test files, 766+ test classes, 2958+ test methods.
 
 **Current schema version:** `10`.
 
@@ -25,7 +27,7 @@ Atlas is in the **Capability Track Era**. All four core capability tracks
 
 | Track | Capability | Status |
 |---|---|---|
-| A | Research & Knowledge | **COMPLETE** (`v0.17.0`) |
+| A | Research & Knowledge | **COMPLETE** (`v0.17.0`); coordinator + `research.coordinate` implemented (Phase 21, unreleased) |
 | B | Tool Ecosystem | **COMPLETE** (`v0.18.0`) |
 | C | Long-Term Learning | **COMPLETE & runtime-integrated** (`v0.19.1`) |
 | D | Advanced Reasoning | **RELEASED (`v0.20`)** — implemented & runtime-integrated |
@@ -124,10 +126,11 @@ docs/                 Documentation
 
 ## Roadmap (summary)
 
-- **COMPLETED:** Tracks A, B, C, and the Track D foundation/implementation.
-- **CURRENT:** Post-Track-D — Track D is released (`v0.20`); the first
-  already-recorded NEXT implementation item (Track A research coordinator)
-  is the primed next task.
+- **COMPLETED:** Tracks A, B, C, the Track D foundation/implementation, and the
+  Track A research coordinator (Phase 21, implemented but not yet released).
+- **CURRENT:** Post-Track-D — Track D is released (`v0.20`); Phase 21's
+  research coordinator is implemented and pending release with the next
+  milestone; remaining Track A/B/C follow-ups are primed.
 - **DEFERRED:** Governed `ReasoningIngestSink` runtime wiring remains
   pending/deferred; it depends on the Phase 16 schedule-store/dispatcher
   hand-off being finalized, so `reasoning.ingest` stays fail-closed (sink not

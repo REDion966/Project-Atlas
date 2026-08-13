@@ -38,17 +38,39 @@ strictly:
   0 errors**
 - **Released as `v0.20`** (annotated tag)
 
+### Track A — Research Coordinator (Phase 21, implemented, not released)
+- `ConcreteResearchCoordinator` in `atlas/research/coordinator.py` — first
+  concrete implementation of the legacy `ResearchCoordinator` ABC; composes the
+  existing Track A planner/extractor/verifier/storage/ingest via DI (no
+  duplicates).
+- `research.coordinate` capability registered additively by the kernel and
+  reachable through a plan step via the existing
+  CapabilityRegistry → CapabilityRouter → CapabilityDispatcher path
+  (PLANNING-stage dispatch; REASONING stays candidate-only).
+- Research execution results enter the existing Phase 20 outcome → Reflection →
+  Learning → capability selection feedback loop as normal ReasoningOutcomes; no
+  research-specific learning subsystem was added.
+- ResearchIngestBridge remains governed and fail-closed (no sink wired); no
+  direct KnowledgeManager injection.
+- Tests: `tests/test_phase21_research_coordinator.py`,
+  `tests/test_phase21_research_feedback.py`. Commits: `7d86a6b`, `fee0e32`.
+- Full suite at acceptance gate: **3070 passed, 57 subtests, 1 failed** — the
+  single failure is the pre-existing Ollama-dependency
+  `test_cognition_runtime.py::test_full_cognition_conversation_flow`
+  (localhost:11434 unavailable), reproduced on the pre-Phase-21 baseline.
+
 ---
 
 ## CURRENT — Active Work
 
 **Post-Track-D implementation.** Track D was released as `v0.20`. The active
-focus now moves to the first already-recorded NEXT implementation item:
+focus is the completed-but-unreleased first NEXT implementation item and its
+remaining follow-ups:
 
-- **Track A — research coordinator implementation** (NEXT below): the abstract
-  `ResearchCoordinator` interface exists (`atlas/evolution/research_coordinator.py`);
-  the concrete coordinator that orchestrates the Track A pipeline is the first
-  primed task.
+- **Track A — research coordinator implementation** is implemented (Phase 21)
+  and pending release together with the next milestone. It is not yet tagged.
+- The next primed tasks are the already-recorded Track A/B/C follow-ups listed
+  under NEXT below.
 - Keep `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` synchronized.
 
 > The governed `ReasoningIngestSink` is a **pending/deferred dependency** — **not**
@@ -62,8 +84,7 @@ focus now moves to the first already-recorded NEXT implementation item:
 
 Based on the existing repository already recording these deferred follow-ups:
 
-- **Track A** follow-ups: knowledge-graph expansion, web source adapter, research
-  coordinator implementation
+- **Track A** follow-ups: knowledge-graph expansion, web source adapter
 - **Track B** follow-ups: skill authoring, PARALLEL / CONDITIONAL tool-chain
   execution, learned-skill promotion
 - **Track C** follow-ups: feeding episodic context into working memory /
