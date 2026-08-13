@@ -533,6 +533,43 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
     `ATLAS_STATE.md`, then `ROADMAP.md`, then `README.md` if the public status
     changed. Never treat archived docs as current architecture.
 
+## 22. Phase 22 — Toolchain Execution & Learned-Skill Progression (PLANNED)
+
+Status: **PLANNED** (approved design; not yet implemented). The authoritative
+Phase 22 specification is `docs/PHASE_22_DESIGN.md`.
+
+Scope: the Track B NEXT items implemented additively in `atlas/toolchain/`:
+
+- **CONDITIONAL execution** — deterministic selection of later steps from
+  prior step output via the existing `ToolStep.depends_on` seam.
+- **PARALLEL execution** — deterministic sequential fan-out/fan-in. NO actual
+  concurrency: the executor's "No threading. No async. No subprocess." promise
+  is preserved as an invariant (design §5).
+- **Learned-skill authoring/promotion** — a pure authoring surface over the
+  existing `ToolLearner` output; promotion (status change / registry mutation /
+  persistence of an activated skill) remains governed through
+  `ToolchainIngestBridge` / GOV-009 and fails closed without a sink.
+
+Batches (each lands green): 1 = CONDITIONAL, 2 = PARALLEL,
+3 = skill authoring/promotion, 4 = integration + acceptance.
+
+Non-goals: no second planner/router/dispatcher; no RuntimeCoordinator
+redesign; no ModelRouter changes; no Phase 16 revival; no Track C
+memory/context work; no actual OS-level concurrency. All Phase 20/21
+invariants listed in design §9 must remain untouched.
+
+Resolved owner decisions (recorded 2026-08-13):
+1. **Phase 21 release strategy:** Phase 21 is completed local development and
+   is bundled with the Phase 22 milestone/release — no separate Phase 21 tag;
+   nothing is pushed as part of Phase 22 preparation.
+2. **Batch 3 promotion persistence:** learned-skill promotion candidates stay
+   in-memory for Phase 22; no additive migration is introduced for speculative
+   future persistence. If a later batch proves stricter-than-required
+   persistence, the decision is revisited and reported before any migration.
+3. **CONDITIONAL predicate vocabulary:** no general expression language; Batch
+   1 uses a small deterministic predicate mechanism over prior step `output`
+   dicts, finalized when Batch 1 begins — not expanded now.
+
 ---
 
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D

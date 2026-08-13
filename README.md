@@ -16,7 +16,9 @@ human ownership and oversight.
 Atlas is in the **Capability Track Era**. All four core capability tracks
 (A–D) are implemented; Track D (Advanced Reasoning) is **released as `v0.20`**.
 Track A's research coordinator (Phase 21) is implemented and plan-reachable
-(`research.coordinate`) but **not yet released/tagged**.
+(`research.coordinate`) but **not yet released/tagged**. **Phase 22** (Toolchain
+Execution & Learned-Skill Progression) is specified and **PLANNED** — see
+`docs/PHASE_22_DESIGN.md` — not yet implemented.
 
 **Latest verified test run (Phase 21 acceptance gate):** `3070 passed`, `57 subtests passed`, `1 failed` — the single failure is the pre-existing Ollama-dependency integration test (`localhost:11434` unavailable), reproduced on the pre-Phase-21 baseline.
 *Current test inventory (not a result):* 178+ test files, 766+ test classes, 2958+ test methods.

@@ -97,7 +97,22 @@ These are the concrete, already-recorded next items. They are not new inventions
 
 ## PLANNED
 
-There are no additional **PLANNED** (approved-design) items beyond the deferred
+- **Phase 22 — Toolchain Execution & Learned-Skill Progression** (approved
+  design: `docs/PHASE_22_DESIGN.md`). Covers the Track B NEXT items:
+  CONDITIONAL execution, PARALLEL execution (deterministic sequential
+  fan-out/fan-in; the executor's "No threading. No async. No subprocess."
+  promise is preserved), and learned-skill authoring/promotion (governed via
+  GOV-009, fail-closed). Batches: 1 = CONDITIONAL, 2 = PARALLEL,
+  3 = skill authoring/promotion, 4 = integration + acceptance. Invariants and
+  non-goals are listed in the design document.
+  Owner decisions recorded: (1) Phase 21 is bundled with the Phase 22
+  milestone/release — no separate Phase 21 tag; (2) learned-skill promotion
+  candidates stay in-memory for Phase 22 — no additive migration is
+  introduced unless a later batch proves strict requirement; (3) CONDITIONAL
+  use a small deterministic predicate vocabulary, finalized at Batch 1, not
+  expanded now.
+
+No other additional **PLANNED** (approved-design) items beyond the deferred
 Track A/B/C follow-ups listed under NEXT. Any new capability must first receive
 an approved design and be added to this document before implementation.
 
