@@ -383,12 +383,12 @@ class TestFallbackExecution:
 
 
 # ---------------------------------------------------------------------------
-# Parallel fail-closed tests
+# Parallel execution tests
 # ---------------------------------------------------------------------------
 
 
-class TestParallelFailClosed:
-    def test_parallel_returns_failed_result(self):
+class TestParallelExecution:
+    def test_parallel_executes_all_tools_in_declared_order(self):
         invoker = FakeToolInvoker(
             results={
                 "tool_a": FakeToolResult(tool_name="tool_a", success=True),
@@ -402,23 +402,13 @@ class TestParallelFailClosed:
         )
         result = executor.execute(chain)
 
-        assert not result.success
-        assert "parallel" in result.error.lower()
-        assert result.metadata["reason"] == "unsupported_strategy"
+        assert result.success
+        assert result.metadata["strategy"] == "parallel"
+        assert len(result.step_results) == 2
+        # Fan-out invokes every eligible tool exactly once, in declared order.
+        assert [call[0] for call in invoker.calls] == ["tool_a", "tool_b"]
 
-    def test_parallel_never_raises(self):
-        invoker = FakeToolInvoker()
-        executor = ToolChainExecutor(invoker)
-        chain = _chain(
-            [_step("step:0000", "tool_a")],
-            strategy="parallel",
-        )
-        # Must not raise
-        result = executor.execute(chain)
-        assert isinstance(result, ToolChainResult)
-        assert not result.success
-
-    def test_parallel_does_not_execute_tools(self):
+    def test_parallel_single_step_success(self):
         invoker = FakeToolInvoker(
             results={"tool_a": FakeToolResult(tool_name="tool_a", success=True)}
         )
@@ -427,9 +417,22 @@ class TestParallelFailClosed:
             [_step("step:0000", "tool_a")],
             strategy="parallel",
         )
-        executor.execute(chain)
-        # No tools should have been called
-        assert len(invoker.calls) == 0
+        result = executor.execute(chain)
+
+        assert result.success
+        assert len(result.step_results) == 1
+
+    def test_parallel_never_raises_on_unknown_tools(self):
+        invoker = FakeToolInvoker()
+        executor = ToolChainExecutor(invoker)
+        chain = _chain(
+            [_step("step:0000", "tool_a")],
+            strategy="parallel",
+        )
+        # Must not raise even though tool_a is not registered.
+        result = executor.execute(chain)
+        assert isinstance(result, ToolChainResult)
+        assert not result.success
 
     def test_conditional_strategy_is_supported(self):
         """Phase 22 Batch 1: conditional is no longer a fail-closed strategy."""
@@ -887,8 +890,10 @@ class TestStrategyConstants:
     def test_supported_strategies_contains_fallback(self):
         assert "fallback" in SUPPORTED_STRATEGIES
 
-    def test_unsupported_strategies_contains_parallel(self):
-        assert "parallel" in UNSUPPORTED_STRATEGIES
+    def test_supported_strategies_contains_parallel(self):
+        """Phase 22 Batch 2: parallel is now a supported strategy."""
+        assert "parallel" in SUPPORTED_STRATEGIES
+        assert "parallel" not in UNSUPPORTED_STRATEGIES
 
     def test_supported_strategies_contains_conditional(self):
         """Phase 22 Batch 1: conditional is now a supported strategy."""

@@ -11,10 +11,16 @@ Supported strategies:
       over prior step output (Phase 22, Batch 1; see
       :mod:`atlas.toolchain.conditional`). The executor is the only
       decision point — no planner/router/dispatcher involvement.
+  - PARALLEL  — deterministic sequential fan-out/fan-in (Phase 22,
+      Batch 2; docs/PHASE_22_DESIGN.md §4/§5): every eligible step
+      executes exactly once, results are collected in declared order, and
+      any step failure fails the overall result while sibling results are
+      preserved. No threading/async/subprocess — the "no real
+      concurrency" invariant remains in force.
 
 Unsupported strategies:
-  - PARALLEL  — returns a failed :class:`ToolChainResult`; never raises.
-  - Any other unknown strategy — same fail-closed behaviour.
+  - Any strategy not listed above returns a failed
+    :class:`ToolChainResult`; never raises.
 
 The executor never raises. Every error condition (unknown tool, denied tool,
 unsupported strategy, handler exception, malformed input) produces a failed
@@ -123,11 +129,13 @@ class RiskPolicy:
 
 #: Strategies the executor supports.
 SUPPORTED_STRATEGIES: frozenset[str] = frozenset(
-    {"sequential", "fallback", "conditional"}
+    {"sequential", "fallback", "conditional", "parallel"}
 )
 
-#: Strategies the executor explicitly does not support.
-UNSUPPORTED_STRATEGIES: frozenset[str] = frozenset({"parallel"})
+#: Strategies the executor explicitly does not support. Empty for Phase 22
+#: Batch 2 — every declared strategy now has an implementation. Unknown
+#: strategies still fail closed via the generic unsupported-strategy guard.
+UNSUPPORTED_STRATEGIES: frozenset[str] = frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +267,8 @@ class ToolChainExecutor:
             return self._execute_fallback(chain_id, steps, shared_params, start)
         if strategy == "conditional":
             return self._execute_conditional(chain_id, steps, shared_params, start)
+        if strategy == "parallel":
+            return self._execute_parallel(chain_id, steps, shared_params, start)
 
         # Should not reach here due to earlier check, but fail-closed.
         return self._failed_result(
@@ -557,6 +567,130 @@ class ToolChainExecutor:
             error="All fallback steps failed.",
             execution_time_ms=elapsed_ms,
             metadata={"reason": "all_failed", "strategy": "fallback"},
+        )
+
+    def _execute_parallel(
+        self,
+        chain_id: str,
+        steps: tuple[ToolStep, ...],
+        shared_params: dict[str, Any],
+        start: float,
+    ) -> ToolChainResult:
+        """Execute a parallel chain as a deterministic sequential fan-out.
+
+        Phase 22 Batch 2 semantics (docs/PHASE_22_DESIGN.md §4/§5 and the
+        project's "No threading. No async. No subprocess." invariant):
+
+          * Fan-out — steps are walked once in declared order. Every
+            eligible step executes EXACTLY ONCE via :meth:`_execute_step`
+            (which enforces the allow/deny policy). A step is ineligible
+            only when a declared prerequisite (``step.depends_on``) has not
+            completed successfully before its position in the walk; such a
+            step is never invoked and is recorded in declared order as a
+            skipped entry (``success=False``, ``skipped=True``, reason
+            ``unsatisfied_prerequisite``). One failed step does NOT prevent
+            later eligible siblings from executing — mirroring a parallel
+            fan-out where all branches run. No threads, async, subprocess,
+            or hidden concurrency: the fan-out is a plain synchronous loop.
+          * Fan-in — executed step results and skipped entries are
+            collected in declared step order (the tuple is a total
+            function over the declared steps). If any step failed (tool
+            failure, denied tool, invoker exception, malformed result),
+            the overall ``ToolChainResult`` is a failure whose error
+            surfaces the FIRST failing step's tool, id, and error; every
+            sibling result — including successful siblings executed after
+            the failure — is preserved. No failed invocation is converted
+            into a success and no successful sibling result is discarded.
+          * Failed prerequisites — a prerequisite step that itself failed
+            is (like every failure) surfaced by the fan-in; the dependent
+            step's tool is never invoked because the prerequisite never
+            completed successfully.
+          * Risk limits — the pre-flight ``max_steps`` check applies to
+            the whole declared batch (identical to sequential/fallback/
+            conditional); per-step eligibility is a boolean signature and
+            skipped steps never consume the execution budget by
+            construction. ``max_execution_time_ms`` is enforced as a
+            whole-run cap every iteration, exactly like the other
+            strategies.
+
+        Deterministic: identical inputs produce identical step execution,
+        identical result ordering, and identical overall success. The
+        executor is the only decision point. Never raises. Purely
+        synchronous.
+        """
+        step_results: list[dict[str, Any]] = []
+        completed: set[str] = set()
+        first_failure: tuple[ToolStep, dict[str, Any]] | None = None
+
+        for step in steps:
+            # --- Time limit check (applies across the whole run) ---
+            if self._policy.has_time_limit:
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                if elapsed_ms > self._policy.max_execution_time_ms:
+                    return ToolChainResult(
+                        chain_id=chain_id,
+                        success=False,
+                        step_results=tuple(step_results),
+                        error=(
+                            f"Execution time limit exceeded: "
+                            f"{elapsed_ms:.1f}ms > "
+                            f"{self._policy.max_execution_time_ms}ms."
+                        ),
+                        execution_time_ms=elapsed_ms,
+                        metadata={"reason": "time_limit_exceeded", "strategy": "parallel"},
+                    )
+
+            # --- Unsatisfied prerequisite: never execute this step ---
+            missing: list[str] = [
+                dep for dep in step.depends_on if dep not in completed
+            ]
+            if missing:
+                step_results.append(
+                    self._skipped_step_result(
+                        step,
+                        skipped_reason="unsatisfied_prerequisite",
+                    )
+                )
+                continue
+
+            result = self._execute_step(step, shared_params)
+            step_results.append(result)
+
+            if result.get("success", False):
+                completed.add(step.step_id)
+            elif first_failure is None:
+                # Record the first (deterministic: lowest declared position)
+                # failing step; the walk continues so every eligible sibling
+                # still fans out exactly once.
+                first_failure = (step, result)
+
+        if first_failure is not None:
+            failing_step, failing_result = first_failure
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            return ToolChainResult(
+                chain_id=chain_id,
+                success=False,
+                step_results=tuple(step_results),
+                error=(
+                    f"Step '{failing_step.step_id}' (tool "
+                    f"'{failing_step.tool_name}') failed: "
+                    f"{failing_result.get('error', 'unknown error')}."
+                ),
+                execution_time_ms=elapsed_ms,
+                metadata={
+                    "reason": "step_failed",
+                    "strategy": "parallel",
+                    "step_id": failing_step.step_id,
+                },
+            )
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        return ToolChainResult(
+            chain_id=chain_id,
+            success=True,
+            step_results=tuple(step_results),
+            execution_time_ms=elapsed_ms,
+            metadata={"strategy": "parallel", "step_count": len(step_results)},
         )
 
     # ------------------------------------------------------------------

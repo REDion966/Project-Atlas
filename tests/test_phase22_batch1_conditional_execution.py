@@ -149,13 +149,19 @@ class TestSupportedStrategy:
     def test_conditional_no_longer_unsupported(self):
         assert "conditional" not in UNSUPPORTED_STRATEGIES
 
-    def test_parallel_still_fails_closed(self):
-        """parallel remains out of scope for Batch 1."""
-        executor = ToolChainExecutor(FakeToolInvoker())
+    def test_parallel_is_supported_by_batch_2(self):
+        """parallel became a supported strategy in Phase 22 Batch 2.
+
+        Batch 1 acceptance only required that conditional no longer fails
+        closed; the parallel surface is owned by Batch 2 and therefore no
+        longer fails closed either.
+        """
+        invoker = FakeToolInvoker(results={"tool_a": _ok("tool_a")})
+        executor = ToolChainExecutor(invoker)
         chain = _chain([_step("step:0000", "tool_a")], strategy="parallel")
         result = executor.execute(chain)
-        assert not result.success
-        assert result.metadata["reason"] == "unsupported_strategy"
+        assert result.success
+        assert result.metadata["strategy"] == "parallel"
 
     def test_conditional_chain_succeeds_without_conditions(self):
         """Unconditional steps under the conditional strategy behave like an

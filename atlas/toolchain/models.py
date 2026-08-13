@@ -52,8 +52,11 @@ class ChainStrategy(Enum):
     """Execution strategy for a :class:`ToolChain`.
 
     SEQUENTIAL — steps run one-after-another in order.
-    PARALLEL   — independent steps run concurrently (planning only;
-        execution semantics are owned by a future executor).
+    PARALLEL   — independent steps fan out exactly once and fan in in
+        declared order (executed by the ToolChainExecutor since Phase 22
+        Batch 2 as a deterministic sequential fan-out/fan-in; no real
+        concurrency — the "no threading/async/subprocess" invariant
+        remains in force).
     FALLBACK   — steps are tried in order; first success wins.
     CONDITIONAL — steps are selected based on prior step output
         (executed by the ToolChainExecutor since Phase 22 Batch 1; the
