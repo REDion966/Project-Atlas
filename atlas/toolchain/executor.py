@@ -5,8 +5,12 @@ injected tool-execution surface. Deterministic, fail-closed, protocol-based,
 and fully typed.
 
 Supported strategies:
-  - SEQUENTIAL — steps run one-after-another; all must succeed.
-  - FALLBACK  — steps are tried in order; first success wins.
+  - SEQUENTIAL  — steps run one-after-another; all must succeed.
+  - FALLBACK    — steps are tried in order; first success wins.
+  - CONDITIONAL — steps are selected based on deterministic predicates
+      over prior step output (Phase 22, Batch 1; see
+      :mod:`atlas.toolchain.conditional`). The executor is the only
+      decision point — no planner/router/dispatcher involvement.
 
 Unsupported strategies:
   - PARALLEL  — returns a failed :class:`ToolChainResult`; never raises.
@@ -27,6 +31,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from atlas.toolchain.conditional import (
+    evaluate_condition,
+    extract_condition,
+    is_supported_condition,
+)
 from atlas.toolchain.models import ToolChain, ToolChainPlan, ToolChainResult, ToolStep
 
 
@@ -113,10 +122,12 @@ class RiskPolicy:
 # ---------------------------------------------------------------------------
 
 #: Strategies the executor supports.
-SUPPORTED_STRATEGIES: frozenset[str] = frozenset({"sequential", "fallback"})
+SUPPORTED_STRATEGIES: frozenset[str] = frozenset(
+    {"sequential", "fallback", "conditional"}
+)
 
 #: Strategies the executor explicitly does not support.
-UNSUPPORTED_STRATEGIES: frozenset[str] = frozenset({"parallel", "conditional"})
+UNSUPPORTED_STRATEGIES: frozenset[str] = frozenset({"parallel"})
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +257,8 @@ class ToolChainExecutor:
             return self._execute_sequential(chain_id, steps, shared_params, start)
         if strategy == "fallback":
             return self._execute_fallback(chain_id, steps, shared_params, start)
+        if strategy == "conditional":
+            return self._execute_conditional(chain_id, steps, shared_params, start)
 
         # Should not reach here due to earlier check, but fail-closed.
         return self._failed_result(
@@ -254,6 +267,183 @@ class ToolChainExecutor:
             start,
             {"reason": "unsupported_strategy", "strategy": strategy},
         )
+
+    def _execute_conditional(
+        self,
+        chain_id: str,
+        steps: tuple[ToolStep, ...],
+        shared_params: dict[str, Any],
+        start: float,
+    ) -> ToolChainResult:
+        """Execute a conditional chain deterministically.
+
+        Phase 22 Batch 1 semantics (docs/PHASE_22_DESIGN.md §3):
+
+          * Steps are walked in declared order. A step's declared
+            prerequisites (``step.depends_on``) must have executed
+            successfully first (verified by an ordered walk of the chain).
+          * A step with an express condition (``ToolStep.parameters``,
+            see :mod:`atlas.toolchain.conditional`) is eligible only when
+            the condition evaluates to ``True`` against the most recently
+            produced step output.
+          * A step that is not eligible is recorded as a skipped step
+            (``success=False``, ``skipped=True``) and the chain continues.
+          * An unsupported/malformed condition fails safely: the step is
+            recorded as skipped with reason ``unsupported_condition`` and is
+            never executed (no arbitrary logic runs).
+          * A failed prerequisite produces a deterministic chain failure
+            BEFORE any dependent step executes — a dependent step's tool is
+            never invoked.
+          * ``RiskPolicy.max_steps`` and ``max_execution_time_ms`` apply
+            exactly as they do to sequential execution.
+          * Stable result ordering is preserved.
+
+        The executor is the ONLY decision point. No planner, router,
+        dispatcher, or selection engine is involved. Purely synchronous and
+        deterministic. Never raises.
+        """
+        step_results: list[dict[str, Any]] = []
+        completed: set[str] = set()
+        last_output: dict[str, Any] | None = None
+        executed_count: int = 0
+        index: int = 0
+
+        while index < len(steps):
+            # --- Time limit check (applies across the whole run) ---
+            if self._policy.has_time_limit:
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                if elapsed_ms > self._policy.max_execution_time_ms:
+                    return ToolChainResult(
+                        chain_id=chain_id,
+                        success=False,
+                        step_results=tuple(step_results),
+                        error=(
+                            f"Execution time limit exceeded: "
+                            f"{elapsed_ms:.1f}ms > "
+                            f"{self._policy.max_execution_time_ms}ms."
+                        ),
+                        execution_time_ms=elapsed_ms,
+                        metadata={"reason": "time_limit_exceeded", "strategy": "conditional"},
+                    )
+
+            step = steps[index]
+
+            # --- Failed prerequisite: dependent step never executes ---
+            missing: list[str] = [
+                dep for dep in step.depends_on if dep not in completed
+            ]
+            if missing:
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return ToolChainResult(
+                    chain_id=chain_id,
+                    success=False,
+                    step_results=tuple(step_results),
+                    error=(
+                        f"Step '{step.step_id}' has unsatisfied prerequisite "
+                        f"steps: {', '.join(sorted(missing))}."
+                    ),
+                    execution_time_ms=elapsed_ms,
+                    metadata={
+                        "reason": "unsatisfied_prerequisite",
+                        "strategy": "conditional",
+                        "step_id": step.step_id,
+                    },
+                )
+
+            # --- Condition check (deterministic predicate) ---
+            condition = extract_condition(step.parameters)
+            if condition is not None:
+                if not is_supported_condition(condition):
+                    step_results.append(
+                        self._skipped_step_result(
+                            step,
+                            skipped_reason="unsupported_condition",
+                        )
+                    )
+                    index += 1
+                    continue
+                eligible = evaluate_condition(condition, last_output or {})
+                if not eligible:
+                    step_results.append(
+                        self._skipped_step_result(
+                            step,
+                            skipped_reason="condition_false",
+                        )
+                    )
+                    index += 1
+                    continue
+
+            # --- Step limit check (counts real executions, not skips) ---
+            if (
+                self._policy.has_step_limit
+                and executed_count >= self._policy.max_steps
+            ):
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return ToolChainResult(
+                    chain_id=chain_id,
+                    success=False,
+                    step_results=tuple(step_results),
+                    error=(
+                        f"Step limit reached: {self._policy.max_steps} "
+                        f"executed steps."
+                    ),
+                    execution_time_ms=elapsed_ms,
+                    metadata={"reason": "step_limit_exceeded", "strategy": "conditional"},
+                )
+
+            result = self._execute_step(step, shared_params)
+            step_results.append(result)
+            executed_count += 1
+            completed.add(step.step_id)
+            if result.get("success", False):
+                last_output = dict(result.get("output", {}) or {})
+
+            if not result.get("success", False):
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return ToolChainResult(
+                    chain_id=chain_id,
+                    success=False,
+                    step_results=tuple(step_results),
+                    error=(
+                        f"Step '{step.step_id}' (tool '{step.tool_name}') "
+                        f"failed: {result.get('error', 'unknown error')}."
+                    ),
+                    execution_time_ms=elapsed_ms,
+                    metadata={"reason": "step_failed", "strategy": "conditional"},
+                )
+
+            index += 1
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        return ToolChainResult(
+            chain_id=chain_id,
+            success=True,
+            step_results=tuple(step_results),
+            execution_time_ms=elapsed_ms,
+            metadata={"strategy": "conditional", "step_count": len(step_results)},
+        )
+
+    @staticmethod
+    def _skipped_step_result(
+        step: ToolStep,
+        skipped_reason: str,
+    ) -> dict[str, Any]:
+        """Record a deterministically-skipped conditional step.
+
+        Skipped steps keep ``success=False`` so ``step_results`` ordering
+        and the result/error structure stay stable, and carry ``skipped``
+        metadata so consumers can distinguish a skip from an error.
+        """
+        return {
+            "step_id": step.step_id,
+            "tool_name": step.tool_name,
+            "success": False,
+            "output": {},
+            "error": "",
+            "execution_time_ms": 0.0,
+            "skipped": True,
+            "skipped_reason": skipped_reason,
+        }
 
     # ------------------------------------------------------------------
     # Strategy implementations

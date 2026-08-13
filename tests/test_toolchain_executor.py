@@ -431,7 +431,8 @@ class TestParallelFailClosed:
         # No tools should have been called
         assert len(invoker.calls) == 0
 
-    def test_conditional_strategy_also_fails_closed(self):
+    def test_conditional_strategy_is_supported(self):
+        """Phase 22 Batch 1: conditional is no longer a fail-closed strategy."""
         invoker = FakeToolInvoker(
             results={"tool_a": FakeToolResult(tool_name="tool_a", success=True)}
         )
@@ -441,7 +442,8 @@ class TestParallelFailClosed:
             strategy="conditional",
         )
         result = executor.execute(chain)
-        assert not result.success
+        assert result.success
+        assert result.metadata["strategy"] == "conditional"
 
 
 # ---------------------------------------------------------------------------
@@ -888,8 +890,10 @@ class TestStrategyConstants:
     def test_unsupported_strategies_contains_parallel(self):
         assert "parallel" in UNSUPPORTED_STRATEGIES
 
-    def test_unsupported_strategies_contains_conditional(self):
-        assert "conditional" in UNSUPPORTED_STRATEGIES
+    def test_supported_strategies_contains_conditional(self):
+        """Phase 22 Batch 1: conditional is now a supported strategy."""
+        assert "conditional" in SUPPORTED_STRATEGIES
+        assert "conditional" not in UNSUPPORTED_STRATEGIES
 
     def test_supported_and_unsupported_disjoint(self):
         assert not (SUPPORTED_STRATEGIES & UNSUPPORTED_STRATEGIES)

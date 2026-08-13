@@ -56,8 +56,9 @@ class ChainStrategy(Enum):
         execution semantics are owned by a future executor).
     FALLBACK   — steps are tried in order; first success wins.
     CONDITIONAL — steps are selected based on prior step output
-        (planning hint only; deterministic planning emits the full
-        candidate list).
+        (executed by the ToolChainExecutor since Phase 22 Batch 1; the
+        executor evaluates deterministic predicates over prior step
+        output and only runs eligible steps).
     """
 
     SEQUENTIAL = auto()
