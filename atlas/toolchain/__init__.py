@@ -51,6 +51,14 @@ from atlas.toolchain.models import (
 )
 from atlas.toolchain.planner import ToolChainPlanner, ToolProvider
 from atlas.toolchain.registry import SkillRegistry
+from atlas.toolchain.skill_author import (
+    CANDIDATE_ID_PREFIX,
+    LearnedSkillCandidate,
+    LearnedSkillPromoter,
+    PROMOTION_REQUEST_ID_PREFIX,
+    SkillPromotionRequest,
+    ToolSkillAuthor,
+)
 from atlas.toolchain.wiring import (
     register_toolchain_component,
     toolchain_component,
@@ -87,6 +95,13 @@ __all__ = [
     "SKILL_STATUS_NAMES",
     # Registry (18.3)
     "SkillRegistry",
+    # Author / Promotion (22.3)
+    "CANDIDATE_ID_PREFIX",
+    "LearnedSkillCandidate",
+    "LearnedSkillPromoter",
+    "PROMOTION_REQUEST_ID_PREFIX",
+    "SkillPromotionRequest",
+    "ToolSkillAuthor",
     # Planner (18.4)
     "ToolChainPlanner",
     "ToolProvider",
