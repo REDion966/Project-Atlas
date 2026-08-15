@@ -31,6 +31,7 @@ from atlas.cognition.context import CognitionContext
 from atlas.cognition.decision import CognitionDecision
 from atlas.cognition.engine import CognitionEngine
 from atlas.ai.routing.models import RoutingRequest
+from atlas.evolution.runtime_observations import collect_runtime_observations
 from atlas.cognition.models import (
     CognitionState,
     PipelineMetrics,
@@ -945,19 +946,22 @@ class RuntimeCoordinator:
             elapsed_ms = elapsed * 1000.0
             error_count = self._current_metrics.failed_count
 
-        obs = self._evolution_observation_engine.observe_runtime_metrics(
-            avg_response_time_ms=round(elapsed_ms, 2),
-            request_count=1,
-            error_count=error_count,
-            source="runtime_coordinator",
+        observations, skipped = collect_runtime_observations(
+            engine=self._evolution_observation_engine,
+            state=state,
+            metrics=self._current_metrics,
+            elapsed_ms=elapsed_ms,
         )
 
-        state.evolution_observations = [obs]
+        state.evolution_observations = observations
 
         return StageResult(
             stage=StageType.EVOLUTION_OBSERVATION,
             status=StageStatus.SUCCESS,
-            data={"observations_count": 1},
+            data={
+                "observations_count": len(observations),
+                "skipped_categories": sorted(skipped),
+            },
             confidence=0.7,
         )
 

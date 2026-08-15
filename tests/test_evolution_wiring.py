@@ -331,7 +331,9 @@ class TestObservationsAccumulate:
             evolution_memory=memory,
         )
 
-        # Run pipeline 5 times — Stage 13 adds 1 observation each time
+        # Run pipeline 5 times — Stage 13 adds at least one observation per
+        # run (F1: runtime metrics + health, plus any categories with
+        # available pipeline evidence).
         for i in range(5):
             result = coordinator.process(
                 user_input=f"test input {i}",
@@ -339,8 +341,8 @@ class TestObservationsAccumulate:
             )
             assert result.success is True
 
-        # After 5 runs, 5 observations should be in the engine
-        assert obs_engine.observation_count == 5
+        # After 5 runs, at least 5 observations accumulated in the engine.
+        assert obs_engine.observation_count >= 5
 
     def test_observations_persist_across_runs(self):
         """Stage 13 observations persist in the engine between pipeline runs."""
@@ -350,17 +352,20 @@ class TestObservationsAccumulate:
             evolution_observation_engine=obs_engine,
         )
 
-        # First run
+        # First run — at least one observation recorded (F1: multi-category).
         coordinator.process(user_input="first", metadata={"test": True})
-        assert obs_engine.observation_count == 1
+        first_count = obs_engine.observation_count
+        assert first_count >= 1
 
-        # Second run
+        # Second run — observations accumulate (monotonic growth).
         coordinator.process(user_input="second", metadata={"test": True})
-        assert obs_engine.observation_count == 2
+        second_count = obs_engine.observation_count
+        assert second_count > first_count
 
-        # Third run
+        # Third run — accumulation continues.
         coordinator.process(user_input="third", metadata={"test": True})
-        assert obs_engine.observation_count == 3
+        third_count = obs_engine.observation_count
+        assert third_count > second_count
 
 
 # ---------------------------------------------------------------------------
