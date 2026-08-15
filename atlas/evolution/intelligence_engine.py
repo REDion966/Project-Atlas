@@ -135,6 +135,11 @@ class EvolutionIntelligenceEngine:
           5. Delegate to InsightScorer for scoring.
           6. Create, store, and return the EvolutionInsight.
 
+        Post-Core F7: a failed governed execution (success=False on its
+        execution record) is classified deterministically as a "failure"
+        from the record's own outcome metadata, so it is represented in
+        the learning record and can never be mis-scored as a success.
+
         Args:
             proposal_id: The ID of the executed proposal to analyze.
 
@@ -169,31 +174,46 @@ class EvolutionIntelligenceEngine:
         # 4. Collect experiences after execution
         experiences = self._collect_experiences(execution_record)
 
-        # 5. Score
-        scorer = self._insight_scorer
-        if scorer is not None:
-            effectiveness = scorer.score_effectiveness(
-                proposal, tracked_goal, experiences,
-            )
-            confidence = scorer.score_confidence(experiences)
-            evidence_quality = scorer.score_evidence_quality(
-                proposal, experiences,
-            )
-            regression_risk = scorer.score_regression_risk(experiences)
-            outcome = scorer.classify_outcome(effectiveness, confidence)
-
-            # Build evidence summary
-            evidence_summary = self._build_evidence_summary(
-                tracked_goal, experiences, outcome,
+        # 5. Classify outcome.
+        # Post-Core F7: a failed governed execution is classified
+        # deterministically as a failure from the execution record's own
+        # outcome metadata — never by the experience-based heuristic and
+        # never as a success. A failed action can therefore never become a
+        # successful learning record.
+        if not execution_record.metadata.get("success", True):
+            outcome = "failure"
+            effectiveness = 0.0
+            confidence = 1.0
+            evidence_quality = 0.0
+            regression_risk = 1.0
+            evidence_summary = "Execution failed: {}".format(
+                execution_record.metadata.get("error", "unknown execution error")
             )
         else:
-            # Default values when no scorer is available
-            effectiveness = 0.0
-            confidence = 0.0
-            evidence_quality = 0.0
-            regression_risk = 0.0
-            outcome = "inconclusive"
-            evidence_summary = "No InsightScorer available."
+            scorer = self._insight_scorer
+            if scorer is not None:
+                effectiveness = scorer.score_effectiveness(
+                    proposal, tracked_goal, experiences,
+                )
+                confidence = scorer.score_confidence(experiences)
+                evidence_quality = scorer.score_evidence_quality(
+                    proposal, experiences,
+                )
+                regression_risk = scorer.score_regression_risk(experiences)
+                outcome = scorer.classify_outcome(effectiveness, confidence)
+
+                # Build evidence summary
+                evidence_summary = self._build_evidence_summary(
+                    tracked_goal, experiences, outcome,
+                )
+            else:
+                # Default values when no scorer is available
+                effectiveness = 0.0
+                confidence = 0.0
+                evidence_quality = 0.0
+                regression_risk = 0.0
+                outcome = "inconclusive"
+                evidence_summary = "No InsightScorer available."
 
         # 6. Create insight
         insight = EvolutionInsight(
@@ -212,9 +232,10 @@ class EvolutionIntelligenceEngine:
             proposal_title=proposal.title,
             proposal_summary=proposal.summary,
             metadata={
-                "scorer_available": scorer is not None,
+                "scorer_available": self._insight_scorer is not None,
                 "tracked_goal_found": tracked_goal is not None,
                 "experience_count": len(experiences),
+                "execution_success": execution_record.metadata.get("success", True),
             },
         )
 
@@ -242,7 +263,13 @@ class EvolutionIntelligenceEngine:
 
     def analyze_all(self) -> list[EvolutionInsight]:
         """
-        Analyze all executed proposals that do not already have insights.
+        Analyze all proposals that have an execution record and do not
+        already have an insight.
+
+        Post-Core F7: the gate is keyed on the existence of an execution
+        EvolutionRecord rather than on the proposal status. This includes
+        failed governed executions (proposal left in its pre-execution
+        status) so their failure outcome reaches the analysis path.
 
         Returns:
             A list of new EvolutionInsight instances.
@@ -250,15 +277,11 @@ class EvolutionIntelligenceEngine:
         if self._evolution_memory is None:
             return []
 
-        # Get all proposals with IMPLEMENTED status
+        # Get all proposals
         proposals = self._evolution_memory.get_all_proposals()
         new_insights: list[EvolutionInsight] = []
 
         for proposal in proposals:
-            # Only analyze implemented proposals
-            if proposal.status.name != "IMPLEMENTED":
-                continue
-
             # Check if already analyzed
             execution_record = self._find_execution_record(proposal.proposal_id)
             if execution_record is None:

@@ -295,16 +295,19 @@ class EvolutionExecutionEngine:
         Returns:
             An ExecutionResult describing the outcome.
         """
-        # Validate proposal state
+        # Validate proposal state — a refused governed execution is still an
+        # execution outcome and must be recorded, never silently discarded.
         if proposal.status != ProposalStatus.APPROVED:
+            error = (
+                f"Cannot execute proposal '{proposal.proposal_id}' "
+                f"with status '{proposal.status.name}'. "
+                f"Proposal must be APPROVED."
+            )
+            self._store_execution_failure(proposal, error)
             return ExecutionResult(
                 success=False,
                 proposal_id=proposal.proposal_id,
-                error=(
-                    f"Cannot execute proposal '{proposal.proposal_id}' "
-                    f"with status '{proposal.status.name}'. "
-                    f"Proposal must be APPROVED."
-                ),
+                error=error,
             )
 
         # Update proposal status to IMPLEMENTED
@@ -315,19 +318,9 @@ class EvolutionExecutionEngine:
         if self._evolution_memory is not None:
             self._evolution_memory.store_proposal(proposal)
 
-        # Create and store the execution record
-        record = self._create_execution_record(proposal)
-        if self._evolution_memory is not None:
-            self._evolution_memory.store_record(record)
-
-        # Feed execution record into knowledge pipeline for consolidation
-        if self._knowledge_pipeline is not None:
-            try:
-                self._knowledge_pipeline.consolidate()
-            except Exception:
-                pass
-
-        # Create a TrackedGoal for outcome verification
+        # Create a TrackedGoal for outcome verification FIRST so the
+        # execution record below can carry the tracked_goal_id (F7: a
+        # single complete representation of the execution outcome).
         tracked_goal_id = ""
         if self._outcome_tracker is not None:
             try:
@@ -339,6 +332,24 @@ class EvolutionExecutionEngine:
                     tracked_goal_id = goal.goal_id
             except Exception:
                 # Tracking failures should not block execution
+                pass
+
+        # Create and store the execution record with its outcome metadata.
+        record = self._create_execution_record(
+            proposal,
+            success=True,
+            error="",
+            status=ProposalStatus.IMPLEMENTED.name,
+            tracked_goal_id=tracked_goal_id,
+        )
+        if self._evolution_memory is not None:
+            self._evolution_memory.store_record(record)
+
+        # Feed execution record into knowledge pipeline for consolidation
+        if self._knowledge_pipeline is not None:
+            try:
+                self._knowledge_pipeline.consolidate()
+            except Exception:
                 pass
 
         return ExecutionResult(
@@ -576,21 +587,37 @@ class EvolutionExecutionEngine:
     def _create_execution_record(
         self,
         proposal: EvolutionProposal,
+        success: bool = True,
+        error: str = "",
+        status: str = "",
+        tracked_goal_id: str = "",
     ) -> EvolutionRecord:
         """
         Create an EvolutionRecord documenting a proposal execution.
 
+        Post-Core F7: the record carries the execution's own outcome
+        (``success``, ``error``, ``status``, ``tracked_goal_id``) in
+        metadata so EvolutionIntelligenceEngine can deterministically
+        classify the execution — including a failed governed execution
+        as a failure — without duplicating representation.
+
         Args:
             proposal: The executed EvolutionProposal.
+            success: Whether the execution attempt succeeded.
+            error: Error message when the execution failed.
+            status: Final status name of the proposal after the attempt.
+            tracked_goal_id: ID of the TrackedGoal created for this
+                execution (empty when tracking is unavailable).
 
         Returns:
             An EvolutionRecord with event_type "execution".
         """
+        verb = "Executed" if success else "Failed to execute"
         return EvolutionRecord(
             record_id=self._next_record_id(),
             event_type="execution",
             description=(
-                f"Executed proposal '{proposal.proposal_id}': "
+                f"{verb} proposal '{proposal.proposal_id}': "
                 f"{proposal.title}. {proposal.summary[:100]}"
             ),
             related_ids=[proposal.proposal_id],
@@ -598,8 +625,34 @@ class EvolutionExecutionEngine:
                 "execution_level": self._execution_level.name,
                 "proposal_title": proposal.title,
                 "proposal_summary": proposal.summary,
+                "success": success,
+                "error": error,
+                "status": status or proposal.status.name,
+                "tracked_goal_id": tracked_goal_id,
             },
         )
+
+    def _store_execution_failure(
+        self,
+        proposal: EvolutionProposal,
+        error: str,
+    ) -> None:
+        """Record a failed execution attempt in EvolutionMemory.
+
+        Post-Core F7: failed governed executions are never silently
+        discarded — they become deterministic failure records consumed by
+        EvolutionIntelligenceEngine so the next improvement-analysis cycle
+        can account for them.
+        """
+        if self._evolution_memory is None:
+            return
+        record = self._create_execution_record(
+            proposal,
+            success=False,
+            error=error,
+            status=proposal.status.name,
+        )
+        self._evolution_memory.store_record(record)
 
     def _store_rejection_record(
         self,
