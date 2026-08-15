@@ -13,14 +13,22 @@ human ownership and oversight.
 
 ## Current Status
 
-Atlas is in the **Capability Track Era**. All four core capability tracks
-(A–D) are implemented; Track D (Advanced Reasoning) is **released as `v0.20`**.
-Track A's research coordinator (Phase 21) is implemented and plan-reachable
-(`research.coordinate`) but **not yet released/tagged**. **Phase 22** (Toolchain
-Execution & Learned-Skill Progression) is specified and **PLANNED** — see
-`docs/PHASE_22_DESIGN.md` — not yet implemented.
+Atlas is in the **Capability Track Era — Atlas Core COMPLETE**. All four core
+capability tracks (A–D) are implemented; Track D (Advanced Reasoning) is
+**released as `v0.20`**. Track A's research coordinator (Phase 21) and Phase 22
+(Toolchain Execution & Learned-Skill Progression: CONDITIONAL/PARALLEL
+execution + learned-skill authoring/promotion + integration) are implemented
+and bundled, pending release (not yet tagged). **Phase 22 is the FINAL numbered
+implementation phase for Atlas Core — there is NO Phase 23.** Development has
+transitioned to **post-core guided self-improvement** (see
+`docs/ATLAS_STATE.md` §22.4): Atlas improves itself through the existing
+governed mechanisms (`Observe/record → analyze/plan → propose → approve →
+execute governed changes → verify → repeat`) with `SELF_CONFIG`/`INFORMATION`
+as the enabled governed scopes. CODE mutation remains locked and is not
+enabled; code changes may be produced as reviewable artifacts/patches rather
+than autonomously applied.
 
-**Latest verified test run (Phase 21 acceptance gate):** `3070 passed`, `57 subtests passed`, `1 failed` — the single failure is the pre-existing Ollama-dependency integration test (`localhost:11434` unavailable), reproduced on the pre-Phase-21 baseline.
+**Latest verified test run (Phase 22 acceptance gate):** `3169 passed`, `57 subtests passed`, `1 failed` — the single failure is the pre-existing Ollama-dependency integration test (`localhost:11434` unavailable), reproduced on the pre-Phase-21 baseline.
 *Current test inventory (not a result):* 178+ test files, 766+ test classes, 2958+ test methods.
 
 **Current schema version:** `10`.
@@ -29,8 +37,8 @@ Execution & Learned-Skill Progression) is specified and **PLANNED** — see
 
 | Track | Capability | Status |
 |---|---|---|
-| A | Research & Knowledge | **COMPLETE** (`v0.17.0`); coordinator + `research.coordinate` implemented (Phase 21, unreleased) |
-| B | Tool Ecosystem | **COMPLETE** (`v0.18.0`) |
+| A | Research & Knowledge | **COMPLETE** (`v0.17.0`); coordinator + `research.coordinate` implemented (Phase 21, bundled with Phase 22) |
+| B | Tool Ecosystem | **COMPLETE** (`v0.18.0`); CONDITIONAL/PARALLEL execution + learned-skill authoring/promotion added (Phase 22) |
 | C | Long-Term Learning | **COMPLETE & runtime-integrated** (`v0.19.1`) |
 | D | Advanced Reasoning | **RELEASED (`v0.20`)** — implemented & runtime-integrated |
 
@@ -50,7 +58,7 @@ Execution & Learned-Skill Progression) is specified and **PLANNED** — see
 
 Atlas is modular, AI-independent, and event-driven. The **kernel** is the only
 place where the whole system is wired. A **ServiceContainer** registers public
-shared services; a **RuntimeCoordinator** orchestrates the 14-stage cognitive
+shared services; a **RuntimeCoordinator** orchestrates the 15-stage cognitive
 pipeline; track-specific private dependencies (e.g. `AdvancedReasoningService`)
 are injected directly and **not** registered in the container.
 
@@ -97,7 +105,7 @@ atlas goal                        # goal intelligence
 ```
 atlas/                Core framework packages
   ├── kernel/         Service container + root application (composition)
-  ├── runtime/        RuntimeCoordinator (14-stage cognitive pipeline)
+  ├── runtime/        RuntimeCoordinator (15-stage cognitive pipeline)
   ├── cognition/      API, context, engine, decisions, pipeline
   ├── reasoning/      Core reasoning (controller, capabilities, planning)
   ├── advanced_reasoning/  Track D — advanced reasoning (reasoning.*)
@@ -128,16 +136,20 @@ docs/                 Documentation
 
 ## Roadmap (summary)
 
-- **COMPLETED:** Tracks A, B, C, the Track D foundation/implementation, and the
-  Track A research coordinator (Phase 21, implemented but not yet released).
-- **CURRENT:** Post-Track-D — Track D is released (`v0.20`); Phase 21's
-  research coordinator is implemented and pending release with the next
-  milestone; remaining Track A/B/C follow-ups are primed.
+- **COMPLETED:** Tracks A, B, C, Track D (v0.20), Track A research coordinator
+  (Phase 21), and Phase 22 — Toolchain Execution & Learned-Skill Progression.
+  **Atlas Core is complete at Phase 22.**
+- **CURRENT:** Atlas Core complete; **post-core guided self-improvement** —
+  Atlas improves itself through the existing governed mechanisms.
+  `SELF_CONFIG`/`INFORMATION` are the enabled governed scopes;
+  `CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remain locked.
 - **DEFERRED:** Governed `ReasoningIngestSink` runtime wiring remains
   pending/deferred; it depends on the Phase 16 schedule-store/dispatcher
   hand-off being finalized, so `reasoning.ingest` stays fail-closed (sink not
   wired).
-- **NEXT/PLANNED:** Per existing repository plans and track designs.
+- **NEXT:** Remaining Track A/C enhancement follow-ups (knowledge-graph
+  expansion, web source adapter, episodic-context/ContextEngine, semantic
+  memory, forgetting-policy tuning). None is required for core completion.
 - **PROPOSED (not approved):** Tracks E, F, G from the Capability Track
   roadmap. See `docs/ROADMAP.md` for details.
 

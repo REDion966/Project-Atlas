@@ -25,7 +25,7 @@ strictly:
 |---|---|---|
 | **A** | Research & Knowledge | Complete (`v0.17.0`) — `atlas/research/`, migration v7, `research.*`, GOV-008, CLI |
 | **B** | Tool Ecosystem | Complete (`v0.18.0`) — `atlas/toolchain/`, migration v8, GOV-009, CLI |
-| **C** | Long-Term Learning | Complete & runtime-integrated (`v0.19.1`) — `atlas/longterm/`, migration v9, `memory.*`, GOV-010, CLI |
+| **C** | Long-Term Learning | Complete & runtime-integrated (`v0.19.1`) — `atlas/longterm/`, migration v9, GOV-010, CLI |
 
 ### Track D — Advanced Reasoning (released)
 - Multi-step reasoning, causal/counterfactual analysis, hypothesis generation,
@@ -54,23 +54,47 @@ strictly:
   direct KnowledgeManager injection.
 - Tests: `tests/test_phase21_research_coordinator.py`,
   `tests/test_phase21_research_feedback.py`. Commits: `7d86a6b`, `fee0e32`.
-- Full suite at acceptance gate: **3070 passed, 57 subtests, 1 failed** — the
+- Bundled with the Phase 22 milestone (no separate Phase 21 tag, nothing pushed).
+
+### Phase 22 — Toolchain Execution & Learned-Skill Progression (COMPLETE)
+- **Batch 1 — CONDITIONAL execution** (`0926ea2`): deterministic selection of
+  later steps from prior step output; no general expression language.
+- **Batch 2 — PARALLEL execution** (`7fa81f3`): deterministic sequential
+  fan-out/fan-in; NO actual concurrency ("No threading. No async. No
+  subprocess." remains in force).
+- **Batch 3 — Learned-skill authoring/promotion**: pure in-memory
+  `ToolSkillAuthor`/`LearnedSkillPromoter`; promotion governed via
+  `ToolchainIngestBridge`/GOV-009, fail-closed without a sink.
+- **Batch 4 — Integration & acceptance** (`f501367`): toolchain capabilities
+  reachable through the existing capability dispatch path; all invariants hold.
+- **Atlas Core is COMPLETE at Phase 22 — the FINAL numbered implementation
+  phase for Atlas Core. There is NO Phase 23.** The next development model is
+  post-core guided self-improvement (see CURRENT below and
+  `docs/ATLAS_STATE.md` §22.4).
+- Full suite at acceptance: **3169 passed, 57 subtests, 1 failed** — the
   single failure is the pre-existing Ollama-dependency
   `test_cognition_runtime.py::test_full_cognition_conversation_flow`
   (localhost:11434 unavailable), reproduced on the pre-Phase-21 baseline.
 
 ---
 
-## CURRENT — Active Work
+## CURRENT — Atlas Core complete; post-core guided self-improvement
 
-**Post-Track-D implementation.** Track D was released as `v0.20`. The active
-focus is the completed-but-unreleased first NEXT implementation item and its
-remaining follow-ups:
+**Atlas Core is COMPLETE at Phase 22.** Phase 21 (research coordinator) and
+Phase 22 (toolchain CONDITIONAL/PARALLEL execution + learned-skill
+authoring/promotion + integration & acceptance) are implemented and bundled,
+pending release together with the next milestone (not yet tagged).
 
-- **Track A — research coordinator implementation** is implemented (Phase 21)
-  and pending release together with the next milestone. It is not yet tagged.
-- The next primed tasks are the already-recorded Track A/B/C follow-ups listed
-  under NEXT below.
+There is **NO Phase 23 for Atlas Core**. The next development model is
+**post-core guided self-improvement**: Atlas improves itself through the
+existing governed mechanisms (`Observe/record → analyze/plan → propose →
+approve → execute governed changes → verify → repeat`), with
+`SELF_CONFIG`/`INFORMATION` as the enabled governed scopes and
+`CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remaining locked in accordance with
+the constitution (see `docs/ATLAS_STATE.md` §22.4).
+
+- The remaining already-recorded Track A/B/C follow-ups (under NEXT below) are
+  enhancement / post-core work — **none is required for core completion**.
 - Keep `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` synchronized.
 
 > The governed `ReasoningIngestSink` is a **pending/deferred dependency** — **not**
@@ -80,13 +104,12 @@ remaining follow-ups:
 
 ---
 
-## NEXT — Immediate Next Work
+## NEXT — Enhancement / Post-Core Work
 
-Based on the existing repository already recording these deferred follow-ups:
+Based on the existing repository already recording these deferred follow-ups
+(zero of these are required for Atlas Core completion):
 
 - **Track A** follow-ups: knowledge-graph expansion, web source adapter
-- **Track B** follow-ups: skill authoring, PARALLEL / CONDITIONAL tool-chain
-  execution, learned-skill promotion
 - **Track C** follow-ups: feeding episodic context into working memory /
   `ContextEngine` (requires RuntimeCoordinator review before scheduling),
   semantic-memory upgrades, forgetting-policy tuning
@@ -97,24 +120,11 @@ These are the concrete, already-recorded next items. They are not new inventions
 
 ## PLANNED
 
-- **Phase 22 — Toolchain Execution & Learned-Skill Progression** (approved
-  design: `docs/PHASE_22_DESIGN.md`). Covers the Track B NEXT items:
-  CONDITIONAL execution, PARALLEL execution (deterministic sequential
-  fan-out/fan-in; the executor's "No threading. No async. No subprocess."
-  promise is preserved), and learned-skill authoring/promotion (governed via
-  GOV-009, fail-closed). Batches: 1 = CONDITIONAL, 2 = PARALLEL,
-  3 = skill authoring/promotion, 4 = integration + acceptance. Invariants and
-  non-goals are listed in the design document.
-  Owner decisions recorded: (1) Phase 21 is bundled with the Phase 22
-  milestone/release — no separate Phase 21 tag; (2) learned-skill promotion
-  candidates stay in-memory for Phase 22 — no additive migration is
-  introduced unless a later batch proves strict requirement; (3) CONDITIONAL
-  use a small deterministic predicate vocabulary, finalized at Batch 1, not
-  expanded now.
-
-No other additional **PLANNED** (approved-design) items beyond the deferred
-Track A/B/C follow-ups listed under NEXT. Any new capability must first receive
-an approved design and be added to this document before implementation.
+There are **no PLANNED numbered phases** for Atlas Core. Phase 22 was the final
+numbered implementation phase. Future foundational changes — pipeline
+restructuring, new governance levels, or enabling CODE scope — require a
+separate owner-approved design and are post-core evolution work, not an
+automatic Phase 23.
 
 ---
 
@@ -178,4 +188,6 @@ documents as current.
 ---
 
 *Authoritative re-write: 2026-08-08 (post-Track-D, schema v10, ahead of
-v0.19.1). Project Atlas — docs/ROADMAP.md.*
+v0.19.1). Core milestone update: 2026-08-14 (Phase 22 COMPLETE — Atlas Core
+complete; post-core guided self-improvement; no Phase 23). Project Atlas —
+docs/ROADMAP.md.*
