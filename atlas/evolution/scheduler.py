@@ -15,6 +15,11 @@ The scheduler:
 Single-threaded. No async. No concurrent cycles. No autonomous execution.
 
 Pure logic. All dependencies injected. Fully testable.
+
+Post-Core F5: evolution insight / decision intelligence / knowledge
+pipeline integrations stay fail-soft (best-effort), but the most recent
+integration error is now observable via ``EvolutionSchedulerResult.last_error``
+and ``EvolutionScheduler.last_error``.
 """
 
 from dataclasses import dataclass, field
@@ -42,6 +47,9 @@ class EvolutionSchedulerResult:
         proposals_stored: Number of proposals stored in EvolutionMemory.
         ran_at: When the tick was executed.
         is_running: Whether a cycle was already in progress (skipped).
+        last_error: Most recent fail-soft integration error message from
+            this cycle ("" when no error occurred). Diagnostics only —
+            does not change fail-soft semantics.
     """
 
     cycle_number: int
@@ -52,6 +60,7 @@ class EvolutionSchedulerResult:
     proposals_stored: int = 0
     ran_at: datetime = field(default_factory=datetime.now)
     is_running: bool = False
+    last_error: str = ""
 
 
 class EvolutionScheduler:
@@ -124,6 +133,7 @@ class EvolutionScheduler:
         self._cycle_number = 0
         self._running = False
         self._last_result: EvolutionSchedulerResult | None = None
+        self._last_error = ""
 
         # Track observation count at last analysis to detect new data
         self._last_observation_count = 0
@@ -151,6 +161,14 @@ class EvolutionScheduler:
     def running(self) -> bool:
         """Return True if a tick cycle is currently in progress."""
         return self._running
+
+    @property
+    def last_error(self) -> str:
+        """Return the most recent fail-soft integration error, or ''.
+
+        Diagnostics only (Post-Core F5). Never changes fail-soft semantics.
+        """
+        return self._last_error
 
     # ------------------------------------------------------------------
     # Main tick cycle
@@ -206,6 +224,9 @@ class EvolutionScheduler:
         Returns:
             An EvolutionSchedulerResult with the outcome.
         """
+        # Reset fail-soft diagnostic for this cycle
+        self._last_error = ""
+
         # Collect observations
         observations = self._observation_engine.recent_observations(n=100)
         current_count = len(observations)
@@ -228,24 +249,24 @@ class EvolutionScheduler:
         if self._intelligence_engine is not None:
             try:
                 self._intelligence_engine.analyze_all()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._last_error = f"intelligence_engine.analyze_all failed: {exc}"
 
         # Fetch evolution insights if available
         insights = None
         if self._intelligence_engine is not None:
             try:
                 insights = self._intelligence_engine.get_insights()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._last_error = f"intelligence_engine.get_insights failed: {exc}"
 
         # Phase 14.3: Build planning context once from decision intelligence
         planning_context = None
         if self._decision_intelligence is not None:
             try:
                 planning_context = self._decision_intelligence.get_planning_context()
-            except Exception:
-                planning_context = None
+            except Exception as exc:
+                self._last_error = f"decision_intelligence failed: {exc}"
 
         # Detect weaknesses
         weaknesses = self._improvement_planner.detect_weaknesses(
@@ -261,6 +282,7 @@ class EvolutionScheduler:
                 ran_analysis=True,
                 observation_count=current_count,
                 weaknesses_detected=0,
+                last_error=self._last_error,
             )
 
         # Create improvement plan
@@ -277,6 +299,7 @@ class EvolutionScheduler:
                 observation_count=current_count,
                 weaknesses_detected=len(weaknesses),
                 proposals_generated=0,
+                last_error=self._last_error,
             )
 
         # Generate proposal
@@ -294,8 +317,8 @@ class EvolutionScheduler:
             try:
                 self._knowledge_pipeline.record_weaknesses(weaknesses)
                 self._knowledge_pipeline.consolidate()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._last_error = f"knowledge_pipeline failed: {exc}"
 
         # Update last observation count for next cycle
         self._last_observation_count = current_count
@@ -307,6 +330,7 @@ class EvolutionScheduler:
             weaknesses_detected=len(weaknesses),
             proposals_generated=1,
             proposals_stored=1,
+            last_error=self._last_error,
         )
 
     def reset_threshold(self) -> None:
@@ -327,4 +351,5 @@ class EvolutionScheduler:
         self._cycle_number = 0
         self._running = False
         self._last_result = None
+        self._last_error = ""
         self._last_observation_count = 0
