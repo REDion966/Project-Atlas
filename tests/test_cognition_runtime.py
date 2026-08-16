@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from atlas.ai.ai_manager import AIManager
+from atlas.ai.routing.router import ModelRouter
 from atlas.kernel.atlas import Atlas
 from atlas.cognition.api import CognitionAPI
 from atlas.cognition.decision import CognitionDecision
@@ -38,6 +39,11 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
         provider call. The configured provider is Ollama (config.toml), so it
         is replaced with the Mock Provider following the existing convention in
         tests/test_conversation_service.py. No production code is changed.
+
+        Post-Core hardening: ConversationService.send() always routes via the
+        real ModelRouter, whose routing decision would override the patched
+        Mock active provider. The ModelRouter patch is therefore scoped to the
+        send() call so AIRouter falls back to the active Mock provider.
         """
 
         atlas = Atlas()
@@ -101,7 +107,11 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
         )
 
         # --- Send user query through ConversationService ---
-        response = conversation.send("Test cognition query")
+        # ConversationService.send always routes via the real ModelRouter,
+        # whose routing decision would override the patched Mock active
+        # provider. Return no decision so AIRouter falls back to Mock.
+        with patch.object(ModelRouter, "route", return_value=None):
+            response = conversation.send("Test cognition query")
 
         # --- Verify final response completed ---
         self.assertEqual(response.role, "assistant")

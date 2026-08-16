@@ -124,6 +124,26 @@ class SQLiteUnderstandingStorage(UnderstandingStorage):
         return json.dumps(value, ensure_ascii=False)
 
     @staticmethod
+    def _clamp_int(value: Any, default: int) -> int:
+        """Clamp an integer to SQLite's signed 64-bit range.
+
+        Post-Core Hardening — understanding counters (concept/pattern
+        frequency, relationship observed_count) are unbounded ``+=``
+        accumulators that compound across restore+merge cycles. Without a
+        clamp, a persisted counter that converges on 2**63 - 1 overflows
+        SQLite's INTEGER column and aborts the batch write. Saturation
+        preserves the counter's meaning — more observations than can be
+        represented — while keeping writes deterministic and loss-free.
+
+        Non-numeric or missing values fall back to ``default``, matching the
+        previous ``get(key, default)`` behavior.
+        """
+        if isinstance(value, bool) or not isinstance(value, int):
+            return default
+        max_int64 = 2**63 - 1
+        return value if value <= max_int64 else max_int64
+
+    @staticmethod
     def _from_json(value: str | None) -> Any:
         """Deserialize a JSON string back to a Python object."""
         if value is None:
@@ -168,7 +188,7 @@ class SQLiteUnderstandingStorage(UnderstandingStorage):
                 c.get("domain", "GENERAL"),
                 c.get("confidence", 0.5),
                 c.get("source", ""),
-                c.get("frequency", 1),
+                self._clamp_int(c.get("frequency", 1), 1),
                 c.get("first_seen"),
                 c.get("last_seen"),
                 self._to_json(c.get("metadata", {})),
@@ -228,7 +248,7 @@ class SQLiteUnderstandingStorage(UnderstandingStorage):
                 r.get("relationship_type"),
                 r.get("weight", 0.5),
                 r.get("confidence", 0.5),
-                r.get("observed_count", 1),
+                self._clamp_int(r.get("observed_count", 1), 1),
                 r.get("first_observed"),
                 r.get("last_observed"),
             )
@@ -286,7 +306,7 @@ class SQLiteUnderstandingStorage(UnderstandingStorage):
                 p.get("description", ""),
                 p.get("confidence", 0.5),
                 self._to_json(p.get("related_concept_ids", [])),
-                p.get("frequency", 1),
+                self._clamp_int(p.get("frequency", 1), 1),
                 p.get("first_observed"),
                 p.get("last_observed"),
             )
