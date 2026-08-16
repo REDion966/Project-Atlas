@@ -8,6 +8,9 @@ Never modifies anything.
 Phase 7.0 — Self-Evolution Foundation.
 Phase 12.4 — Added evolution feedback integration. Planner can optionally
 receive EvolutionInsight objects to adjust planning based on past outcomes.
+Post-Core F2 — Weakness detectors aggregate the relevant metric across the
+bounded per-category observation window (mean) instead of only the newest
+observation. Single-observation behavior is preserved (mean == value).
 """
 
 from collections import Counter
@@ -311,7 +314,37 @@ class ImprovementPlanner:
         return weakness
 
     # ------------------------------------------------------------------
-    # Weakness detection methods (unchanged)
+    # Observation aggregation helper (Post-Core F2)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mean_value(
+        observations: list[Observation],
+        key: str,
+        default: float,
+    ) -> float:
+        """
+        Return the arithmetic mean of a metric across the observation window.
+
+        Post-Core F2: weakness detectors aggregate the relevant metric over
+        the bounded per-category window supplied by the scheduler rather than
+        only the newest observation. A single observation yields
+        ``mean == value``, so single-observation behavior is preserved
+        exactly. Deterministic: ordinary arithmetic over the exact
+        observations already passed in.
+        """
+        numeric = [
+            value
+            for obs in observations
+            for value in (obs.value.get(key), )
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        if not numeric:
+            return default
+        return sum(numeric) / len(numeric)
+
+    # ------------------------------------------------------------------
+    # Weakness detection methods
     # ------------------------------------------------------------------
 
     def _detect_runtime_weakness(
@@ -321,9 +354,9 @@ class ImprovementPlanner:
         """
         Detect runtime performance weaknesses.
 
-        Flags if:
-        - Average response time exceeds 5000ms.
-        - Error rate exceeds 10%.
+        Post-Core F2: aggregates avg_response_time_ms and error_rate_percent
+        across the runtime window (mean) instead of only the newest
+        observation.
         """
         runtime_obs = [
             obs for obs in observations
@@ -333,11 +366,14 @@ class ImprovementPlanner:
             return None
 
         latest = runtime_obs[-1]
-        value = latest.value
         obs_id = f"{latest.timestamp.isoformat()}:{latest.metric_name}"
 
-        avg_time = value.get("avg_response_time_ms", 0)
-        error_rate = value.get("error_rate_percent", 0)
+        avg_time = self._mean_value(
+            runtime_obs, "avg_response_time_ms", 0.0
+        )
+        error_rate = self._mean_value(
+            runtime_obs, "error_rate_percent", 0.0
+        )
 
         issues: list[str] = []
         if avg_time > 5000:
@@ -372,8 +408,8 @@ class ImprovementPlanner:
         """
         Detect reasoning quality weaknesses.
 
-        Flags if:
-        - Success rate is below 70%.
+        Post-Core F2: aggregates success_rate across the reasoning window
+        (mean) instead of only the newest observation.
         """
         reasoning_obs = [
             obs for obs in observations
@@ -383,10 +419,11 @@ class ImprovementPlanner:
             return None
 
         latest = reasoning_obs[-1]
-        value = latest.value
         obs_id = f"{latest.timestamp.isoformat()}:{latest.metric_name}"
 
-        success_rate = value.get("success_rate", 1.0)
+        success_rate = self._mean_value(
+            reasoning_obs, "success_rate", 1.0
+        )
 
         if success_rate >= 0.7:
             return None
@@ -453,9 +490,9 @@ class ImprovementPlanner:
         """
         Detect memory quality weaknesses.
 
-        Flags if:
-        - Average relevance score is below 0.5.
-        - Retrieval success rate is below 80%.
+        Post-Core F2: aggregates avg_relevance_score and
+        retrieval_success_rate across the memory window (mean) instead of
+        only the newest observation.
         """
         memory_obs = [
             obs for obs in observations
@@ -465,11 +502,14 @@ class ImprovementPlanner:
             return None
 
         latest = memory_obs[-1]
-        value = latest.value
         obs_id = f"{latest.timestamp.isoformat()}:{latest.metric_name}"
 
-        avg_relevance = value.get("avg_relevance_score", 1.0)
-        retrieval_rate = value.get("retrieval_success_rate", 1.0)
+        avg_relevance = self._mean_value(
+            memory_obs, "avg_relevance_score", 1.0
+        )
+        retrieval_rate = self._mean_value(
+            memory_obs, "retrieval_success_rate", 1.0
+        )
 
         issues: list[str] = []
         if avg_relevance < 0.5:
