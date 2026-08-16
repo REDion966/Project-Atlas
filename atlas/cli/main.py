@@ -233,6 +233,28 @@ def main() -> None:
     )
 
     # -------------------------
+    # Evolution Proposals (read-only audit; Post-Core F8)
+    # -------------------------
+
+    proposals_parser = subparsers.add_parser(
+        "proposals",
+        help="Evolution proposal inspection (read-only)",
+    )
+    proposals_parser.add_argument(
+        "action",
+        choices=["list", "show", "audit"],
+    )
+    proposals_parser.add_argument(
+        "proposal_id",
+        nargs="?",
+    )
+    proposals_parser.add_argument(
+        "--pending",
+        action="store_true",
+        help="list only pending proposals",
+    )
+
+    # -------------------------
     # Toolchain Commands (Phase 18.10)
     # -------------------------
 
@@ -509,6 +531,14 @@ def main() -> None:
         return
 
     # -------------------------
+    # Proposals (read-only audit; Post-Core F8)
+    # -------------------------
+
+    if args.command == "proposals":
+        _run_proposals(args)
+        return
+
+    # -------------------------
     # Resource
     # -------------------------
 
@@ -654,6 +684,47 @@ def main() -> None:
         return
 
     parser.print_help()
+
+
+def _run_proposals(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas proposals list|show|audit``.
+
+    Post-Core F8 — presentation-only, read-only audit surface. Delegates
+    to the EvolutionExecutionEngine's read-only proposal retrieval APIs.
+    None of the actions approve, execute, reject, or defer proposals and
+    none touch governance.
+    """
+    from atlas.cli.evolution_commands import (
+        cmd_proposals_audit,
+        cmd_proposals_list,
+        cmd_proposals_show,
+    )
+    from atlas.kernel.atlas import Atlas
+
+    if not getattr(args, "action", ""):
+        print("error: proposals requires an action (list|show|audit)")
+        return
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+        engine = atlas.execution_engine
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
+        return
+
+    try:
+        if args.action == "list":
+            print(cmd_proposals_list(engine, args))
+            return
+        if args.action == "show":
+            print(cmd_proposals_show(engine, args))
+            return
+        if args.action == "audit":
+            print(cmd_proposals_audit(engine, args))
+            return
+    finally:
+        atlas.shutdown()
 
 
 def _run_research(args: argparse.Namespace) -> None:

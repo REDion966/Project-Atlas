@@ -175,3 +175,64 @@ def cmd_proposals_defer(engine: Any, args: Any) -> str:
     if result.success:
         return f"✓ Proposal '{proposal_id}' deferred."
     return f"✗ Failed to defer proposal '{proposal_id}': {result.error}"
+
+
+def cmd_proposals_audit(engine: Any, args: Any) -> str:
+    """
+    Show the read-only evolution audit trail for a proposal.
+
+    CLI: atlas proposals audit <proposal_id>
+
+    Post-Core F8 — Inspection only: surfaces the proposal's lifecycle
+    (status/priority/timestamps), the current approval decision, and the
+    execution outcome already represented by the F7 EvolutionRecord.
+    Read-only — never approves, executes, or touches governance.
+
+    Delegates to: EvolutionExecutionEngine.get_proposal_audit()
+    """
+    proposal_id = getattr(args, "proposal_id", "")
+    if not proposal_id:
+        return "Error: proposal_id is required."
+
+    audit = engine.get_proposal_audit(proposal_id)
+    if audit is None:
+        return f"Proposal '{proposal_id}' not found."
+
+    lines = [
+        f"Proposal: {audit['proposal_id']}",
+        f"Title: {audit['title']}",
+        f"Status: {audit['status']}",
+        f"Priority: {audit['priority']}",
+        f"Created: {audit['created_at']}",
+    ]
+    if audit["approved_at"]:
+        lines.append(f"Approved: {audit['approved_at']}")
+    if audit["rejection_reason"]:
+        lines.append(f"Rejection Reason: {audit['rejection_reason']}")
+
+    approval = audit["approval"]
+    if approval is not None:
+        lines.append(
+            f"Approval Decision: {approval['decision']}"
+            + (f" ({approval['comment']})" if approval["comment"] else "")
+        )
+        if approval["decided_at"]:
+            lines.append(f"Decided At: {approval['decided_at']}")
+    else:
+        lines.append("Approval Decision: (none)")
+
+    execution = audit["execution"]
+    if execution is not None:
+        outcome = "Success" if execution["success"] else "Failure"
+        lines.append(f"Execution: {outcome}")
+        lines.append(f"Execution Record: {execution['record_id']}")
+        if execution["status"]:
+            lines.append(f"Execution Status: {execution['status']}")
+        if execution["error"]:
+            lines.append(f"Execution Error: {execution['error']}")
+        if execution["tracked_goal_id"]:
+            lines.append(f"Tracked Goal: {execution['tracked_goal_id']}")
+    else:
+        lines.append("Execution: (not yet executed)")
+
+    return "\n".join(lines)

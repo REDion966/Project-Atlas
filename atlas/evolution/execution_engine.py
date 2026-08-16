@@ -551,6 +551,90 @@ class EvolutionExecutionEngine:
         return self._evolution_memory.get_proposal(proposal_id)
 
     # ------------------------------------------------------------------
+    # Read-only audit surface (Post-Core F8)
+    # ------------------------------------------------------------------
+
+    def get_proposal_audit(self, proposal_id: str) -> dict[str, Any] | None:
+        """
+        Return a read-only audit projection for a proposal.
+
+        Post-Core F8 — Audit/visibility: combines the proposal's own
+        fields with the current approval decision and the execution
+        outcome already represented by the F7 EvolutionRecord metadata.
+        Never mutates state, never executes, and never touches governance.
+
+        Args:
+            proposal_id: The proposal identifier.
+
+        Returns:
+            A stable dictionary projection, or None if the proposal is
+            unknown.
+        """
+        proposal = self.get_proposal(proposal_id)
+        if proposal is None:
+            return None
+
+        approval = None
+        request = self._find_approval_request(proposal_id)
+        if request is not None:
+            from atlas.evolution.models import ApprovalDecision
+
+            decision = getattr(request, "decision", ApprovalDecision.PENDING)
+            approval = {
+                "decision": (
+                    decision.name if hasattr(decision, "name") else str(decision)
+                ),
+                "comment": getattr(request, "decision_comment", ""),
+                "decided_at": self._format_timestamp(
+                    getattr(request, "decided_at", None)
+                ),
+            }
+
+        execution = None
+        record = self._find_execution_record(proposal_id)
+        if record is not None:
+            execution = {
+                "record_id": record.record_id,
+                "success": bool(record.metadata.get("success", True)),
+                "error": str(record.metadata.get("error", "")),
+                "status": str(record.metadata.get("status", "")),
+                "tracked_goal_id": str(record.metadata.get("tracked_goal_id", "")),
+            }
+
+        return {
+            "proposal_id": proposal.proposal_id,
+            "title": proposal.title,
+            "status": proposal.status.name,
+            "priority": proposal.plan.priority.name,
+            "created_at": self._format_timestamp(proposal.created_at),
+            "approved_at": self._format_timestamp(proposal.approved_at),
+            "rejection_reason": proposal.rejection_reason,
+            "approval": approval,
+            "execution": execution,
+        }
+
+    @staticmethod
+    def _format_timestamp(value: Any) -> str:
+        """Format a timestamp deterministically for audit output."""
+        if value is None:
+            return ""
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return str(value)
+
+    def _find_execution_record(
+        self,
+        proposal_id: str,
+    ) -> EvolutionRecord | None:
+        """Find the execution EvolutionRecord for a proposal."""
+        if self._evolution_memory is None:
+            return None
+        for record in self._evolution_memory.get_records_by_type("execution"):
+            if proposal_id in record.related_ids:
+                return record
+        return None
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
