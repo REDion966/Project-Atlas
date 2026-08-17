@@ -50,17 +50,21 @@ mechanism by which Atlas may change its own operational state.
 
 | Field | Value |
 |---|---|
-| Released baseline | **v0.20** (stable; Track D — Advanced Reasoning released) |
-| Current HEAD | `f501367` (branch `phase5-memory-evolution`) |
-| In-development work | **Phase 21 + Phase 22 complete and bundled** (research coordinator; toolchain CONDITIONAL/PARALLEL execution + learned-skill authoring/promotion; integration & acceptance) — not yet released/tagged |
+| Released baseline | **v0.20** (stable; Track D — Advanced Reasoning released); **v0.20.0** (release preparation complete at HEAD `b2b4674`) |
+| Current HEAD | `b2b4674` (branch `phase5-memory-evolution`) |
+| In-development work | **Post-core complete** — F1–F8 (F3 subsumed by F8; F4 deferred/monitored; F5 scheduler diagnostics; F6 expected behavior) + two hardening fixes (cognition Mock routing; SQLite INTEGER clamp) — release preparation for **v0.20.0** |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **10** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
 | Era | **Capability Track Era** |
 
-**CURRENT IMPLEMENTATION:** Track D is implemented, runtime-integrated, and
-released in **v0.20** (annotated tag, full suite verified: 2973 passed, 57
-subtests, 0 failed, 0 errors). Do not claim any later release.
+**CURRENT IMPLEMENTATION:** Track D is released in **v0.20** (annotated tag,
+full suite verified: 2973 passed, 57 subtests, 0 failed, 0 errors). Post-core
+F1–F8 and the two hardening fixes are complete at HEAD `b2b4674`; final release
+verification for **v0.20.0**: **3260 passed, 0 failed, 57 subtests, 2 warnings**
+(the 2 warnings are non-blocking `asyncio.iscoroutinefunction` deprecations in a
+Phase 21 test). Do not claim any release beyond v0.20 before the owner tags
+v0.20.0.
 
 ---
 
@@ -275,7 +279,7 @@ additively. Track D adds `atlas reasoning` with actions: `trace`, `causal`,
 
 Other current subcommands include: `workspace`, `project`, `resource`,
 `permission`, `member`, `tag`, `research` (A), `toolchain` / `skill` (B),
-`memory` (C), `evolution`, `goal`.
+`memory` (C), `evolution`, `goal`, `proposals` (post-core F8, read-only).
 
 ## 11. Governance / Evolution Framework Boundaries
 
@@ -398,6 +402,12 @@ Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
 
 ## 15. Current Test / Verification State
 
+> **Precision rule:** Only an actually-executed number may be stated as a test
+> result. The figure above is the verified execution for Track D Batch 2. Any
+> snapshot from the Phase 1 repository inventory is a **"current test
+> inventory"**, not a result — do not call an inventory count a passing test
+> count.
+
 **Verified Track D Batch 2 execution** (decision-gate result, ~9 minutes):
 
 ```
@@ -407,11 +417,14 @@ Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
 0 errors
 ```
 
-> **Precision rule:** Only an actually-executed number may be stated as a test
-> result. The figure above is the verified execution for Track D Batch 2. Any
-> snapshot from the Phase 1 repository inventory is a **"current test
-> inventory"**, not a result — do not call an inventory count a passing test
-> count.
+**Verified post-core release gate (HEAD `b2b4674`, v0.20.0 preparation):**
+
+```
+3260 passed
+57 subtests passed
+0 failed
+2 warnings (non-blocking asyncio.iscoroutinefunction deprecations)
+```
 
 **Current test inventory (not a result):** 178 test files, 766 test classes,
 2958 test methods (+ parameterized subtests).
@@ -493,6 +506,13 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 - Phase 16: boot activation of staged config + SAFE_MODE rollback are part of
   the governed-autonomy design but remain governed-path behavior; CODE scope is
   unreachable by constitutional design.
+- **F4 (scheduler double-tick) is DEFERRED/MONITORED**: the EvolutionScheduler's
+  shared tick counter, new-observations gate, and reentrancy guard prevent
+  duplicate analysis; revisit only if duplicate proposal IDs/content or
+  duplicate mutation execution is observed.
+- **F6 (persistence degradation) is EXPECTED BEHAVIOR**: SQLite evolution
+  storage intentionally degrades to memory-only; `evolution.storage.unavailable`
+  is emitted.
 
 ## 20. Current Known Limitations
 
@@ -503,7 +523,8 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 - Large-model enhancement in Track D is optional and protocol-injected; the
   deterministic engine is the primary mechanism.
 - `docs/archive/releases/CHANGELOG.md` is not maintained past the early
-  releases; git history is the authoritative change log for later work.
+  releases; git history is the authoritative change log for later work; the
+  active release notes live in the root `CHANGELOG.md` (created at v0.20.0).
 
 ## 21. Rules Future AI Agents MUST Follow
 
@@ -602,11 +623,54 @@ Observe/record → analyze/plan → propose → approve → execute governed cha
   governance levels, or enabling CODE scope — require a separate owner-approved
   design and are post-core evolution work, not an automatic Phase 23.
 
+## 23. Post-Core Completion Record (v0.20.0 release preparation)
+
+Post-core guided self-improvement delivered F1–F8 plus two hardening fixes.
+All are complete at HEAD `b2b4674` (branch `phase5-memory-evolution`); the
+owner is preparing release **v0.20.0** (tag not yet created).
+
+- **F1 — Runtime observation coverage**: five observation categories per
+  runtime cycle (`atlas/evolution/runtime_observations.py`).
+- **F2 — Planner observation aggregation**: weakness detectors average the
+  relevant metric over the bounded per-category window instead of only the
+  newest observation (`ImprovementPlanner._mean_value`).
+- **F3 — SUBSUMED by F8**: proposal list/show/audit visibility makes a
+  separate audit item unnecessary.
+- **F4 — DEFERRED/MONITORED**: the EvolutionScheduler's shared tick counter +
+  new-observations gate + reentrancy guard prevent duplicate analysis; no
+  defect demonstrated, so no change was made.
+- **F5 — Scheduler fail-soft diagnostics**: `EvolutionSchedulerResult.last_error`
+  surfaces the most recent integration error while fail-soft semantics stay
+  byte-identical.
+- **F6 — EXPECTED BEHAVIOR**: SQLite evolution storage's memory-only fallback
+  is the documented degraded mode; `evolution.storage.unavailable` is emitted.
+- **F7 — Closed learning feedback loop**: deterministic failure EvolutionRecords
+  → insight → planner feedback.
+- **F8 — Evolution audit/proposal visibility**: `get_proposal_audit()` +
+  `atlas proposals list|show|audit` CLI (read-only).
+- **Hardening — cognition Mock routing**: the cognition runtime test now routes
+  via Mock Provider (the `ModelRouter.route → None` patch is scoped to
+  `send()`), eliminating the Ollama 404.
+- **Hardening — SQLite INTEGER clamp**: understanding `frequency` /
+  `observed_count` binds are saturated at `2**63 - 1`, eliminating the
+  `OverflowError` from unbounded counter accumulation.
+
+**Final release verification:** full suite **3260 passed, 0 failed, 57
+subtests, 2 warnings** (the 2 warnings are non-blocking
+`asyncio.iscoroutinefunction` deprecations in `test_phase21_research_coordinator.py`).
+
+**Governance statement (unchanged, reasserted):** autonomous code mutation
+remains disabled. `SELF_CONFIG` (1) and `INFORMATION` (2) remain the enabled
+governed scopes; `CODE_ARTIFACT` (3), `SANDBOXED` (4), and `AUTONOMOUS` (5)
+remain locked/unreachable. No autonomous code mutation exists in the source.
+
 ---
 
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
-2973 passed, 57 subtests, 0 failed, 0 errors) · Project Atlas —
+2973 passed, 57 subtests, 0 failed, 0 errors) · Release preparation update:
+2026-08-16 (post-core F1–F8 + hardening complete at HEAD b2b4674; release gate
+3260 passed, 0 failed, 57 subtests, 2 non-blocking warnings) · Project Atlas —
 docs/ATLAS_STATE.md. This document is the authoritative current architecture
 handbook and replaces all earlier ATLAS_STATE revisions.*

@@ -76,6 +76,30 @@ strictly:
   `test_cognition_runtime.py::test_full_cognition_conversation_flow`
   (localhost:11434 unavailable), reproduced on the pre-Phase-21 baseline.
 
+### Post-Core Guided Self-Improvement (COMPLETE — F1–F8 + hardening)
+Post-core work completed on top of Atlas Core, ahead of the v0.20.0 release:
+
+- **F1 — Runtime observation coverage**: five observation categories per
+  runtime cycle (`atlas/evolution/runtime_observations.py`).
+- **F2 — Planner observation aggregation**: weakness detectors average the
+  relevant metric over the bounded per-category observation window instead of
+  only the newest observation (`ImprovementPlanner._mean_value`).
+- **F3 — SUBSUMED by F8**: proposal list/show/audit visibility.
+- **F4 — DEFERRED/MONITORED**: EvolutionScheduler shared tick counter +
+  new-observations gate + reentrancy guard prevent duplicate analysis.
+- **F5 — Scheduler fail-soft diagnostics**: `EvolutionSchedulerResult.last_error`.
+- **F6 — EXPECTED BEHAVIOR**: SQLite evolution storage memory-only fallback.
+- **F7 — Closed learning feedback loop**: failure EvolutionRecords → insight →
+  planner feedback.
+- **F8 — Evolution audit/proposal visibility**: `get_proposal_audit()` +
+  `atlas proposals list|show|audit` CLI (read-only).
+- **Hardening — cognition Mock routing**: `test_cognition_runtime.py` now
+  routes via Mock Provider (`ModelRouter.route → None` scoped to `send()`),
+  eliminating the Ollama 404.
+- **Hardening — SQLite INTEGER clamp**: understanding `frequency` /
+  `observed_count` binds saturated at `2**63 - 1`, eliminating the
+  `OverflowError` from unbounded counter accumulation.
+
 ---
 
 ## CURRENT — Atlas Core complete; post-core guided self-improvement
@@ -83,7 +107,19 @@ strictly:
 **Atlas Core is COMPLETE at Phase 22.** Phase 21 (research coordinator) and
 Phase 22 (toolchain CONDITIONAL/PARALLEL execution + learned-skill
 authoring/promotion + integration & acceptance) are implemented and bundled,
-pending release together with the next milestone (not yet tagged).
+pending release together with the next milestone.
+
+**Post-core completion (release preparation for v0.20.0):** F1 (runtime
+observation coverage), F2 (planner observation aggregation), F7 (closed
+learning feedback loop), and F8 (evolution audit/proposal visibility) are
+complete; F3 is subsumed by F8; F4 is deferred/monitored (scheduler guards
+proven); F5 scheduler fail-soft diagnostics is implemented; F6 persistence
+degradation is documented expected behavior. Two hardening fixes shipped:
+cognition runtime test routes to Mock Provider, and SQLite
+understanding-counter INTEGER overflow is clamped deterministically at
+2**63 - 1. Final full-suite verification at HEAD `b2b4674`:
+**3260 passed, 0 failed, 57 subtests, 2 non-blocking warnings** (see
+`docs/ATLAS_STATE.md` §23).
 
 There is **NO Phase 23 for Atlas Core**. The next development model is
 **post-core guided self-improvement**: Atlas improves itself through the
@@ -189,5 +225,7 @@ documents as current.
 
 *Authoritative re-write: 2026-08-08 (post-Track-D, schema v10, ahead of
 v0.19.1). Core milestone update: 2026-08-14 (Phase 22 COMPLETE — Atlas Core
-complete; post-core guided self-improvement; no Phase 23). Project Atlas —
+complete; post-core guided self-improvement; no Phase 23). Post-core release
+update: 2026-08-16 (F1–F8 + hardening complete at HEAD b2b4674; release gate
+3260 passed, 0 failed, 57 subtests, 2 non-blocking warnings). Project Atlas —
 docs/ROADMAP.md.*

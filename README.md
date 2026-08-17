@@ -18,17 +18,19 @@ capability tracks (A–D) are implemented; Track D (Advanced Reasoning) is
 **released as `v0.20`**. Track A's research coordinator (Phase 21) and Phase 22
 (Toolchain Execution & Learned-Skill Progression: CONDITIONAL/PARALLEL
 execution + learned-skill authoring/promotion + integration) are implemented
-and bundled, pending release (not yet tagged). **Phase 22 is the FINAL numbered
-implementation phase for Atlas Core — there is NO Phase 23.** Development has
-transitioned to **post-core guided self-improvement** (see
-`docs/ATLAS_STATE.md` §22.4): Atlas improves itself through the existing
-governed mechanisms (`Observe/record → analyze/plan → propose → approve →
-execute governed changes → verify → repeat`) with `SELF_CONFIG`/`INFORMATION`
-as the enabled governed scopes. CODE mutation remains locked and is not
-enabled; code changes may be produced as reviewable artifacts/patches rather
-than autonomously applied.
+and bundled, and the post-core improvements (F1–F8) and two hardening fixes are
+complete — release **v0.20.0** is in preparation at HEAD `b2b4674`.
+**Phase 22 is the FINAL numbered implementation phase for Atlas Core — there is
+NO Phase 23.** Development has transitioned to **post-core guided
+self-improvement** (see `docs/ATLAS_STATE.md` §22.4 and §23): Atlas improves
+itself through the existing governed mechanisms (`Observe/record → analyze/plan
+→ propose → approve → execute governed changes → verify → repeat`) with
+`SELF_CONFIG`/`INFORMATION` as the enabled governed scopes. CODE mutation
+remains locked and is not enabled; code changes may be produced as reviewable
+artifacts/patches rather than autonomously applied. **Autonomous code mutation
+remains disabled.**
 
-**Latest verified test run (Phase 22 acceptance gate):** `3169 passed`, `57 subtests passed`, `1 failed` — the single failure is the pre-existing Ollama-dependency integration test (`localhost:11434` unavailable), reproduced on the pre-Phase-21 baseline.
+**Latest verified test run (v0.20.0 release gate):** `3260 passed`, `57 subtests passed`, `0 failed`, `2 warnings` — the 2 warnings are non-blocking `asyncio.iscoroutinefunction` deprecation warnings in a Phase 21 test.
 *Current test inventory (not a result):* 178+ test files, 766+ test classes, 2958+ test methods.
 
 **Current schema version:** `10`.
@@ -53,6 +55,17 @@ than autonomously applied.
   sink is not yet wired at runtime, so `reasoning.ingest` intentionally fails
   closed.
 - Exposed as `reasoning.*` capability handlers and an `atlas reasoning` CLI.
+
+### Post-Core Improvements
+
+- **F1** — runtime observation coverage; **F2** — planner observation
+  aggregation; **F7** — closed learning feedback loop; **F8** — evolution
+  audit/proposal visibility (`atlas proposals list|show|audit`).
+- **F3** subsumed by F8; **F4** deferred/monitored; **F5** scheduler fail-soft
+  diagnostics; **F6** persistence degradation documented as expected behavior.
+- **Hardening** — cognition runtime test correctly routes to Mock Provider
+  (Ollama 404 eliminated) and SQLite understanding-counter INTEGER overflow is
+  clamped deterministically at `2**63 - 1`.
 
 ## Architecture (high level)
 
@@ -97,6 +110,7 @@ atlas toolchain / atlas skill     # Track B — tool ecosystem
 atlas memory                      # Track C — long-term learning
 atlas reasoning                   # Track D — advanced reasoning
 atlas evolution                   # governed self-evolution
+atlas proposals                   # evolution proposal audit (read-only; post-core F8)
 atlas goal                        # goal intelligence
 ```
 
@@ -127,6 +141,7 @@ docs/                 Documentation
 - **`README.md`** — public entry point (this file)
 - **`docs/ATLAS_STATE.md`** — authoritative current technical state
 - **`docs/ROADMAP.md`** — authoritative forward direction
+- **`CHANGELOG.md`** — release notes (active since v0.20.0)
 - **`docs/archive/`** — historical documents (reference only)
 - **Git history** — historical chronology and implementation record
 
@@ -137,7 +152,8 @@ docs/                 Documentation
 ## Roadmap (summary)
 
 - **COMPLETED:** Tracks A, B, C, Track D (v0.20), Track A research coordinator
-  (Phase 21), and Phase 22 — Toolchain Execution & Learned-Skill Progression.
+  (Phase 21), Phase 22 — Toolchain Execution & Learned-Skill Progression — and
+  post-core F1–F8 + hardening.
   **Atlas Core is complete at Phase 22.**
 - **CURRENT:** Atlas Core complete; **post-core guided self-improvement** —
   Atlas improves itself through the existing governed mechanisms.
