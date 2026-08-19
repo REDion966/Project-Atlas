@@ -102,55 +102,50 @@ Post-core work completed on top of Atlas Core, ahead of the v0.20.0 release:
 
 ---
 
-## CURRENT — Atlas Core complete; post-core guided self-improvement
+## CURRENT — Foundation Strengthening
 
-**Atlas Core is COMPLETE at Phase 22.** Phase 21 (research coordinator) and
-Phase 22 (toolchain CONDITIONAL/PARALLEL execution + learned-skill
-authoring/promotion + integration & acceptance) are implemented and bundled,
-pending release together with the next milestone.
+**Atlas Core is COMPLETE.** v0.20.0 is released at tag `v0.20.0` (`b92c5d9`).
+Development has transitioned from numbered phases to continuous
+foundation-strengthening tracks.
 
-**Post-core completion (release preparation for v0.20.0):** F1 (runtime
-observation coverage), F2 (planner observation aggregation), F7 (closed
-learning feedback loop), and F8 (evolution audit/proposal visibility) are
-complete; F3 is subsumed by F8; F4 is deferred/monitored (scheduler guards
-proven); F5 scheduler fail-soft diagnostics is implemented; F6 persistence
-degradation is documented expected behavior. Two hardening fixes shipped:
-cognition runtime test routes to Mock Provider, and SQLite
-understanding-counter INTEGER overflow is clamped deterministically at
-2**63 - 1. Final full-suite verification at HEAD `b2b4674`:
-**3260 passed, 0 failed, 57 subtests, 2 non-blocking warnings** (see
-`docs/ATLAS_STATE.md` §23).
+**Foundation Strengthening — completed batches:**
+
+- **Batch 1** — Kernel composition-root decomposition: `Atlas.start()` decomposed
+  into 7 private domain helpers (see `docs/ATLAS_STATE.md` §5.1 and §24).
+- **Batch 2** — Scaffold & legacy cleanup: removed 30 files of genuinely
+  unused/unwired scaffolding (`atlas/agents/`, `atlas/automation/`,
+  `atlas/interfaces/`, plus 3 unused files from `atlas/events/`,
+  `atlas/runtime/`, `atlas/scheduler/`).
+
+Full suite after each batch: **3260 passed, 0 failed, 57 subtests, 2 warnings**
+(identical to v0.20.0 release gate).
 
 There is **NO Phase 23 for Atlas Core**. The next development model is
-**post-core guided self-improvement**: Atlas improves itself through the
-existing governed mechanisms (`Observe/record → analyze/plan → propose →
-approve → execute governed changes → verify → repeat`), with
+**post-core guided self-improvement** with
 `SELF_CONFIG`/`INFORMATION` as the enabled governed scopes and
-`CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remaining locked in accordance with
-the constitution (see `docs/ATLAS_STATE.md` §22.4).
-
-- The remaining already-recorded Track A/B/C follow-ups (under NEXT below) are
-  enhancement / post-core work — **none is required for core completion**.
-- Keep `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` synchronized.
-
-> The governed `ReasoningIngestSink` is a **pending/deferred dependency** — **not**
-> an actively approved implementation task. Do not treat it as one; see DEFERRED
-> below. `reasoning.ingest` is expected to remain fail-closed until that dependency
-> is resolved.
+`CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remaining locked (see
+`docs/ATLAS_STATE.md` §22.4).
 
 ---
 
-## NEXT — Enhancement / Post-Core Work
+## NEXT — Foundation Strengthening / Post-Core Work
 
-Based on the existing repository already recording these deferred follow-ups
-(zero of these are required for Atlas Core completion):
+The immediate next foundation-strengthening focus:
+
+- **Governed ingest sink resolution** — wire the governed `ReasoningIngestSink`
+  (and corresponding Track A/B/C ingest bridges) so that governed evolution
+  can feed distilled insights back into Atlas state.
+- **Episodic context surfacing** — feed long-term episodic memory into the
+  RuntimeCoordinator pipeline so stored experiences influence current processing.
+
+Remaining already-recorded Track A/C follow-ups (zero required for core
+completion):
 
 - **Track A** follow-ups: knowledge-graph expansion, web source adapter
-- **Track C** follow-ups: feeding episodic context into working memory /
-  `ContextEngine` (requires RuntimeCoordinator review before scheduling),
-  semantic-memory upgrades, forgetting-policy tuning
+- **Track C** follow-ups: semantic-memory upgrades, forgetting-policy tuning
 
-These are the concrete, already-recorded next items. They are not new inventions.
+These are not new inventions. The next implementation focus should be governed
+ingest sink resolution (see `docs/ATLAS_STATE.md` §19, §24).
 
 ---
 
@@ -225,7 +220,8 @@ documents as current.
 
 *Authoritative re-write: 2026-08-08 (post-Track-D, schema v10, ahead of
 v0.19.1). Core milestone update: 2026-08-14 (Phase 22 COMPLETE — Atlas Core
-complete; post-core guided self-improvement; no Phase 23). Post-core release
-update: 2026-08-16 (F1–F8 + hardening complete at HEAD b2b4674; release gate
-3260 passed, 0 failed, 57 subtests, 2 non-blocking warnings). Project Atlas —
+complete; post-core guided self-improvement; no Phase 23). Release update:
+2026-08-16 (v0.20.0 released at b92c5d9; 3260 passed, 0 failed, 57 subtests,
+2 non-blocking warnings). Foundation Strengthening: Batch 1 (kernel
+decomposition) and Batch 2 (scaffold cleanup) completed. Project Atlas —
 docs/ROADMAP.md.*

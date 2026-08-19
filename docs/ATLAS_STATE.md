@@ -50,21 +50,20 @@ mechanism by which Atlas may change its own operational state.
 
 | Field | Value |
 |---|---|
-| Released baseline | **v0.20** (stable; Track D — Advanced Reasoning released); **v0.20.0** (release preparation complete at HEAD `b2b4674`) |
-| Current HEAD | `b2b4674` (branch `phase5-memory-evolution`) |
-| In-development work | **Post-core complete** — F1–F8 (F3 subsumed by F8; F4 deferred/monitored; F5 scheduler diagnostics; F6 expected behavior) + two hardening fixes (cognition Mock routing; SQLite INTEGER clamp) — release preparation for **v0.20.0** |
+| Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
+| Current HEAD | `b92c5d9` (tag `v0.20.0`, branch `phase5-memory-evolution`) |
+| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup) |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **10** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
 | Era | **Capability Track Era** |
 
-**CURRENT IMPLEMENTATION:** Track D is released in **v0.20** (annotated tag,
-full suite verified: 2973 passed, 57 subtests, 0 failed, 0 errors). Post-core
-F1–F8 and the two hardening fixes are complete at HEAD `b2b4674`; final release
-verification for **v0.20.0**: **3260 passed, 0 failed, 57 subtests, 2 warnings**
-(the 2 warnings are non-blocking `asyncio.iscoroutinefunction` deprecations in a
-Phase 21 test). Do not claim any release beyond v0.20 before the owner tags
-v0.20.0.
+**CURRENT IMPLEMENTATION:** Atlas v0.20.0 is released at tag `v0.20.0`
+(`b92c5d9`). Foundation Strengthening Batch 1 (kernel composition-root
+decomposition) and Batch 2 (scaffold/legacy cleanup) have been completed on
+the working tree. Full suite: **3260 passed, 0 failed, 57 subtests, 2
+non-blocking warnings** (the 2 warnings are `asyncio.iscoroutinefunction`
+deprecation notices in `test_phase21_research_coordinator.py`).
 
 ---
 
@@ -179,6 +178,23 @@ service and runtime dependency and injects them via constructor — there is no
 internal instantiation of services. Track-specific private dependencies are
 built in the kernel and held as private attributes — **not** registered in the
 container (see §6).
+
+As of post-v0.20.0 Foundation Strengthening (Batch 1), `start()` delegates to
+7 private domain helpers called in dependency order:
+
+1. `_init_ai_provider()` — config, model routing, AI manager
+2. `_init_memory_knowledge()` — memory, knowledge, legacy intelligence, learning
+3. `_init_reasoning_pipeline()` — capability registry, Track A/B factories,
+   LearningEngine, reasoning engine, tools
+4. `_init_cognitive_engines()` — understanding, world model, identity, goals,
+   experience, self-model, feedback
+5. `_init_tracks()` — evolution storage + Tracks A–D infrastructure
+6. `_init_evolution_pipeline()` — evolution intelligence, knowledge, governance,
+   gateway
+7. `_init_runtime_services()` — RuntimeCoordinator, scheduler, goal execution,
+   cognition service, conversation, component registry, container
+
+The helpers are private; the composition-root semantics are unchanged.
 
 ### 5.2 RuntimeCoordinator
 `atlas/runtime/runtime_coordinator.py` is the single permanent orchestrator of
@@ -623,11 +639,10 @@ Observe/record → analyze/plan → propose → approve → execute governed cha
   governance levels, or enabling CODE scope — require a separate owner-approved
   design and are post-core evolution work, not an automatic Phase 23.
 
-## 23. Post-Core Completion Record (v0.20.0 release preparation)
+## 23. Post-Core Completion Record (v0.20.0)
 
 Post-core guided self-improvement delivered F1–F8 plus two hardening fixes.
-All are complete at HEAD `b2b4674` (branch `phase5-memory-evolution`); the
-owner is preparing release **v0.20.0** (tag not yet created).
+All are included in the v0.20.0 release at tag `v0.20.0` (`b92c5d9`).
 
 - **F1 — Runtime observation coverage**: five observation categories per
   runtime cycle (`atlas/evolution/runtime_observations.py`).
@@ -666,11 +681,47 @@ remain locked/unreachable. No autonomous code mutation exists in the source.
 
 ---
 
+## 24. Foundation Strengthening (post-v0.20.0)
+
+After v0.20.0, development transitioned from numbered phases to continuous
+foundation-strengthening tracks. Two batches have been completed:
+
+### Batch 1 — Kernel Composition-Root Decomposition
+`Atlas.start()` was decomposed into 7 private domain helpers (see §5.1). No
+public API, service key, behavioral, or architectural change. 44 kernel tests,
+207 integration tests, and 3260 full-suite tests all passed.
+
+### Batch 2 — Scaffold & Legacy Cleanup
+Removed 30 files of genuinely unused/unwired scaffolding:
+
+- `atlas/agents/` (27 files) — obsolete multi-agent scaffold never imported by
+  the kernel or any active module
+- `atlas/automation/` (1 file) — empty `__init__.py` only
+- `atlas/interfaces/` (1 file) — empty `__init__.py` only
+- `atlas/events/agent_event_bridge.py` — referenced only by deleted `agents/`
+- `atlas/runtime/agent_runtime.py` — referenced only by deleted `agents/`
+- `atlas/scheduler/agent_scheduler.py` — referenced only by deleted `agents/`
+
+**Retained** (verified as genuinely used): `atlas/scheduler/` (used by
+`atlas/task/task_manager.py`) and `atlas/models/ai_response.py` (used by all
+AI providers).
+
+The Capability Track roadmap's PROPOSED Track E (Multi-Agent Collaboration) is
+preserved as a long-term future direction. The deleted scaffold was an
+unwired prototype; any future agent capability must be designed against the
+current post-v0.20.0 architecture, not by resurrecting the deleted code.
+
+Full suite after cleanup: **3260 passed, 0 failed, 57 subtests, 2 warnings**
+(identical to v0.20.0 release gate).
+
+---
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
-2973 passed, 57 subtests, 0 failed, 0 errors) · Release preparation update:
-2026-08-16 (post-core F1–F8 + hardening complete at HEAD b2b4674; release gate
-3260 passed, 0 failed, 57 subtests, 2 non-blocking warnings) · Project Atlas —
+2973 passed, 57 subtests, 0 failed, 0 errors) · Release update: 2026-08-16
+(v0.20.0 released at b92c5d9; 3260 passed, 0 failed, 57 subtests, 2
+non-blocking warnings) · Foundation Strengthening: Batch 1 (kernel
+decomposition) and Batch 2 (scaffold cleanup) completed. · Project Atlas —
 docs/ATLAS_STATE.md. This document is the authoritative current architecture
 handbook and replaces all earlier ATLAS_STATE revisions.*

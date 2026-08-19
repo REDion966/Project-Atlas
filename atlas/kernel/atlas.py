@@ -1,8 +1,12 @@
 """
 Atlas Kernel
 
-The root application object.
-Phase 7.5 — Wires RuntimeCoordinator and all cognitive subsystems.
+The root application object and sole composition root.
+All subsystem wiring occurs here via private helper methods called
+from ``start()`` in dependency order.  No component is instantiated
+internally — everything is constructor-injected from this root.
+
+v0.20.0 — Atlas Core complete.  Numbered phases are finished.
 """
 
 import hashlib
@@ -180,13 +184,19 @@ from atlas.advanced_reasoning.wiring import (
 )
 from atlas.storage.advanced_reasoning_storage import AdvancedReasoningSQLiteStorage
 
+# --- Phase 16: Autonomy persistence wiring ---
+from atlas.kernel.autonomy_wiring import (
+    init_autonomy_persistence,
+    shutdown_autonomy_persistence,
+)
+
 
 class KnowledgeEvidenceProvider:
     """Kernel-boundary ``EvidenceProvider`` backed by ``KnowledgeManager.query``.
 
     Read-only: converts each ``KnowledgeEntry`` into a stable
-    ``"source:title"`` reference string. Pure Track D modules never import
-    the knowledge service (TRACK_D §3.4).
+    ``"source:title"`` reference string.  Pure Track D modules never import
+    the knowledge service (TRACK_D section 3.4).
     """
 
     def __init__(self, knowledge_manager: KnowledgeManager) -> None:
@@ -211,7 +221,7 @@ class WorldModelCausalGraphProvider:
 
     Read-only: causal chains come from ``world_model.get_causal_chain``;
     ``related_entities`` is the deterministic union of direct causes and
-    effects. The provider never mutates the world model.
+    effects.  The provider never mutates the world model.
     """
 
     def __init__(self, world_model: WorldModelEngine) -> None:
@@ -288,11 +298,13 @@ class WorldModelCausalGraphProvider:
 
 
 class Atlas:
-    """
-    Root object for the Atlas application.
+    """Root application object and sole composition root.
 
-    Phase 7.5 — Wires all cognitive subsystems through the
-    RuntimeCoordinator, the single permanent orchestrator.
+    All subsystem wiring occurs in ``start()`` via private helper methods
+    called in strict dependency order.  No component instantiates other
+    components internally — everything is constructor-injected from here.
+
+    v0.20.0 — Atlas Core complete.  Numbered phases are finished.
     """
 
     def __init__(self):
@@ -426,6 +438,14 @@ class Atlas:
         self._advanced_reasoning_evidence_provider: Any | None = None
         self._advanced_reasoning_causal_provider: Any | None = None
 
+        # --- Phase 16: Autonomy persistence ---
+        self._autonomy_storage: Any | None = None
+        self._schedule_store: Any | None = None
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
     @property
     def container(self):
         return self._container
@@ -511,6 +531,11 @@ class Atlas:
         return self._research_coordinator
 
     @property
+    def schedule_store(self):
+        """Return the Phase 16 ScheduleStore, or None if not wired."""
+        return self._schedule_store
+
+    @property
     def started(self):
         return self._started
 
@@ -521,12 +546,52 @@ class Atlas:
     def models(self):
         return self._ai_manager.service.models()
 
+    # ------------------------------------------------------------------
+    # Composition root — public entry point
+    # ------------------------------------------------------------------
+
     def start(self):
+        """Start Atlas by wiring all subsystems in dependency order.
+
+        The public entry point delegates to private helper methods that
+        each initialise a coherent wiring domain.  Dependency ordering
+        between helpers is explicit in the call sequence below.
+        """
         if self._started:
             return
 
         self._config.load()
 
+        # Domain 1 — AI provider, model routing, config
+        self._init_ai_provider()
+
+        # Domain 2 — Memory, knowledge, legacy intelligence, learning
+        self._init_memory_knowledge()
+
+        # Domain 3 — Reasoning pipeline, capability registry, tracks A/B
+        #   factories, learning engine, tools
+        self._init_reasoning_pipeline()
+
+        # Domain 4 — Understanding, world model, identity, goals,
+        #   experience, self-model, feedback
+        self._init_cognitive_engines()
+
+        # Domain 5 — Evolution storage, tracks A-D infrastructure
+        self._init_tracks()
+
+        # Domain 6 — Evolution intelligence, knowledge, governance, gateway
+        self._init_evolution_pipeline()
+
+        # Domain 7 — RuntimeCoordinator, scheduler, goal execution,
+        #   cognition service, conversation, component registry, container
+        self._init_runtime_services()
+
+    # ------------------------------------------------------------------
+    # Domain 1 — AI Provider
+    # ------------------------------------------------------------------
+
+    def _init_ai_provider(self) -> None:
+        """Wire model routing, AI manager, and provider configuration."""
         provider = str(self._config.get("ai", "provider"))
         model = str(self._config.get("ai", "model"))
         timeout = int(self._config.get("ai", "timeout"))  # type: ignore[arg-type]
@@ -564,6 +629,12 @@ class Atlas:
             api_keys=api_keys,  # type: ignore[arg-type]
         )
 
+    # ------------------------------------------------------------------
+    # Domain 2 — Memory, Knowledge, Legacy Intelligence, Learning
+    # ------------------------------------------------------------------
+
+    def _init_memory_knowledge(self) -> None:
+        """Wire memory, knowledge, legacy cognitive loop, and learning."""
         # --- Memory ---
         repository = MemoryRepository()
         ranking_engine = RankingEngine()
@@ -590,7 +661,18 @@ class Atlas:
         self._learning_manager = LearningManager()
         self._knowledge_feedback = KnowledgeFeedback()
 
-        # --- Reasoning pipeline ---
+    # ------------------------------------------------------------------
+    # Domain 3 — Reasoning Pipeline & Tools
+    # ------------------------------------------------------------------
+
+    def _init_reasoning_pipeline(self) -> None:
+        """Wire the capability registry, reasoning engine, and tools.
+
+        Creates the CapabilityRegistry and registers all default handlers
+        plus Track A/B factories *before* the LearningEngine so that the
+        CapabilityAnalyzer can reuse the same kernel-owned LearningMemory
+        instance (Phase 20 Batch 4 ordering requirement).
+        """
         self._capability_registry = CapabilityRegistry()
         for capability_name, handler in DEFAULT_HANDLERS.items():
             self._capability_registry.register(capability_name, handler)
@@ -607,7 +689,7 @@ class Atlas:
         # --- Phase 20 Batch 4: create the LearningEngine before the
         #     CapabilityAnalyzer so reflection-derived strategy evidence
         #     (stored in the kernel-owned LearningMemory) can influence
-        #     capability selection. The exact same LearningMemory instance
+        #     capability selection.  The exact same LearningMemory instance
         #     is reused — no second store is created.
         self._learning_engine = LearningEngine()
         self._capability_analyzer = CapabilityAnalyzer(
@@ -629,7 +711,16 @@ class Atlas:
         for tool in BUILTIN_TOOLS:
             self._tool_registry.register(tool)
 
-        # --- Phase 7.5: Wire all cognitive subsystems ---
+    # ------------------------------------------------------------------
+    # Domain 4 — Cognitive Engines
+    # ------------------------------------------------------------------
+
+    def _init_cognitive_engines(self) -> None:
+        """Wire understanding, world model, identity, goals, experience,
+        self-model, and feedback — all cognitive engines that the
+        RuntimeCoordinator depends on.
+        """
+        # --- Phase 7.5: Understanding ---
         understanding_storage = SQLiteUnderstandingStorage()
         understanding_storage.initialize()
 
@@ -719,6 +810,17 @@ class Atlas:
             learning_engine=self._learning_engine,
         )
 
+    # ------------------------------------------------------------------
+    # Domain 5 — Track Infrastructure
+    # ------------------------------------------------------------------
+
+    def _init_tracks(self) -> None:
+        """Wire evolution storage and all four Track subsystems (A–D).
+
+        Each track follows the same pattern: create storage, initialise,
+        publish availability events, compose track-private components, and
+        register capability handlers / governance rules.
+        """
         # --- Phase 11.3: Create and initialize evolution storage ---
         self._evolution_storage = SQLiteEvolutionStorage()
         evolution_storage = self._evolution_storage
@@ -751,9 +853,9 @@ class Atlas:
         # --- Track A (Phase 21): Concrete Research Coordinator ---
         # Composed from the SAME Track A components owned by the factory
         # (planner/extractor/verifier + the factory's source resolver) — no
-        # duplicate components. Storage is the kernel-owned research adapter;
+        # duplicate components.  Storage is the kernel-owned research adapter;
         # ingest is governed and fails closed (sink intentionally unwired
-        # until the Phase 16 hand-off exists). The coordinator is kernel-private
+        # until the Phase 16 hand-off exists).  The coordinator is kernel-private
         # and NOT registered in the ServiceContainer (Track C/D precedent).
         self._research_ingest_bridge = ResearchIngestBridge()
         self._research_coordinator = ConcreteResearchCoordinator(
@@ -846,7 +948,7 @@ class Atlas:
 
         # --- Track D: Provider adapters (kernel-boundary, read-only) ---
         # EvidenceProvider wraps KnowledgeManager; CausalGraphProvider wraps
-        # WorldModelEngine. Neither adapter is registered in the container.
+        # WorldModelEngine.  Neither adapter is registered in the container.
         self._advanced_reasoning_evidence_provider = KnowledgeEvidenceProvider(
             self._knowledge_manager
         )
@@ -856,11 +958,11 @@ class Atlas:
 
         # --- Track D: AdvancedReasoningService (private, kernel-owned) ---
         # Composed with injected engines, dual-write repository, and the
-        # fail-closed ingest bridge. The engine implementations receive the
+        # fail-closed ingest bridge.  The engine implementations receive the
         # kernel-built provider adapters (KnowledgeEvidenceProvider →
         # MultiStepReasoner; WorldModelCausalGraphProvider → CausalReasoner)
         # so traces are evidence-aware and causal analysis reads the world
-        # model. The service is NOT registered in the ServiceContainer
+        # model.  The service is NOT registered in the ServiceContainer
         # (Track C private-factory precedent).
         self._advanced_reasoning_ingest_bridge = ReasoningIngestBridge()
         self._advanced_reasoning_repository = ReasoningTraceRepository(
@@ -880,7 +982,7 @@ class Atlas:
 
         # --- Track D: Trace recorder as additive pipeline-consumer surface ---
         # The recorder is wired to the existing runtime.pipeline.completed
-        # event (Track C precedent). The subscription itself is kernel-owned.
+        # event (Track C precedent).  The subscription itself is kernel-owned.
         self._advanced_reasoning_recorder = ReasoningTraceRecorder()
         self._event_bus.subscribe(
             "runtime.pipeline.completed",
@@ -893,16 +995,24 @@ class Atlas:
         )
         self._advanced_reasoning_factory.register(self._capability_registry)
 
+    # ------------------------------------------------------------------
+    # Domain 6 — Evolution Pipeline
+    # ------------------------------------------------------------------
+
+    def _init_evolution_pipeline(self) -> None:
+        """Wire the evolution intelligence, knowledge, governance, and
+        execution gateway — the full governed self-improvement pipeline.
+        """
         # --- Phase 10.0: Evolution Pipeline with Phase 11.3 persistence ---
         self._improvement_planner = ImprovementPlanner()
         self._proposal_generator = ProposalGenerator()
         self._approval_manager = ApprovalManager()
-        self._evolution_memory = EvolutionMemory(storage=evolution_storage)
+        self._evolution_memory = EvolutionMemory(storage=self._evolution_storage)
         self._evolution_memory.restore()
 
         # --- Phase 13.5: Create the Persistent Evolution Knowledge layer ---
         self._knowledge_repository = EvolutionKnowledgeRepository(
-            storage=evolution_storage,
+            storage=self._evolution_storage,
         )
         self._knowledge_repository.restore()
         self._knowledge_consolidator = EvolutionKnowledgeConsolidator()
@@ -924,7 +1034,7 @@ class Atlas:
             evolution_memory=self._evolution_memory,
             experience_repository=self._experience_repository,
             insight_scorer=self._insight_scorer,
-            storage=evolution_storage,
+            storage=self._evolution_storage,
             knowledge_pipeline=self._knowledge_pipeline,
         )
 
@@ -959,13 +1069,29 @@ class Atlas:
         # --- Phase 13.4: Create the EvolutionExecutionGateway ---
         # The gateway is the ONLY future entry point for self-modification.
         # It sits between approval and execution, validating every proposal
-        # against governance rules. Missing governance fails CLOSED.
+        # against governance rules.  Missing governance fails CLOSED.
         self._execution_gateway = EvolutionExecutionGateway(
             execution_engine=self._execution_engine,
             rule_engine=self._rule_engine,
             evolution_memory=self._evolution_memory,
         )
 
+        # --- Phase 16: Autonomy persistence foundation ---
+        # Wired with a disabled AutonomyPolicy — no autonomous execution.
+        # ScheduleStore is available for future request lifecycle management.
+        self._autonomy_storage, self._schedule_store = (
+            init_autonomy_persistence(self._event_bus)
+        )
+
+    # ------------------------------------------------------------------
+    # Domain 7 — Runtime, Services & Container
+    # ------------------------------------------------------------------
+
+    def _init_runtime_services(self) -> None:
+        """Wire the RuntimeCoordinator, scheduler, goal execution,
+        cognition service, conversation, component registry, and
+        service container — the final assembly of the running system.
+        """
         # --- Phase 7.5: Create the RuntimeCoordinator (single orchestrator) ---
         self._runtime_coordinator = RuntimeCoordinator(
             memory_service=self._memory_service,
@@ -1112,6 +1238,10 @@ class Atlas:
         self._state_manager.update({"status": "running", "health": "healthy"})
         self._event_bus.publish("atlas.started", {"status": "running"})
 
+    # ------------------------------------------------------------------
+    # Tick
+    # ------------------------------------------------------------------
+
     def tick(self):
         self._task_manager.tick()
         if self._evolution_scheduler is not None:
@@ -1119,12 +1249,16 @@ class Atlas:
         if self._goal_executor is not None:
             self._goal_executor.settle()
 
+    # ------------------------------------------------------------------
+    # Pipeline event consumers
+    # ------------------------------------------------------------------
+
     def _record_longterm_from_pipeline(self, payload: Any) -> None:
         """Track C additive consumer: record the latest experience as an episode.
 
         Subscribed to ``runtime.pipeline.completed`` (published by the
-        RuntimeCoordinator after experience accumulation). This is an
-        additive consumer — the 14-stage pipeline order is untouched.
+        RuntimeCoordinator after experience accumulation).  This is an
+        additive consumer — the 15-stage pipeline order is untouched.
         Failures are swallowed so the pipeline event never breaks.
         """
         if self._experience_accumulator is None or self._longterm_recorder is None:
@@ -1156,8 +1290,8 @@ class Atlas:
         """Track D additive consumer: record the latest experience as a trace.
 
         Subscribed to ``runtime.pipeline.completed`` (published by the
-        RuntimeCoordinator after experience accumulation). This is an
-        additive consumer — the 14-stage pipeline order is untouched.
+        RuntimeCoordinator after experience accumulation).  This is an
+        additive consumer — the 15-stage pipeline order is untouched.
         Failures are swallowed so the pipeline event never breaks.
         """
         if self._advanced_reasoning_recorder is None:
@@ -1193,6 +1327,10 @@ class Atlas:
                 "reasoning.recording.failed",
                 {"source": "runtime.pipeline.completed"},
             )
+
+    # ------------------------------------------------------------------
+    # Conversation API
+    # ------------------------------------------------------------------
 
     def chat(self, text: str):
         if not self._started:
@@ -1232,7 +1370,7 @@ class Atlas:
         """Register all core components in the ComponentRegistry.
 
         Iterates over CORE_COMPONENTS definitions and registers each
-        one. This is purely observational — the registry never modifies,
+        one.  This is purely observational — the registry never modifies,
         restarts, or repairs any component.
         """
         for metadata in CORE_COMPONENTS:
@@ -1286,6 +1424,10 @@ class Atlas:
                 component.name,
                 ComponentStatus.HEALTHY,
             )
+
+    # ------------------------------------------------------------------
+    # Shutdown
+    # ------------------------------------------------------------------
 
     def shutdown(self):
         if not self._started:
@@ -1376,6 +1518,11 @@ class Atlas:
         self._longterm_consolidator = None
         self._longterm_factory = None
         self._longterm_ingest_bridge = None
+
+        # --- Phase 16: Autonomy persistence cleanup ---
+        shutdown_autonomy_persistence(self._autonomy_storage)
+        self._autonomy_storage = None
+        self._schedule_store = None
 
         # --- Track D: Cleanup ---
         if self._advanced_reasoning_storage is not None:

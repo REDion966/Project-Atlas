@@ -8,6 +8,45 @@ and this project adheres to a milestone- and track-based release model
 
 ---
 
+## [Unreleased] — Foundation Strengthening
+
+### Foundation Strengthening Batch 1 — Kernel Composition-Root Decomposition
+
+- Decomposed the monolithic `Atlas.start()` method into 7 private domain
+  helpers (`_init_ai_provider`, `_init_memory_knowledge`,
+  `_init_reasoning_pipeline`, `_init_cognitive_engines`, `_init_tracks`,
+  `_init_evolution_pipeline`, `_init_runtime_services`). No public API or
+  behavioral change; composition-root semantics preserved.
+
+### Foundation Strengthening Batch 2 — Scaffold & Legacy Cleanup
+
+- Removed 30 files of genuinely unused/unwired scaffolding:
+  - `atlas/agents/` (27 files) — obsolete multi-agent scaffold
+  - `atlas/automation/` (1 file) — empty package
+  - `atlas/interfaces/` (1 file) — empty package
+  - `atlas/events/agent_event_bridge.py` — referenced only by deleted agents
+  - `atlas/runtime/agent_runtime.py` — referenced only by deleted agents
+  - `atlas/scheduler/agent_scheduler.py` — referenced only by deleted agents
+- Retained `atlas/scheduler/` (used by `atlas/task/task_manager.py`) and
+  `atlas/models/ai_response.py` (used by all AI providers).
+- Track E (Multi-Agent Collaboration) remains PROPOSED in the roadmap; any
+  future agent capability must be designed against the current architecture.
+
+### Batch 5 — Phase 16 Autonomy Persistence Foundation
+
+- Wired `AutonomySQLiteStorage` + `ScheduleStore` into the kernel via
+  `atlas/kernel/autonomy_wiring.py` helper.  `ScheduleStore` receives a
+  default **disabled** `AutonomyPolicy` — autonomous execution remains
+  disabled.  This is the persistence foundation for the future governed
+  ingest sink pipeline.
+
+### Test Status
+
+- **3260 passed, 0 failed, 57 subtests, 2 warnings** (identical to v0.20.0
+  release gate).
+
+---
+
 ## [v0.20.0] — Atlas Core Release — 2026-08-16
 
 ### Atlas Core is COMPLETE at Phase 22

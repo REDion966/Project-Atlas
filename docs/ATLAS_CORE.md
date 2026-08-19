@@ -246,16 +246,12 @@ CLI / Presentation
 | Services | Coordinate multiple components |
 | CLI | User interaction and command routing |
 | Storage | Low-level read/write to disk |
-| `agents` | Agent abstractions and orchestration components |
-| `automation` | Automation workflows |
 | `core` | Boot, startup, and application lifecycle |
-| `interfaces` | Contracts and abstractions |
 | `intelligence` | LEGACY: CognitiveLoop, CognitiveService (preserved, do not modify) |
 | `lifecycle` | Lifecycle management |
 | `models` | Shared domain models |
 | `runtime` | Health, heartbeat, metrics, and runtime monitoring |
 | `scheduler` | Scheduling components |
-| `skills` | Skill abstractions and extensions |
 | `memory/context` | Context management layer |
 | `evolution` | Self-observation, improvement planning, proposal generation, approval workflow — designed to deepen understanding, not merely accumulate changes |
 | `goals` | Goal intelligence and self-directed improvement planning (Phase 8.3) |
@@ -269,7 +265,7 @@ CLI / Presentation
 | Core (active, wired) | `kernel`, `cognition`, `reasoning`, `services`, `evolution`, `identity`, `goals`, `experience` |
 | Infrastructure (active, wired) | `memory`, `storage`, `events`, `config` |
 | Capability (active, wired) | `ai`, `knowledge`, `learning`, `workspace` |
-| Future / scaffold (not fully wired) | `agents`, `automation`, `lifecycle`, `runtime`, `scheduler`, `skills`, `interfaces`, `models` |
+| Active, wired (not fully wired) | `lifecycle`, `runtime`, `scheduler`, `models` |
 | Legacy (preserved, do not modify) | `intelligence` |
 
 ### 9.4 Atlas Module Tree
@@ -298,9 +294,6 @@ atlas/
 ├── storage/             Generic storage utilities
 ├── cli/                 Command-line interface
 ├── utils/               Shared utilities
-├── agents/              Agent abstractions and orchestration components
-├── automation/          Automation workflows
-├── interfaces/          Contracts and abstractions
 ├── lifecycle/           Lifecycle management
 ├── models/              Shared domain models
 ├── runtime/             Health, heartbeat, metrics, runtime monitoring
@@ -312,7 +305,7 @@ atlas/
 ├── goals/               Goal intelligence and self-directed improvement planning
 ├── identity/            Cognitive identity engine
 ├── experience/          Persistent experience accumulation and self-model evolution
-└── skills/              Skill abstractions and extensions
+└── ...                 Additional modules (advanced_reasoning, toolchain, research, longterm, etc.)
 ```
 
 Runtime data and storage locations:

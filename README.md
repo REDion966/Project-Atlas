@@ -19,7 +19,7 @@ capability tracks (A–D) are implemented; Track D (Advanced Reasoning) is
 (Toolchain Execution & Learned-Skill Progression: CONDITIONAL/PARALLEL
 execution + learned-skill authoring/promotion + integration) are implemented
 and bundled, and the post-core improvements (F1–F8) and two hardening fixes are
-complete — release **v0.20.0** is in preparation at HEAD `b2b4674`.
+complete — release **v0.20.0** is available at tag `v0.20.0` (`b92c5d9`).
 **Phase 22 is the FINAL numbered implementation phase for Atlas Core — there is
 NO Phase 23.** Development has transitioned to **post-core guided
 self-improvement** (see `docs/ATLAS_STATE.md` §22.4 and §23): Atlas improves
@@ -30,7 +30,7 @@ remains locked and is not enabled; code changes may be produced as reviewable
 artifacts/patches rather than autonomously applied. **Autonomous code mutation
 remains disabled.**
 
-**Latest verified test run (v0.20.0 release gate):** `3260 passed`, `57 subtests passed`, `0 failed`, `2 warnings` — the 2 warnings are non-blocking `asyncio.iscoroutinefunction` deprecation warnings in a Phase 21 test.
+**Latest verified test run (v0.20.0 + Foundation Strengthening Batches 1–2):** `3260 passed`, `57 subtests passed`, `0 failed`, `2 warnings` — the 2 warnings are non-blocking `asyncio.iscoroutinefunction` deprecation warnings in a Phase 21 test.
 *Current test inventory (not a result):* 178+ test files, 766+ test classes, 2958+ test methods.
 
 **Current schema version:** `10`.
@@ -153,19 +153,16 @@ docs/                 Documentation
 
 - **COMPLETED:** Tracks A, B, C, Track D (v0.20), Track A research coordinator
   (Phase 21), Phase 22 — Toolchain Execution & Learned-Skill Progression — and
-  post-core F1–F8 + hardening.
-  **Atlas Core is complete at Phase 22.**
-- **CURRENT:** Atlas Core complete; **post-core guided self-improvement** —
-  Atlas improves itself through the existing governed mechanisms.
+  post-core F1–F8 + hardening. **Atlas Core is complete at Phase 22.**
+  Foundation Strengthening Batch 1 (kernel decomposition) and Batch 2
+  (scaffold cleanup) are complete.
+- **CURRENT:** Foundation Strengthening — post-release architectural hardening.
   `SELF_CONFIG`/`INFORMATION` are the enabled governed scopes;
   `CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remain locked.
 - **DEFERRED:** Governed `ReasoningIngestSink` runtime wiring remains
-  pending/deferred; it depends on the Phase 16 schedule-store/dispatcher
-  hand-off being finalized, so `reasoning.ingest` stays fail-closed (sink not
-  wired).
-- **NEXT:** Remaining Track A/C enhancement follow-ups (knowledge-graph
-  expansion, web source adapter, episodic-context/ContextEngine, semantic
-  memory, forgetting-policy tuning). None is required for core completion.
+  pending/deferred; `reasoning.ingest` stays fail-closed (sink not wired).
+- **NEXT:** Governed ingest sink resolution, episodic context surfacing,
+  remaining Track A/C follow-ups. None is required for core completion.
 - **PROPOSED (not approved):** Tracks E, F, G from the Capability Track
   roadmap. See `docs/ROADMAP.md` for details.
 
