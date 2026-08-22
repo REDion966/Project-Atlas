@@ -255,6 +255,29 @@ def main() -> None:
     )
 
     # -------------------------
+    # Autonomy Requests (Foundation Strengthening Batch 14)
+    # -------------------------
+
+    evolution_parser = subparsers.add_parser(
+        "evolution",
+        help="Governed evolution request lifecycle (human authorization)",
+    )
+    evolution_parser.add_argument(
+        "action",
+        choices=["pending", "show", "authorize", "status"],
+    )
+    evolution_parser.add_argument(
+        "request_id",
+        nargs="?",
+        help="EvolutionRequest id (required for show/authorize)",
+    )
+    evolution_parser.add_argument(
+        "--comment",
+        default="",
+        help="Human comment for the explicit authorization",
+    )
+
+    # -------------------------
     # Toolchain Commands (Phase 18.10)
     # -------------------------
 
@@ -539,6 +562,14 @@ def main() -> None:
         return
 
     # -------------------------
+    # Autonomy Requests (human authorization; Batch 14)
+    # -------------------------
+
+    if args.command == "evolution":
+        _run_evolution(args)
+        return
+
+    # -------------------------
     # Resource
     # -------------------------
 
@@ -684,6 +715,61 @@ def main() -> None:
         return
 
     parser.print_help()
+
+
+def _run_evolution(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas evolution pending|show|authorize|status``.
+
+    Batch 14 — production human authorization surface. `pending`, `show` and
+    `status` are read-only. `authorize` is the explicit user:cli human gate
+    that moves a PENDING_AUTHORIZATION request to AUTHORIZED then SCHEDULED via
+    the authoritative AuthorizationManager + ScheduleStore. It NEVER executes
+    the request itself.
+    """
+    from atlas.cli.autonomy_commands import (
+        cmd_request_authorize,
+        cmd_request_show,
+        cmd_requests_pending,
+        cmd_requests_status,
+    )
+    from atlas.kernel.atlas import Atlas
+
+    if not getattr(args, "action", ""):
+        print("error: evolution requires an action (pending|show|authorize|status)")
+        return
+
+    if args.action in {"show", "authorize"} and not getattr(args, "request_id", ""):
+        print(f"error: evolution {args.action} requires a request_id")
+        return
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+        schedule_store = atlas.schedule_store
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
+        return
+
+    if schedule_store is None:
+        print("error: autonomy persistence is not available")
+        atlas.shutdown()
+        return
+
+    try:
+        if args.action == "pending":
+            print(cmd_requests_pending(schedule_store, args))
+            return
+        if args.action == "show":
+            print(cmd_request_show(schedule_store, args))
+            return
+        if args.action == "authorize":
+            print(cmd_request_authorize(schedule_store, args))
+            return
+        if args.action == "status":
+            print(cmd_requests_status(schedule_store, args))
+            return
+    finally:
+        atlas.shutdown()
 
 
 def _run_proposals(args: argparse.Namespace) -> None:
