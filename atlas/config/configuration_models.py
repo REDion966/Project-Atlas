@@ -4,7 +4,7 @@ Atlas Configuration Models
 Strongly typed configuration objects.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
@@ -32,6 +32,9 @@ class AISettings:
     temperature: float
     timeout: int
     api_keys: APIKeySettings | None = None
+    # Optional raw model-profile entries from [ai.profiles].
+    # None/empty means the routing defaults apply.
+    profiles: list[dict] = field(default_factory=list)
 
 
 @dataclass(slots=True)

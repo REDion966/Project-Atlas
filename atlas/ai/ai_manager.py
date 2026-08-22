@@ -12,10 +12,12 @@ from atlas.ai.providers.ollama_provider import OllamaProvider
 from atlas.ai.providers.openai_provider import OpenAIProvider
 from atlas.ai.providers.lmstudio_provider import LMStudioProvider
 from atlas.ai.providers.anthropic_provider import AnthropicProvider
+from atlas.ai.providers.openrouter_provider import OpenRouterProvider
 from atlas.ai.router.ai_router import AIRouter
 from atlas.services.ai_service import AIService
 
 if TYPE_CHECKING:
+    from atlas.ai.routing.registry import ModelProfileRegistry
     from atlas.ai.routing.router import ModelRouter
     from atlas.config.configuration_models import APIKeySettings
 
@@ -27,8 +29,13 @@ class AIManager:
     the active one based on configuration.
     """
 
-    def __init__(self):
-        self._router = AIRouter()
+    def __init__(
+        self,
+        model_profile_registry: "ModelProfileRegistry | None" = None,
+    ):
+        self._router = AIRouter(
+            model_profile_registry=model_profile_registry,
+        )
         self._service: AIService | None = None
         self._model_router: "ModelRouter | None" = None
 
@@ -89,6 +96,14 @@ class AIManager:
                 model=model,
                 timeout=timeout,
                 api_key=anthropic_key or None,
+            )
+        )
+
+        # Register OpenRouter (optional; requires OPENROUTER_API_KEY at use)
+        self._router.registry.register(
+            OpenRouterProvider(
+                model=model,
+                timeout=timeout,
             )
         )
 

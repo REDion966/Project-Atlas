@@ -38,6 +38,10 @@ class AnthropicProvider(AIProvider):
                 "Set ANTHROPIC_API_KEY environment variable or pass api_key."
             )
 
+    def _resolve_model(self, model: str | None) -> str:
+        """Return the per-call model override, or the configured default."""
+        return model or self._model
+
     def name(self) -> str:
         """Return provider name."""
         return "Anthropic"
@@ -49,7 +53,7 @@ class AnthropicProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
-    def chat(self, messages):
+    def chat(self, messages, model: str | None = None):
         """Generate a complete chat response.
 
         Anthropic uses a /v1/messages endpoint with a 'content'
@@ -59,7 +63,7 @@ class AnthropicProvider(AIProvider):
         self._require_api_key()
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "messages": messages,
             "max_tokens": 4096,
             "stream": False,
@@ -85,7 +89,7 @@ class AnthropicProvider(AIProvider):
         return AIResponse(
             text=text,
             provider=self.name(),
-            model=self._model,
+            model=payload["model"],
             tokens=(
                 data.get("usage", {}).get("input_tokens", 0)
                 + data.get("usage", {}).get("output_tokens", 0)
@@ -100,6 +104,7 @@ class AnthropicProvider(AIProvider):
     def stream_chat(
         self,
         messages,
+        model: str | None = None,
     ) -> Iterator[str]:
         """Stream chat response from Anthropic.
 
@@ -111,7 +116,7 @@ class AnthropicProvider(AIProvider):
         self._require_api_key()
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "messages": messages,
             "max_tokens": 4096,
             "stream": True,
@@ -153,11 +158,12 @@ class AnthropicProvider(AIProvider):
                     if text:
                         yield text
 
-    def complete(self, prompt):
+    def complete(self, prompt, model: str | None = None):
         """Generate a completion using the messages endpoint."""
 
         return self.chat(
-            [{"role": "user", "content": prompt}]
+            [{"role": "user", "content": prompt}],
+            model=model,
         )
 
     def models(self):

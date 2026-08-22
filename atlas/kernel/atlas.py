@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from atlas.ai.ai_manager import AIManager
-from atlas.ai.routing.models import ModelProfile
+from atlas.ai.routing.profile_loader import load_model_profiles
 from atlas.ai.routing.registry import ModelProfileRegistry
 from atlas.ai.routing.router import ModelRouter
 from atlas.config.configuration import Configuration
@@ -617,30 +617,18 @@ class Atlas:
         timeout = int(self._config.get("ai", "timeout"))  # type: ignore[arg-type]
 
         # --- Model routing ---
+        # Registry is recreated here so shutdown() → start() restarts work.
+        # Profiles come from the optional [ai.profiles] config section;
+        # when absent, safe defaults replicate the previous behavior.
         self._model_profile_registry = ModelProfileRegistry()
-        self._model_profile_registry.register(
-            ModelProfile(
-                provider_name="Mock Provider",
-                model_name="atlas-mock-v1",
-                complexity_score=0.3,
-                latency_class="fast",
-                cost_tier=0.1,
-                supported_tasks=["conversation"],
-                priority=10,
-            )
-        )
-        self._model_profile_registry.register(
-            ModelProfile(
-                provider_name="Ollama",
-                model_name=model,
-                complexity_score=0.8,
-                latency_class="medium",
-                cost_tier=0.2,
-                supported_tasks=["conversation", "analysis", "code"],
-                priority=20,
-            )
-        )
+        profile_entries = self._config.get("ai", "profiles") or []
+        for profile in load_model_profiles(profile_entries, model):
+            self._model_profile_registry.register(profile)
         self._model_router = ModelRouter(self._model_profile_registry)
+
+        self._ai_manager = AIManager(
+            model_profile_registry=self._model_profile_registry,
+        )
 
         api_keys = self._config.get("ai", "api_keys")
         self._ai_manager.initialize(

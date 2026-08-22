@@ -10,6 +10,20 @@ model = "qwen3:8b"
 temperature = 0.7
 timeout = 300
 
+# Optional model routing profiles. When absent, safe defaults are used
+# (Mock Provider @0.3 + Ollama @0.8 with the configured model).
+# Each entry: provider_name, model_name, complexity_score, latency_class,
+# cost_tier, supported_tasks, priority.
+# [ai.profiles]
+# [[ai.profiles]]
+# provider_name = "Ollama"
+# model_name = "qwen3:8b"
+# complexity_score = 0.8
+# latency_class = "medium"
+# cost_tier = 0.2
+# supported_tasks = ["conversation", "analysis", "code"]
+# priority = 20
+
 [conversation]
 history_limit = 20
 

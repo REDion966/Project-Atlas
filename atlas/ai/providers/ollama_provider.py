@@ -30,11 +30,15 @@ class OllamaProvider(AIProvider):
         """Return provider name."""
         return "Ollama"
 
-    def chat(self, messages):
+    def _resolve_model(self, model: str | None) -> str:
+        """Return the per-call model override, or the configured default."""
+        return model or self._model
+
+    def chat(self, messages, model: str | None = None):
         """Generate a complete chat response."""
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "messages": messages,
             "stream": False,
         }
@@ -52,17 +56,18 @@ class OllamaProvider(AIProvider):
         return AIResponse(
             text=data["message"]["content"],
             provider=self.name(),
-            model=self._model,
+            model=payload["model"],
         )
 
     def stream_chat(
         self,
         messages,
+        model: str | None = None,
     ) -> Iterator[str]:
         """Stream chat response from Ollama."""
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "messages": messages,
             "stream": True,
         }
@@ -91,11 +96,11 @@ class OllamaProvider(AIProvider):
             if chunk.get("done", False):
                 break
 
-    def complete(self, prompt):
+    def complete(self, prompt, model: str | None = None):
         """Generate a completion."""
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "prompt": prompt,
             "stream": False,
         }
@@ -113,7 +118,7 @@ class OllamaProvider(AIProvider):
         return AIResponse(
             text=data["response"],
             provider=self.name(),
-            model=self._model,
+            model=payload["model"],
         )
 
     def models(self):

@@ -37,6 +37,10 @@ class OpenAIProvider(AIProvider):
                 "Set OPENAI_API_KEY environment variable or pass api_key."
             )
 
+    def _resolve_model(self, model: str | None) -> str:
+        """Return the per-call model override, or the configured default."""
+        return model or self._model
+
     def name(self) -> str:
         """Return provider name."""
         return "OpenAI"
@@ -47,13 +51,13 @@ class OpenAIProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
-    def chat(self, messages):
+    def chat(self, messages, model: str | None = None):
         """Generate a complete chat response."""
 
         self._require_api_key()
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "messages": messages,
             "stream": False,
         }
@@ -74,7 +78,7 @@ class OpenAIProvider(AIProvider):
         return AIResponse(
             text=choice["message"]["content"],
             provider=self.name(),
-            model=self._model,
+            model=payload["model"],
             tokens=data.get("usage", {}).get("total_tokens"),
             finish_reason=choice.get("finish_reason"),
             metadata={
@@ -86,13 +90,14 @@ class OpenAIProvider(AIProvider):
     def stream_chat(
         self,
         messages,
+        model: str | None = None,
     ) -> Iterator[str]:
         """Stream chat response from OpenAI."""
 
         self._require_api_key()
 
         payload = {
-            "model": self._model,
+            "model": self._resolve_model(model),
             "messages": messages,
             "stream": True,
         }
@@ -132,11 +137,12 @@ class OpenAIProvider(AIProvider):
                 if content:
                     yield content
 
-    def complete(self, prompt):
+    def complete(self, prompt, model: str | None = None):
         """Generate a completion using the chat endpoint."""
 
         return self.chat(
-            [{"role": "user", "content": prompt}]
+            [{"role": "user", "content": prompt}],
+            model=model,
         )
 
     def models(self):

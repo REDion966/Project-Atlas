@@ -1,10 +1,11 @@
 """
-Atlas LM Studio Provider
+Atlas OpenRouter Provider
 
-Provides local AI access through LM Studio's OpenAI-compatible API.
+Provides AI access through OpenRouter's OpenAI-compatible API.
 """
 
 import json
+import os
 from collections.abc import Iterator
 
 import requests
@@ -13,23 +14,34 @@ from atlas.ai.provider import AIProvider
 from atlas.models.ai_response import AIResponse
 
 
-class LMStudioProvider(AIProvider):
-    """LM Studio AI Provider.
+class OpenRouterProvider(AIProvider):
+    """OpenRouter API Provider.
 
-    LM Studio exposes an OpenAI-compatible API endpoint.
+    OpenRouter exposes an OpenAI-compatible API with a
+    different base URL and authentication scheme.
     """
 
-    BASE_URL = "http://localhost:1234/v1"
+    BASE_URL = "https://openrouter.ai/api/v1"
 
     def __init__(
         self,
         model: str,
         timeout: int,
+        api_key: str | None = None,
         base_url: str | None = None,
     ):
         self._model = model
         self._timeout = timeout
+        self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         self._base_url = (base_url or self.BASE_URL).rstrip("/")
+
+    def _require_api_key(self):
+        """Raise if no API key is configured."""
+        if not self._api_key:
+            raise RuntimeError(
+                "OpenRouter API key is required. "
+                "Set OPENROUTER_API_KEY environment variable or pass api_key."
+            )
 
     def _resolve_model(self, model: str | None) -> str:
         """Return the per-call model override, or the configured default."""
@@ -37,15 +49,18 @@ class LMStudioProvider(AIProvider):
 
     def name(self) -> str:
         """Return provider name."""
-        return "LM Studio"
+        return "OpenRouter"
 
     def _headers(self) -> dict:
         return {
+            "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
     def chat(self, messages, model: str | None = None):
         """Generate a complete chat response."""
+
+        self._require_api_key()
 
         payload = {
             "model": self._resolve_model(model),
@@ -83,7 +98,9 @@ class LMStudioProvider(AIProvider):
         messages,
         model: str | None = None,
     ) -> Iterator[str]:
-        """Stream chat response from LM Studio."""
+        """Stream chat response from OpenRouter."""
+
+        self._require_api_key()
 
         payload = {
             "model": self._resolve_model(model),
@@ -135,7 +152,9 @@ class LMStudioProvider(AIProvider):
         )
 
     def models(self):
-        """Return available models from LM Studio."""
+        """Return available OpenRouter models."""
+
+        self._require_api_key()
 
         response = requests.get(
             f"{self._base_url}/models",

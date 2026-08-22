@@ -44,6 +44,7 @@ class Configuration:
                     openai=api_keys_data.get("openai", ""),
                     anthropic=api_keys_data.get("anthropic", ""),
                 ),
+                profiles=list(data.get("ai", {}).get("profiles", [])),
             ),
             conversation=ConversationSettings(
                 history_limit=data["conversation"]["history_limit"],

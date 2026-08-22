@@ -14,16 +14,16 @@ class MockProvider(AIProvider):
     def name(self) -> str:
         return "Mock Provider"
 
-    def chat(self, messages):
+    def chat(self, messages, model: str | None = None):
         """Return a complete response."""
 
         return AIResponse(
             text="Hello! I am Atlas's first AI provider.",
             provider=self.name(),
-            model="atlas-mock-v1",
+            model=model or "atlas-mock-v1",
         )
 
-    def stream_chat(self, messages):
+    def stream_chat(self, messages, model: str | None = None):
         """Stream a response one word at a time."""
 
         text = "Hello! I am Atlas's first AI provider."
@@ -31,12 +31,12 @@ class MockProvider(AIProvider):
         for word in text.split():
             yield word + " "
 
-    def complete(self, prompt):
+    def complete(self, prompt, model: str | None = None):
 
         return AIResponse(
             text=f"Mock completion: {prompt}",
             provider=self.name(),
-            model="atlas-mock-v1",
+            model=model or "atlas-mock-v1",
         )
 
     def models(self):
