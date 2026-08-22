@@ -190,6 +190,7 @@ from atlas.evolution.autonomy.autonomy_request_adapter import (
 )
 from atlas.kernel.autonomy_wiring import (
     init_autonomy_application_engine,
+    init_autonomy_dispatcher,
     init_autonomy_persistence,
     init_governed_ingest_sink,
     shutdown_autonomy_persistence,
@@ -449,6 +450,7 @@ class Atlas:
         self._application_engine: Any | None = None
         self._governed_ingest_sink: Any | None = None
         self._autonomy_request_adapter: Any | None = None
+        self._autonomy_dispatcher: Any | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -1088,11 +1090,8 @@ class Atlas:
         # The gateway is the ONLY future entry point for self-modification.
         # It sits between approval and execution, validating every proposal
         # against governance rules.  Missing governance fails CLOSED.
-        self._execution_gateway = EvolutionExecutionGateway(
-            execution_engine=self._execution_engine,
-            rule_engine=self._rule_engine,
-            evolution_memory=self._evolution_memory,
-        )
+        # Constructed after the Phase 16 application engine + request adapter
+        # exist so it can expose the governed ``execute_request`` path.
 
         # --- Phase 16: Autonomy persistence foundation ---
         # Wired with a disabled AutonomyPolicy — no autonomous execution.
@@ -1121,6 +1120,17 @@ class Atlas:
         # the RuleEngine / gateway require (closed scope map, D2). Kernel-private.
         self._autonomy_request_adapter = AutonomyRequestAdapter()
 
+        # --- Phase 13.4/16: Construct the gateway with the governed path ---
+        # ``execute(proposal)`` semantics are unchanged; ``execute_request`` is
+        # the sole applied-evolution path carrying the engine + adapter (D3/D15).
+        self._execution_gateway = EvolutionExecutionGateway(
+            execution_engine=self._execution_engine,
+            rule_engine=self._rule_engine,
+            evolution_memory=self._evolution_memory,
+            application_engine=self._application_engine,
+            autonomy_request_adapter=self._autonomy_request_adapter,
+        )
+
         # --- Phase 16: Governed ingest sink (kernel-private, shared) ---
         # One sink instance persists bridge-produced EvolutionRequests as
         # DRAFTED records via the existing ScheduleStore.  Injected into the
@@ -1144,6 +1154,22 @@ class Atlas:
                 self._advanced_reasoning_ingest_bridge._sink = (  # noqa: SLF001
                     self._governed_ingest_sink
                 )
+
+        # --- Phase 16 / Batch 13: Governed lifecycle dispatcher ---
+        # Kernel-private consumer that advances DRAFTED requests to the
+        # PENDING_AUTHORIZATION terminus and applies pre-authorized SCHEDULED
+        # requests exclusively through gateway.execute_request(). It never
+        # authorizes anything and is never registered in the ServiceContainer.
+        if self._schedule_store is not None:
+            # Batch 15: wire the existing post-application lifecycle services
+            # (VerificationService, RollbackManager, VersionManager) over the
+            # shared AutonomySQLiteStorage + ApplicationEngine internals.
+            self._autonomy_dispatcher = init_autonomy_dispatcher(
+                schedule_store=self._schedule_store,
+                execution_gateway=self._execution_gateway,
+                application_engine=self._application_engine,
+                storage=self._autonomy_storage,
+            )
 
     # ------------------------------------------------------------------
     # Domain 7 — Runtime, Services & Container
@@ -1310,6 +1336,9 @@ class Atlas:
             self._evolution_scheduler.tick()
         if self._goal_executor is not None:
             self._goal_executor.settle()
+        # Phase 16 / Batch 13 — governed lifecycle. One non-blocking settle.
+        if self._autonomy_dispatcher is not None:
+            self._autonomy_dispatcher.settle()
 
     # ------------------------------------------------------------------
     # Pipeline event consumers
@@ -1588,6 +1617,7 @@ class Atlas:
         self._application_engine = None
         self._governed_ingest_sink = None
         self._autonomy_request_adapter = None
+        self._autonomy_dispatcher = None
 
         # --- Track D: Cleanup ---
         if self._advanced_reasoning_storage is not None:

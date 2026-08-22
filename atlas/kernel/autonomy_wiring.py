@@ -36,8 +36,12 @@ from atlas.evolution.autonomy.adapters import (
 )
 from atlas.evolution.autonomy.application_engine import ApplicationEngine
 from atlas.evolution.autonomy.applier_registry import ApplierRegistry
+from atlas.evolution.autonomy.dispatcher import EvolutionAutonomyDispatcher
 from atlas.evolution.autonomy.governed_ingest_sink import GovernanceIngestSink
 from atlas.evolution.autonomy.models import AutonomyPolicy
+from atlas.evolution.autonomy.rollback_manager import RollbackManager
+from atlas.evolution.autonomy.verification_service import VerificationService
+from atlas.evolution.autonomy.version_manager import VersionManager
 from atlas.evolution.autonomy.risk_assessor import EvolutionRiskAssessor
 from atlas.evolution.autonomy.schedule_store import ScheduleStore
 from atlas.evolution.autonomy.validator import EvolutionValidator
@@ -181,3 +185,86 @@ def init_governed_ingest_sink(
     if schedule_store is None:
         raise ValueError("ScheduleStore is required")
     return GovernanceIngestSink(schedule_store=schedule_store)
+
+def init_autonomy_dispatcher(
+    schedule_store: ScheduleStore,
+    execution_gateway: Any,
+    application_engine: Any | None = None,
+    storage: Any | None = None,
+    audit_callback: Any | None = None,
+    state_version_provider: Any | None = None,
+) -> EvolutionAutonomyDispatcher:
+    """Create and return the kernel-owned governed lifecycle dispatcher.
+
+    The dispatcher consumes DRAFTED requests from ``schedule_store``, advances
+    them through Validator → RiskAssessor → PENDING_AUTHORIZATION (a hard
+    production terminus — no authorization is ever minted here), and applies
+    pre-authorized SCHEDULED requests ONLY through ``execution_gateway``.
+
+    When ``application_engine`` and ``storage`` (the shared
+    ``AutonomySQLiteStorage``) are provided, Batch 15 also wires the existing
+    post-application lifecycle services — VerificationService, RollbackManager
+    and VersionManager — so a request reaches a verified, versioned,
+    outcome-recorded terminal state instead of a bare status splice.
+
+    ``execution_gateway`` already carries the ApplicationEngine and the
+    AutonomyRequestAdapter injected by the kernel; the dispatcher never holds
+    or imports the engine (Phase 16 D15).
+
+    Args:
+        schedule_store: the kernel-owned ScheduleStore (same instance reused
+            by the governed ingest sink).
+        execution_gateway: the wired EvolutionExecutionGateway exposing
+            ``execute_request``.
+        application_engine: the wired ApplicationEngine whose registry/readers/
+            writers are reused by VerificationService and RollbackManager.
+        storage: the shared ``AutonomySQLiteStorage`` (request/snapshot/outcome/
+            version persistence).
+        audit_callback: optional audit record consumer (kernel-provided).
+        state_version_provider: optional current-state-version callable used
+            by ScheduleStore atomic claiming. Defaults to ``""``.
+
+    Called by ``Atlas._init_evolution_pipeline()`` after the gateway and
+    application engine exist. Kernel-private; not registered in ServiceContainer.
+    """
+    if schedule_store is None:
+        raise ValueError("ScheduleStore is required")
+    if execution_gateway is None:
+        raise ValueError("EvolutionExecutionGateway is required")
+
+    verification_service = None
+    rollback_manager = None
+    version_manager = None
+    outcome_store = None
+
+    if application_engine is not None and storage is not None:
+        version_manager = VersionManager(storage=storage)
+        readers = getattr(application_engine, "readers", None) or {}
+        writers = getattr(application_engine, "writers", None) or {}
+        registry = getattr(application_engine, "registry", None)
+        verification_service = VerificationService(
+            registry=registry,
+            readers=readers,
+            snapshot_store=storage,
+        )
+        rollback_manager = RollbackManager(
+            request_store=storage,
+            snapshot_store=storage,
+            outcome_store=storage,
+            version_manager=version_manager,
+            writers=writers,
+        )
+        outcome_store = storage
+
+    return EvolutionAutonomyDispatcher(
+        schedule_store=schedule_store,
+        validator=EvolutionValidator(),
+        risk_assessor=EvolutionRiskAssessor(),
+        execution_gateway=execution_gateway,
+        verification_service=verification_service,
+        rollback_manager=rollback_manager,
+        version_manager=version_manager,
+        outcome_store=outcome_store,
+        audit_callback=audit_callback,
+        state_version_provider=state_version_provider,
+    )

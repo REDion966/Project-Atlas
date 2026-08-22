@@ -34,12 +34,16 @@ a separate human gate, and verification already runs inside
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable
 
 from atlas.evolution.autonomy.models import (
+    AuthorizationMode,
+    EvolutionOutcomeRecord,
     EvolutionRequest,
     EvolutionRequestStatus,
+    RiskLevel,
 )
 
 
@@ -72,6 +76,9 @@ class EvolutionAutonomyDispatcher:
         execution_gateway: Any,
         authorization_manager: Any | None = None,
         verification_service: Any | None = None,
+        rollback_manager: Any | None = None,
+        version_manager: Any | None = None,
+        outcome_store: Any | None = None,
         audit_callback: Callable[[dict], None] | None = None,
         state_version_provider: Callable[[], str] | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -92,6 +99,9 @@ class EvolutionAutonomyDispatcher:
         # Reserved for forward compatibility — never used to grant/verify here.
         self._authorization_manager = authorization_manager
         self._verification_service = verification_service
+        self._rollback_manager = rollback_manager
+        self._version_manager = version_manager
+        self._outcome_store = outcome_store
         self._audit_callback = audit_callback
         self._state_version_provider = state_version_provider or (lambda: "")
         self._clock = clock if clock is not None else datetime.now
@@ -254,20 +264,28 @@ class EvolutionAutonomyDispatcher:
         result: Any,
         now: datetime,
     ) -> None:
-        """Persist the lifecycle outcome produced by the gateway/engine."""
+        """Persist the terminal outcome of a gateway/engine result.
+
+        When batch-15 lifecycle services (verification, versioning, outcome
+        persistence, rollback) are injected this runs the full completion seam:
+          - verified application success -> COMPLETED + outcome + version bump
+          - verification failure        -> rollback -> ROLLED_BACK | EVOLUTION_HOLD
+          - application failure         -> rollback (when a plan exists) else FAILED
+        Without those services this preserves the batch-13 bare status splice.
+        """
         if result.success:
-            # request already carries COMPLETED / PENDING_EFFECTIVE +
-            # receipt + verification + rollback (engine output).
-            self._schedule_store.save_request(result.request)
-            self._audit(
-                "phase16.dispatcher.applied",
-                request.request_id,
-                terminal_status=result.terminal_status,
-            )
+            if self._completion_ready():
+                self._complete_success(request, result, now)
+            else:
+                self._schedule_store.save_request(result.request)
+                self._audit(
+                    "phase16.dispatcher.applied",
+                    request.request_id,
+                    terminal_status=result.terminal_status,
+                )
             return
 
         if result.terminal_status in ("REFUSED", "REJECTED"):
-            # Governance refused before any mutation — no receipt produced.
             self._schedule_store.update_status(
                 request.request_id,
                 EvolutionRequestStatus.APPLIED,
@@ -282,15 +300,133 @@ class EvolutionAutonomyDispatcher:
             )
             return
 
-        # Apply failed — engine returned a FAILED request carrying the rollback
-        # plan (and any captured snapshot). Persist it as-is; EVOLUTION_HOLD is
-        # driven by the rollback services, not invented here.
+        if self._rollback_manager is not None and result.request.rollback is not None:
+            # Persist the applied/failed request so RollbackManager (which
+            # reloads by request_id) sees the receipt + rollback plan.
+            self._schedule_store.save_request(result.request)
+            self._rollback_result(request, now)
+            return
+
         self._schedule_store.save_request(result.request)
         self._audit(
             "phase16.dispatcher.failed",
             request.request_id,
             terminal_status="FAILED",
             error=result.error,
+        )
+
+    # ------------------------------------------------------------------
+    # Batch 15 - post-application completion seam
+    # ------------------------------------------------------------------
+
+    def _completion_ready(self) -> bool:
+        """True when all batch-15 lifecycle services are injected."""
+        return (
+            self._verification_service is not None
+            and self._version_manager is not None
+            and self._outcome_store is not None
+        )
+
+    def _complete_success(
+        self,
+        request: EvolutionRequest,
+        result: Any,
+        now: datetime,
+    ) -> None:
+        """Run verification and, on pass, finalize COMPLETED + outcome + version."""
+        report = self._verification_service.verify(result.request)
+        if report.passed:
+            completed = result.request
+            outcome = self._build_outcome(
+                completed,
+                now,
+                outcome="COMPLETED",
+                verification_passed=True,
+                rollback_occurred=False,
+                effectiveness=1.0,
+            )
+            self._outcome_store.store_outcome(outcome)
+            if completed.receipt is not None:
+                self._version_manager.record_version(completed, completed.receipt)
+                current = self._version_manager.current_version
+                self._audit(
+                    "phase16.dispatcher.versioned",
+                    request.request_id,
+                    version=(
+                        f"{current.major}.{current.minor}.{current.patch}"
+                        if current is not None
+                        else ""
+                    ),
+                )
+            self._schedule_store.save_request(completed)
+            self._audit(
+                "phase16.dispatcher.completed",
+                request.request_id,
+                verification=report.details,
+            )
+            return
+
+        if self._rollback_manager is not None and result.request.rollback is not None:
+            # Persist the verified-failure request (receipt + rollback plan) so
+            # RollbackManager can reload and undo the mutation.
+            self._schedule_store.save_request(result.request)
+            self._rollback_result(request, now)
+        else:
+            failed = replace(result.request, status=EvolutionRequestStatus.FAILED)
+            self._schedule_store.save_request(failed)
+            self._audit(
+                "phase16.dispatcher.failed",
+                request.request_id,
+                terminal_status="FAILED",
+                error=report.details,
+            )
+
+    def _rollback_result(
+        self,
+        request: EvolutionRequest,
+        now: datetime,
+    ) -> None:
+        """Invoke the existing RollbackManager; it sets ROLLED_BACK or HOLD."""
+        rb = self._rollback_manager.rollback(request.request_id)
+        self._audit(
+            "phase16.dispatcher.rollback",
+            request.request_id,
+            success=rb.success,
+            hold=rb.hold,
+            error=rb.error,
+        )
+
+    def _build_outcome(
+        self,
+        req: EvolutionRequest,
+        now: datetime,
+        outcome: str,
+        verification_passed: bool,
+        rollback_occurred: bool,
+        effectiveness: float,
+    ) -> EvolutionOutcomeRecord:
+        """Build the Phase 17 evidence record for a terminal request state."""
+        risk = RiskLevel.LOW
+        if req.risk is not None:
+            risk = req.risk.risk_level
+        mode = AuthorizationMode.EXPLICIT
+        if req.authorization is not None:
+            mode = req.authorization.mode
+        return EvolutionOutcomeRecord(
+            outcome_record_id=f"outcome-{req.request_id}",
+            request_id=req.request_id,
+            scope=req.target_scope,
+            area=req.target_scope.name.lower(),
+            risk_level=risk,
+            intended_level=req.intended_level,
+            authorization_mode=mode,
+            outcome=outcome,
+            verification_passed=verification_passed,
+            rollback_occurred=rollback_occurred,
+            effectiveness_proxy=effectiveness,
+            started_at=req.created_at,
+            finished_at=now,
+            metadata=req.metadata,
         )
 
     # ------------------------------------------------------------------
