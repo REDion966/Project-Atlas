@@ -37,6 +37,7 @@ from atlas.evolution.autonomy.models import (
     RiskLevel,
 )
 from atlas.evolution.governance.models import ScopeType
+from atlas.evolution.models import ExecutionLevel
 
 
 class AuthorizationRefusal(Exception):
@@ -145,9 +146,16 @@ class AuthorizationManager:
 
         Validates that the request is eligible for user approval and
         produces a time-bounded ``EvolutionAuthorization``.
-        """
-        self._ensure_policy_enabled()
 
+        Batch 10 (Foundation Strengthening): an explicit ``user:cli``
+        INFORMATION-boundary request — ``MEMORY``/``KNOWLEDGE`` at
+        ``ExecutionLevel.INFORMATION`` — may be authorized even while the
+        autonomy policy is disabled. This is the human-executed governed
+        path: the user is the authority and ``system:autonomy`` remains
+        disabled. Every other path still requires an enabled policy, so
+        this is NOT a "disabled policy means allow user" bypass.
+        """
+        # Protected scopes are refused first and unconditionally.
         if request.target_scope in {ScopeType.UNKNOWN, ScopeType.IDENTITY, ScopeType.CODE}:
             return AuthorizationResult(
                 authorized=False,
@@ -157,6 +165,20 @@ class AuthorizationManager:
                 ),
                 requires_user_approval=False,
             )
+
+        # Narrow carve-out: explicit user:cli INFORMATION-boundary grant while
+        # the policy is disabled. All other disabled-policy paths raise.
+        if not self.policy.enabled:
+            is_explicit_user_cli = (
+                auth_request.mode == AuthorizationMode.EXPLICIT
+                and auth_request.authorized_by == "user:cli"
+            )
+            is_information_boundary = (
+                request.target_scope in {ScopeType.MEMORY, ScopeType.KNOWLEDGE}
+                and request.intended_level == ExecutionLevel.INFORMATION
+            )
+            if not (is_explicit_user_cli and is_information_boundary):
+                raise AuthorizationRefusal("Autonomy policy is disabled")
 
         auth = self._build_authorization(
             request_id=request.request_id,

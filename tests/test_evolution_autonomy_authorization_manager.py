@@ -94,6 +94,142 @@ class _RequestFactory:
         )
 
 
+class TestExplicitInformationGrant(unittest.TestCase):
+    """Batch 10 — explicit user:cli INFORMATION grants while policy disabled."""
+
+    @staticmethod
+    def _info_request(
+        scope: ScopeType, request_id: str = "AUTORQ-INFO"
+    ) -> EvolutionRequest:
+        return EvolutionRequest(
+            request_id=request_id,
+            source="cli",
+            target_scope=scope,
+            change_payload={"operation": "add", "entry_id": "x", "content": "y"},
+            intended_level=ExecutionLevel.INFORMATION,
+        )
+
+    def test_knowledge_user_cli_granted_policy_disabled(self):
+        policy = AutonomyPolicy(enabled=False)
+        manager = AuthorizationManager(policy=policy)
+        req = self._info_request(ScopeType.KNOWLEDGE)
+        result = manager.request_user_authorization(
+            req,
+            AuthorizationRequest(
+                authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+            ),
+        )
+
+        self.assertTrue(result.authorized)
+        auth = result.authorization
+        self.assertIsNotNone(auth)
+        self.assertEqual(auth.mode, AuthorizationMode.EXPLICIT)
+        self.assertEqual(auth.authorized_by, "user:cli")
+        self.assertEqual(auth.request_id, req.request_id)
+
+    def test_memory_user_cli_granted_policy_disabled(self):
+        policy = AutonomyPolicy(enabled=False)
+        manager = AuthorizationManager(policy=policy)
+        req = self._info_request(ScopeType.MEMORY)
+        result = manager.request_user_authorization(
+            req,
+            AuthorizationRequest(
+                authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+            ),
+        )
+
+        self.assertTrue(result.authorized)
+        auth = result.authorization
+        self.assertIsNotNone(auth)
+        self.assertEqual(auth.mode, AuthorizationMode.EXPLICIT)
+        self.assertEqual(auth.authorized_by, "user:cli")
+
+    def test_user_grant_emits_audit_event(self):
+        records: list[dict] = []
+        policy = AutonomyPolicy(enabled=False)
+        manager = AuthorizationManager(policy=policy, audit_callback=records.append)
+        req = self._info_request(ScopeType.KNOWLEDGE)
+        manager.request_user_authorization(
+            req,
+            AuthorizationRequest(
+                authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+            ),
+        )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["event"], "phase16.authorization.granted.user")
+        self.assertEqual(records[0]["request_id"], req.request_id)
+
+    def test_user_grant_preserves_ttl(self):
+        now = datetime(2026, 1, 1, 12, 0, 0)
+        policy = AutonomyPolicy(enabled=False, authorization_ttl_minutes=30)
+        manager = AuthorizationManager(policy=policy, clock=_FixedClock(now))
+        req = self._info_request(ScopeType.MEMORY)
+        auth = manager.request_user_authorization(
+            req,
+            AuthorizationRequest(
+                authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+            ),
+        ).authorization
+
+        self.assertIsNotNone(auth)
+        self.assertEqual(auth.granted_at, now)
+        self.assertEqual(auth.expires_at, now + timedelta(minutes=30))
+
+    def test_policy_remains_disabled_after_grant(self):
+        policy = AutonomyPolicy(enabled=False, version="v1")
+        manager = AuthorizationManager(policy=policy)
+        req = self._info_request(ScopeType.KNOWLEDGE)
+        manager.request_user_authorization(
+            req,
+            AuthorizationRequest(
+                authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+            ),
+        )
+
+        self.assertFalse(policy.enabled)
+        self.assertEqual(policy.version, "v1")
+
+    def test_config_self_config_denied_when_policy_disabled(self):
+        # CONFIG is the SELF_CONFIG boundary, NOT INFORMATION — still denied
+        # when the policy is disabled.
+        policy = AutonomyPolicy(enabled=False)
+        manager = AuthorizationManager(policy=policy)
+        req = EvolutionRequest(
+            request_id="AUTORQ-CFG",
+            source="cli",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"key": "x", "value": 1},
+            intended_level=ExecutionLevel.SELF_CONFIG,
+        )
+        with self.assertRaises(AuthorizationRefusal):
+            manager.request_user_authorization(
+                req,
+                AuthorizationRequest(
+                    authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+                ),
+            )
+
+    def test_information_scope_wrong_level_denied_when_policy_disabled(self):
+        # MEMORY at ADMINISTRATIVE (not INFORMATION) — outside the carve-out.
+        policy = AutonomyPolicy(enabled=False)
+        manager = AuthorizationManager(policy=policy)
+        req = EvolutionRequest(
+            request_id="AUTORQ-ADMIN",
+            source="cli",
+            target_scope=ScopeType.MEMORY,
+            change_payload={"operation": "add", "entry_id": "x", "content": "y"},
+            intended_level=ExecutionLevel.ADMINISTRATIVE,
+        )
+        with self.assertRaises(AuthorizationRefusal):
+            manager.request_user_authorization(
+                req,
+                AuthorizationRequest(
+                    authorized_by="user:cli", mode=AuthorizationMode.EXPLICIT
+                ),
+            )
+
+
 class TestUserAuthorization(unittest.TestCase):
     """user:cli / user:policy authorizations."""
 

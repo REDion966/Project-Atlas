@@ -185,8 +185,13 @@ from atlas.advanced_reasoning.wiring import (
 from atlas.storage.advanced_reasoning_storage import AdvancedReasoningSQLiteStorage
 
 # --- Phase 16: Autonomy persistence wiring ---
+from atlas.evolution.autonomy.autonomy_request_adapter import (
+    AutonomyRequestAdapter,
+)
 from atlas.kernel.autonomy_wiring import (
+    init_autonomy_application_engine,
     init_autonomy_persistence,
+    init_governed_ingest_sink,
     shutdown_autonomy_persistence,
 )
 
@@ -441,6 +446,9 @@ class Atlas:
         # --- Phase 16: Autonomy persistence ---
         self._autonomy_storage: Any | None = None
         self._schedule_store: Any | None = None
+        self._application_engine: Any | None = None
+        self._governed_ingest_sink: Any | None = None
+        self._autonomy_request_adapter: Any | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -534,6 +542,16 @@ class Atlas:
     def schedule_store(self):
         """Return the Phase 16 ScheduleStore, or None if not wired."""
         return self._schedule_store
+
+    @property
+    def application_engine(self):
+        """Return the kernel-owned Phase 16 ApplicationEngine (kernel-private).
+
+        The engine is NOT registered in the ServiceContainer (track-private
+        precedent). Constructing it creates no execution path — ``apply()``
+        is only reachable through the governed pipeline.
+        """
+        return self._application_engine
 
     @property
     def started(self):
@@ -1083,6 +1101,50 @@ class Atlas:
             init_autonomy_persistence(self._event_bus)
         )
 
+        # --- Phase 16: ApplicationEngine (kernel-private) ---
+        # Constructed after all required services (memory, knowledge, config,
+        # capability registry) and the shared autonomy storage exist. Uses the
+        # Batch 9 production adapters: readers for all four state scopes,
+        # writers for MEMORY/KNOWLEDGE only (the Batch 10 INFORMATION
+        # boundary). Not registered in ServiceContainer. No execution path is
+        # created by construction alone.
+        self._application_engine = init_autonomy_application_engine(
+            storage=self._autonomy_storage,
+            knowledge_manager=self._knowledge_manager,
+            memory_service=self._memory_service,
+            configuration=self._config,
+            capability_registry=self._capability_registry,
+        )
+
+        # --- Phase 16: AutonomyRequestAdapter (sole translator) ---
+        # Translates an EvolutionRequest into the scope-pinned EvolutionProposal
+        # the RuleEngine / gateway require (closed scope map, D2). Kernel-private.
+        self._autonomy_request_adapter = AutonomyRequestAdapter()
+
+        # --- Phase 16: Governed ingest sink (kernel-private, shared) ---
+        # One sink instance persists bridge-produced EvolutionRequests as
+        # DRAFTED records via the existing ScheduleStore.  Injected into the
+        # three kernel-owned ingest bridges (Research, LongTerm, Reasoning).
+        # ToolchainIngestBridge is created on-demand in CLI/skill-author
+        # contexts (not kernel-owned) and uses its own fail-closed default.
+        if self._schedule_store is not None:
+            self._governed_ingest_sink = init_governed_ingest_sink(
+                self._schedule_store
+            )
+            # Inject into the three kernel-owned bridges.
+            if self._research_ingest_bridge is not None:
+                self._research_ingest_bridge._sink = (  # noqa: SLF001
+                    self._governed_ingest_sink
+                )
+            if self._longterm_ingest_bridge is not None:
+                self._longterm_ingest_bridge._sink = (  # noqa: SLF001
+                    self._governed_ingest_sink
+                )
+            if self._advanced_reasoning_ingest_bridge is not None:
+                self._advanced_reasoning_ingest_bridge._sink = (  # noqa: SLF001
+                    self._governed_ingest_sink
+                )
+
     # ------------------------------------------------------------------
     # Domain 7 — Runtime, Services & Container
     # ------------------------------------------------------------------
@@ -1523,6 +1585,9 @@ class Atlas:
         shutdown_autonomy_persistence(self._autonomy_storage)
         self._autonomy_storage = None
         self._schedule_store = None
+        self._application_engine = None
+        self._governed_ingest_sink = None
+        self._autonomy_request_adapter = None
 
         # --- Track D: Cleanup ---
         if self._advanced_reasoning_storage is not None:
