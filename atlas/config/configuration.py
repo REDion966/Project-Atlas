@@ -45,6 +45,9 @@ class Configuration:
                     anthropic=api_keys_data.get("anthropic", ""),
                 ),
                 profiles=list(data.get("ai", {}).get("profiles", [])),
+                allow_fallback=bool(
+                    data.get("ai", {}).get("allow_fallback", False)
+                ),
             ),
             conversation=ConversationSettings(
                 history_limit=data["conversation"]["history_limit"],

@@ -15,6 +15,7 @@ from atlas.ai.providers.anthropic_provider import AnthropicProvider
 from atlas.ai.providers.openrouter_provider import OpenRouterProvider
 from atlas.ai.router.ai_router import AIRouter
 from atlas.ai.ai_service import AIService
+from atlas.ai.fallback import FallbackExecutor, make_fallback_audit_callback
 
 if TYPE_CHECKING:
     from atlas.ai.routing.registry import ModelProfileRegistry
@@ -33,6 +34,7 @@ class AIManager:
         self,
         model_profile_registry: "ModelProfileRegistry | None" = None,
     ):
+        self._profile_registry = model_profile_registry
         self._router = AIRouter(
             model_profile_registry=model_profile_registry,
         )
@@ -46,11 +48,16 @@ class AIManager:
         timeout: int,
         model_router: "ModelRouter | None" = None,
         api_keys: "APIKeySettings | None" = None,
+        allow_fallback: bool = False,
     ):
         """Initialize Atlas AI.
 
         Registers all available providers and activates the
         one specified in the configuration.
+
+        ``allow_fallback`` is the operator-level default for routed chat;
+        per-request ``RoutingRequest.allow_fallback`` can still opt in on an
+        individual request even while the default is False.
         """
 
         self._model_router = model_router
@@ -110,9 +117,22 @@ class AIManager:
         # Activate the configured provider
         self._router.use(provider)
 
+        # Wire the policy-controlled fallback executor.  The profile registry
+        # backs the capability guard; the provider registry backs real
+        # provider availability; the Logger-backed callback emits bounded
+        # ai.routing.fallback audit lines.  Fallback stays OFF unless
+        # explicitly enabled (per-request flag or operator default).
+        fallback_executor = FallbackExecutor(
+            profile_registry=self._profile_registry,
+            audit_callback=make_fallback_audit_callback(),
+            provider_available=self._router.registry.exists,
+        )
+
         self._service = AIService(
             self._router,
             model_router=self._model_router,
+            fallback_executor=fallback_executor,
+            allow_fallback_default=allow_fallback,
         )
 
         self._service.start()

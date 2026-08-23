@@ -10,6 +10,11 @@ model = "qwen3:8b"
 temperature = 0.7
 timeout = 300
 
+# Operator-level default for policy-controlled model fallback on routed
+# chat.  Safe default: false (explicit opt-in only).  A per-request
+# RoutingRequest.allow_fallback can still enable fallback individually.
+allow_fallback = false
+
 # Optional model routing profiles. When absent, safe defaults are used
 # (Mock Provider @0.3 + Ollama @0.8 with the configured model).
 # Each entry: provider_name, model_name, complexity_score, latency_class,

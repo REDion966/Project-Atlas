@@ -57,6 +57,7 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
             timeout: int,
             model_router=None,
             api_keys=None,
+            allow_fallback: bool = False,
         ):
             original_initialize(
                 manager,
@@ -65,6 +66,7 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
                 timeout,
                 model_router=model_router,
                 api_keys=api_keys,
+                allow_fallback=allow_fallback,
             )
 
         with patch.object(AIManager, "initialize", initialize_with_mock):

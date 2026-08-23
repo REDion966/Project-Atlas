@@ -35,6 +35,10 @@ class AISettings:
     # Optional raw model-profile entries from [ai.profiles].
     # None/empty means the routing defaults apply.
     profiles: list[dict] = field(default_factory=list)
+    # Operator-level default for policy-controlled model fallback on routed
+    # chat.  Safe default False; explicit opt-in only.  Per-request
+    # RoutingRequest.allow_fallback can still enable fallback individually.
+    allow_fallback: bool = False
 
 
 @dataclass(slots=True)

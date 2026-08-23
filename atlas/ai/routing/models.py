@@ -51,6 +51,10 @@ class RoutingRequest:
     latency_requirement: str = "any"
     task_type: str = "conversation"
     context_size: int = 0
+    # When True, a caller explicitly permits policy-controlled fallback
+    # to an eligible candidate on transient/model-unavailable failures.
+    # Default False so all existing callers retain current behavior.
+    allow_fallback: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

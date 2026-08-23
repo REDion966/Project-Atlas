@@ -631,10 +631,12 @@ class Atlas:
         )
 
         api_keys = self._config.get("ai", "api_keys")
+        allow_fallback = bool(self._config.get("ai", "allow_fallback", default=False))
         self._ai_manager.initialize(
             provider, model, timeout,
             model_router=self._model_router,
             api_keys=api_keys,  # type: ignore[arg-type]
+            allow_fallback=allow_fallback,
         )
 
     # ------------------------------------------------------------------
