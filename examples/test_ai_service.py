@@ -1,4 +1,4 @@
-from atlas.services.ai_service import AIService
+from atlas.ai.ai_service import AIService
 
 ai = AIService()
 

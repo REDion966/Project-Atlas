@@ -14,7 +14,7 @@ from atlas.ai.providers.lmstudio_provider import LMStudioProvider
 from atlas.ai.providers.anthropic_provider import AnthropicProvider
 from atlas.ai.providers.openrouter_provider import OpenRouterProvider
 from atlas.ai.router.ai_router import AIRouter
-from atlas.services.ai_service import AIService
+from atlas.ai.ai_service import AIService
 
 if TYPE_CHECKING:
     from atlas.ai.routing.registry import ModelProfileRegistry

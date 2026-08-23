@@ -15,7 +15,7 @@ from atlas.ai.routing.models import ModelProfile, RoutingDecision, RoutingReques
 from atlas.ai.routing.registry import ModelProfileRegistry
 from atlas.ai.routing.router import ModelRouter
 from atlas.cognition.models import StageType
-from atlas.services.ai_service import AIService
+from atlas.ai.ai_service import AIService
 
 
 def _tracking_handler(calls: list):

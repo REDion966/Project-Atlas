@@ -14,7 +14,7 @@ from atlas.conversation.history import History
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.memory.context.context_engine import ContextEngine
-from atlas.services.ai_service import AIService
+from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
 
 
