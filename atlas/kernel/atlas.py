@@ -66,6 +66,9 @@ from atlas.runtime.feedback_coordinator import FeedbackCoordinator
 from atlas.understanding.understanding_engine import UnderstandingEngine
 from atlas.world_model.world_model_engine import WorldModelEngine
 from atlas.evolution.self_observation import SelfObservationEngine
+from atlas.evolution.development_planner import DevelopmentPlanner
+from atlas.evolution.self_development_loop import SelfDevelopmentLoop
+from atlas.evolution.autonomy.sandbox_tools import register_sandbox_tools
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
@@ -452,6 +455,14 @@ class Atlas:
         self._autonomy_request_adapter: Any | None = None
         self._autonomy_dispatcher: Any | None = None
 
+        # --- Phase E6: Governed self-development loop ---
+        # One DevelopmentPlanner + one SelfDevelopmentLoop reuse the existing
+        # kernel-owned LearningMemory and ToolRegistry. No parallel registries or
+        # stores are created. Development runs are bounded and never touch the
+        # real repository.
+        self._development_planner: DevelopmentPlanner | None = None
+        self._self_development_loop: SelfDevelopmentLoop | None = None
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -494,6 +505,16 @@ class Atlas:
     def execution_gateway(self):
         """Return the EvolutionExecutionGateway (Phase 13.4)."""
         return self._execution_gateway
+
+    @property
+    def development_planner(self):
+        """Return the kernel-owned DevelopmentPlanner (Phase E3/E6)."""
+        return self._development_planner
+
+    @property
+    def self_development_loop(self):
+        """Return the kernel-owned governed SelfDevelopmentLoop (Phase E5/E6)."""
+        return self._self_development_loop
 
     @property
     def rule_engine(self):
@@ -565,6 +586,34 @@ class Atlas:
 
     def models(self):
         return self._ai_manager.service.models()
+
+    # ------------------------------------------------------------------
+    # Phase E6 — Governed self-development entry point
+    # ------------------------------------------------------------------
+
+    def run_self_development(self, proposal, max_iterations=None):
+        """Run the bounded, governed self-development loop for an approved proposal.
+
+        This is the smallest real runtime bridge from an APPROVED
+        ``EvolutionProposal`` to the kernel-owned E5 ``SelfDevelopmentLoop``
+        (which delegates planning to the E3 ``DevelopmentPlanner`` and executes
+        the E2 sandbox / E4 pytest path). It reuses the existing governance
+        approval contract and never touches the real repository.
+
+        Args:
+            proposal: An already-approved ``EvolutionProposal`` carrying the
+                development workload in its metadata.
+            max_iterations: Optional bounded iteration budget.
+
+        Returns:
+            A ``DevelopmentRunResult``. Unapproved / malformed proposals fail
+            closed with no sandbox work performed.
+        """
+        if self._self_development_loop is None:
+            raise RuntimeError(
+                "Self-development loop is not wired; Atlas.start() must run first."
+            )
+        return self._self_development_loop.run(proposal, max_iterations=max_iterations)
 
     # ------------------------------------------------------------------
     # Composition root — public entry point
@@ -720,6 +769,11 @@ class Atlas:
         )
         for tool in BUILTIN_TOOLS:
             self._tool_registry.register(tool)
+
+        # --- Phase E6: Register the E4 sandbox tools through the SAME
+        #     kernel-owned ToolRegistry (pytest + read-only git inspection,
+        #     confined to minted sandbox workspaces). No parallel registry.
+        register_sandbox_tools(self._tool_registry)
 
     # ------------------------------------------------------------------
     # Domain 4 — Cognitive Engines
@@ -1145,6 +1199,18 @@ class Atlas:
                     self._governed_ingest_sink
                 )
 
+        # --- Phase E6: Governed self-development loop ---
+        # Construct one DevelopmentPlanner + one SelfDevelopmentLoop reusing the
+        # existing kernel-owned LearningMemory and the governed approval gate.
+        # The loop is bounded, never authorizes, and never writes to the real
+        # repository. It is kernel-owned (not registered as a gateway service).
+        self._development_planner = DevelopmentPlanner()
+        learning_memory = getattr(self._learning_engine, "memory", None)
+        self._self_development_loop = SelfDevelopmentLoop(
+            planner=self._development_planner,
+            learning_store=learning_memory,
+        )
+
         # --- Phase 16 / Batch 13: Governed lifecycle dispatcher ---
         # Kernel-private consumer that advances DRAFTED requests to the
         # PENDING_AUTHORIZATION terminus and applies pre-authorized SCHEDULED
@@ -1563,6 +1629,8 @@ class Atlas:
         # --- Phase 13.4: Cleanup ---
         self._execution_gateway = None
         self._rule_engine = None
+        self._development_planner = None
+        self._self_development_loop = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
