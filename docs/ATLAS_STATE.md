@@ -716,6 +716,67 @@ Full suite after cleanup: **3260 passed, 0 failed, 57 subtests, 2 warnings**
 
 ---
 
+## 25. Post-Core Adaptation Foundation (F1–F6) — working tree
+
+The Post-Core **Adaptation Foundation** adds a bounded, manually-triggered,
+deterministic, governance-safe adaptation pipeline on top of the frozen
+Core. F1–F6 are additive post-Core layers; Atlas Core remains frozen, Phase E
+remains the only governed code-development execution boundary.
+
+| Layer | Purpose | Implementation |
+|---|---|---|
+| F1 | Environment Foundation | `atlas/evolution/environment/` |
+| F2 | Knowledge Freshness & Provenance | `atlas/evolution/freshness/` |
+| F3 | Capability / Model / Tool Lifecycle | `atlas/evolution/lifecycle/` |
+| F4 | Governed Adaptation Decision Engine | `atlas/evolution/adaptation/engine.py` |
+| F5 | Adaptation Evaluation & Feedback | `atlas/evolution/adaptation/evaluator.py` |
+| F6 | Full Adaptation Orchestration | `atlas/evolution/adaptation/orchestrator.py` |
+
+### F1 — Environment Foundation
+`EnvironmentObserver` observes provider state through duck-typed providers and emits deterministic
+`EnvironmentChange` records on the EXISTING EventBus / SelfObservationEngine — no new bus/registry.
+
+### F2 — Knowledge Freshness & Provenance
+`KnowledgeFreshnessAssessor` classifies knowledge as FRESH/STALE/UNCERTAIN/UNASSESSED against an
+injectable `FreshnessPolicy`, consumes F1 changes deterministically, and emits bounded
+`StaleKnowledgeCandidate`s with provenance preserved.
+
+### F3 — Capability / Model / Tool Lifecycle
+`CapabilityLifecycleAssessor` converts F1/F2 + lifecycle metadata into deterministic
+`LifecycleAssessment` records (NONE / REVIEW / DEPRECATE / REPLACE / FALLBACK). Never mutates registries.
+
+### F4 — Governed Adaptation Decision Engine
+`AdaptationDecisionEngine` translates F3 assessments into DRAFT-only `EvolutionProposal`
+candidates using the existing proposal model. It never approves; every generated proposal stays `DRAFT`.
+
+### F5 — Adaptation Evaluation & Feedback
+`AdaptationEvaluator` evaluates proposal lifecycle states and Phase-E `DevelopmentOutcome`s
+(reusing `effectiveness_proxy`), separates governance outcomes from technical outcomes, and emits
+bounded `AdaptationFeedback` with F2/F3 bridge signals. May best-effort record into the EXISTING
+`EvolutionMemory` / `LearningMemory`; never executes, never approves.
+
+### F6 — Full Adaptation Orchestration
+`AdaptationOrchestrator` (plus the kernel bridge `Atlas.run_adaptation_cycle()`)
+composes F1→F2→F3→F4 into one bounded, manually-triggered cycle, producing
+DRAFT `EvolutionProposal`s and optionally evaluating supplied existing proposal/outcome
+pairs via F5. It stops at the DRAFT proposal boundary.
+
+**Guarantees across all layers:**
+- Manually triggered and bounded (per-stage caps; deterministic truncation surfaced).
+- Deterministic ordering; identical inputs → identical outputs.
+- Fail-closed on malformed input (bounded `(stage, message)` failures).
+- Provenance survives F1 → F2 → F3 → F4 → governance boundary → Phase E → F5.
+- No auto-approval / auto-execution / daemon / `Atlas.tick()` integration.
+- No second EventBus / registry / memory / scheduler / approval / authorization / executor / sandbox.
+  CODE remains constitutionally protected.
+- Phase E remains the governed self-development execution boundary.
+
+Verification: F1–F6 focused tests **177 passed**; architecture/container/governance
+regressions **106 passed, 10 subtests passed**; Phase-E E2–E6 **143 passed, 1 skipped**;
+four known baseline stale failures remain unchanged by F1–F6.
+
+---
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:

@@ -40,6 +40,42 @@ and this project adheres to a milestone- and track-based release model
   disabled.  This is the persistence foundation for the future governed
   ingest sink pipeline.
 
+### Post-Core Adaptation Foundation (F1–F6) — working tree
+
+Completed the post-Core **Adaptation Foundation**: a bounded, manually-triggered,
+deterministic, governance-safe adaptation pipeline built additively on top of the
+frozen Core (Phase E at `e100883`). All layers reuse existing infrastructure —
+no new EventBus / scheduler / registry / memory / approval / authorization /
+executor / sandbox, no `Atlas.tick()` integration, no daemon.
+
+- **F1 — Environment Foundation** (`atlas/evolution/environment/`): `EnvironmentObserver`
+  observes provider state via duck-typed providers and emits deterministic
+  `EnvironmentChange` records on the existing EventBus / SelfObservationEngine.
+- **F2 — Knowledge Freshness & Provenance** (`atlas/evolution/freshness/`):
+  `KnowledgeFreshnessAssessor` classifies knowledge FRESH/STALE/UNCERTAIN/UNASSESSED
+  against an injectable `FreshnessPolicy` and emits bounded stale-knowledge candidates.
+- **F3 — Capability / Model / Tool Lifecycle** (`atlas/evolution/lifecycle/`):
+  `CapabilityLifecycleAssessor` produces deterministic `LifecycleAssessment` records
+  (NONE/REVIEW/DEPRECATE/REPLACE/FALLBACK) without mutating registries.
+- **F4 — Governed Adaptation Decision Engine** (`atlas/evolution/adaptation/engine.py`):
+  `AdaptationDecisionEngine` translates F3 assessments into DRAFT-only
+  `EvolutionProposal` candidates; never approves.
+- **F5 — Adaptation Evaluation & Feedback** (`atlas/evolution/adaptation/evaluator.py`):
+  `AdaptationEvaluator` evaluates proposal lifecycle states + Phase-E outcomes
+  (reusing `effectiveness_proxy`), separates governance from technical outcomes,
+  and emits bounded `AdaptationFeedback` with F2/F3 bridge signals.
+- **F6 — Full Adaptation Orchestration** (`atlas/evolution/adaptation/orchestrator.py` +
+  `Atlas.run_adaptation_cycle()`): one bounded, manually-triggered F1→F2→F3→F4
+  cycle producing DRAFT proposals (and optional F5 evaluation of supplied
+  already-approved proposal/outcome data). Stops at the DRAFT proposal boundary.
+
+**Guarantees:** deterministic, bounded (per-stage caps + surfaced truncation),
+fail-closed on malformed input, provenance preserved end-to-end, CODE remains
+constitutionally protected, Phase E remains the governed self-development
+execution boundary. Verification: F1–F6 focused 177 passed; architecture/container/
+governance regressions 106 passed + 10 subtests; Phase-E E2–E6 143 passed, 1
+skipped; four known baseline stale failures unchanged.
+
 ### Test Status
 
 - **3260 passed, 0 failed, 57 subtests, 2 warnings** (identical to v0.20.0

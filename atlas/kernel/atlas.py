@@ -69,6 +69,13 @@ from atlas.evolution.self_observation import SelfObservationEngine
 from atlas.evolution.development_planner import DevelopmentPlanner
 from atlas.evolution.self_development_loop import SelfDevelopmentLoop
 from atlas.evolution.autonomy.sandbox_tools import register_sandbox_tools
+from atlas.evolution.environment import EnvironmentObserver
+from atlas.evolution.environment.providers import default_providers
+from atlas.evolution.lifecycle import CapabilityLifecycleAssessor
+from atlas.evolution.lifecycle.targets import targets_from_registries
+from atlas.evolution.adaptation import AdaptationDecisionEngine
+from atlas.evolution.adaptation.evaluator import AdaptationEvaluator
+from atlas.evolution.adaptation.orchestrator import AdaptationOrchestrator
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
@@ -463,6 +470,245 @@ class Atlas:
         self._development_planner: DevelopmentPlanner | None = None
         self._self_development_loop: SelfDevelopmentLoop | None = None
 
+        # --- Phase F1 (post-Core): Environment observation foundation ---
+        # One EnvironmentObserver reusing the EXISTING model-profile / tool /
+        # capability registries, the EXISTING EventBus, and the EXISTING
+        # SelfObservationEngine. Purely observational; nothing auto-runs.
+        self._environment_observer: EnvironmentObserver | None = None
+
+        # --- Phase F3 (post-Core): Lifecycle assessment foundation ---
+        # One pure CapabilityLifecycleAssessor reusing the EXISTING registries
+        # as read-only snapshot inputs. Never auto-runs; never mutates.
+        self._lifecycle_assessor: CapabilityLifecycleAssessor | None = None
+
+        # --- Phase F4 (post-Core): Governed adaptation decision foundation ---
+        # One pure AdaptationDecisionEngine producing DRAFT proposal candidates
+        # only. Never auto-runs; never approves; never executes.
+        self._adaptation_engine: AdaptationDecisionEngine | None = None
+
+        # --- Phase F5 (post-Core): Adaptation evaluation & feedback ---
+        # One pure AdaptationEvaluator closing the governed loop. Observes and
+        # records outcomes only; never executes, never approves.
+        self._adaptation_evaluator: AdaptationEvaluator | None = None
+
+        # --- Phase F6 (post-Core): Full adaptation cycle orchestrator ---
+        # One pure orchestrator composing F1-F5 into bounded, manually-triggered
+        # adaptation cycles. Never auto-runs; never approves; never executes.
+        self._adaptation_orchestrator: AdaptationOrchestrator | None = None
+
+    # ------------------------------------------------------------------
+    # Public entry / on-demand observation cycle
+    # ------------------------------------------------------------------
+
+    def observe_environment(self):
+        """Run one bounded environment observation cycle.
+
+        Returns an ``EnvironmentObservationResult``. Raises ``RuntimeError``
+        if Atlas has not started (observer not wired).
+        """
+        if self._environment_observer is None:
+            raise RuntimeError(
+                "Environment observer is not wired; Atlas.start() must run first."
+            )
+        return self._environment_observer.observe_cycle()
+
+    # ------------------------------------------------------------------
+    # Phase F1: Environment observer (wired; never auto-started)
+    # ------------------------------------------------------------------
+
+    def _init_environment_observer(self) -> None:
+        """Phase F1 (post-Core): additively wire the environment observer.
+
+        Reuses the existing registries/EventBus/SelfObservationEngine.
+        Nothing runs automatically; ``observe_environment()`` drives it on demand.
+        """
+        providers = default_providers(
+            model_registry=self._model_profile_registry,
+            tool_registry=self._tool_registry,
+            capability_registry=self._capability_registry,
+        )
+        self._environment_observer = EnvironmentObserver(
+            providers=providers,
+            event_bus=self._event_bus,
+            observation_engine=self._self_observation_engine,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase F3: Lifecycle assessor (wired; read-only, never auto-runs)
+    # ------------------------------------------------------------------
+
+    def _init_lifecycle_assessor(self) -> None:
+        """Phase F3 (post-Core): additively wire the lifecycle assessor.
+
+        Reuses the existing model/tool/capability/skill registries as
+        read-only snapshot inputs. No mutation, no automatic execution.
+        """
+        self._lifecycle_assessor = CapabilityLifecycleAssessor()
+
+    def assess_capability_lifecycle(self, changes=None, freshness=None, targets=None):
+        """Run a read-only lifecycle assessment over existing registries.
+
+        Args:
+            changes: Optional iterable of F1 ``EnvironmentChange`` records.
+            freshness: Optional iterable of F2 ``KnowledgeFreshnessAssessment``
+                records.
+            targets: Optional explicit ``LifecycleTarget`` descriptors. When
+                ``None``, targets are snapshotted from the kernel's existing
+                model-profile / tool / capability registries.
+
+        Returns:
+            A ``LifecycleAssessmentResult``. Never mutates any registry and
+            never executes anything.
+        """
+        if self._lifecycle_assessor is None:
+            raise RuntimeError(
+                "Lifecycle assessor is not wired; Atlas.start() must run first."
+            )
+        if targets is None:
+            targets = targets_from_registries(
+                model_registry=self._model_profile_registry,
+                tool_registry=self._tool_registry,
+                capability_registry=self._capability_registry,
+            )
+        return self._lifecycle_assessor.assess_many(
+            targets,
+            changes=changes or (),
+            freshness=freshness or (),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase F4: Governed adaptation decision (candidate-producing only)
+    # ------------------------------------------------------------------
+
+    def _init_adaptation_engine(self) -> None:
+        """Phase F4 (post-Core): additively wire the adaptation decision engine.
+
+        Produces DRAFT proposal candidates only. No approval, no execution,
+        no persistence. Nothing auto-runs.
+        """
+        self._adaptation_engine = AdaptationDecisionEngine()
+
+    def generate_adaptation_proposals(self, changes=None, freshness=None, targets=None):
+        """Run F1/F2/F3 -> F4 and return DRAFT-only adaptation proposals.
+
+        Args:
+            changes: Optional iterable of F1 ``EnvironmentChange`` records.
+            freshness: Optional iterable of F2 ``KnowledgeFreshnessAssessment``
+                records.
+            targets: Optional explicit ``LifecycleTarget`` descriptors. When
+                ``None``, targets are snapshotted from the kernel's existing
+                registries.
+
+        Returns:
+            A tuple of ``EvolutionProposal`` in ``DRAFT`` status (never
+            ``APPROVED``). Nothing is executed or approved here.
+        """
+        if self._adaptation_engine is None or self._lifecycle_assessor is None:
+            raise RuntimeError(
+                "Adaptation engine is not wired; Atlas.start() must run first."
+            )
+        assessment_result = self.assess_capability_lifecycle(
+            changes=changes, freshness=freshness, targets=targets
+        )
+        return self._adaptation_engine.generate(assessment_result.assessments)
+
+    # ------------------------------------------------------------------
+    # Phase F5: Adaptation evaluation & feedback (observer only)
+    # ------------------------------------------------------------------
+
+    def _init_adaptation_evaluator(self) -> None:
+        """Phase F5 (post-Core): additively wire the adaptation evaluator.
+
+        Closes the governed loop with pure evaluation + feedback. It never
+        executes, never approves, never auto-runs.
+        """
+        self._adaptation_evaluator = AdaptationEvaluator()
+
+    def evaluate_adaptation(self, proposal, outcome=None):
+        """Evaluate one adaptation proposal (optionally with its outcome).
+
+        Args:
+            proposal: An ``EvolutionProposal`` (any lifecycle status).
+            outcome: Optional Phase E ``DevelopmentOutcome`` / run result.
+
+        Returns:
+            An ``AdaptationEvaluation`` plus its ``AdaptationFeedback`` as a
+            tuple. Nothing is executed, approved, or persisted here.
+        """
+        if self._adaptation_evaluator is None:
+            raise RuntimeError(
+                "Adaptation evaluator is not wired; Atlas.start() must run first."
+            )
+        evaluation = (
+            self._adaptation_evaluator.evaluate_outcome(proposal, outcome)
+            if outcome is not None
+            else self._adaptation_evaluator.evaluate_proposal(proposal)
+        )
+        return (evaluation, self._adaptation_evaluator.feedback_for(evaluation))
+
+    # ------------------------------------------------------------------
+    # Phase F6: Full adaptation cycle (manually triggered; bounded)
+    # ------------------------------------------------------------------
+
+    def _init_adaptation_orchestrator(self) -> None:
+        """Phase F6 (post-Core): additively wire the adaptation orchestrator.
+
+        Composes the kernel's existing F1/F3/F4/F5 instances plus a fresh F2
+        assessor into one bounded adaptation cycle. Never runs automatically;
+        ``run_adaptation_cycle()`` drives it explicitly.
+        """
+        self._adaptation_orchestrator = AdaptationOrchestrator(
+            environment_observer=self._environment_observer,
+            lifecycle_assessor=self._lifecycle_assessor,
+            decision_engine=self._adaptation_engine,
+            evaluator=self._adaptation_evaluator,
+        )
+
+    def run_adaptation_cycle(
+        self,
+        knowledge_refs=(),
+        lifecycle_targets=(),
+        supplied_changes=(),
+        evaluate_pairs=(),
+        max_candidates=5,
+    ):
+        """Manually trigger one bounded F1-F5 adaptation cycle.
+
+        Produces DRAFT ``EvolutionProposal`` candidates ONLY and returns a
+        bounded ``AdaptationCycleResult``. It never approves, never executes,
+        never auto-runs from ``tick()``, and never starts a daemon.
+
+        Args:
+            knowledge_refs: F2 ``KnowledgeRef`` descriptors.
+            lifecycle_targets: F3 ``LifecycleTarget`` descriptors (defaults to
+                a read-only snapshot of the kernel's existing registries when
+                omitted).
+            supplied_changes: Optional explicit F1 ``EnvironmentChange`` list.
+            evaluate_pairs: Optional ``(proposal, outcome)`` pairs for F5
+                evaluation (existing/governance-held data only).
+            max_candidates: Bound on generated candidates/proposals.
+
+        Returns:
+            An ``AdaptationCycleResult``.
+        """
+        if self._adaptation_orchestrator is None:
+            raise RuntimeError(
+                "Adaptation orchestrator is not wired; Atlas.start() must run first."
+            )
+        if lifecycle_targets is None or not lifecycle_targets:
+            lifecycle_targets = targets_from_registries(
+                model_registry=self._model_profile_registry,
+                tool_registry=self._tool_registry,
+                capability_registry=self._capability_registry,
+            )
+        return self._adaptation_orchestrator.run_cycle(
+            knowledge_refs=knowledge_refs,
+            lifecycle_targets=lifecycle_targets,
+            supplied_changes=supplied_changes,
+            evaluate_pairs=evaluate_pairs,
+            max_candidates=max_candidates,
+        )
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -515,6 +761,51 @@ class Atlas:
     def self_development_loop(self):
         """Return the kernel-owned governed SelfDevelopmentLoop (Phase E5/E6)."""
         return self._self_development_loop
+
+    @property
+    def lifecycle_assessor(self):
+        """Return the kernel-owned CapabilityLifecycleAssessor (Phase F3).
+
+        Reuses the existing registries as read-only snapshot inputs. Never
+        mutates and never auto-runs.
+        """
+        return self._lifecycle_assessor
+
+    @property
+    def adaptation_engine(self):
+        """Return the kernel-owned AdaptationDecisionEngine (Phase F4).
+
+        Produces DRAFT proposal candidates ONLY. Never approves, never
+        executes, never auto-runs.
+        """
+        return self._adaptation_engine
+
+    @property
+    def adaptation_evaluator(self):
+        """Return the kernel-owned AdaptationEvaluator (Phase F5).
+
+        Observes + evaluates outcomes only. Never executes, never approves,
+        never auto-runs.
+        """
+        return self._adaptation_evaluator
+
+    @property
+    def adaptation_orchestrator(self):
+        """Return the kernel-owned AdaptationOrchestrator (Phase F6).
+
+        Composes F1-F5 into bounded, manually-triggered adaptation cycles.
+        Never auto-runs, never approves, never executes.
+        """
+        return self._adaptation_orchestrator
+
+    @property
+    def environment_observer(self):
+        """Return the kernel-owned EnvironmentObserver (Phase F1).
+
+        Reuses the existing model/tool/capability registries, EventBus, and
+        SelfObservationEngine. Purely observational — nothing auto-runs.
+        """
+        return self._environment_observer
 
     @property
     def rule_engine(self):
@@ -650,6 +941,26 @@ class Atlas:
 
         # Domain 6 — Evolution intelligence, knowledge, governance, gateway
         self._init_evolution_pipeline()
+
+        # Domain 6b — Phase F1: environment observation foundation
+        # Purely observational; wiring only, nothing auto-runs.
+        self._init_environment_observer()
+
+        # Domain 6c — Phase F3: lifecycle assessment foundation
+        # Read-only assessment; wiring only, nothing auto-runs.
+        self._init_lifecycle_assessor()
+
+        # Domain 6d — Phase F4: governed adaptation decision foundation
+        # Candidate-producing only; nothing auto-runs, nothing approves.
+        self._init_adaptation_engine()
+
+        # Domain 6e — Phase F5: adaptation evaluation & feedback foundation
+        # Observer/evaluator only; nothing auto-runs, nothing executes.
+        self._init_adaptation_evaluator()
+
+        # Domain 6f — Phase F6: full adaptation cycle orchestrator
+        # Manually-triggered composition only; nothing auto-runs.
+        self._init_adaptation_orchestrator()
 
         # Domain 7 — RuntimeCoordinator, scheduler, goal execution,
         #   cognition service, conversation, component registry, container
@@ -1631,6 +1942,11 @@ class Atlas:
         self._rule_engine = None
         self._development_planner = None
         self._self_development_loop = None
+        self._environment_observer = None
+        self._lifecycle_assessor = None
+        self._adaptation_engine = None
+        self._adaptation_evaluator = None
+        self._adaptation_orchestrator = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
