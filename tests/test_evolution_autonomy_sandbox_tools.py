@@ -213,6 +213,18 @@ class TestPytestWorkspace(unittest.TestCase):
             self.assertFalse(result.success)
             self.assertEqual(result.output["outcome"], "error")
 
+    def test_pytest_no_tests_collected_is_distinct(self):
+        """CAND-CYCLE2-PYTEST5 — an empty sandbox collects no tests (pytest
+        exit 5). The tool must report this distinctly as
+        ``no_tests_collected`` with success=False and a self-explanatory
+        error, instead of the generic ``failed``."""
+        with SandboxWorkspace.create() as ws:
+            result = pytest_tool().handler({"workspace": ws.path})
+            self.assertFalse(result.success)
+            self.assertEqual(result.output["outcome"], "no_tests_collected")
+            self.assertEqual(result.output["exit_code"], 5)
+            self.assertIn("collected no tests", result.error.lower())
+
     def test_pytest_rejects_non_sandbox_workspace(self):
         with tempfile.TemporaryDirectory() as td:
             result = pytest_tool().handler({"workspace": td})

@@ -425,6 +425,7 @@ def _spawn(
     timeout_seconds: float,
     *,
     failure_message: str,
+    no_tests_exit_code: int | None = None,
 ) -> SandboxRunReport:
     """Run a fixed command list inside the workspace with a bounded result.
 
@@ -465,8 +466,21 @@ def _spawn(
         error = f"{failure_message}: {exc}"
 
     if ran:
-        outcome = "passed" if exit_code == 0 else "failed"
-        error = "" if exit_code == 0 else failure_message
+        if exit_code == 0:
+            outcome = "passed"
+            error = ""
+        elif (
+            no_tests_exit_code is not None
+            and exit_code == no_tests_exit_code
+        ):
+            outcome = "no_tests_collected"
+            error = (
+                f"{failure_message}; pytest collected no tests "
+                f"(exit code {exit_code})."
+            )
+        else:
+            outcome = "failed"
+            error = failure_message
 
     stdout_kept, stdout_trunc = _bounded(stdout_text)
     stderr_kept, stderr_trunc = _bounded(stderr_text)
@@ -507,15 +521,19 @@ def run_pytest_in_sandbox(params: dict[str, Any]) -> ToolResult:
     argv = [sys.executable, "-m", "pytest"]
     argv.append(target or ".")
 
+    # pytest exit 5 means "no tests collected" — report it distinctly so
+    # operators can tell a documentation-only change from a genuine failure.
     report = _spawn(
         "pytest",
         argv,
         workspace,
         timeout,
         failure_message="pytest failed to start",
+        no_tests_exit_code=5,
     )
 
-    # pytest exit semantics: 0 = passed, 1 = failed, 2 = interrupted/error.
+    # pytest exit semantics: 0 = passed, 1 = failed, 2 = interrupted/error,
+    # 5 = no tests collected (reported as ``no_tests_collected``).
     if report.exit_code == 2 and report.outcome == "failed":
         report.outcome = "error"
         report.error = report.error or "pytest reported an error (exit 2)."
