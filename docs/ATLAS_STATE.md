@@ -134,8 +134,9 @@ injection — no duplicates, no new subsystems.
   ReflectionEngine → LearningEngine → capability-keyed `StrategyPerformance` →
   later CapabilityAnalyzer selection boundary (Phase 20 architecture reused;
   no research-specific learning subsystem).
-- **Governance:** ResearchIngestBridge remains fail-closed (no sink wired);
-  research results are never injected directly into KnowledgeManager.
+- **Governance:** ResearchIngestBridge routes through the kernel-owned
+  governed sink (GOV-008); research results are never injected directly into
+  KnowledgeManager.
 - **Tests:** `tests/test_phase21_research_coordinator.py`,
   `tests/test_phase21_research_feedback.py`.
 - **Commits:** `7d86a6b` (coordinator + reachability), `fee0e32` (feedback loop).
@@ -504,12 +505,12 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 
 ## 19. Deferred Functionality (DEFERRED)
 
-- **`reasoning.ingest` sink is not wired at runtime.** The
-  `ReasoningIngestBridge` is constructed without a real governed sink, so
-  `reasoning.ingest` fails closed until the kernel wires a real sink into the
-  Phase 16 schedule-store/dispatcher queue. Reasoning artifacts are persisted
-  regardless; only *ingestion of distilled insights into Atlas state* is
-  deferred.
+- **RESOLVED (post-Core F-series):** `reasoning.ingest` governed ingestion is
+  now wired at runtime. `_init_evolution_pipeline()` injects the kernel-owned
+  governed sink into the research, longterm, AND advanced-reasoning bridges,
+  so distilled reasoning insights flow through the Phase 16
+  schedule-store/dispatcher queue under GOV-011. Reasoning artifacts are
+  persisted regardless; nothing remains deferred on this path.
 - Track A deferred follow-ups: knowledge-graph expansion, web adapter.
   (The research coordinator — formerly a deferred Track A item — is complete
   as Phase 21.)
@@ -538,6 +539,12 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 - No autonomous reflection/strategy adjustment without approval.
 - Large-model enhancement in Track D is optional and protocol-injected; the
   deterministic engine is the primary mechanism.
+- **BootActivation re-verification semantics (owner decision pending).** On a
+  second boot, an already-activated staged-config entry whose session overlay
+  marker was lost fails read-back verification and its originating request is
+  transitioned COMPLETED → FAILED without a SAFE_MODE escalation. This is
+  existing Phase 16.7 behavior surfaced by the F11 boot-recovery wiring; the
+  implementation is unchanged pending an owner ruling on D11 semantics.
 - `docs/archive/releases/CHANGELOG.md` is not maintained past the early
   releases; git history is the authoritative change log for later work; the
   active release notes live in the root `CHANGELOG.md` (created at v0.20.0).
@@ -865,12 +872,19 @@ Add / preserve these principles wherever architecturally appropriate:
 F1–F6 shown above remain exactly as committed: they are NOT renamed or
 reordered. The planned post-Core continuation is:
 
-- **F7 — Autonomous Operation**
-- **F8 — Autonomous Research & Knowledge Acquisition**
-- **F9 — Governed Autonomous Development**
+- **F7 — Autonomous Operation** — **COMPLETE** (`abd6856`)
+- **F8 — Autonomous Research & Knowledge Acquisition** — **COMPLETE** (`abd6856`)
+- **F9 — Governed Autonomous Development** — **COMPLETE** (`08b5596`)
 - **F10 — Resource Independence & Model-Optional Intelligence** (MUST include
-  the model-independence / resource-independence principles of this section)
-- **F11 — Long-Term Self-Management & Recovery**
+  the model-independence / resource-independence principles of this section) —
+  **COMPLETE** (`9352948`)
+- **F11 — Long-Term Self-Management & Recovery** — **COMPLETE** (`e620177`);
+  final F-series implementation phase
+
+**STATUS (post-Core close-out): F7–F11 are COMPLETE.** The inspect-before-build
+rule was honored for every phase. **The F-series concludes at F11 — it is
+COMPLETE; no F12 exists or is planned.** Any future development track requires
+an explicitly written scope before implementation begins.
 
 Before any F7 implementation, future work MUST first inspect the existing
 Atlas infrastructure — scheduler, events, task manager, and runtime — and

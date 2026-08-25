@@ -50,8 +50,9 @@ strictly:
 - Research execution results enter the existing Phase 20 outcome → Reflection →
   Learning → capability selection feedback loop as normal ReasoningOutcomes; no
   research-specific learning subsystem was added.
-- ResearchIngestBridge remains governed and fail-closed (no sink wired); no
-  direct KnowledgeManager injection.
+- ResearchIngestBridge governed and fail-closed from day one (no direct
+  KnowledgeManager injection); its runtime governed sink was wired post-Core
+  (F-series close-out) — see DEFERRED/RESOLVED below.
 - Tests: `tests/test_phase21_research_coordinator.py`,
   `tests/test_phase21_research_feedback.py`. Commits: `7d86a6b`, `fee0e32`.
 - Bundled with the Phase 22 milestone (no separate Phase 21 tag, nothing pushed).
@@ -186,35 +187,45 @@ future post-Core work, including F7–F11:
   point of failure." / "AI models are replaceable assistants, not permanent
   authorities."
 
-### Planned Post-Core Continuation (F7–F11)
+### Post-Core Continuation (F7–F11) — **COMPLETE**
 
 The planned post-Core continuation, preserving the committed F1–F6 (not renamed
-or reordered):
+or reordered), has been delivered in full. The inspect-before-build rule
+("inspect the existing Atlas infrastructure — scheduler, events, task manager,
+runtime — and reuse what already exists rather than rebuilding") was honored
+for every phase:
 
-- **F7 — Autonomous Operation**
-- **F8 — Autonomous Research & Knowledge Acquisition**
-- **F9 — Governed Autonomous Development**
-- **F10 — Resource Independence & Model-Optional Intelligence** (must include
-  the model-independence / resource-independence principles above)
-- **F11 — Long-Term Self-Management & Recovery**
+- **F7 — Autonomous Operation** — **COMPLETE** (`abd6856`)
+- **F8 — Autonomous Research & Knowledge Acquisition** — **COMPLETE** (`abd6856`)
+- **F9 — Governed Autonomous Development** — **COMPLETE** (`08b5596`)
+- **F10 — Resource Independence & Model-Optional Intelligence** (includes the
+  model-independence / resource-independence principles above) — **COMPLETE**
+  (`9352948`)
+- **F11 — Long-Term Self-Management & Recovery** — **COMPLETE** (`e620177`)
 
-Before any F7 implementation, first inspect the existing Atlas infrastructure
-(scheduler, events, task manager, runtime) and reuse what already exists rather
-than rebuilding existing capabilities.
+**The F-series concludes at F11. It is COMPLETE; no F12 exists or is planned.**
+Any future development track requires an explicitly written scope before
+implementation begins (inspect-before-build remains in force).
 
 ---
 
 ## DEFERRED — Agreed But Postponed
 
-- **Runtime wiring of the governed `ReasoningIngestSink` is deferred.** It
-  depends on the Phase 16 schedule-store/dispatcher queue hand-off being
-  finalized in the kernel, and was intentionally deferred from Track D Batch 2.
-  Until that dependency is resolved, `reasoning.ingest` remains **fail-closed**
-  by design.
+- **RESOLVED:** the governed `ReasoningIngestSink` runtime wiring deferred from
+  Track D Batch 2 has since been completed — `_init_evolution_pipeline()` now
+  injects the kernel-owned governed sink into the research, longterm, AND
+  advanced-reasoning bridges, so `reasoning.ingest` flows through the Phase 16
+  schedule-store/dispatcher queue under GOV-011 instead of failing closed.
 - `ContextEngine` episodic-context integration (Track C) is deferred pending a
   RuntimeCoordinator review, because it could touch the locked pipeline order.
 - Autonomous (CODE scope / AUTONOMOUS level) evolution remains unreachable by
   constitutional design.
+- **BootActivation re-verification semantics — owner decision pending.** On a
+  second boot, an already-activated staged-config entry whose session overlay
+  marker was lost fails read-back verification and its originating request
+  transitions COMPLETED → FAILED without a SAFE_MODE escalation. Existing
+  Phase 16.7 behavior surfaced by the F11 wiring; implementation unchanged
+  pending an owner ruling on D11 semantics.
 
 ---
 

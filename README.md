@@ -51,9 +51,9 @@ remains disabled.**
 - Reasoning is pure deterministic pipeline logic; large-model enhancement is
   optional and protocol-injected.
 - Persistence via `reasoning_*` SQLite tables (schema migration **v10**).
-- Governed ingestion through the Evolution Framework (**GOV-011**) — the ingest
-  sink is not yet wired at runtime, so `reasoning.ingest` intentionally fails
-  closed.
+- Governed ingestion through the Evolution Framework (**GOV-011**) — the
+  kernel-owned governed sink is wired at runtime into the research, longterm,
+  and advanced-reasoning bridges.
 - Exposed as `reasoning.*` capability handlers and an `atlas reasoning` CLI.
 
 ### Post-Core Improvements

@@ -76,6 +76,73 @@ execution boundary. Verification: F1–F6 focused 177 passed; architecture/conta
 governance regressions 106 passed + 10 subtests; Phase-E E2–E6 143 passed, 1
 skipped; four known baseline stale failures unchanged.
 
+### Post-Core Autonomous Operation & Research (F7–F8) — `abd6856`
+
+Completed post-Core **F7 Autonomous Operation** and **F8 Autonomous Research &
+Information Acquisition**. All layers reuse existing infrastructure additively
+— no new scheduler / EventBus / database / memory / governance / AI stack, no
+`Atlas.tick()` integration, no daemon.
+
+- **F7 — Autonomous Operation** (`atlas/evolution/operation/`):
+  `OperationController` wraps the existing F6 adaptation cycle in a bounded,
+  deterministic cooldown / budget / failure policy (`OperationPolicy`). One
+  bounded invocation per explicit call (`Atlas.run_operation_cycle()`); never
+  a daemon, never tick()-driven; never approves or executes.
+- **F8 — Research & Information Acquisition**
+  (`atlas/research/sources/web.py`, `atlas/research/acquisition.py`):
+  bounded HTTP(S) `WebSourceAdapter` (deny-by-default host allowlist, SSRF
+  protection, size/time/redirect caps) composed by the model-independent
+  `InformationAcquisitionService` over the EXISTING research pipeline;
+  provenance + `extraction_origin`; GOV-008 governed ingest; kernel bridge
+  `Atlas.run_information_acquisition()`.
+
+Verification: focused F7/F8 90 passed; full suite **3896 passed, 4 failed**
+(pre-existing baseline), **1 skipped, 67 subtests**.
+
+### Governed Autonomous Development Cycle (F9) — `08b5596`
+
+Completed post-Core **F9 Governed Autonomous Development Preparation**
+(`atlas/evolution/development_cycle.py`). `DevelopmentCycleController` turns a
+development need into a bounded DRAFT `EvolutionProposal` and submits it to the
+existing `ApprovalManager`, STOPPING at the human approval boundary
+(PENDING_APPROVAL). Deterministic change supplier by default (E5 metadata
+convention); optional model assistance injectable, OFF by default, marked
+unverified-draft. Kernel bridge: `Atlas.run_development_cycle()`.
+
+Verification: focused F9 21 passed; full suite **3917 passed, 4 failed**
+(same pre-existing baseline), **1 skipped, 67 subtests**.
+
+### Deterministic AI Availability (F10) — `9352948`
+
+Completed post-Core **F10 Resource Independence / Model-Optional Intelligence**
+foundations (`atlas/ai/availability.py`): `ProviderAvailabilityTracker` derives
+HEALTHY / DEGRADED / OFFLINE / UNKNOWN from the existing failure taxonomy over
+a bounded outcome window, exposed through the EXISTING F1 environment-
+observation cycle as a PROVIDER-domain state. Observation-only, on demand,
+model-independent. An invocation-budget subsystem was evaluated and
+intentionally skipped (routing already prefers cheapest-capable profiles with
+capped attempts). Kernel surface: `Atlas.ai_availability`.
+
+Verification: focused F10 18 passed; full suite **3935 passed, 4 failed**
+(same pre-existing baseline), **1 skipped, 67 subtests**.
+
+### Long-Term Self-Management & Recovery (F11) — `e620177`
+
+Completed post-Core **F11 Long-Term Self-Management & Recovery**:
+
+- Wired the EXISTING Phase 16.7 `BootActivationService` into startup
+  (`init_boot_activation` in `atlas/kernel/autonomy_wiring.py`) — staged config
+  activation/verification with SAFE_MODE narrowing autonomous advancement.
+- Added the read-only `SelfManagementReview`
+  (`atlas/evolution/self_management.py`) aggregating durable evidence into a
+  bounded JSON-safe report via `Atlas.run_self_management_review()`. Stops
+  before every governance boundary; flagged needs are inert evidence for the
+  existing F6/F9 flows.
+
+Verification: focused F11 23 passed; regression subset 327 passed + 10 subtests;
+full suite **3958 passed, 4 failed** (same pre-existing baseline), **1 skipped,
+67 subtests**.
+
 ### Permanent Architectural Directive — Model Independence & Information Autonomy
 
 Documentation-only permanent boundary adopted ahead of post-Core F7–F11
