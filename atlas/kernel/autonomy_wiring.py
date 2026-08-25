@@ -35,7 +35,9 @@ from atlas.evolution.autonomy.adapters import (
     MemoryStateAdapter,
 )
 from atlas.evolution.autonomy.application_engine import ApplicationEngine
+from atlas.evolution.autonomy.applier import DictStateReader, DictStateWriter
 from atlas.evolution.autonomy.applier_registry import ApplierRegistry
+from atlas.evolution.autonomy.boot_activation import BootActivationService
 from atlas.evolution.autonomy.dispatcher import EvolutionAutonomyDispatcher
 from atlas.evolution.autonomy.governed_ingest_sink import GovernanceIngestSink
 from atlas.evolution.autonomy.models import AutonomyPolicy
@@ -267,4 +269,36 @@ def init_autonomy_dispatcher(
         outcome_store=outcome_store,
         audit_callback=audit_callback,
         state_version_provider=state_version_provider,
+    )
+
+
+def init_boot_activation(
+    storage: AutonomySQLiteStorage,
+    config_overlay: dict[str, Any] | None = None,
+    clock: Any | None = None,
+) -> BootActivationService:
+    """Create the F11 boot-time staged-config activation service.
+
+    Composes the EXISTING Phase 16.7 ``BootActivationService`` over the
+    shared ``AutonomySQLiteStorage`` (which already implements the staged
+    config, request, and snapshot surfaces). Config activation writes into
+    the bounded session-overlay dict — live ``Configuration`` is NEVER
+    mutated (the constitutional staged-config boundary holds); read-back
+    verification uses a ``DictStateReader`` over the same overlay.
+
+    Runs exactly once per startup; never retried; no background recovery.
+    """
+    overlay: dict[str, Any] = config_overlay if config_overlay is not None else {}
+    verification_service = VerificationService(
+        registry=ApplierRegistry.default(),
+        readers={ScopeType.CONFIG: DictStateReader(overlay)},
+        snapshot_store=storage,
+        clock=clock,
+    )
+    return BootActivationService(
+        staged_store=storage,
+        request_store=storage,
+        verification_service=verification_service,
+        config_writer=DictStateWriter(overlay),
+        clock=clock,
     )

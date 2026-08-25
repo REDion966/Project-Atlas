@@ -210,9 +210,11 @@ from atlas.kernel.autonomy_wiring import (
     init_autonomy_application_engine,
     init_autonomy_dispatcher,
     init_autonomy_persistence,
+    init_boot_activation,
     init_governed_ingest_sink,
     shutdown_autonomy_persistence,
 )
+from atlas.evolution.self_management import SelfManagementReview
 
 
 class KnowledgeEvidenceProvider:
@@ -471,6 +473,15 @@ class Atlas:
         self._autonomy_request_adapter: Any | None = None
         self._autonomy_dispatcher: Any | None = None
 
+        # --- Phase 16.7 / F11 (post-Core): Boot activation & SAFE_MODE ---
+        # One boot-time staged-config activation pass over the EXISTING
+        # Phase 16.7 service. Runs once during startup; integrity failure
+        # => SAFE_MODE (base config, dispatcher suppressed). Never retried;
+        # no background recovery; never runs from tick().
+        self._boot_activation: Any | None = None
+        self._boot_report: Any | None = None
+        self._config_overlay: dict[str, Any] = {}
+
         # --- Phase E6: Governed self-development loop ---
         # One DevelopmentPlanner + one SelfDevelopmentLoop reuse the existing
         # kernel-owned LearningMemory and ToolRegistry. No parallel registries or
@@ -522,6 +533,12 @@ class Atlas:
         # never authorizes; never executes; never runs from tick(); an
         # external host drives ``run_development_cycle()`` explicitly.
         self._development_controller: DevelopmentCycleController | None = None
+
+        # --- Phase F11 (post-Core): Long-Term Self-Management Review ---
+        # One bounded, read-only, single-shot evidence review. Never
+        # approves/authorizes/executes; never persists; never runs from
+        # tick(); an external host calls ``run_self_management_review()``.
+        self._self_management_review: SelfManagementReview | None = None
 
     # ------------------------------------------------------------------
     # Public entry / on-demand observation cycle
@@ -894,6 +911,47 @@ class Atlas:
         )
 
     # ------------------------------------------------------------------
+    # Phase F11: Long-Term Self-Management Review (manually invoked)
+    # ------------------------------------------------------------------
+
+    def _init_self_management_review(self) -> None:
+        """Phase F11 (post-Core): additively wire the self-management review.
+
+        Composes the EXISTING EvolutionMemory, LearningMemory, ScheduleStore,
+        and F10 availability tracker as read-only evidence sources. The review
+        never runs from ``tick()``, never persists anything, and never
+        approves, authorizes, executes, or promotes.
+        """
+        learning_memory = getattr(self._learning_engine, "memory", None)
+        self._self_management_review = SelfManagementReview(
+            evolution_memory=self._evolution_memory,
+            learning_memory=learning_memory,
+            schedule_store=self._schedule_store,
+            availability=self._ai_availability,
+        )
+
+    @property
+    def self_management_review(self):
+        """Return the kernel-owned SelfManagementReview (Phase F11)."""
+        return self._self_management_review
+
+    def run_self_management_review(self):
+        """Manually trigger ONE bounded long-term self-management review.
+
+        Aggregates durable evidence (evolution records, learning signals,
+        request queues, provider availability) into a bounded, deterministic,
+        JSON-safe report. Read-only: nothing is approved, authorized,
+        executed, promoted, or persisted here. Flagged maintenance needs are
+        inert evidence for the EXISTING F6/F9 governance flows.
+        """
+        if self._self_management_review is None:
+            raise RuntimeError(
+                "Self-management review is not wired; Atlas.start() must "
+                "run first."
+            )
+        return self._self_management_review.run_review()
+
+    # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
 
@@ -1001,6 +1059,26 @@ class Atlas:
         any non-AI path.
         """
         return self._ai_availability
+
+    @property
+    def boot_safe_mode(self) -> bool:
+        """True when F11 boot recovery reported SAFE_MODE.
+
+        SAFE_MODE only narrows capabilities: base config is used, the config
+        overlay is preserved, and autonomous lifecycle advancement stays
+        disabled for the session (the governed dispatcher is not wired).
+        """
+        return bool(self._boot_report is not None and self._boot_report.safe_mode)
+
+    @property
+    def boot_report(self):
+        """Return the F11 boot activation report (read-only), or None."""
+        return self._boot_report
+
+    @property
+    def boot_activation(self):
+        """Return the kernel-owned BootActivationService (F11), or None."""
+        return self._boot_activation
 
     @property
     def rule_engine(self):
@@ -1165,6 +1243,11 @@ class Atlas:
         # Bounded single-shot proposal preparation; stops at the human
         # approval boundary. Nothing auto-runs, no daemon, no execution.
         self._init_development_cycle()
+
+        # Domain 6i — Phase F11: long-term self-management review
+        # Read-only aggregation of durable evidence; nothing auto-runs,
+        # no daemon, no execution, no persistence of its own.
+        self._init_self_management_review()
 
         # Domain 7 — RuntimeCoordinator, scheduler, goal execution,
         #   cognition service, conversation, component registry, container
@@ -1735,12 +1818,39 @@ class Atlas:
             learning_store=learning_memory,
         )
 
+        # --- Phase 16.7 / F11: Boot activation & SAFE_MODE recovery ---
+        # One pass of the EXISTING BootActivationService over the shared
+        # autonomy storage: integrity check first; on a clean report, staged
+        # config entries are activated and verified (requests transition to
+        # COMPLETED/FAILED). An integrity failure => SAFE_MODE: base config,
+        # overlay preserved, autonomous advancement suppressed for this
+        # session (dispatcher not wired). Runs once per startup; never
+        # retried; no background recovery; never runs from tick().
+        if self._autonomy_storage is not None:
+            self._boot_activation = init_boot_activation(
+                storage=self._autonomy_storage,
+                config_overlay=self._config_overlay,
+            )
+            integrity = self._boot_activation.check_integrity()
+            if integrity.safe_mode:
+                self._boot_report = integrity
+            else:
+                self._boot_report = (
+                    self._boot_activation.activate_staged_configs()
+                )
+
         # --- Phase 16 / Batch 13: Governed lifecycle dispatcher ---
         # Kernel-private consumer that advances DRAFTED requests to the
         # PENDING_AUTHORIZATION terminus and applies pre-authorized SCHEDULED
         # requests exclusively through gateway.execute_request(). It never
         # authorizes anything and is never registered in the ServiceContainer.
-        if self._schedule_store is not None:
+        # F11 SAFE_MODE: when boot recovery reported an integrity failure the
+        # dispatcher is NOT wired — autonomous advancement stays disabled for
+        # this session (tick()'s existing None-guard skips it).
+        if (
+            self._schedule_store is not None
+            and not (self._boot_report is not None and self._boot_report.safe_mode)
+        ):
             # Batch 15: wire the existing post-application lifecycle services
             # (VerificationService, RollbackManager, VersionManager) over the
             # shared AutonomySQLiteStorage + ApplicationEngine internals.
@@ -2163,6 +2273,9 @@ class Atlas:
         self._operation_controller = None
         self._development_controller = None
         self._ai_availability = None
+        self._self_management_review = None
+        self._boot_activation = None
+        self._boot_report = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
