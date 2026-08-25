@@ -175,6 +175,143 @@ class TestDevelop:
             atlas.shutdown()
 
 
+class TestNeedContractValidation:
+    """Deterministic need-file contract enforcement at the operator boundary."""
+
+    def _atlas_with_counting_approval(self):
+        from atlas.kernel.atlas import Atlas
+
+        atlas = Atlas()
+        try:
+            atlas.start()
+            calls: list = []
+            manager = atlas._approval_manager  # noqa: SLF001
+            original = manager.create_approval_request
+
+            def counting(proposal):
+                calls.append(1)
+                return original(proposal)
+
+            manager.create_approval_request = counting  # noqa: SLF001
+            return atlas, calls
+        except Exception:
+            atlas.shutdown()
+            raise
+
+    def _run_develop(self, atlas, tmp_path, payload):
+        need_file = tmp_path / "need.json"
+        need_file.write_text(json.dumps(payload), encoding="utf-8")
+        return cmd_develop(atlas, _args(need_file=str(need_file)))
+
+    def test_malformed_test_files_shape_rejected_before_persistence(
+        self, tmp_path
+    ):
+        atlas, calls = self._atlas_with_counting_approval()
+        try:
+            out = self._run_develop(
+                atlas,
+                tmp_path,
+                {
+                    "title": "t",
+                    "code_changes": [
+                        {"path": "a.md", "content": "# a"}
+                    ],
+                    "test_files": {"paths": "['tests']"},
+                },
+            )
+            assert out.startswith("error:")
+            assert "not a pytest test module" in out
+            # Rejected BEFORE any durable proposal/approval persistence.
+            assert calls == []
+        finally:
+            atlas.shutdown()
+
+    def test_non_string_code_change_content_rejected(self, tmp_path):
+        atlas, calls = self._atlas_with_counting_approval()
+        try:
+            out = self._run_develop(
+                atlas,
+                tmp_path,
+                {
+                    "title": "t",
+                    "code_changes": [
+                        {
+                            "path": "a.md",
+                            "content": {"brief": "describes the change"},
+                        }
+                    ],
+                },
+            )
+            assert out.startswith("error:")
+            assert "code_changes[0].content" in out
+            assert "must be a string" in out
+            assert calls == []
+        finally:
+            atlas.shutdown()
+
+    @pytest.mark.parametrize(
+        "payload_fragment",
+        [
+            {"path": "", "content": "# x"},
+            {"path": 123, "content": "# x"},
+            {"path": "a.py"},
+            {"content": "# x"},
+        ],
+    )
+    def test_invalid_path_or_content_fields_rejected(
+        self, tmp_path, payload_fragment
+    ):
+        atlas, calls = self._atlas_with_counting_approval()
+        try:
+            out = self._run_develop(
+                atlas,
+                tmp_path,
+                {"title": "t", "code_changes": [payload_fragment]},
+            )
+            assert out.startswith("error:")
+            assert calls == []
+        finally:
+            atlas.shutdown()
+
+    def test_empty_content_rejected(self, tmp_path):
+        atlas, calls = self._atlas_with_counting_approval()
+        try:
+            out = self._run_develop(
+                atlas,
+                tmp_path,
+                {
+                    "title": "t",
+                    "code_changes": [{"path": "a.md", "content": "   "}],
+                },
+            )
+            assert out.startswith("error:")
+            assert "must not be empty" in out
+            assert calls == []
+        finally:
+            atlas.shutdown()
+
+    def test_valid_contract_still_accepted(self, tmp_path):
+        atlas, calls = self._atlas_with_counting_approval()
+        try:
+            out = self._run_develop(
+                atlas,
+                tmp_path,
+                {
+                    "title": "valid contract need",
+                    "code_changes": [
+                        {"path": "docs/x.md", "content": "# x\n"}
+                    ],
+                    "test_files": {
+                        "tests/test_x.py": "def test_x():\n    assert True\n"
+                    },
+                },
+            )
+            assert "PENDING_APPROVAL" in out
+            assert len(calls) == 1
+        finally:
+            atlas.shutdown()
+
+
 class TestReviewAndSafeMode:
     def test_review_reports_summary(self):
         from atlas.kernel.atlas import Atlas

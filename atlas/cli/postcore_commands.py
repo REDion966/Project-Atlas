@@ -99,7 +99,20 @@ def cmd_research(atlas, args) -> str:
 
 
 def _load_need(args):
-    """Load and validate a development-need JSON file. Raises ValueError."""
+    """Load and validate a development-need JSON file. Raises ValueError.
+
+    Contract (must match the E5 deterministic supplier / sandbox semantics):
+
+    * ``code_changes`` — optional list of objects, each with a non-empty
+      string ``path`` and a string ``content`` holding the LITERAL new file
+      body (never instructions describing the change).
+    * ``test_files`` — optional object mapping test-module paths
+      (``test_*.py``) to string file bodies. These are executed by pytest
+      during sandbox verification, so anything pytest will not collect can
+      never satisfy verification and is rejected here.
+
+    Raises ``ValueError`` identifying the offending field and expected shape.
+    """
     path = getattr(args, "need_file", "") or ""
     if not path:
         raise ValueError("develop requires --need-file")
@@ -110,17 +123,75 @@ def _load_need(args):
     title = str(data.get("title", "")).strip()
     if not title:
         raise ValueError("need file requires a non-empty 'title'")
+
     metadata: dict = {}
+
+    # --- code_changes: list of {path, content} objects ---------------------
     code_changes = data.get("code_changes", [])
+    cleaned_changes: list[dict] = []
     if code_changes:
         if not isinstance(code_changes, list):
-            raise ValueError("'code_changes' must be a list")
-        metadata["code_changes"] = code_changes
+            raise ValueError(
+                "'code_changes' must be a list of objects, each with "
+                "string 'path' and string 'content'"
+            )
+        for index, item in enumerate(code_changes):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"'code_changes[{index}]' must be an object with "
+                    "string 'path' and string 'content'"
+                )
+            entry_path = item.get("path")
+            entry_content = item.get("content")
+            if not isinstance(entry_path, str) or not entry_path.strip():
+                raise ValueError(
+                    f"'code_changes[{index}].path' must be a non-empty string"
+                )
+            if not isinstance(entry_content, str):
+                raise ValueError(
+                    f"'code_changes[{index}].content' must be a string "
+                    "containing the literal new file body (not a "
+                    "description of the change)"
+                )
+            if not entry_content.strip():
+                raise ValueError(
+                    f"'code_changes[{index}].content' must not be empty"
+                )
+            cleaned_changes.append(
+                {"path": entry_path, "content": entry_content}
+            )
+        metadata["code_changes"] = cleaned_changes
+
+    # --- test_files: object mapping test paths to pytest-collectable bodies -
     test_files = data.get("test_files", {})
+    cleaned_tests: dict[str, str] = {}
     if test_files:
         if not isinstance(test_files, dict):
-            raise ValueError("'test_files' must be an object")
-        metadata["test_files"] = test_files
+            raise ValueError(
+                "'test_files' must be an object mapping test module paths "
+                "(e.g. \"tests/test_x.py\") to string file bodies"
+            )
+        for tf_path, tf_content in test_files.items():
+            if not isinstance(tf_path, str) or not tf_path.strip():
+                raise ValueError("'test_files' paths must be non-empty strings")
+            module_name = tf_path.replace("\\", "/").rsplit("/", 1)[-1]
+            if not (
+                module_name.startswith("test_")
+                or module_name.endswith("_test.py")
+            ):
+                raise ValueError(
+                    f"'test_files' path '{tf_path}' is not a pytest test "
+                    "module (expected 'test_*.py'); put non-test files in "
+                    "'code_changes'"
+                )
+            if not isinstance(tf_content, str) or not tf_content.strip():
+                raise ValueError(
+                    f"'test_files['{tf_path}']' content must be a non-empty "
+                    "string"
+                )
+            cleaned_tests[tf_path] = tf_content
+        metadata["test_files"] = cleaned_tests
+
     return {
         "title": title,
         "summary": str(data.get("summary", "")),
