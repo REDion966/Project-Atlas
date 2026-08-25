@@ -23,11 +23,23 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 import requests
 
 from atlas.ai.availability import ProviderAvailabilityTracker
 from atlas.evolution.development_cycle import DevelopmentNeed
 from atlas.lifecycle.models import ComponentStatus
+from tests.test_durable_guided_improvement import _storage_class
+
+
+@pytest.fixture(autouse=True)
+def _isolated_evolution_storage(monkeypatch, tmp_path):
+    """Model-off composite must not touch the operator database."""
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.SQLiteEvolutionStorage",
+        _storage_class(tmp_path),
+    )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 

@@ -40,6 +40,23 @@ from atlas.evolution.self_management import (
     SelfManagementReview,
 )
 from atlas.lifecycle.models import ComponentStatus
+from tests.test_durable_guided_improvement import _storage_class
+
+
+@pytest.fixture(autouse=True)
+def _isolated_evolution_storage(monkeypatch, tmp_path):
+    """Kernel-starting F11 tests must not touch the operator database."""
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.SQLiteEvolutionStorage",
+        _storage_class(tmp_path),
+    )
+from atlas.evolution.self_management import (
+    MaintenanceNeed,
+    SelfManagementPolicy,
+    SelfManagementReport,
+    SelfManagementReview,
+)
+from atlas.lifecycle.models import ComponentStatus
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)

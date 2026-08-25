@@ -32,6 +32,16 @@ import pytest
 from atlas.evolution.development_models import DevelopmentOutcomeStatus
 from atlas.evolution.models import ProposalStatus
 from atlas.kernel.atlas import Atlas
+from tests.test_durable_guided_improvement import _storage_class
+
+
+@pytest.fixture(autouse=True)
+def _isolated_evolution_storage(monkeypatch, tmp_path):
+    """Kernel-starting tests here must not touch the operator database."""
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.SQLiteEvolutionStorage",
+        _storage_class(tmp_path),
+    )
 
 
 def _need_payload(**overrides):

@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -32,6 +33,21 @@ from atlas.cli.postcore_commands import (
     cmd_research,
     cmd_review,
 )
+from tests.test_durable_guided_improvement import _storage_class
+
+
+@pytest.fixture(autouse=True)
+def _isolated_evolution_storage(monkeypatch, tmp_path):
+    """Redirect evolution persistence away from the operator database.
+
+    Tests in this module exercise ``postcore develop``, which durably
+    persists proposals/approval requests. Without this fixture they would
+    pollute the real operator database (``atlas_data/atlas_experience.db``).
+    """
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.SQLiteEvolutionStorage",
+        _storage_class(tmp_path),
+    )
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -310,6 +326,80 @@ class TestNeedContractValidation:
             assert len(calls) == 1
         finally:
             atlas.shutdown()
+
+
+class TestOperatorDatabaseIsolation:
+    """Prove the isolation fixture keeps the operator DB untouched."""
+
+    def _operator_counts(self):
+        conn = sqlite3.connect(
+            "file:atlas_data/atlas_experience.db?mode=ro", uri=True
+        )
+        try:
+            cur = conn.cursor()
+            proposals = cur.execute(
+                "SELECT COUNT(*) FROM evolution_proposals"
+            ).fetchone()[0]
+            approvals = cur.execute(
+                "SELECT COUNT(*) FROM evolution_approval_requests"
+            ).fetchone()[0]
+            return proposals, approvals
+        finally:
+            conn.close()
+
+    def test_develop_leaves_operator_database_unchanged(self, tmp_path):
+        before = self._operator_counts()
+        from atlas.kernel.atlas import Atlas
+
+        atlas = Atlas()
+        proposal_id = ""
+        try:
+            atlas.start()
+            need_file = _write_need_file(tmp_path)
+            out = cmd_develop(atlas, _args(need_file=need_file))
+            assert "PENDING_APPROVAL" in out
+            import re as _re
+
+            match = _re.search(r"Proposal ID: (DEV-\w+)", out)
+            assert match
+            proposal_id = match.group(1)
+        finally:
+            atlas.shutdown()
+
+        after = self._operator_counts()
+        assert after == before
+        # The new proposal exists only in the isolated storage.
+        import sqlite3
+
+        conn = sqlite3.connect(
+            "file:atlas_data/atlas_experience.db?mode=ro", uri=True
+        )
+        try:
+            hits = conn.execute(
+                "SELECT COUNT(*) FROM evolution_proposals WHERE proposal_id=?",
+                (proposal_id,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert hits == 0
+
+
+def _write_need_file(tmp_path):
+    path = tmp_path / "need.json"
+    path.write_text(
+        json.dumps(
+            {
+                "title": "isolation proof need",
+                "summary": "s",
+                "candidate_id": "CAND-ISO-1",
+                "code_changes": [
+                    {"path": "docs/iso.md", "content": "# iso\n"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return str(path)
 
 
 class TestReviewAndSafeMode:

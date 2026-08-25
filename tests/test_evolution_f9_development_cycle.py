@@ -23,6 +23,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from atlas.evolution.development_cycle import DevelopmentNeed
+from tests.test_durable_guided_improvement import _storage_class
+
+
+@pytest.fixture(autouse=True)
+def _isolated_evolution_storage(monkeypatch, tmp_path):
+    """Kernel-starting F9 bridge tests must not touch the operator DB."""
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.SQLiteEvolutionStorage",
+        _storage_class(tmp_path),
+    )
+
 from atlas.evolution.approval_manager import ApprovalManager
 from atlas.evolution.development_cycle import (
     ChangeSupplier,
