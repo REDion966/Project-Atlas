@@ -56,29 +56,37 @@ class WorkspaceSettings:
         cls,
         data: dict,
     ) -> "WorkspaceSettings":
-        """Deserialize settings."""
+        """Deserialize settings.
 
-        return cls(
-            version=data.get(
+        Legacy workspaces may predate the ``settings`` object entirely; any
+        missing field falls back to the dataclass defaults instead of
+        raising ``KeyError``.
+        """
+
+        kwargs: dict = {
+            "version": data.get(
                 "version",
                 "1.0",
             ),
-            autosave=data.get(
+            "autosave": data.get(
                 "autosave",
                 True,
             ),
-            default_project_id=data.get(
+            "default_project_id": data.get(
                 "default_project_id",
                 "",
             ),
-            ai_provider=data.get(
+            "ai_provider": data.get(
                 "ai_provider",
                 "",
             ),
-            created_at=datetime.fromisoformat(
+        }
+        if "created_at" in data:
+            kwargs["created_at"] = datetime.fromisoformat(
                 data["created_at"]
-            ),
-            updated_at=datetime.fromisoformat(
+            )
+        if "updated_at" in data:
+            kwargs["updated_at"] = datetime.fromisoformat(
                 data["updated_at"]
-            ),
-        )
+            )
+        return cls(**kwargs)
