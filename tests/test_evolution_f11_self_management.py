@@ -26,6 +26,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -547,3 +548,79 @@ class TestKernelBridge:
             assert atlas.boot_safe_mode is False
         finally:
             atlas.shutdown()
+
+
+class TestStaleAuthorizationTimestamps:
+    """Fix #1 — naive/aware datetime normalization in stale detection."""
+
+    _NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _request(self, request_id, created_at):
+        return SimpleNamespace(request_id=request_id, created_at=created_at)
+
+    def test_naive_created_at_does_not_raise_and_detects_stale(self):
+        old_naive = self._NOW.replace(tzinfo=None) - timedelta(hours=48)
+        pending = [self._request("REQ-NAIVE-OLD", old_naive)]
+
+        review = SelfManagementReview(
+            schedule_store=MagicMock(pending_authorization=lambda: pending),
+            clock=lambda: self._NOW,
+        )
+        report = review.run_review()
+
+        assert report.ok
+        assert report.stale_authorization_count == 1
+        assert report.stale_authorization_ids == ("REQ-NAIVE-OLD",)
+        # No datetime mismatch leaked into source errors.
+        assert all(
+            "naive" not in msg and "offset" not in msg
+            for _, msg in report.source_errors
+        )
+
+    def test_naive_fresh_created_at_is_not_stale(self):
+        fresh_naive = self._NOW.replace(tzinfo=None) - timedelta(minutes=5)
+        pending = [self._request("REQ-FRESH", fresh_naive)]
+
+        review = SelfManagementReview(
+            schedule_store=MagicMock(pending_authorization=lambda: pending),
+            clock=lambda: self._NOW,
+        )
+        report = review.run_review()
+
+        assert report.ok
+        assert report.stale_authorization_count == 0
+
+    def test_aware_created_at_behavior_unchanged(self):
+        aware_old = self._NOW - timedelta(hours=48)
+        pending = [self._request("REQ-AWARE", aware_old)]
+
+        review = SelfManagementReview(
+            schedule_store=MagicMock(pending_authorization=lambda: pending),
+            clock=lambda: self._NOW,
+        )
+        report = review.run_review()
+
+        assert report.ok
+        assert report.stale_authorization_count == 1
+        assert report.stale_authorization_ids == ("REQ-AWARE",)
+
+    def test_mixed_naive_stale_and_fresh(self):
+        pending = [
+            self._request(
+                "REQ-STALE",
+                self._NOW.replace(tzinfo=None) - timedelta(hours=30),
+            ),
+            self._request(
+                "REQ-OK",
+                self._NOW.replace(tzinfo=None) - timedelta(hours=2),
+            ),
+        ]
+        review = SelfManagementReview(
+            schedule_store=MagicMock(pending_authorization=lambda: pending),
+            clock=lambda: self._NOW,
+        )
+        report = review.run_review()
+
+        assert report.ok
+        assert report.stale_authorization_ids == ("REQ-STALE",)
+        assert len(report.needs) >= 0

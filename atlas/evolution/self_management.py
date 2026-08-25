@@ -273,6 +273,15 @@ class SelfManagementReview:
                     if request_id:
                         pending_ids.append(request_id)
                     created = getattr(request, "created_at", None)
+                    # Normalize naive timestamps to UTC so age math never
+                    # mixes offset-naive and offset-aware datetimes.
+                    # (ApprovalManager stamps naive datetime.now().)
+                    if (
+                        created is not None
+                        and isinstance(created, datetime)
+                        and created.tzinfo is None
+                    ):
+                        created = created.replace(tzinfo=timezone.utc)
                     if (
                         request_id
                         and created is not None
