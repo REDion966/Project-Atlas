@@ -98,6 +98,7 @@ from atlas.storage.understanding_storage import SQLiteUnderstandingStorage
 
 # --- Phase 10.0: Evolution Pipeline ---
 from atlas.evolution.improvement_planner import ImprovementPlanner
+from atlas.evolution.models import ProposalStatus
 from atlas.evolution.proposal_generator import ProposalGenerator
 from atlas.evolution.approval_manager import ApprovalManager
 from atlas.evolution.evolution_memory import EvolutionMemory
@@ -880,6 +881,8 @@ class Atlas:
                 if self._acquisition_service is not None
                 else None
             ),
+            proposal_store=self._evolution_memory,
+            approval_request_store=self._evolution_memory,
         )
 
     @property
@@ -929,6 +932,92 @@ class Atlas:
             schedule_store=self._schedule_store,
             availability=self._ai_availability,
         )
+
+    def confirm_development_approval(self, proposal_id: str, comment: str = ""):
+        """Explicit human confirmation of a persisted development proposal.
+
+        Operational Maturity track — the cross-process human gate for F9
+        proposals. Composes EXISTING machinery only:
+
+          * loads the persisted PENDING_APPROVAL proposal from
+            EvolutionMemory (restored from EvolutionSQLiteStorage),
+          * locates its pending ApprovalRequest,
+          * records the explicit decision via the EXISTING ApprovalManager
+            two-step contract (``approve`` +
+            ``update_proposal_from_decision``),
+          * persists APPROVED via ``update_proposal_status``.
+
+        Never executes, schedules, or promotes anything; sandbox execution of
+        the approved proposal happens separately via
+        ``run_development_execution()``. Fail-closed on missing proposals,
+        wrong states, or missing pending requests.
+        """
+        memory = self._evolution_memory
+        manager = self._approval_manager
+        if memory is None or manager is None:
+            raise RuntimeError(
+                "Evolution approval surfaces are not wired; Atlas.start() "
+                "must run first."
+            )
+
+        proposal = memory.get_proposal(proposal_id)
+        if proposal is None:
+            raise RuntimeError(
+                f"Proposal '{proposal_id}' not found."
+            )
+        status_name = getattr(proposal.status, "name", "")
+        if status_name != "PENDING_APPROVAL":
+            raise RuntimeError(
+                f"Proposal '{proposal_id}' is {status_name}, not "
+                "PENDING_APPROVAL — refusing to confirm."
+            )
+
+        pending = [
+            req
+            for req in memory.get_all_approval_requests()
+            if req.proposal_id == proposal_id
+            and getattr(req.decision, "name", "") == "PENDING"
+        ]
+        if not pending:
+            raise RuntimeError(
+                f"Proposal '{proposal_id}' has no pending approval request."
+            )
+
+        manager.approve(pending[0], comment=comment)
+        manager.update_proposal_from_decision(proposal, pending[0])
+        memory.update_proposal_status(proposal_id, ProposalStatus.APPROVED)
+        return proposal
+
+    def run_development_execution(self, proposal_id: str):
+        """Execute an APPROVED, persisted development proposal.
+
+        Loads the proposal from EvolutionMemory, requires APPROVED state,
+        then runs the EXISTING DevelopmentPlanner + SelfDevelopmentLoop path
+        (disposable CodeSandbox, pytest verification, DevelopmentOutcome,
+        LearningMemory evidence). Read-only with respect to the real
+        repository; never approves/authorizes/promotes anything.
+        """
+        memory = self._evolution_memory
+        planner = self._development_planner
+        loop = self._self_development_loop
+        if memory is None or planner is None or loop is None:
+            raise RuntimeError(
+                "Development execution surfaces are not wired; Atlas.start() "
+                "must run first."
+            )
+
+        proposal = memory.get_proposal(proposal_id)
+        if proposal is None:
+            raise RuntimeError(f"Proposal '{proposal_id}' not found.")
+        status_name = getattr(proposal.status, "name", "")
+        if status_name != "APPROVED":
+            raise RuntimeError(
+                f"Proposal '{proposal_id}' is {status_name}, not APPROVED — "
+                "only explicitly approved proposals may be executed."
+            )
+
+        plan = planner.plan(proposal)
+        return loop.run(proposal)
 
     @property
     def self_management_review(self):

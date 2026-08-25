@@ -242,7 +242,24 @@ def main() -> None:
     )
     postcore_parser.add_argument(
         "action",
-        choices=["operate", "research", "develop", "review"],
+        choices=[
+            "operate",
+            "research",
+            "develop",
+            "review",
+            "confirm",
+            "execute",
+        ],
+    )
+    postcore_parser.add_argument(
+        "--proposal-id",
+        default="",
+        help="Proposal id (confirm/execute actions)",
+    )
+    postcore_parser.add_argument(
+        "--comment",
+        default="",
+        help="Optional human comment for the explicit approval (confirm)",
     )
     postcore_parser.add_argument(
         "--question",
@@ -823,7 +840,9 @@ def _run_postcore(args: argparse.Namespace) -> None:
     authorizes, executes, schedules, applies, promotes, or rolls back.
     """
     from atlas.cli.postcore_commands import (
+        cmd_confirm,
         cmd_develop,
+        cmd_execute,
         cmd_operate,
         cmd_research,
         cmd_review,
@@ -850,6 +869,12 @@ def _run_postcore(args: argparse.Namespace) -> None:
         if args.action == "review":
             print(cmd_review(atlas, args))
             return
+        if args.action == "confirm":
+            print(cmd_confirm(atlas, args))
+            return
+        if args.action == "execute":
+            print(cmd_execute(atlas, args))
+            return
     finally:
         atlas.shutdown()
 
@@ -860,7 +885,8 @@ def _run_proposals(args: argparse.Namespace) -> None:
     Post-Core F8 — presentation-only, read-only audit surface. Delegates
     to the EvolutionExecutionEngine's read-only proposal retrieval APIs.
     None of the actions approve, execute, reject, or defer proposals and
-    none touch governance.
+    none touch governance. (Development-proposal approval lives in
+    ``atlas postcore confirm`` — Operational Maturity track.)
     """
     from atlas.cli.evolution_commands import (
         cmd_proposals_audit,
@@ -871,6 +897,12 @@ def _run_proposals(args: argparse.Namespace) -> None:
 
     if not getattr(args, "action", ""):
         print("error: proposals requires an action (list|show|audit)")
+        return
+
+    if args.action in {"show", "audit"} and not getattr(
+        args, "proposal_id", ""
+    ):
+        print(f"error: proposals {args.action} requires a proposal_id")
         return
 
     atlas = Atlas()

@@ -194,6 +194,66 @@ def cmd_develop(atlas, args) -> str:
     return "\n".join(lines)
 
 
+def cmd_confirm(atlas, args) -> str:
+    """Explicit human confirmation of a persisted development proposal."""
+    proposal_id = (getattr(args, "proposal_id", "") or "").strip()
+    if not proposal_id:
+        return "error: confirm requires --proposal-id"
+    comment = getattr(args, "comment", "") or ""
+    try:
+        proposal = atlas.confirm_development_approval(
+            proposal_id, comment=comment
+        )
+    except RuntimeError as exc:
+        return f"error: {exc}"
+    return "\n".join([
+        f"✓ Proposal '{proposal.proposal_id}' approved by explicit human "
+        "confirmation.",
+        f"  Status: {proposal.status.name}",
+        "  Execute it with: "
+        f"atlas postcore execute --proposal-id {proposal.proposal_id}",
+    ])
+
+
+def cmd_execute(atlas, args) -> str:
+    """Execute an APPROVED, persisted development proposal.
+
+    Delegates to the kernel bridge, which loads the persisted proposal,
+    requires APPROVED state (fail-closed), then runs the EXISTING
+    DevelopmentPlanner + SelfDevelopmentLoop inside a disposable
+    CodeSandbox. Never approves, authorizes, schedules, or promotes.
+    """
+    proposal_id = (getattr(args, "proposal_id", "") or "").strip()
+    if not proposal_id:
+        return "error: execute requires --proposal-id"
+
+    try:
+        run_result = atlas.run_development_execution(proposal_id)
+    except RuntimeError as exc:
+        return f"error: {exc}"
+
+    lines = [
+        "Governed development execution complete.",
+        f"  Proposal ID: {proposal_id}",
+        f"  Run status: {run_result.status.name}",
+        f"  Iterations used: {run_result.iterations_used}",
+    ]
+    if run_result.outcomes:
+        last = run_result.outcomes[-1]
+        lines.extend([
+            f"  Last outcome: {last.outcome.name}",
+            f"  Verification passed: {last.verification_passed}",
+            "  Changed files (sandbox): "
+            + (", ".join(last.changed_files) or "(none)"),
+        ])
+    if run_result.message:
+        lines.append(f"  Message: {run_result.message[:300]}")
+    notice = _safe_mode_line(atlas)
+    if notice:
+        lines.append(notice)
+    return "\n".join(lines)
+
+
 def cmd_review(atlas, args) -> str:
     """F11 — run ONE bounded long-term self-management review."""
     report = atlas.run_self_management_review()

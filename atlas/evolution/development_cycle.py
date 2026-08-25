@@ -317,6 +317,16 @@ class DevelopmentCycleController:
             never imports or duplicates the research pipeline.
         policy: Deterministic bounds (defaults).
         now: Optional clock callable (UTC) — injectable for tests.
+        proposal_store: Optional duck-typed durable store exposing
+            ``store_proposal(proposal)`` (the EXISTING EvolutionMemory /
+            EvolutionSQLiteStorage surface). When wired, every prepared
+            proposal is persisted so operators can inspect/approve it in a
+            later process. Persistence failures fail closed (an explicit
+            partial-state failure is returned after submission).
+        approval_request_store: Optional duck-typed durable store exposing
+            ``store_approval_request(request)``; wire alongside
+            ``proposal_store`` so cross-process ``approve_proposal_by_id``
+            lookups can find the pending request.
     """
 
     def __init__(
@@ -327,6 +337,8 @@ class DevelopmentCycleController:
         researcher: Callable[..., Any] | None = None,
         policy: DevelopmentCyclePolicy | None = None,
         now: Callable[[], datetime] | None = None,
+        proposal_store: Any | None = None,
+        approval_request_store: Any | None = None,
     ) -> None:
         if approval_manager is None:
             raise ValueError("approval_manager is required (fail-closed)")
@@ -340,6 +352,8 @@ class DevelopmentCycleController:
         self._policy = policy or DevelopmentCyclePolicy()
         self._now = now or utc_now
         self._counter = 0
+        self._proposal_store = proposal_store
+        self._approval_request_store = approval_request_store
 
     @property
     def policy(self) -> DevelopmentCyclePolicy:
@@ -426,6 +440,30 @@ class DevelopmentCycleController:
             request = self._approval_manager.create_approval_request(proposal)
         except Exception as exc:
             return _failed([("approval", _bounded_text(exc))])
+
+        # 6b. Persist durably through the EXISTING stores so operators can
+        # inspect/approve this proposal in a later process: the proposal at
+        # PENDING_APPROVAL plus its approval request (required by
+        # ``approve_proposal_by_id``'s lookup). Fail closed with an explicit
+        # partial-state report if persistence itself fails.
+        if self._proposal_store is not None:
+            try:
+                self._proposal_store.store_proposal(proposal)
+            except Exception as exc:
+                return _failed([(
+                    "persistence",
+                    "proposal submitted but not persisted: "
+                    + _bounded_text(exc),
+                )])
+        if self._approval_request_store is not None:
+            try:
+                self._approval_request_store.store_approval_request(request)
+            except Exception as exc:
+                return _failed([(
+                    "persistence",
+                    "approval request submitted but not persisted: "
+                    + _bounded_text(exc),
+                )])
 
         return DevelopmentCycleResult(
             cycle_id=cycle_id,
