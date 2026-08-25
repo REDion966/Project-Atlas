@@ -221,6 +221,39 @@ class RuntimeEnvironmentObserver:
         ]
 
 
+class ProviderHealthObserver:
+    """Expose deterministic AI-provider availability (Post-Core F10).
+
+    Adapts a duck-typed F10 :class:`atlas.ai.availability.ProviderAvailabilityTracker`
+    (anything exposing ``snapshot()``) into a PROVIDER-domain
+    ``EnvironmentState``. Purely observational: the adapter reads a snapshot;
+    it never records outcomes, calls providers, or mutates anything.
+    """
+
+    domain = EnvironmentDomain.PROVIDER
+
+    def __init__(self, tracker, reliability=ObservationReliability.HIGH):
+        # tracker: anything exposing ``snapshot() -> dict``.
+        self._tracker = tracker
+        self._reliability = reliability
+
+    def provider_name(self) -> str:
+        return "provider_health"
+
+    def observe(self) -> list[EnvironmentState]:
+        snapshot = self._tracker.snapshot()
+        name = str(snapshot.get("name", "ai_provider"))
+        state = {k: v for k, v in snapshot.items() if k != "name"}
+        return [
+            EnvironmentState(
+                entity=EnvironmentEntity(self.domain, name),
+                state=state,
+                source=self.provider_name(),
+                reliability=self._reliability,
+            )
+        ]
+
+
 #: Convenience default provider set used by callers that want the standard
 #: model / tool / capability / skill / runtime observation surface.
 def default_providers(

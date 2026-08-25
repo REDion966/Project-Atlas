@@ -70,7 +70,11 @@ from atlas.evolution.development_planner import DevelopmentPlanner
 from atlas.evolution.self_development_loop import SelfDevelopmentLoop
 from atlas.evolution.autonomy.sandbox_tools import register_sandbox_tools
 from atlas.evolution.environment import EnvironmentObserver
-from atlas.evolution.environment.providers import default_providers
+from atlas.evolution.environment.providers import (
+    ProviderHealthObserver,
+    default_providers,
+)
+from atlas.ai.availability import ProviderAvailabilityTracker
 from atlas.evolution.lifecycle import CapabilityLifecycleAssessor
 from atlas.evolution.lifecycle.targets import targets_from_registries
 from atlas.evolution.adaptation import AdaptationDecisionEngine
@@ -481,6 +485,12 @@ class Atlas:
         # SelfObservationEngine. Purely observational; nothing auto-runs.
         self._environment_observer: EnvironmentObserver | None = None
 
+        # --- Phase F10 (post-Core): AI provider availability (observation) ---
+        # One bounded, deterministic outcome tracker exposed through the
+        # EXISTING F1 environment-observation cycle. On demand only; never
+        # records by itself; never runs from tick(); no daemon.
+        self._ai_availability: ProviderAvailabilityTracker | None = None
+
         # --- Phase F3 (post-Core): Lifecycle assessment foundation ---
         # One pure CapabilityLifecycleAssessor reusing the EXISTING registries
         # as read-only snapshot inputs. Never auto-runs; never mutates.
@@ -544,6 +554,12 @@ class Atlas:
             tool_registry=self._tool_registry,
             capability_registry=self._capability_registry,
         )
+        # --- Phase F10 (post-Core): AI provider availability ---
+        # Bounded, deterministic outcome tracker exposed as one additional
+        # PROVIDER-domain observation. Purely observational; outcomes are
+        # recorded only when a caller reports them; nothing auto-runs.
+        self._ai_availability = ProviderAvailabilityTracker()
+        providers.append(ProviderHealthObserver(self._ai_availability))
         self._environment_observer = EnvironmentObserver(
             providers=providers,
             event_bus=self._event_bus,
@@ -974,6 +990,17 @@ class Atlas:
         SelfObservationEngine. Purely observational — nothing auto-runs.
         """
         return self._environment_observer
+
+    @property
+    def ai_availability(self):
+        """Return the kernel-owned ProviderAvailabilityTracker (Phase F10).
+
+        Bounded, deterministic, observation-only AI-provider availability.
+        Callers may record outcomes explicitly; status/snapshot are computed
+        on demand. Never records by itself; never auto-runs; never blocks
+        any non-AI path.
+        """
+        return self._ai_availability
 
     @property
     def rule_engine(self):
@@ -2135,6 +2162,7 @@ class Atlas:
         self._adaptation_orchestrator = None
         self._operation_controller = None
         self._development_controller = None
+        self._ai_availability = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
