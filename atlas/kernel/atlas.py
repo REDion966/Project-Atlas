@@ -77,6 +77,7 @@ from atlas.evolution.adaptation import AdaptationDecisionEngine
 from atlas.evolution.adaptation.evaluator import AdaptationEvaluator
 from atlas.evolution.adaptation.orchestrator import AdaptationOrchestrator
 from atlas.evolution.operation import OperationController
+from atlas.evolution.development_cycle import DevelopmentCycleController
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
@@ -506,6 +507,12 @@ class Atlas:
         # an external host drives ``run_operation_cycle()`` explicitly.
         self._operation_controller: OperationController | None = None
 
+        # --- Phase F9 (post-Core): Governed Development Cycle Controller ---
+        # One bounded, single-shot preparation controller. Never approves;
+        # never authorizes; never executes; never runs from tick(); an
+        # external host drives ``run_development_cycle()`` explicitly.
+        self._development_controller: DevelopmentCycleController | None = None
+
     # ------------------------------------------------------------------
     # Public entry / on-demand observation cycle
     # ------------------------------------------------------------------
@@ -820,6 +827,57 @@ class Atlas:
         )
 
     # ------------------------------------------------------------------
+    # Phase F9: Governed Development Cycle (manually invoked; bounded)
+    # ------------------------------------------------------------------
+
+    def _init_development_cycle(self) -> None:
+        """Phase F9 (post-Core): additively wire the development-cycle
+        controller.
+
+        Composes the EXISTING ``ApprovalManager`` and, when wired, the F8
+        acquisition service as an optional researcher. The controller only
+        PREPARES a bounded DRAFT ``EvolutionProposal`` and submits it to the
+        existing approval workflow. It never runs from ``tick()``, never
+        starts a daemon, and never authorizes, executes, or promotes.
+        """
+        self._development_controller = DevelopmentCycleController(
+            approval_manager=self._approval_manager,
+            researcher=(
+                self._acquisition_service.acquire
+                if self._acquisition_service is not None
+                else None
+            ),
+        )
+
+    @property
+    def development_controller(self):
+        """Return the kernel-owned DevelopmentCycleController (Phase F9)."""
+        return self._development_controller
+
+    def run_development_cycle(
+        self,
+        need,
+        force_research=False,
+    ):
+        """Manually trigger ONE bounded development-cycle preparation.
+
+        Delegates to the kernel's F9 ``DevelopmentCycleController``, which
+        formulates a bounded DRAFT ``EvolutionProposal`` and submits it to
+        the existing ``ApprovalManager``, STOPPING at the human approval
+        boundary. Returns a ``DevelopmentCycleResult``. Nothing is approved,
+        authorized, scheduled, executed, or promoted here.
+        """
+        if self._development_controller is None:
+            raise RuntimeError(
+                "Development cycle controller is not wired; Atlas.start() "
+                "must run first."
+            )
+        return self._development_controller.run_development_cycle(
+            need,
+            force_research=force_research,
+        )
+
+    # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
 
@@ -1075,6 +1133,11 @@ class Atlas:
         # Domain 6g — Phase F7: autonomous operation controller
         # Bounded manual wrapper around F6; nothing auto-runs, no daemon.
         self._init_operation_controller()
+
+        # Domain 6h — Phase F9: governed development-cycle preparation
+        # Bounded single-shot proposal preparation; stops at the human
+        # approval boundary. Nothing auto-runs, no daemon, no execution.
+        self._init_development_cycle()
 
         # Domain 7 — RuntimeCoordinator, scheduler, goal execution,
         #   cognition service, conversation, component registry, container
@@ -2071,6 +2134,7 @@ class Atlas:
         self._adaptation_evaluator = None
         self._adaptation_orchestrator = None
         self._operation_controller = None
+        self._development_controller = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
