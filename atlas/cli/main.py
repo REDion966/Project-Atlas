@@ -233,6 +233,40 @@ def main() -> None:
     )
 
     # -------------------------
+    # Post-Core Operator Surface (Operational Maturity track)
+    # -------------------------
+
+    postcore_parser = subparsers.add_parser(
+        "postcore",
+        help="Post-core operator surface (bounded; stops at governance boundaries)",
+    )
+    postcore_parser.add_argument(
+        "action",
+        choices=["operate", "research", "develop", "review"],
+    )
+    postcore_parser.add_argument(
+        "--question",
+        default="",
+        help="Research question (research action)",
+    )
+    postcore_parser.add_argument(
+        "--sources",
+        action="append",
+        default=[],
+        help="Optional source URI for research (repeatable)",
+    )
+    postcore_parser.add_argument(
+        "--query-id",
+        default="",
+        help="Optional deterministic query id for research",
+    )
+    postcore_parser.add_argument(
+        "--need-file",
+        default="",
+        help="Path to a development-need JSON file (develop action)",
+    )
+
+    # -------------------------
     # Evolution Proposals (read-only audit; Post-Core F8)
     # -------------------------
 
@@ -714,6 +748,14 @@ def main() -> None:
         _run_reasoning(args)
         return
 
+    # -------------------------
+    # Post-Core Operator Surface (presentation-only; bounded)
+    # -------------------------
+
+    if args.command == "postcore":
+        _run_postcore(args)
+        return
+
     parser.print_help()
 
 
@@ -767,6 +809,46 @@ def _run_evolution(args: argparse.Namespace) -> None:
             return
         if args.action == "status":
             print(cmd_requests_status(schedule_store, args))
+            return
+    finally:
+        atlas.shutdown()
+
+
+def _run_postcore(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas postcore operate|research|develop|review``.
+
+    Operational Maturity track — presentation-only operator surface over the
+    EXISTING post-Core kernel bridges (F7/F8/F9/F11). Every action is bounded
+    and externally invoked; ``develop`` stops at PENDING_APPROVAL; no command
+    authorizes, executes, schedules, applies, promotes, or rolls back.
+    """
+    from atlas.cli.postcore_commands import (
+        cmd_develop,
+        cmd_operate,
+        cmd_research,
+        cmd_review,
+    )
+    from atlas.kernel.atlas import Atlas
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
+        return
+
+    try:
+        if args.action == "operate":
+            print(cmd_operate(atlas, args))
+            return
+        if args.action == "research":
+            print(cmd_research(atlas, args))
+            return
+        if args.action == "develop":
+            print(cmd_develop(atlas, args))
+            return
+        if args.action == "review":
+            print(cmd_review(atlas, args))
             return
     finally:
         atlas.shutdown()
