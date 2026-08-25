@@ -367,8 +367,8 @@ class TestFailClosed:
     def test_oversize_content_fails_closed(self):
         big_need = make_need(
             metadata={
-                # > max_content_chars (8_000) -> bounds failure, fail-closed.
-                "code_changes": [{"path": "a.py", "content": "x" * 9_000}],
+                # > max_content_chars (32_000) -> bounds failure, fail-closed.
+                "code_changes": [{"path": "a.py", "content": "x" * 40_000}],
             },
         )
         result = make_controller().run_development_cycle(big_need)

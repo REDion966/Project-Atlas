@@ -76,7 +76,8 @@ class DevelopmentCyclePolicy:
         max_code_changes: Upper bound on supplied file changes (default 5).
         max_test_files: Upper bound on supplied test files (default 3).
         max_path_chars: Upper bound per path string (default 256).
-        max_content_chars: Upper bound per file content (default 8_000).
+        max_content_chars: Upper bound per file content (default 32_000,
+            sized for real single-file production modules).
         max_title_chars: Upper bound for the proposal title (default 200).
         max_summary_chars: Upper bound for the summary (default 2_000).
         max_text_chars: Upper bound per free-text field (default 4_000).
@@ -87,7 +88,7 @@ class DevelopmentCyclePolicy:
     max_code_changes: int = 5
     max_test_files: int = 3
     max_path_chars: int = 256
-    max_content_chars: int = 8_000
+    max_content_chars: int = 32_000
     max_title_chars: int = 200
     max_summary_chars: int = 2_000
     max_text_chars: int = 4_000
