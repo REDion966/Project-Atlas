@@ -31,7 +31,7 @@ governed ingestion are best-effort and must not break the research result.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from atlas.evolution.models import ResearchQuery, ResearchResult
 from atlas.evolution.research_coordinator import ResearchCoordinator
@@ -51,24 +51,28 @@ from atlas.research.verifier import ClaimVerifier
 SourceResolver = Callable[[list], list]
 
 
-def _default_resolver(specs: list) -> list:
-    """Fallback resolver reusing the three Track A source adapters.
+def _default_resolver(specs: list, *, host_policy: Any = None) -> list:
+    """Fallback resolver reusing the Track A source adapters.
 
     Used only when the kernel does not inject the production resolver
     (isolated unit tests / standalone construction). Mirrors the existing
     Track A resolution mechanism without importing the capability layer.
+    ``host_policy`` is an optional :class:`WebHostPolicy` for the bounded
+    web adapter; ``None`` keeps it deny-by-default.
     """
     from pathlib import Path
 
     from atlas.research.sources import (
         CodebaseSourceAdapter,
         DocumentSourceAdapter,
+        WebSourceAdapter,
         WorkspaceSourceAdapter,
     )
 
     document = DocumentSourceAdapter()
     workspace = WorkspaceSourceAdapter(root=Path("."))
     codebase = CodebaseSourceAdapter()
+    web = WebSourceAdapter(host_policy=host_policy)
     resolved: list = []
     if not isinstance(specs, list):
         return resolved
@@ -84,6 +88,10 @@ def _default_resolver(specs: list) -> list:
                     candidate = codebase.load(spec)
                 elif document.supports(spec):
                     candidate = document.load(spec)
+                elif web.supports(spec):
+                    # Web is tried last; the default adapter is deny-by-default
+                    # (no allowlist configured => web sources are not fetched).
+                    candidate = web.load(spec)
                 else:
                     continue
                 resolved.append(candidate)
@@ -108,6 +116,7 @@ class ConcreteResearchCoordinator(ResearchCoordinator):
         storage: Any | None = None,
         ingest: Any | None = None,
         resolve_sources: SourceResolver | None = None,
+        web_hosts: Sequence[str] = (),
     ) -> None:
         """Initialise the coordinator with injected Track A components.
 
@@ -119,13 +128,26 @@ class ConcreteResearchCoordinator(ResearchCoordinator):
             ingest: Optional governed ResearchIngestBridge (fail-closed).
             resolve_sources: Optional resolver reusing the existing Track A
                 source-adapter mechanism. Defaults to a standalone resolver.
+            web_hosts: Explicit web host allowlist used by the standalone
+                fallback resolver. Empty (the default) keeps the web adapter
+                deny-by-default; SSRF protections remain mandatory.
         """
+        from atlas.research.sources.web import web_host_policy_from_hosts
+
         self._planner = planner or ResearchPlanner()
         self._extractor = extractor or KnowledgeExtractor()
         self._verifier = verifier or ClaimVerifier()
         self._storage = storage
         self._ingest = ingest
-        self._resolve_sources = resolve_sources or _default_resolver
+        if resolve_sources is not None:
+            self._resolve_sources = resolve_sources
+        else:
+            host_policy = web_host_policy_from_hosts(web_hosts)
+            self._resolve_sources = (
+                lambda specs, _hp=host_policy: _default_resolver(
+                    specs, host_policy=_hp
+                )
+            )
 
     # ------------------------------------------------------------------
     # Public sync entry point (used by capability handlers)

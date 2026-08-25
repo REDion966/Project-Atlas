@@ -49,6 +49,19 @@ class ConversationSettings:
 
 
 @dataclass(slots=True)
+class ResearchSettings:
+    """Research / information-acquisition configuration.
+
+    ``web_allowed_hosts`` is the explicit allowlist for the bounded web
+    source adapter. Empty (the default) keeps the web adapter
+    deny-by-default: no external host may be fetched. HTTP/HTTPS remain
+    the only accepted schemes and all SSRF protections stay mandatory.
+    """
+
+    web_allowed_hosts: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
 class LoggingSettings:
     """Logging configuration."""
 
@@ -63,3 +76,6 @@ class AtlasSettings:
     ai: AISettings
     conversation: ConversationSettings
     logging: LoggingSettings
+    # Optional research/acquisition settings; defaults keep the web source
+    # adapter deny-by-default.
+    research: ResearchSettings = field(default_factory=ResearchSettings)

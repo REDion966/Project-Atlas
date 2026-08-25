@@ -76,6 +76,29 @@ execution boundary. Verification: F1–F6 focused 177 passed; architecture/conta
 governance regressions 106 passed + 10 subtests; Phase-E E2–E6 143 passed, 1
 skipped; four known baseline stale failures unchanged.
 
+### Permanent Architectural Directive — Model Independence & Information Autonomy
+
+Documentation-only permanent boundary adopted ahead of post-Core F7–F11
+(recorded at `83b1c0e`; no code, test, or runtime-behavior change):
+
+- **SELF → DIRECT SOURCES → MODEL ASSISTANCE.** Atlas prefers existing verified
+  knowledge/memory, then its own deterministic tools/algorithms/reasoning, then
+  direct external-source retrieval, and only then AI-model assistance (only
+  when the above cannot resolve the need).
+- **No single point of failure.** No AI model/provider/family/API/framework/
+  external service may become a permanent dependency. AI models are replaceable
+  assistants, not permanent authorities or sources of truth.
+- **Model-derived information is not automatically durable knowledge.** Claims
+  must be traced to evidence, independently verified, associated with
+  provenance + retrieval/verification timestamps, assigned confidence, and
+  stored via the existing knowledge/provenance architecture.
+- **Resource independence** (independence before cost; usage necessity-,
+  capability-, risk-, and budget-aware and replaceable).
+- Recorded roadmap: F7 Autonomous Operation, F8 Autonomous Research & Knowledge
+  Acquisition, F9 Governed Autonomous Development, F10 Resource Independence &
+  Model-Optional Intelligence, F11 Long-Term Self-Management & Recovery — all
+  preceded by an inspect-before-build review of existing infrastructure.
+
 ### Test Status
 
 - **3260 passed, 0 failed, 57 subtests, 2 warnings** (identical to v0.20.0

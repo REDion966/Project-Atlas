@@ -12,6 +12,7 @@ class SourceKind(Enum):
     DOCUMENT = auto()
     WORKSPACE = auto()
     CODEBASE = auto()
+    WEB = auto()
 
 
 class VerificationStatus(Enum):

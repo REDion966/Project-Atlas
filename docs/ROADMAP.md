@@ -157,6 +157,51 @@ restructuring, new governance levels, or enabling CODE scope — require a
 separate owner-approved design and are post-core evolution work, not an
 automatic Phase 23.
 
+### Permanent Architectural Directive — Model Independence & Information Autonomy
+
+A permanent architectural boundary (see `docs/ATLAS_STATE.md` §26) governs all
+future post-Core work, including F7–F11:
+
+- **SELF → DIRECT SOURCES → MODEL ASSISTANCE.** Atlas prefers (1) existing
+  verified knowledge/memory, (2) its own deterministic tools/algorithms/
+  reasoning, (3) direct retrieval from external information sources, and only
+  then (4) AI-model assistance — and only when the above cannot resolve the
+  need.
+- **No single point of failure.** No AI model/provider/family/API/framework/
+  external service may become a permanent dependency. AI models are replaceable
+  assistants, not permanent authorities or sources of truth.
+- **Model-derived information is not automatically durable knowledge.** Claims
+  must be traced to evidence, independently verified, associated with
+  provenance and retrieval/verification timestamps, assigned confidence, and
+  stored via the existing knowledge/provenance architecture. Preserve the
+  underlying evidence so model obsolescence cannot invalidate durable knowledge.
+- **Resource independence.** Independence is the primary goal (not cost). Model
+  usage is necessity-, capability-, risk-, and budget-aware, and replaceable.
+- **Permanent design principles.** "Never optimize Atlas for permanence of
+  implementation; optimize Atlas for permanence of purpose and adaptability of
+  implementation." / "Atlas should not need to know everything. It should know
+  how to discover, understand, evaluate, remember, retrieve, and use what it
+  needs." / "Atlas should prefer discovering information directly over
+  receiving knowledge from an AI model." / "No AI model should become a single
+  point of failure." / "AI models are replaceable assistants, not permanent
+  authorities."
+
+### Planned Post-Core Continuation (F7–F11)
+
+The planned post-Core continuation, preserving the committed F1–F6 (not renamed
+or reordered):
+
+- **F7 — Autonomous Operation**
+- **F8 — Autonomous Research & Knowledge Acquisition**
+- **F9 — Governed Autonomous Development**
+- **F10 — Resource Independence & Model-Optional Intelligence** (must include
+  the model-independence / resource-independence principles above)
+- **F11 — Long-Term Self-Management & Recovery**
+
+Before any F7 implementation, first inspect the existing Atlas infrastructure
+(scheduler, events, task manager, runtime) and reuse what already exists rather
+than rebuilding existing capabilities.
+
 ---
 
 ## DEFERRED — Agreed But Postponed

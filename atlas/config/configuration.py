@@ -12,6 +12,7 @@ from atlas.config.configuration_models import (
     AtlasSettings,
     ConversationSettings,
     LoggingSettings,
+    ResearchSettings,
 )
 
 
@@ -54,6 +55,13 @@ class Configuration:
             ),
             logging=LoggingSettings(
                 level=data["logging"]["level"],
+            ),
+            research=ResearchSettings(
+                web_allowed_hosts=tuple(
+                    str(h).strip()
+                    for h in data.get("research", {}).get("web_allowed_hosts", ())
+                    if str(h).strip()
+                ),
             ),
         )
 

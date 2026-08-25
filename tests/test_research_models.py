@@ -25,7 +25,12 @@ from atlas.research.models import (
 
 class TestSourceKind:
     def test_members(self):
-        expected = {SourceKind.DOCUMENT, SourceKind.WORKSPACE, SourceKind.CODEBASE}
+        expected = {
+            SourceKind.DOCUMENT,
+            SourceKind.WORKSPACE,
+            SourceKind.CODEBASE,
+            SourceKind.WEB,
+        }
         assert set(SourceKind) == expected
 
     def test_members_are_enum(self):

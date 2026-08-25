@@ -777,6 +777,105 @@ four known baseline stale failures remain unchanged by F1–F6.
 
 ---
 
+## 26. Permanent Architectural Directive — Model Independence & Information Autonomy
+
+Permanent principle adopted ahead of post-Core work **F7–F11** (recorded at
+commit `83b1c0e`, immediately after the F1–F6 Adaptation Foundation). This is an
+architectural boundary: every future design, including F7–F11, must honor it.
+
+### 26.1 Model Independence
+
+No particular AI model, provider, model family, API, framework, or external
+intelligence service may become a permanent dependency or single point of
+failure for Atlas. AI models are **replaceable reasoning, interpretation,
+planning, and assistance components** — never permanent authorities or
+permanent sources of truth. Atlas must remain useful even if today's AI models
+disappear, degrade, or are replaced.
+
+Concretely:
+
+- Model/provider access remains behind the existing replaceable
+  `AIProvider` / model-profile abstraction.
+- No future design may make a specific model or provider a hard architectural
+  dependency.
+- Atlas continues operating with degraded or unavailable AI models by relying
+  on its own architecture, memory, verified knowledge, deterministic tools,
+  direct information sources, capability abstractions, and previously learned
+  strategies.
+
+### 26.2 Information-autonomy hierarchy
+
+When Atlas needs information, the preferred order is:
+
+1. **Existing verified Atlas knowledge / memory.**
+2. **Atlas's own deterministic capabilities** — tools, algorithms, reasoning.
+3. **Direct retrieval from external information sources** — web, APIs,
+   documentation, public datasets, local/external files, databases, other
+   available information systems.
+4. **AI-model assistance** — only when Atlas cannot adequately discover,
+   interpret, reason about, or resolve the problem using the above mechanisms.
+
+The model should therefore normally help Atlas **UNDERSTAND** information
+rather than become the permanent **OWNER** of that information.
+
+### 26.3 Knowledge rule — model-derived information is not automatically knowledge
+
+Model-generated information must NOT automatically become durable Atlas
+knowledge merely because a model produced it. Where appropriate, model-derived
+claims must be:
+
+- traced to evidence,
+- independently verified,
+- associated with provenance,
+- associated with retrieval/verification timestamps,
+- assigned appropriate confidence,
+- stored according to the existing Atlas knowledge/provenance architecture.
+
+Atlas must preserve the underlying evidence and reasoning context so that
+future disappearance, replacement, degradation, or obsolescence of today's AI
+models does not invalidate Atlas's durable knowledge.
+
+### 26.4 Resource-independence principle
+
+Cost optimization is **not** the primary goal; **independence** is. The desired
+hierarchy is **SELF → DIRECT SOURCES → MODEL ASSISTANCE** — never an
+unbroken `MODEL → MODEL → MODEL → MODEL` chain. Model usage is
+necessity-driven, capability-driven, risk-aware, budget-aware, and replaceable.
+Cheap/free model usage is useful but must never become a reason to make Atlas
+architecturally dependent on that model. Future resource/model management
+optimizes (in priority order): independence, correctness, evidence quality,
+reliability, capability, cost — while respecting governance and safety.
+
+### 26.5 Permanent design principles
+
+Add / preserve these principles wherever architecturally appropriate:
+
+1. "Never optimize Atlas for permanence of implementation; optimize Atlas for
+   permanence of purpose and adaptability of implementation."
+2. "Atlas should not need to know everything. It should know how to discover,
+   understand, evaluate, remember, retrieve, and use what it needs."
+3. "Atlas should prefer discovering information directly over receiving
+   knowledge from an AI model."
+4. "No AI model should become a single point of failure for Atlas's knowledge,
+   reasoning, or continued existence."
+5. "AI models are replaceable assistants, not permanent authorities."
+
+### 26.6 Roadmap position
+
+F1–F6 shown above remain exactly as committed: they are NOT renamed or
+reordered. The planned post-Core continuation is:
+
+- **F7 — Autonomous Operation**
+- **F8 — Autonomous Research & Knowledge Acquisition**
+- **F9 — Governed Autonomous Development**
+- **F10 — Resource Independence & Model-Optional Intelligence** (MUST include
+  the model-independence / resource-independence principles of this section)
+- **F11 — Long-Term Self-Management & Recovery**
+
+Before any F7 implementation, future work MUST first inspect the existing
+Atlas infrastructure — scheduler, events, task manager, and runtime — and
+reuse what already exists rather than rebuilding existing capabilities.
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:

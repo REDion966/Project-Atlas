@@ -19,6 +19,13 @@ from atlas.research.evolution_integration import (
     register_gov_008,
 )
 from atlas.research.extractor import KnowledgeExtractor
+from atlas.research.acquisition import (
+    AcquisitionPolicy,
+    AcquisitionResult,
+    InformationAcquisitionService,
+    SourceEvidence,
+    source_evidence,
+)
 from atlas.research.models import (
     CitationRecord,
     ClaimVerification,
@@ -35,6 +42,7 @@ from atlas.research.source_adapter import SourceAdapter
 from atlas.research.sources import (
     CodebaseSourceAdapter,
     DocumentSourceAdapter,
+    WebSourceAdapter,
     WorkspaceSourceAdapter,
 )
 from atlas.research.storage_protocol import ResearchStorage
@@ -56,12 +64,19 @@ __all__ = [
     "SourceKind",
     "SourceProfile",
     "VerificationStatus",
+    # Acquisition (F8)
+    "AcquisitionPolicy",
+    "AcquisitionResult",
+    "InformationAcquisitionService",
+    "SourceEvidence",
+    "source_evidence",
     # Planner (17.3)
     "ResearchPlanner",
     # Source adapter layer (17.2)
     "SourceAdapter",
     "CodebaseSourceAdapter",
     "DocumentSourceAdapter",
+    "WebSourceAdapter",
     "WorkspaceSourceAdapter",
     # Extractor (17.4)
     "KnowledgeExtractor",

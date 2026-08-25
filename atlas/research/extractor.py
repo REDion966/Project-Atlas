@@ -23,6 +23,7 @@ Pipeline (all deterministic unless a model is injected):
 No verification. No storage. No gateway.
 """
 
+from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
 
 from atlas.research._extraction import (
@@ -65,6 +66,10 @@ class KnowledgeExtractor:
             raise ValueError(f"chunk_size must be positive, got {chunk_size}")
         self._model: ExtractionModel | None = model
         self._chunk_size: int = chunk_size
+        # Tracks whether the most recent extract() used the optional model
+        # path or the deterministic sentence fallback (provenance markers).
+        self._last_extraction_origin: str = "deterministic"
+        self._last_extracted_at: str = ""
 
     @property
     def chunk_size(self) -> int:
@@ -78,6 +83,8 @@ class KnowledgeExtractor:
         text: str = source_text(source)
         chunks: list[str] = chunk_text(text, self._chunk_size)
         claims: list[KnowledgeClaim] = []
+        self._last_extraction_origin = "deterministic"
+        self._last_extracted_at = datetime.now(timezone.utc).isoformat()
         for chunk_index, chunk in enumerate(chunks):
             raw_statements: list[str] = self._raw_statements(chunk)
             for raw_statement in raw_statements:
@@ -90,7 +97,11 @@ class KnowledgeExtractor:
                         statement=normalized,
                         citations=(self._build_citation(source, chunk_index),),
                         confidence=provisional_confidence(normalized, source),
-                        metadata={"source_uri": source.uri},
+                        metadata={
+                            "source_uri": source.uri,
+                            "extraction_origin": self._last_extraction_origin,
+                            "extracted_at": self._last_extracted_at,
+                        },
                     )
                 )
         return self._deduplicate_claims(claims)
@@ -127,6 +138,7 @@ class KnowledgeExtractor:
                 line.strip() for line in response.splitlines() if line.strip()
             ]
             if statements:
+                self._last_extraction_origin = "model"
                 return statements
         return [s for s in chunk.split(". ") if s.strip()]
 

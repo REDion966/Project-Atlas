@@ -102,6 +102,8 @@ _TAG_ASPECTS: dict[str, str] = {
 _MARKERS: tuple[tuple[str, SourceKind], ...] = (
     ("workspace://", SourceKind.WORKSPACE),
     ("code://", SourceKind.CODEBASE),
+    ("https://", SourceKind.WEB),
+    ("http://", SourceKind.WEB),
 )
 
 _DEFAULT_DEPTH: int = 1

@@ -76,6 +76,7 @@ from atlas.evolution.lifecycle.targets import targets_from_registries
 from atlas.evolution.adaptation import AdaptationDecisionEngine
 from atlas.evolution.adaptation.evaluator import AdaptationEvaluator
 from atlas.evolution.adaptation.orchestrator import AdaptationOrchestrator
+from atlas.evolution.operation import OperationController
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
@@ -141,6 +142,8 @@ from atlas.lifecycle import (
 # --- Track A: Research & Knowledge (Phase 17 integration) ---
 from atlas.research.capability_handlers import ResearchCapabilityFactory
 from atlas.research.coordinator import ConcreteResearchCoordinator
+from atlas.research.acquisition import InformationAcquisitionService
+from atlas.evolution.freshness.assessor import KnowledgeFreshnessAssessor
 from atlas.research.evolution_integration import (
     ResearchIngestBridge,
     register_gov_008,
@@ -429,6 +432,7 @@ class Atlas:
         self._research_factory: ResearchCapabilityFactory | None = None
         self._research_coordinator: ConcreteResearchCoordinator | None = None
         self._research_ingest_bridge: ResearchIngestBridge | None = None
+        self._acquisition_service: InformationAcquisitionService | None = None
 
         # --- Track B: Tool Ecosystem ---
         self._toolchain_storage: ToolchainSQLiteStorage | None = None
@@ -495,6 +499,12 @@ class Atlas:
         # One pure orchestrator composing F1-F5 into bounded, manually-triggered
         # adaptation cycles. Never auto-runs; never approves; never executes.
         self._adaptation_orchestrator: AdaptationOrchestrator | None = None
+
+        # --- Phase F7 (post-Core): Autonomous Operation Controller ---
+        # One bounded, manually-invoked operational controller around F6.
+        # Never a daemon; never approves/executes; never runs from tick();
+        # an external host drives ``run_operation_cycle()`` explicitly.
+        self._operation_controller: OperationController | None = None
 
     # ------------------------------------------------------------------
     # Public entry / on-demand observation cycle
@@ -707,6 +717,106 @@ class Atlas:
             supplied_changes=supplied_changes,
             evaluate_pairs=evaluate_pairs,
             max_candidates=max_candidates,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase F7: Autonomous Operation Controller (manually invoked; bounded)
+    # ------------------------------------------------------------------
+
+    def _init_operation_controller(self) -> None:
+        """Phase F7 (post-Core): additively wire the operation controller.
+
+        Wraps the kernel's existing ``run_adaptation_cycle`` (F6) in a bounded,
+        manually-invoked controller with the default policy. It never runs from
+        ``tick()`` and never starts a daemon; an external host process calls
+        ``run_operation_cycle()``.
+        """
+        self._operation_controller = OperationController(
+            cycle_runner=self.run_adaptation_cycle,
+        )
+
+    @property
+    def operation_controller(self):
+        """Return the kernel-owned OperationController (Phase F7).
+
+        Bounded, manually-invoked wrapper around F6. Never auto-runs, never
+        approves, never executes.
+        """
+        return self._operation_controller
+
+    def run_operation_cycle(
+        self,
+        knowledge_refs=(),
+        lifecycle_targets=(),
+        supplied_changes=(),
+        evaluate_pairs=(),
+        max_cycles=None,
+    ):
+        """Manually trigger ONE bounded autonomous-operation invocation.
+
+        Delegates to the kernel's F7 ``OperationController``, which wraps the
+        existing F6 adaptation cycle inside a bounded cooldown / budget /
+        failure policy. Returns an ``OperationResult``. Nothing is approved,
+        executed, or auto-run here.
+        """
+        if self._operation_controller is None:
+            raise RuntimeError(
+                "Operation controller is not wired; Atlas.start() must run first."
+            )
+        return self._operation_controller.run_operation(
+            knowledge_refs=knowledge_refs,
+            lifecycle_targets=lifecycle_targets,
+            supplied_changes=supplied_changes,
+            evaluate_pairs=evaluate_pairs,
+            max_cycles=max_cycles,
+        )
+
+    # ------------------------------------------------------------------
+    # Phase F8: Information Acquisition (manually invoked; bounded)
+    # ------------------------------------------------------------------
+
+    def _init_information_acquisition(self) -> None:
+        """Phase F8 (post-Core): additively wire the acquisition service.
+
+        Wraps the kernel's existing F2 ``KnowledgeFreshnessAssessor`` and the
+        research coordinator in a thin, deterministic, model-optional
+        information-acquisition layer. It never runs from ``tick()``, never
+        starts a daemon, and never bypasses the GOV-008 governed ingest path.
+        """
+        self._acquisition_service = InformationAcquisitionService(
+            coordinator=self._research_coordinator,
+            planner=self._research_factory.planner,
+            freshness_assessor=KnowledgeFreshnessAssessor(),
+        )
+
+    @property
+    def acquisition_service(self):
+        """Return the kernel-owned InformationAcquisitionService (Phase F8)."""
+        return self._acquisition_service
+
+    def run_information_acquisition(
+        self,
+        question="",
+        sources=(),
+        knowledge_refs=(),
+        query_id="",
+    ):
+        """Manually trigger ONE bounded information-acquisition invocation.
+
+        Delegates to the kernel's F8 ``InformationAcquisitionService``, which
+        composes the existing F2 freshness gate and research pipeline. Returns
+        an ``AcquisitionResult``. Read-only with respect to runtime execution:
+        nothing is approved, executed, or auto-run here.
+        """
+        if self._acquisition_service is None:
+            raise RuntimeError(
+                "Information acquisition is not wired; Atlas.start() must run first."
+            )
+        return self._acquisition_service.acquire(
+            question=question,
+            sources=sources,
+            knowledge_refs=knowledge_refs,
+            query_id=query_id,
         )
 
     # ------------------------------------------------------------------
@@ -962,6 +1072,10 @@ class Atlas:
         # Manually-triggered composition only; nothing auto-runs.
         self._init_adaptation_orchestrator()
 
+        # Domain 6g — Phase F7: autonomous operation controller
+        # Bounded manual wrapper around F6; nothing auto-runs, no daemon.
+        self._init_operation_controller()
+
         # Domain 7 — RuntimeCoordinator, scheduler, goal execution,
         #   cognition service, conversation, component registry, container
         self._init_runtime_services()
@@ -1048,7 +1162,9 @@ class Atlas:
             self._capability_registry.register(capability_name, handler)
 
         # --- Track A: Register research capability handlers (Phase 17.7) ---
-        self._research_factory = ResearchCapabilityFactory()
+        self._research_factory = ResearchCapabilityFactory(
+            web_hosts=self._config.get("research", "web_allowed_hosts", default=()),
+        )
         self._research_factory.register(self._capability_registry)
 
         # --- Track B: Register toolchain capability handlers (Phase 18.7) ---
@@ -1244,6 +1360,13 @@ class Atlas:
         self._research_factory.register_coordinator(
             self._research_coordinator, self._capability_registry
         )
+
+        # --- Track A (Phase F8): Information Acquisition Service ---
+        # Thin manual bridge over the EXISTING F2 freshness + research
+        # coordinator. Never runs from tick(); never a daemon; bounded and
+        # model-optional. Wire after the coordinator exists so the single
+        # coordinator/factory instances are reused (no duplicates).
+        self._init_information_acquisition()
 
         # --- Track B: Instantiate and initialize toolchain storage (Phase 18.8) ---
         self._toolchain_storage = ToolchainSQLiteStorage()
@@ -1947,6 +2070,7 @@ class Atlas:
         self._adaptation_engine = None
         self._adaptation_evaluator = None
         self._adaptation_orchestrator = None
+        self._operation_controller = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
@@ -1968,6 +2092,7 @@ class Atlas:
         self._research_factory = None
         self._research_coordinator = None
         self._research_ingest_bridge = None
+        self._acquisition_service = None
 
         # --- Track C: Cleanup ---
         if self._longterm_storage is not None:

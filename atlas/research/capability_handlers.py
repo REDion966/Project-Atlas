@@ -15,7 +15,7 @@ no evolution, no storage writes from the handlers themselves.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 from atlas.evolution.models import ResearchQuery
 from atlas.reasoning.execution.models import ExecutionResult
@@ -34,8 +34,10 @@ from atlas.research.planner import ResearchPlanner
 from atlas.research.sources import (
     CodebaseSourceAdapter,
     DocumentSourceAdapter,
+    WebSourceAdapter,
     WorkspaceSourceAdapter,
 )
+from atlas.research.sources.web import web_host_policy_from_hosts
 from atlas.research.verifier import ClaimVerifier
 
 CapabilityHandler = Callable[[dict], ExecutionResult]
@@ -57,11 +59,24 @@ class ResearchCapabilityFactory:
         extractor: KnowledgeExtractor | None = None,
         verifier: ClaimVerifier | None = None,
         coordinator: ConcreteResearchCoordinator | None = None,
+        web_hosts: Sequence[str] = (),
     ) -> None:
+        """Initialise the factory with injected Track A components.
+
+        Args:
+            planner: Existing ResearchPlanner (defaults to a fresh one).
+            extractor: Existing KnowledgeExtractor (defaults to a fresh one).
+            verifier: Existing ClaimVerifier (defaults to a fresh one).
+            coordinator: Optional concrete ResearchCoordinator.
+            web_hosts: Explicit web host allowlist for the bounded web source
+                adapter. Empty (the default) keeps the adapter deny-by-default;
+                all SSRF protections remain mandatory regardless of entries.
+        """
         self._planner = planner or ResearchPlanner()
         self._extractor = extractor or KnowledgeExtractor()
         self._verifier = verifier or ClaimVerifier()
         self._coordinator = coordinator
+        self._web_host_policy = web_host_policy_from_hosts(web_hosts)
 
     @property
     def planner(self) -> ResearchPlanner:
@@ -320,12 +335,13 @@ class ResearchCapabilityFactory:
     # ------------------------------------------------------------------
 
     def _resolve_sources(self, specs: list) -> list[ResearchSource | SourceProfile]:
-        """Resolve URI specs via the local adapters (document/workspace/codebase)."""
+        """Resolve URI specs via the local adapters (workspace/codebase/doc/web)."""
         if not isinstance(specs, list):
             return []
         document = DocumentSourceAdapter()
         workspace = WorkspaceSourceAdapter(root=Path("."))
         codebase = CodebaseSourceAdapter()
+        web = WebSourceAdapter(host_policy=self._web_host_policy)
         resolved: list[ResearchSource | SourceProfile] = []
         for spec in specs:
             if isinstance(spec, (ResearchSource, SourceProfile)):
@@ -339,6 +355,11 @@ class ResearchCapabilityFactory:
                         candidate = codebase.load(spec)
                     elif document.supports(spec):
                         candidate = document.load(spec)
+                    elif web.supports(spec):
+                        # Web is tried last; the default adapter is
+                        # deny-by-default so explicit configuration is
+                        # required before any host may be fetched.
+                        candidate = web.load(spec)
                     else:
                         continue
                     resolved.append(candidate)

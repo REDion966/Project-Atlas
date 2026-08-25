@@ -101,3 +101,6 @@ LANGUAGE_BY_EXTENSION: dict[str, str] = {
 DOCUMENT_SCHEMES: frozenset[str] = frozenset({"", "file"})
 CODEBASE_SCHEMES: frozenset[str] = frozenset({"", "file", "code"})
 WORKSPACE_SCHEME: str = "workspace"
+
+# Strict web schemes accepted by the WebSourceAdapter (Phase F8).
+WEB_SCHEMES: frozenset[str] = frozenset({"http", "https"})

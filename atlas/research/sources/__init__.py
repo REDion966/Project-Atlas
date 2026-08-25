@@ -10,9 +10,11 @@ fetching is out of scope for this layer.
 from atlas.research.sources.codebase import CodebaseSourceAdapter
 from atlas.research.sources.document import DocumentSourceAdapter
 from atlas.research.sources.workspace import WorkspaceSourceAdapter
+from atlas.research.sources.web import WebSourceAdapter
 
 __all__ = [
     "CodebaseSourceAdapter",
     "DocumentSourceAdapter",
+    "WebSourceAdapter",
     "WorkspaceSourceAdapter",
 ]

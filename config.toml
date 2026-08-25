@@ -40,3 +40,12 @@ anthropic = ""
 
 [logging]
 level = "INFO"
+
+[research]
+# Explicit web host allowlist for bounded information acquisition (F8).
+# Empty list (default) keeps the web source adapter deny-by-default:
+# no external host may be fetched until explicitly listed here.
+# HTTP/HTTPS remain the only accepted schemes, and all SSRF protections
+# (private/loopback/link-local/metadata ranges, redirect revalidation,
+# size/time bounds) stay mandatory regardless of entries.
+web_allowed_hosts = []
