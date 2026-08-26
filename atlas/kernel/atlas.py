@@ -149,6 +149,7 @@ from atlas.lifecycle import (
 from atlas.research.capability_handlers import ResearchCapabilityFactory
 from atlas.research.coordinator import ConcreteResearchCoordinator
 from atlas.research.acquisition import InformationAcquisitionService
+from atlas.research.repository_map import RepositoryMapBuilder
 from atlas.evolution.freshness.assessor import KnowledgeFreshnessAssessor
 from atlas.research.evolution_integration import (
     ResearchIngestBridge,
@@ -419,6 +420,15 @@ class Atlas:
 
         # --- Phase 13.3: Evolution Scheduler ---
         self._evolution_scheduler: EvolutionScheduler | None = None
+
+        # --- Stage A1: Repository self-knowledge (read-only, lazy build) ---
+        try:
+            self._repository_map_builder = RepositoryMapBuilder(
+                Path(__file__).resolve().parents[2]
+            )
+        except Exception:
+            self._repository_map_builder = None
+        self._repository_map: Any | None = None
 
         # --- Phase 13.5: Persistent Evolution Knowledge ---
         self._knowledge_consolidator: EvolutionKnowledgeConsolidator | None = None
@@ -1234,6 +1244,35 @@ class Atlas:
         return self._started
 
     @property
+    def repository_map(self):
+        """Read-only repository self-knowledge map (built once, cached).
+
+        Returns ``None`` when the builder is unavailable or a build attempt
+        failed — callers must treat the result as advisory context.
+        """
+        if self._repository_map is None and self._repository_map_builder is not None:
+            try:
+                self._repository_map = self._repository_map_builder.build()
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "Repository map build failed; returning no map"
+                )
+        return self._repository_map
+
+    def refresh_repository_map(self):
+        """Explicitly rebuild the cached repository map (read-only).
+
+        Returns the fresh snapshot, or ``None`` when unavailable/failed.
+        Never raises; never triggered automatically.
+        """
+        if self._repository_map_builder is None:
+            return None
+        self._repository_map = None
+        return self.repository_map
+
+    @property
     def provider(self):
         return self._ai_manager.provider
 
@@ -1900,8 +1939,11 @@ class Atlas:
 
         # --- Phase 14.4: Create the DecisionIntelligenceEngine ---
         # Read-only adaptive planning: EvolutionKnowledgeQuery → engine.
+        # Stage A1: the engine also consumes the ALREADY-BUILT repository
+        # map via a cache-only provider (never triggers a scan).
         self._decision_intelligence = DecisionIntelligenceEngine(
             knowledge_query=self._knowledge_query,
+            repository_map_provider=lambda: self._repository_map,
         )
 
         # --- Phase 11.0: Create the EvolutionExecutionEngine ---

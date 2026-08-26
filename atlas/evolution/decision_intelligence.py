@@ -56,15 +56,26 @@ class DecisionIntelligenceEngine:
     All methods are deterministic and side-effect free.
     """
 
-    def __init__(self, knowledge_query: EvolutionKnowledgeQuery | None = None) -> None:
+    def __init__(
+        self,
+        knowledge_query: EvolutionKnowledgeQuery | None = None,
+        repository_map_provider: Any = None,
+    ) -> None:
         """
-        Initialise the engine with a read-only knowledge query surface.
+        Initialise the engine with read-only context surfaces.
 
         Args:
             knowledge_query: The EvolutionKnowledgeQuery to read from.
                 If None, all queries return empty/neutral results.
+            repository_map_provider: Optional zero-argument callable
+                returning an already-built ``RepositoryMap`` (or None).
+                Stage A1: the engine only CONSUMES already-built maps via
+                this provider — it never triggers repository scanning.
+                When present, ``get_planning_context()`` adds a small
+                JSON-safe ``"repository"`` section to the context metadata.
         """
         self._query = knowledge_query
+        self._repository_map_provider = repository_map_provider
 
     # ------------------------------------------------------------------
     # Core context production
@@ -90,6 +101,9 @@ class DecisionIntelligenceEngine:
             A populated ``PlanningContext``.
         """
         if self._query is None:
+            repository_meta = self._build_repository_metadata()
+            if repository_meta:
+                return PlanningContext(metadata={"repository": repository_meta})
             return PlanningContext()
 
         areas = self._collect_areas(weaknesses)
@@ -105,13 +119,49 @@ class DecisionIntelligenceEngine:
             capability_signals,
         )
 
+        metadata: dict[str, Any] = {}
+        repository_meta = self._build_repository_metadata()
+        if repository_meta:
+            metadata["repository"] = repository_meta
+
         return PlanningContext(
             area_adjustments=area_adjustments,
             bottleneck_alerts=bottleneck_alerts,
             strategy_suggestions=strategy_suggestions,
             capability_signals=capability_signals,
             overall_confidence=overall_confidence,
+            metadata=metadata,
         )
+
+    def _build_repository_metadata(self) -> dict[str, Any]:
+        """Consume the already-built repository map, fail-soft.
+
+        Returns an empty dict when no provider is wired, the provider
+        returns None, or the provider raises — never triggers scanning.
+        """
+        if self._repository_map_provider is None:
+            return {}
+        try:
+            repository_map = self._repository_map_provider()
+        except Exception:
+            return {}
+        if repository_map is None:
+            return {}
+
+        from atlas.research.repository_map import RepositoryMap
+
+        if not isinstance(repository_map, RepositoryMap):
+            return {}
+        return {
+            "module_count": repository_map.module_count(),
+            "edge_count": repository_map.edge_count(),
+            "truncated": repository_map.truncated,
+            "error_count": len(repository_map.errors),
+            "architecture_summary": {
+                "packages": repository_map.metadata.get("packages", 0),
+                "files_scanned": repository_map.metadata.get("files_scanned", 0),
+            },
+        }
 
     # ------------------------------------------------------------------
     # Candidate ranking
