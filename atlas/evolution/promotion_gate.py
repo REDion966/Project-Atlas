@@ -54,6 +54,11 @@ ARCHITECTURE_SENSITIVE_PREFIXES: tuple[str, ...] = (
 
 SMALL_CHANGE_FILE_COUNT: int = 3
 
+# Bounded change-manifest limits (Stage H review evidence).
+MAX_MANIFEST_FILES: int = 20
+MAX_EXCERPT_CHARS: int = 500
+MAX_MANIFEST_TOTAL_CHARS: int = 4000
+
 
 class PromotionRisk(str, Enum):
     LOW = "low"
@@ -74,30 +79,18 @@ class PromotionRecommendation(str, Enum):
     NOT_PROMOTABLE = "not_promotable"
 
 
-def _risk_level(
-    verification_passed: bool,
-    rollback_occurred: bool,
-    changed_files: list[str],
-    affected_modules: list[str],
-    run_success: bool,
-) -> PromotionRisk:
-    """
-    Simple, deterministic risk classification.
+def _clamp01(value: Any) -> float:
+    """Coerce an arbitrary value into a bounded [0.0, 1.0] float.
 
-    HIGH   — failed validation, a rollback occurred, the run failed outright,
-             or architecture-sensitive modules were touched.
-    MEDIUM — more than a small number of changed files/modules.
-    LOW    — tests passed and the change is small.
+    Fail-soft: any malformed input becomes ``0.0``.
     """
-    sensitive = any(
-        str(module).startswith(tuple(ARCHITECTURE_SENSITIVE_PREFIXES))
-        for module in affected_modules
-    )
-    if not run_success or not verification_passed or rollback_occurred or sensitive:
-        return PromotionRisk.HIGH
-    if len(changed_files) > SMALL_CHANGE_FILE_COUNT or len(affected_modules) > 2:
-        return PromotionRisk.MEDIUM
-    return PromotionRisk.LOW
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number:  # NaN guard
+        return 0.0
+    return max(0.0, min(1.0, number))
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +113,7 @@ class PromotionAssessment:
     recommendation: PromotionRecommendation = (
         PromotionRecommendation.NEEDS_REVIEW
     )
+    change_manifest: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -138,8 +132,70 @@ class PromotionAssessment:
             "test_summary": self.test_summary,
             "risk_level": self.risk_level.value,
             "recommendation": self.recommendation.value,
+            "change_manifest": dict(self.change_manifest),
             "metadata": dict(self.metadata),
         }
+
+
+def build_change_manifest(
+    changed_contents: Any,
+    max_files: int = MAX_MANIFEST_FILES,
+    max_excerpt_chars: int = MAX_EXCERPT_CHARS,
+    max_total_chars: int = MAX_MANIFEST_TOTAL_CHARS,
+) -> dict[str, Any]:
+    """Bounded, deterministic change manifest for human review.
+
+    Accepts the sandbox workload's ``code_changes``-shaped entries
+    (``{"path": ..., "content": ...}`` dicts). Purely lexical: no
+    filesystem, subprocess, or git access. Fail-soft — malformed
+    entries are skipped. Output is JSON-safe:
+
+    ``{"files": [{"path", "size", "excerpt"}],
+      "total_files": int, "truncated": bool}``
+    """
+    files: list[dict[str, Any]] = []
+    total_files = 0
+    truncated = False
+
+    try:
+        entries = list(changed_contents or [])
+    except TypeError:
+        return {"files": [], "total_files": 0, "truncated": False}
+
+    valid: list[tuple[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        content = entry.get("content", "")
+        if not isinstance(content, str):
+            content = str(content)
+        valid.append((path, content))
+
+    total_files = len(valid)
+    ordered = sorted(valid, key=lambda pair: pair[0])
+    budget = max(0, max_total_chars)
+
+    for path, content in ordered:
+        if len(files) >= max_files or budget <= 0:
+            truncated = True
+            break
+        excerpt = content[:max(0, max_excerpt_chars)]
+        if len(excerpt) < len(content):
+            truncated = True
+        if len(excerpt) > budget:
+            excerpt = excerpt[:budget]
+            truncated = True
+        budget -= len(excerpt)
+        files.append({"path": path, "size": len(content), "excerpt": excerpt})
+
+    return {
+        "files": files,
+        "total_files": total_files,
+        "truncated": truncated,
+    }
 
 
 @dataclass
@@ -194,7 +250,12 @@ class PromotionGate:
 
     # -- assessment ------------------------------------------------------
 
-    def assess(self, run_result: Any, proposal_id: str = "") -> PromotionAssessment:
+    def assess(
+        self,
+        run_result: Any,
+        proposal_id: str = "",
+        change_manifest: dict[str, Any] | None = None,
+    ) -> PromotionAssessment:
         """
         Deterministically assess a ``DevelopmentRunResult``.
 
@@ -253,6 +314,7 @@ class PromotionGate:
             test_summary=test_summary[:120],
             risk_level=risk,
             recommendation=recommendation,
+            change_manifest=dict(change_manifest or {}),
             metadata={
                 "terminal_status": run_result.status.name,
                 "iterations_used": run_result.iterations_used,
@@ -321,6 +383,120 @@ class PromotionGate:
         """Reject a pending review with an optional reason."""
         self._decide(request, PromotionStatus.REJECTED, reason)
         return request
+
+    def pending_reviews(self) -> list[dict[str, Any]]:
+        """Stage H: read-only prioritized view of PENDING_REVIEW promotion
+        requests (highest decision-quality score first).
+
+        Reads existing ``promotion_review`` records through the injected
+        ``EvolutionMemory`` and joins the associated proposal's decision
+        quality when available. Purely read-only — no repository mutation,
+        no approve/promote/execute capability. Fail-soft on malformed
+        records.
+        """
+        if self._evolution_memory is None:
+            return []
+
+        # Proposal lookup for decision-quality joins.
+        proposals: dict[str, Any] = {}
+        try:
+            for proposal in (self._evolution_memory.get_all_proposals() or []):
+                pid = getattr(proposal, "proposal_id", "")
+                if pid:
+                    proposals[pid] = proposal
+        except Exception:
+            proposals = {}
+
+        try:
+            records = self._evolution_memory.get_records_by_type(
+                "promotion_review"
+            )
+        except Exception:
+            return []
+
+        pending: list[tuple[dict[str, Any], bool]] = []
+        for record in records:
+            try:
+                metadata = dict(getattr(record, "metadata", {}) or {})
+                status = metadata.get("status", "")
+                if status != PromotionStatus.PENDING_REVIEW.value:
+                    continue
+
+                request_id = getattr(record, "record_id", "") or metadata.get(
+                    "request_id", ""
+                )
+                related_ids = list(getattr(record, "related_ids", []) or [])
+                proposal_id = metadata.get("proposal_id", "")
+                if not proposal_id and related_ids:
+                    proposal_id = str(related_ids[0])
+
+                # Assessment may be nested under ``assessment`` (the write
+                # path of ``request_review``) or flat (bridge/seed records).
+                assessment = metadata.get("assessment", {})
+                if not isinstance(assessment, dict):
+                    assessment = {}
+
+                risk_level = metadata.get("risk_level") or assessment.get(
+                    "risk_level", ""
+                )
+                recommendation = metadata.get("recommendation") or (
+                    assessment.get("recommendation", "")
+                )
+
+                manifest = metadata.get("change_manifest")
+                if manifest is None:
+                    manifest = assessment.get("change_manifest", {})
+                if not isinstance(manifest, dict):
+                    manifest = {}
+                manifest_files = manifest.get("files", [])
+                if not isinstance(manifest_files, list):
+                    manifest_files = []
+                manifest_file_count = len(manifest_files)
+                evidence_complete = manifest_file_count > 0
+
+                final_priority_score = 0.0
+                has_priority_score = False
+                proposal = proposals.get(proposal_id)
+                if proposal is not None:
+                    prop_metadata = dict(getattr(proposal, "metadata", {}) or {})
+                    dq = prop_metadata.get("decision_quality", {})
+                    if isinstance(dq, dict) and "final_priority_score" in dq:
+                        final_priority_score = _clamp01(
+                            dq.get("final_priority_score")
+                        )
+                        has_priority_score = True
+
+                pending.append(
+                    (
+                        {
+                            "request_id": request_id,
+                            "proposal_id": proposal_id,
+                            "status": status,
+                            "risk_level": risk_level,
+                            "recommendation": recommendation,
+                            "final_priority_score": final_priority_score,
+                            "evidence_complete": evidence_complete,
+                            "manifest_file_count": manifest_file_count,
+                        },
+                        has_priority_score,
+                    )
+                )
+            except Exception:
+                # Fail-soft: skip malformed records; never break the view.
+                continue
+
+        # Deterministic ordering:
+        #   primary — scored requests first (missing scores last)
+        #   then highest final_priority_score first
+        #   secondary — stable tiebreak by request_id
+        pending.sort(
+            key=lambda entry: (
+                0 if entry[1] else 1,
+                -entry[0]["final_priority_score"],
+                entry[0]["request_id"],
+            )
+        )
+        return [item for item, _ in pending]
 
     # -- internals -----------------------------------------------------------
 

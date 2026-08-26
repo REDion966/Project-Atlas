@@ -153,6 +153,8 @@ from atlas.research.repository_map import RepositoryMapBuilder
 from atlas.evolution.promotion_gate import (
     PromotionGate,
     PromotionRecommendation,
+    PromotionRequest,
+    build_change_manifest,
 )
 from atlas.evolution.freshness.assessor import KnowledgeFreshnessAssessor
 from atlas.research.evolution_integration import (
@@ -378,6 +380,13 @@ class Atlas:
         self._proposal_generator: ProposalGenerator | None = None
         self._approval_manager: ApprovalManager | None = None
         self._evolution_memory: EvolutionMemory | None = None
+
+        # --- Stage H: Promotion gate (kernel-owned read-only view + bridge) ---
+        # One PromotionGate composed over the kernel-owned EvolutionMemory.
+        # Used by ``pending_promotion_reviews()`` and the manual
+        # ``submit_development_for_promotion_review()`` bridge. Never
+        # mutates the repository; never auto-runs.
+        self._promotion_gate: PromotionGate | None = None
 
         # --- Phase 11.0: Evolution Execution Engine ---
         self._outcome_tracker: OutcomeTracker | None = None
@@ -1333,7 +1342,6 @@ class Atlas:
         result = self._self_development_loop.run(
             proposal, max_iterations=max_iterations
         )
-
         # --- Development Outcome → Evolution History bridge (Phase 13.5) ---
         # Best-effort on every step: a missing memory skips persistence,
         # storage failures are swallowed, and consolidation failures never
@@ -1353,12 +1361,20 @@ class Atlas:
         # --- Stage E: promotion-review foundation ---
         # Assess every finished run; verified successes automatically open a
         # PENDING_REVIEW promotion request (audit + human boundary prep).
-        # Fail-soft: promotion review can never break development.
+        # Stage H: a bounded change manifest (from the proposal's own
+        # persisted workload) is attached so an approving operator can see
+        # what actually changed. Fail-soft throughout.
         try:
             gate = PromotionGate(evolution_memory=self._evolution_memory)
+            change_manifest = build_change_manifest(
+                (getattr(proposal, "metadata", {}) or {}).get(
+                    "code_changes", []
+                )
+            )
             assessment = gate.assess(
                 result,
                 proposal_id=getattr(proposal, "proposal_id", ""),
+                change_manifest=change_manifest,
             )
             if (
                 assessment.recommendation
@@ -1557,6 +1573,77 @@ class Atlas:
             )
             return {}
 
+    def pending_promotion_reviews(self) -> list:
+        """Stage H: read-only prioritized view of PENDING_REVIEW promotion
+        requests (highest decision quality first). Delegates to the
+        kernel-owned PromotionGate over the EvolutionMemory; never
+        raises and never modifies anything."""
+        gate = self._promotion_gate
+        if gate is None:
+            return []
+        return gate.pending_reviews()
+
+    @property
+    def promotion_gate(self) -> PromotionGate:
+        """Return the kernel-owned Stage H PromotionGate.
+
+        Constructed once during ``start()`` over the kernel-owned
+        EvolutionMemory. Read-only surface for review visibility; the
+        companion ``submit_development_for_promotion_review()`` is the
+        only entry point that opens new PENDING_REVIEW audit rows.
+        """
+        if self._promotion_gate is None:
+            raise RuntimeError(
+                "Promotion gate is not wired; Atlas.start() must run first."
+            )
+        return self._promotion_gate
+
+    def submit_development_for_promotion_review(
+        self,
+        run_result: Any,
+        proposal_id: str = "",
+        change_manifest: dict[str, Any] | None = None,
+        development_record_id: str = "",
+    ) -> PromotionRequest:
+        """Stage H: bridge a verified ``DevelopmentRunResult`` into a
+        ``PENDING_REVIEW`` audit row carrying bounded change evidence.
+
+        Manual, additive, read-only with respect to the repository:
+
+        * Calls ``PromotionGate.assess(...)`` (deterministic risk
+          classification; manifest preserved on the assessment).
+        * Calls ``PromotionGate.request_review(...)`` (opens a
+          ``PENDING_REVIEW`` request and persists a
+          ``event_type="promotion_review"`` record via the existing
+          EvolutionMemory surface).
+        * Returns the ``PromotionRequest`` to the caller.
+
+        Hard safety contract:
+
+        * Never calls ``approve()`` / ``reject()`` / anything that
+          mutates the request's status away from ``PENDING_REVIEW``.
+        * Never mutates the repository. No filesystem, no git, no
+          subprocess. ``PROMOTED`` is reserved for out-of-scope
+          operator tooling.
+        * Never auto-runs. There is no daemon, no tick-loop wiring, and
+          no SDL integration. The host invokes this method explicitly.
+        """
+        gate = self._promotion_gate
+        if gate is None:
+            raise RuntimeError(
+                "Promotion gate is not wired; Atlas.start() must run first."
+            )
+        assessment = gate.assess(
+            run_result,
+            proposal_id=proposal_id,
+            change_manifest=change_manifest,
+        )
+        return gate.request_review(
+            assessment,
+            development_record_id=development_record_id,
+        )
+
+
     # ------------------------------------------------------------------
     # Composition root — public entry point
     # ------------------------------------------------------------------
@@ -1592,6 +1679,11 @@ class Atlas:
 
         # Domain 6 — Evolution intelligence, knowledge, governance, gateway
         self._init_evolution_pipeline()
+
+        # Stage H: kernel-owned PromotionGate (read-only review view +
+        # manual bridge). Wired after Domain 6 so EvolutionMemory exists.
+        # No auto-run; nothing executes; nothing changes the repository.
+        self._init_promotion_gate()
 
         # Domain 6b — Phase F1: environment observation foundation
         # Purely observational; wiring only, nothing auto-runs.
@@ -2259,6 +2351,29 @@ class Atlas:
                 application_engine=self._application_engine,
                 storage=self._autonomy_storage,
             )
+
+    # ------------------------------------------------------------------
+    # Stage H — Promotion gate foundation (kernel-owned)
+    # ------------------------------------------------------------------
+
+    def _init_promotion_gate(self) -> None:
+        """Stage H: wire the kernel-owned ``PromotionGate`` over the
+        kernel-owned ``EvolutionMemory``.
+
+        Composed once during ``start()`` after ``_init_evolution_pipeline()``
+        so that ``self._evolution_memory`` exists. Pure wiring — no
+        filesystem, git, or subprocess behavior; no auto-run; no
+        integration with ``SelfDevelopmentLoop`` or the runtime
+        coordinator. The gate is used by:
+
+        * ``pending_promotion_reviews()`` — read-only view,
+        * ``submit_development_for_promotion_review()`` — manual
+          bridge that opens PENDING_REVIEW audit rows carrying
+          bounded change evidence.
+        """
+        self._promotion_gate = PromotionGate(
+            evolution_memory=self._evolution_memory,
+        )
 
     # ------------------------------------------------------------------
     # Domain 7 — Runtime, Services & Container
