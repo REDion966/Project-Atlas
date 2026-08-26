@@ -150,6 +150,10 @@ from atlas.research.capability_handlers import ResearchCapabilityFactory
 from atlas.research.coordinator import ConcreteResearchCoordinator
 from atlas.research.acquisition import InformationAcquisitionService
 from atlas.research.repository_map import RepositoryMapBuilder
+from atlas.evolution.promotion_gate import (
+    PromotionGate,
+    PromotionRecommendation,
+)
 from atlas.evolution.freshness.assessor import KnowledgeFreshnessAssessor
 from atlas.research.evolution_integration import (
     ResearchIngestBridge,
@@ -1328,6 +1332,29 @@ class Atlas:
 
             logging.getLogger(__name__).exception(
                 "Failed to store development history record for proposal %s",
+                getattr(proposal, "proposal_id", "?"),
+            )
+
+        # --- Stage E: promotion-review foundation ---
+        # Assess every finished run; verified successes automatically open a
+        # PENDING_REVIEW promotion request (audit + human boundary prep).
+        # Fail-soft: promotion review can never break development.
+        try:
+            gate = PromotionGate(evolution_memory=self._evolution_memory)
+            assessment = gate.assess(
+                result,
+                proposal_id=getattr(proposal, "proposal_id", ""),
+            )
+            if (
+                assessment.recommendation
+                is PromotionRecommendation.READY_FOR_PROMOTION
+            ):
+                gate.request_review(assessment)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed promotion-review assessment for proposal %s",
                 getattr(proposal, "proposal_id", "?"),
             )
 
