@@ -1253,6 +1253,12 @@ class Atlas:
         the E2 sandbox / E4 pytest path). It reuses the existing governance
         approval contract and never touches the real repository.
 
+        Phase 13.5 development-history closure: after the loop returns, one
+        ``event_type="development"`` EvolutionRecord is stored best-effort in
+        EvolutionMemory (and the knowledge pipeline is consolidated) so the
+        evolution history and F7 insight feedback see development runs. The
+        returned ``DevelopmentRunResult`` is never affected by persistence.
+
         Args:
             proposal: An already-approved ``EvolutionProposal`` carrying the
                 development workload in its metadata.
@@ -1266,7 +1272,94 @@ class Atlas:
             raise RuntimeError(
                 "Self-development loop is not wired; Atlas.start() must run first."
             )
-        return self._self_development_loop.run(proposal, max_iterations=max_iterations)
+        result = self._self_development_loop.run(
+            proposal, max_iterations=max_iterations
+        )
+
+        # --- Development Outcome → Evolution History bridge (Phase 13.5) ---
+        # Best-effort on every step: a missing memory skips persistence,
+        # storage failures are swallowed, and consolidation failures never
+        # propagate. The DevelopmentRunResult is always returned unchanged.
+        try:
+            record = self._build_development_record(proposal, result)
+            if self._evolution_memory is not None and record is not None:
+                self._evolution_memory.store_record(record)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to store development history record for proposal %s",
+                getattr(proposal, "proposal_id", "?"),
+            )
+
+        if self._knowledge_pipeline is not None:
+            try:
+                self._knowledge_pipeline.consolidate()
+            except Exception:
+                pass
+
+        return result
+
+    def _build_development_record(self, proposal, result):
+        """Construct the ``development`` EvolutionRecord for an SDL run.
+
+        Pure construction from the already-available ``DevelopmentRunResult``
+        evidence. Returns None only when no evidence can be derived.
+        """
+        from atlas.evolution.models import EvolutionRecord
+        from atlas.evolution.development_models import DevelopmentOutcomeStatus
+
+        from datetime import datetime
+
+        last_outcome = result.outcomes[-1] if result.outcomes else None
+        success = result.status == DevelopmentOutcomeStatus.SUCCESS
+
+        related_ids = [proposal.proposal_id]
+        if result.plan is not None and getattr(result.plan, "plan_id", ""):
+            related_ids.append(result.plan.plan_id)
+
+        evidence: dict = {
+            "terminal_status": result.status.name,
+            "iterations_used": result.iterations_used,
+            "success": success,
+            "message": result.message,
+        }
+        if last_outcome is not None:
+            evidence.update(
+                {
+                    "verification_passed": bool(last_outcome.verification_passed),
+                    "rollback_occurred": bool(last_outcome.rollback_occurred),
+                    "test_outcome": last_outcome.test_outcome,
+                    "changed_files": list(last_outcome.changed_files),
+                    "final_iteration": last_outcome.iteration,
+                }
+            )
+            learning_ref = last_outcome.metadata.get("learning_insight_id", "")
+            if learning_ref:
+                evidence["learning_evidence"] = learning_ref
+            outcome_id = (
+                getattr(last_outcome, "outcome_id", "")
+                or last_outcome.metadata.get("outcome_id", "")
+            )
+            if outcome_id:
+                related_ids.append(str(outcome_id))
+
+        counter = getattr(self, "_development_record_counter", 0)
+        counter += 1
+        self._development_record_counter = counter
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        return EvolutionRecord(
+            record_id=f"DEV-{timestamp}-{counter:04d}",
+            event_type="development",
+            description=(
+                f"Self-development run for proposal "
+                f"'{proposal.proposal_id}': {result.status.name}. "
+                f"{result.message[:150]}"
+            ),
+            related_ids=related_ids,
+            metadata=evidence,
+        )
 
     # ------------------------------------------------------------------
     # Composition root — public entry point
