@@ -33,6 +33,11 @@ from atlas.evolution.models import (
     ExecutionResult,
     ProposalStatus,
 )
+from atlas.evolution.execution_plan import (
+    ExecutionActionResult,
+    build_execution_plan,
+    verify_execution_results,
+)
 
 
 class _TrackableProposal:
@@ -86,6 +91,8 @@ class EvolutionExecutionEngine:
         outcome_tracker: Any = None,
         execution_level: ExecutionLevel = ExecutionLevel.ADMINISTRATIVE,
         knowledge_pipeline: Any = None,
+        action_executor: Any = None,
+        result_validator: Any = None,
     ):
         """
         Initialise the execution engine.
@@ -102,12 +109,23 @@ class EvolutionExecutionEngine:
             knowledge_pipeline: Optional EvolutionKnowledgePipeline for
                 automatic consolidation of execution records.
                 Skipped if None.
+            action_executor: Optional callable(execution_plan) -> list of
+                per-action outcomes for CONTROLLED execution of a derived
+                ExecutionPlan. When None (default), the plan is executed
+                administratively — declared and verified, but no external
+                effect. This is the sole sanctioned seam for future governed
+                scopes; it runs only inside execute(), after approval.
+            result_validator: Optional callable(plan, results, final_status)
+                -> (verified: bool, summary: str). Defaults to the pure
+                ``verify_execution_results`` check when None.
         """
         self._approval_manager = approval_manager
         self._evolution_memory = evolution_memory
         self._outcome_tracker = outcome_tracker
         self._execution_level = execution_level
         self._knowledge_pipeline = knowledge_pipeline
+        self._action_executor = action_executor
+        self._result_validator = result_validator or verify_execution_results
         self._record_counter = 0
 
     # ------------------------------------------------------------------
@@ -327,9 +345,36 @@ class EvolutionExecutionEngine:
                 error=error,
             )
 
-        # Update proposal status to IMPLEMENTED
-        proposal.status = ProposalStatus.IMPLEMENTED
-        proposal.metadata["executed_at"] = datetime.now().isoformat()
+        # Controlled Self-Improvement loop (Phase 13.5+): derive the bounded
+        # ExecutionPlan, attempt its actions through the injected executor
+        # (administrative no-effect by default), then validate the results.
+        plan = build_execution_plan(proposal)
+        action_results = self._run_plan_actions(plan)
+
+        all_actions_ok = all(r.success for r in action_results)
+        # Validation sees the INTENDED final status; the actual flip to
+        # IMPLEMENTED happens only after verification passes, so a rejected
+        # attempt can never claim IMPLEMENTED.
+        intended_status = (
+            ProposalStatus.IMPLEMENTED.name
+            if all_actions_ok
+            else proposal.status.name
+        )
+        verified, verification_summary = self._result_validator(
+            plan,
+            action_results,
+            intended_status,
+        )
+
+        if verified and all_actions_ok:
+            proposal.status = ProposalStatus.IMPLEMENTED
+            proposal.metadata["executed_at"] = datetime.now().isoformat()
+
+        proposal.metadata["execution_plan_id"] = plan.plan_id
+        proposal.metadata["verification"] = {
+            "verified": verified,
+            "summary": verification_summary,
+        }
 
         # Persist the updated proposal so status is not lost on restart
         if self._evolution_memory is not None:
@@ -339,7 +384,7 @@ class EvolutionExecutionEngine:
         # execution record below can carry the tracked_goal_id (F7: a
         # single complete representation of the execution outcome).
         tracked_goal_id = ""
-        if self._outcome_tracker is not None:
+        if verified and self._outcome_tracker is not None:
             try:
                 goal = self._outcome_tracker.track_recommendation(
                     recommendation=self._as_trackable(proposal),
@@ -352,12 +397,31 @@ class EvolutionExecutionEngine:
                 pass
 
         # Create and store the execution record with its outcome metadata.
+        # An unverified attempt is recorded as a FAILURE — every execution
+        # attempt produces exactly one record and failures are never
+        # silently discarded (F7 learning-feedback contract).
         record = self._create_execution_record(
             proposal,
-            success=True,
-            error="",
-            status=ProposalStatus.IMPLEMENTED.name,
+            success=verified,
+            error="" if verified else verification_summary,
+            status=proposal.status.name,
             tracked_goal_id=tracked_goal_id,
+            extra_metadata={
+                "execution_plan": plan.to_dict(),
+                "action_results": [
+                    {
+                        "action_type": r.action.action_type,
+                        "target": r.action.target,
+                        "success": r.success,
+                        "detail": r.detail,
+                    }
+                    for r in action_results
+                ],
+                "verification": {
+                    "verified": verified,
+                    "summary": verification_summary,
+                },
+            },
         )
         if self._evolution_memory is not None:
             self._evolution_memory.store_record(record)
@@ -370,12 +434,50 @@ class EvolutionExecutionEngine:
                 pass
 
         return ExecutionResult(
-            success=True,
+            success=verified,
             proposal_id=proposal.proposal_id,
-            status=ProposalStatus.IMPLEMENTED.name,
+            status=proposal.status.name,
             record_id=record.record_id,
             tracked_goal_id=tracked_goal_id,
+            error="" if verified else verification_summary,
         )
+
+    def _run_plan_actions(self, plan) -> list:
+        """
+        Attempt each planned action through the injected executor.
+
+        Without an injected executor every action yields an administrative
+        success (declared-and-recorded, zero external effect). With one,
+        each action runs individually fail-soft: an exception in one action
+        becomes a failed ExecutionActionResult — it can never raise out of
+        execute() nor skip record creation.
+        """
+        if self._action_executor is None:
+            return [
+                ExecutionActionResult(
+                    action=action,
+                    success=True,
+                    detail="administrative recording (no executor configured)",
+                )
+                for action in plan.actions
+            ]
+
+        results: list[ExecutionActionResult] = []
+        for action in plan.actions:
+            try:
+                outcome = self._action_executor(action)
+                ok = bool(getattr(outcome, "success", True))
+                detail = str(getattr(outcome, "detail", "") or "")
+                results.append(
+                    ExecutionActionResult(action=action, success=ok, detail=detail)
+                )
+            except Exception as exc:
+                results.append(
+                    ExecutionActionResult(
+                        action=action, success=False, detail=str(exc)
+                    )
+                )
+        return results
 
     # ------------------------------------------------------------------
     # Convenience methods (for CLI — accept proposal_id strings)
@@ -692,6 +794,7 @@ class EvolutionExecutionEngine:
         error: str = "",
         status: str = "",
         tracked_goal_id: str = "",
+        extra_metadata: dict | None = None,
     ) -> EvolutionRecord:
         """
         Create an EvolutionRecord documenting a proposal execution.
@@ -709,11 +812,25 @@ class EvolutionExecutionEngine:
             status: Final status name of the proposal after the attempt.
             tracked_goal_id: ID of the TrackedGoal created for this
                 execution (empty when tracking is unavailable).
+            extra_metadata: Optional additional JSON-safe metadata
+                (execution plan, action results, verification evidence)
+                merged into the record's metadata.
 
         Returns:
             An EvolutionRecord with event_type "execution".
         """
         verb = "Executed" if success else "Failed to execute"
+        metadata = {
+            "execution_level": self._execution_level.name,
+            "proposal_title": proposal.title,
+            "proposal_summary": proposal.summary,
+            "success": success,
+            "error": error,
+            "status": status or proposal.status.name,
+            "tracked_goal_id": tracked_goal_id,
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
         return EvolutionRecord(
             record_id=self._next_record_id(),
             event_type="execution",
@@ -722,15 +839,7 @@ class EvolutionExecutionEngine:
                 f"{proposal.title}. {proposal.summary[:100]}"
             ),
             related_ids=[proposal.proposal_id],
-            metadata={
-                "execution_level": self._execution_level.name,
-                "proposal_title": proposal.title,
-                "proposal_summary": proposal.summary,
-                "success": success,
-                "error": error,
-                "status": status or proposal.status.name,
-                "tracked_goal_id": tracked_goal_id,
-            },
+            metadata=metadata,
         )
 
     def _store_execution_failure(
