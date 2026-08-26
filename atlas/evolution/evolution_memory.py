@@ -14,11 +14,13 @@ from typing import Any
 from atlas.evolution.models import (
     ApprovalDecision,
     ApprovalRequest,
+    EvolutionInsight,
     ImprovementPlan,
     ImprovementPriority,
     EvolutionProposal,
     EvolutionRecord,
     Observation,
+    ObservationCategory,
     ProposalStatus,
     Weakness,
 )
@@ -27,6 +29,89 @@ from atlas.evolution.models import (
 # ---------------------------------------------------------------------------
 # Module-level helpers: dict → domain model (for restore from storage)
 # ---------------------------------------------------------------------------
+
+
+def _evolution_insight_to_dict(insight: EvolutionInsight) -> dict:
+    """
+    Serialize an EvolutionInsight to a JSON-safe dictionary.
+
+    The key set matches the ``evolution_insights`` schema contract shared
+    with ``SQLiteEvolutionStorage.store_insight`` and with
+    ``EvolutionIntelligenceEngine._insight_to_dict`` so that any writer
+    produces rows any reader can reconstruct.
+    """
+    return {
+        "insight_id": insight.insight_id,
+        "proposal_id": insight.proposal_id,
+        "execution_record_id": insight.execution_record_id,
+        "tracked_goal_id": insight.tracked_goal_id,
+        "outcome": insight.outcome,
+        "confidence": insight.confidence,
+        "effectiveness_score": insight.effectiveness_score,
+        "evidence_summary": insight.evidence_summary,
+        "evidence_count": insight.evidence_count,
+        "evidence_quality": insight.evidence_quality,
+        "regression_risk": insight.regression_risk,
+        "analyzed_at": insight.analyzed_at.isoformat()
+        if hasattr(insight.analyzed_at, "isoformat")
+        else str(insight.analyzed_at),
+        "proposal_title": insight.proposal_title,
+        "proposal_summary": insight.proposal_summary,
+        "metadata": dict(insight.metadata),
+    }
+
+
+def _evolution_insight_from_dict(data: dict) -> EvolutionInsight:
+    """Reconstruct an EvolutionInsight from a dictionary."""
+    analyzed_at = data.get("analyzed_at", "")
+    if isinstance(analyzed_at, str):
+        try:
+            analyzed_at = datetime.fromisoformat(analyzed_at)
+        except (ValueError, TypeError):
+            analyzed_at = datetime.now()
+
+    return EvolutionInsight(
+        insight_id=data.get("insight_id", ""),
+        proposal_id=data.get("proposal_id", ""),
+        execution_record_id=data.get("execution_record_id", ""),
+        tracked_goal_id=data.get("tracked_goal_id", ""),
+        outcome=data.get("outcome", "inconclusive"),
+        confidence=data.get("confidence", 0.0),
+        effectiveness_score=data.get("effectiveness_score", 0.0),
+        evidence_summary=data.get("evidence_summary", ""),
+        evidence_count=data.get("evidence_count", 0),
+        evidence_quality=data.get("evidence_quality", 0.0),
+        regression_risk=data.get("regression_risk", 0.0),
+        analyzed_at=analyzed_at,
+        proposal_title=data.get("proposal_title", ""),
+        proposal_summary=data.get("proposal_summary", ""),
+        metadata=data.get("metadata", {}),
+    )
+
+
+def _observation_from_dict(data: dict) -> Observation:
+    """Reconstruct an Observation from a persisted dictionary."""
+    timestamp = data.get("timestamp", "")
+    if isinstance(timestamp, str):
+        try:
+            timestamp = datetime.fromisoformat(timestamp)
+        except (ValueError, TypeError):
+            timestamp = datetime.now()
+    category = data.get("category", "")
+    if isinstance(category, str):
+        category = getattr(ObservationCategory, category, None) or (
+            ObservationCategory.SYSTEM_HEALTH
+        )
+    return Observation(
+        category=category,
+        metric_name=data.get("metric_name", ""),
+        value=data.get("value"),
+        unit=data.get("unit", ""),
+        description=data.get("description", ""),
+        timestamp=timestamp,
+        source=data.get("source", ""),
+        metadata=data.get("metadata", {}) or {},
+    )
 
 
 def _proposal_from_dict(data: dict) -> EvolutionProposal:
@@ -200,6 +285,7 @@ class EvolutionMemory:
         max_observations: int = 1000,
         max_proposals: int = 200,
         max_records: int = 500,
+        max_insights: int = 500,
         storage: Any = None,
     ) -> None:
         if max_observations <= 0:
@@ -208,16 +294,21 @@ class EvolutionMemory:
             raise ValueError("max_proposals must be a positive integer")
         if max_records <= 0:
             raise ValueError("max_records must be a positive integer")
+        if max_insights <= 0:
+            raise ValueError("max_insights must be a positive integer")
 
         self._max_observations = max_observations
         self._max_proposals = max_proposals
         self._max_records = max_records
+        self._max_insights = max_insights
         self._storage = storage
 
         self._observations: deque[Observation] = deque(maxlen=max_observations)
         self._proposals: deque[EvolutionProposal] = deque(maxlen=max_proposals)
         self._approval_requests: deque[ApprovalRequest] = deque()
         self._records: deque[EvolutionRecord] = deque(maxlen=max_records)
+        # Phase 13.5 — durable outcome insights (bounded, newest appended).
+        self._insights: deque[EvolutionInsight] = deque(maxlen=max_insights)
 
     @property
     def storage(self):
@@ -262,6 +353,23 @@ class EvolutionMemory:
         except Exception:
             logger.exception("Failed to restore evolution records from storage")
 
+        # Phase 13.5 — persisted observations feed the bounded observation
+        # deque so planner aggregation sees pre-restart runtime history.
+        try:
+            for obs_dict in self._storage.load_observations():
+                observation = _observation_from_dict(obs_dict)
+                self._observations.append(observation)
+        except Exception:
+            logger.exception("Failed to restore evolution observations from storage")
+
+        try:
+            for ins_dict in self._storage.load_insights():
+                insight = _evolution_insight_from_dict(ins_dict)
+                if insight.insight_id:
+                    self._insights.append(insight)
+        except Exception:
+            logger.exception("Failed to restore evolution insights from storage")
+
     def _try_storage_write(self, method_name: str, data: dict) -> None:
         """Call a storage write method, degrading gracefully on failure."""
         if self._storage is None or not self._storage.is_available():
@@ -273,6 +381,8 @@ class EvolutionMemory:
                 self._storage.store_approval_request(data)
             elif method_name == "store_record":
                 self._storage.store_record(data)
+            elif method_name == "store_insight":
+                self._storage.store_insight(data)
         except Exception:
             import logging
             logging.getLogger(__name__).exception(
@@ -490,6 +600,55 @@ class EvolutionMemory:
         return len(self._records)
 
     # ------------------------------------------------------------------
+    # Evolution insights (Phase 13.5)
+    # ------------------------------------------------------------------
+
+    def store_insight(self, insight: EvolutionInsight) -> None:
+        """
+        Store an outcome insight in memory and persist it best-effort.
+
+        Memory first: the in-memory path can never fail because of storage.
+        The storage write goes through the same governed adapter used for
+        proposals/records; failures are logged and swallowed.
+        """
+        self._insights.append(insight)
+        self._try_storage_write("store_insight", _evolution_insight_to_dict(insight))
+
+    def get_insight(self, insight_id: str) -> EvolutionInsight | None:
+        """Retrieve an insight by its ID, or None."""
+        for insight in self._insights:
+            if insight.insight_id == insight_id:
+                return insight
+        return None
+
+    def get_insights(
+        self,
+        proposal_id: str | None = None,
+        n: int = 50,
+    ) -> list[EvolutionInsight]:
+        """
+        Return the most recent n insights, newest first.
+
+        Args:
+            proposal_id: Optional filter by originating proposal.
+            n: Maximum number of insights to return.
+        """
+        if n <= 0:
+            return []
+        if proposal_id is not None:
+            filtered = [
+                ins for ins in reversed(self._insights)
+                if ins.proposal_id == proposal_id
+            ]
+            return filtered[:n]
+        return list(reversed(self._insights))[:n]
+
+    @property
+    def insight_count(self) -> int:
+        """Return the number of stored evolution insights."""
+        return len(self._insights)
+
+    # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
 
@@ -500,6 +659,7 @@ class EvolutionMemory:
             "proposal_count": self.proposal_count,
             "approval_request_count": self.approval_request_count,
             "record_count": self.record_count,
+            "insight_count": self.insight_count,
             "pending_approvals": len(self.get_pending_approval_requests()),
         }
 
@@ -509,3 +669,4 @@ class EvolutionMemory:
         self._proposals.clear()
         self._approval_requests.clear()
         self._records.clear()
+        self._insights.clear()

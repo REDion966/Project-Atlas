@@ -508,8 +508,30 @@ class EvolutionIntelligenceEngine:
         self,
         insight: EvolutionInsight,
     ) -> None:
-        """Persist an insight dict to storage, best-effort."""
-        if self._storage is None:
+        """
+        Persist an insight, best-effort.
+
+        Phase 13.5: when an EvolutionMemory is wired, the write goes through
+        its store_insight() so the durable insight layer has ONE persistence
+        path. When the engine's own adapter differs from the memory's (or
+        the memory has none), the legacy direct-adapter write also runs so
+        mixed-wiring configurations keep persisting to the engine's storage.
+        SQLiteEvolutionStorage uses INSERT OR REPLACE on insight_id, so a
+        coincidental double write remains idempotent.
+        """
+        memory_adapter = None
+        if self._evolution_memory is not None:
+            try:
+                self._evolution_memory.store_insight(insight)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Failed to persist insight %s via evolution memory",
+                    insight.insight_id,
+                )
+            memory_adapter = getattr(self._evolution_memory, "storage", None)
+
+        if self._storage is None or self._storage is memory_adapter:
             return
         if not self._storage.is_available():
             return
