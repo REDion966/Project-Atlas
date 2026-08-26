@@ -178,6 +178,11 @@ class EvolutionExecutionEngine:
                 error=str(exc),
             )
 
+        # Decision-persistence closure: the decided request must survive a
+        # restart, otherwise an executed proposal reappears PENDING_APPROVAL.
+        if self._evolution_memory is not None:
+            self._evolution_memory.update_approval_request(request)
+
         return self.execute(
             proposal=proposal,
             latest_experience_id=latest_experience_id,
@@ -223,6 +228,12 @@ class EvolutionExecutionEngine:
 
         self._store_rejection_record(proposal, request)
 
+        # Decision-persistence closure: rejected proposals must not fall
+        # back to their pre-decision status after a restart.
+        if self._evolution_memory is not None:
+            self._evolution_memory.store_proposal(proposal)
+            self._evolution_memory.update_approval_request(request)
+
         return ExecutionResult(
             success=True,
             proposal_id=proposal.proposal_id,
@@ -264,6 +275,12 @@ class EvolutionExecutionEngine:
                 proposal_id=proposal.proposal_id,
                 error=str(exc),
             )
+
+        # Decision-persistence closure: deferred proposals must not fall
+        # back to their pre-decision status after a restart.
+        if self._evolution_memory is not None:
+            self._evolution_memory.store_proposal(proposal)
+            self._evolution_memory.update_approval_request(request)
 
         return ExecutionResult(
             success=True,

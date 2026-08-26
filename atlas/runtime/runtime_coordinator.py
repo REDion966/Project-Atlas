@@ -955,6 +955,23 @@ class RuntimeCoordinator:
 
         state.evolution_observations = observations
 
+        # Phase 13.5 decision-pipeline closure: mirror the collected
+        # observations into EvolutionMemory so runtime history survives a
+        # restart and remains actionable for weakness aggregation.
+        # Memory-first best-effort: persist_observation already degrades
+        # gracefully, and any unexpected failure here must never break the
+        # pipeline stage.
+        if self._evolution_memory is not None and observations:
+            try:
+                for observation in observations:
+                    self._evolution_memory.persist_observation(observation)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "Failed to persist evolution observations from pipeline"
+                )
+
         return StageResult(
             stage=StageType.EVOLUTION_OBSERVATION,
             status=StageStatus.SUCCESS,

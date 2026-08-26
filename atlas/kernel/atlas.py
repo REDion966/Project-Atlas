@@ -1770,6 +1770,13 @@ class Atlas:
         self._evolution_memory = EvolutionMemory(storage=self._evolution_storage)
         self._evolution_memory.restore()
 
+        # Phase 13.5 decision-pipeline closure: replay restored observations
+        # into the scheduler's working set so pre-restart runtime history
+        # remains actionable for weakness aggregation (oldest-first).
+        restored_observations = self._evolution_memory.get_observations(n=1000)
+        if restored_observations:
+            self._self_observation_engine.seed(list(reversed(restored_observations)))
+
         # --- Phase 13.5: Create the Persistent Evolution Knowledge layer ---
         self._knowledge_repository = EvolutionKnowledgeRepository(
             storage=self._evolution_storage,

@@ -57,6 +57,26 @@ class SelfObservationEngine:
         """
         self._observations.append(observation)
 
+    def seed(self, observations: list[Observation]) -> int:
+        """
+        Seed the working set from persisted observations (oldest first).
+
+        Phase 13.5 decision-pipeline closure: after EvolutionMemory.restore()
+        replays pre-restart observations, they are seeded here so weakness
+        aggregation (planner metric windows) keeps its historical context
+        instead of restarting from an empty window. Purely in-memory —
+        seeding never writes back to storage and never raises on empty input.
+
+        Args:
+            observations: Restored observations in oldest-first order.
+
+        Returns:
+            The number of observations seeded.
+        """
+        for observation in observations:
+            self._observations.append(observation)
+        return len(observations)
+
     def observe_runtime_metrics(
         self,
         avg_response_time_ms: float,

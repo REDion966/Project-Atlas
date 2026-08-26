@@ -536,6 +536,27 @@ class EvolutionMemory:
         self._approval_requests.append(request)
         self._try_storage_write("store_approval_request", _approval_request_to_dict(request))
 
+    def update_approval_request(self, request: ApprovalRequest) -> None:
+        """
+        Re-store an approval request after its decision changed.
+
+        Phase 13.5 decision-persistence closure: approve/reject/defer mutate
+        the request in place, so the in-memory entry is replaced by identity
+        (no duplicate rows, pending counts stay correct) and the durable row
+        is upserted best-effort (SQLiteEvolutionStorage uses INSERT OR
+        REPLACE on request_id). Without this, a decided request would
+        reappear PENDING after a restart.
+        """
+        for index, existing in enumerate(self._approval_requests):
+            if existing.request_id == request.request_id:
+                self._approval_requests[index] = request
+                break
+        else:
+            self._approval_requests.append(request)
+        self._try_storage_write(
+            "store_approval_request", _approval_request_to_dict(request)
+        )
+
     def get_approval_request(
         self,
         request_id: str,
