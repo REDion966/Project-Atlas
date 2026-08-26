@@ -52,7 +52,11 @@ class DevelopmentPlanner:
     * The planner never constructs a sandbox executor or executes code.
     """
 
-    def __init__(self, repository_map_provider=None) -> None:
+    def __init__(
+        self,
+        repository_map_provider=None,
+        planning_context_provider=None,
+    ) -> None:
         """
         Initialise the planner.
 
@@ -66,8 +70,14 @@ class DevelopmentPlanner:
                 of repository-validation problems — an absent map, a None
                 snapshot, or a raising provider all preserve the historical
                 behavior exactly.
+            planning_context_provider: Optional zero-argument callable
+                returning a bounded, JSON-safe ``PlanningContext``
+                (Stage D) — attached verbatim as advisory
+                ``metadata["planning_context"]`` on produced plans.
+                Fail-soft: provider exceptions leave plans untouched.
         """
         self._repository_map_provider = repository_map_provider
+        self._planning_context_provider = planning_context_provider
         self._plan_counter = 0
 
     def plan(self, proposal: EvolutionProposal) -> DevelopmentPlan:
@@ -101,6 +111,28 @@ class DevelopmentPlanner:
         validation = self._validate_targets_against_repository(affected_files)
         if validation is not None:
             development_plan.metadata["repository_validation"] = validation
+
+        # Stage D — context-aware planning: attach the kernel-supplied
+        # PlanningContext (evolution history, development outcomes,
+        # repository impact) as advisory metadata. Fail-soft.
+        if self._planning_context_provider is not None:
+            try:
+                context = self._planning_context_provider()
+                # Accept either a plain dict or a PlanningContext object
+                # (flattened to its JSON-safe metadata + confidence).
+                if not isinstance(context, dict) and hasattr(
+                    context, "metadata"
+                ):
+                    flattened = dict(getattr(context, "metadata", {}) or {})
+                    flattened.setdefault(
+                        "overall_confidence",
+                        getattr(context, "overall_confidence", 0.0),
+                    )
+                    context = flattened
+                if isinstance(context, dict) and context:
+                    development_plan.metadata["planning_context"] = context
+            except Exception:
+                pass
 
         return development_plan
 

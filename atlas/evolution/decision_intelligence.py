@@ -60,6 +60,7 @@ class DecisionIntelligenceEngine:
         self,
         knowledge_query: EvolutionKnowledgeQuery | None = None,
         repository_map_provider: Any = None,
+        evolution_context_provider: Any = None,
     ) -> None:
         """
         Initialise the engine with read-only context surfaces.
@@ -71,11 +72,19 @@ class DecisionIntelligenceEngine:
                 returning an already-built ``RepositoryMap`` (or None).
                 Stage A1: the engine only CONSUMES already-built maps via
                 this provider — it never triggers repository scanning.
-                When present, ``get_planning_context()`` adds a small
-                JSON-safe ``"repository"`` section to the context metadata.
+            evolution_context_provider: Optional zero-argument callable
+                returning a bounded, JSON-safe dictionary of evolution
+                history evidence (Stage D — expected shape::
+
+                    {"history": {...}, "development": {...}}
+
+                ). The dictionary is merged verbatim into the planning
+                context metadata. Fail-soft: provider exceptions yield an
+                empty section. Advisory only — never changes permissions.
         """
         self._query = knowledge_query
         self._repository_map_provider = repository_map_provider
+        self._evolution_context_provider = evolution_context_provider
 
     # ------------------------------------------------------------------
     # Core context production
@@ -101,9 +110,15 @@ class DecisionIntelligenceEngine:
             A populated ``PlanningContext``.
         """
         if self._query is None:
+            metadata: dict[str, Any] = {}
             repository_meta = self._build_repository_metadata()
             if repository_meta:
-                return PlanningContext(metadata={"repository": repository_meta})
+                metadata["repository"] = repository_meta
+            evolution_meta = self._build_evolution_context()
+            if evolution_meta:
+                metadata.update(evolution_meta)
+            if metadata:
+                return PlanningContext(metadata=metadata)
             return PlanningContext()
 
         areas = self._collect_areas(weaknesses)
@@ -124,6 +139,10 @@ class DecisionIntelligenceEngine:
         if repository_meta:
             metadata["repository"] = repository_meta
 
+        evolution_meta = self._build_evolution_context()
+        if evolution_meta:
+            metadata.update(evolution_meta)
+
         return PlanningContext(
             area_adjustments=area_adjustments,
             bottleneck_alerts=bottleneck_alerts,
@@ -132,6 +151,18 @@ class DecisionIntelligenceEngine:
             overall_confidence=overall_confidence,
             metadata=metadata,
         )
+
+    def _build_evolution_context(self) -> dict[str, Any]:
+        """Consume the kernel-supplied evolution history snapshot, fail-soft."""
+        if self._evolution_context_provider is None:
+            return {}
+        try:
+            context = self._evolution_context_provider()
+        except Exception:
+            return {}
+        if not isinstance(context, dict) or not context:
+            return {}
+        return context
 
     def _build_repository_metadata(self) -> dict[str, Any]:
         """Consume the already-built repository map, fail-soft.

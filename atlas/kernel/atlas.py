@@ -1400,6 +1400,112 @@ class Atlas:
             metadata=evidence,
         )
 
+    def _evolution_context_snapshot(self, limit: int = 10) -> dict:
+        """
+        Build a bounded, JSON-safe evolution-history snapshot (Stage D).
+
+        Aggregates the most recent development runs, execution attempts,
+        and insights from EvolutionMemory into the advisory structure
+        consumed by DecisionIntelligenceEngine / DevelopmentPlanner::
+
+            {"history": {"previous_attempts": [...],
+                         "successful_patterns": [...],
+                         "failed_patterns": [...]},
+             "development": {"recent_runs": [...],
+                             "common_failures": [...]}}
+
+        Fail-soft: returns {} when memory is unavailable or anything goes
+        wrong. Bounded by ``limit`` per section — never dumps full history.
+        """
+        memory = self._evolution_memory
+        if memory is None:
+            return {}
+
+        try:
+            development_records = memory.get_records_by_type("development")[
+                :limit
+            ]
+            execution_records = memory.get_records_by_type("execution")[:limit]
+            insights = memory.get_insights(n=limit)
+
+            recent_runs = [
+                {
+                    "record_id": record.record_id,
+                    "proposal_id": (
+                        record.related_ids[0]
+                        if record.related_ids
+                        else ""
+                    ),
+                    "terminal_status": str(
+                        record.metadata.get("terminal_status", "")
+                    ),
+                    "success": bool(record.metadata.get("success", False)),
+                    "iterations_used": record.metadata.get(
+                        "iterations_used", 0
+                    ),
+                }
+                for record in development_records
+            ]
+
+            previous_attempts = [
+                {
+                    "proposal_id": insight.proposal_id,
+                    "outcome": insight.outcome,
+                    "record_id": insight.execution_record_id,
+                }
+                for insight in insights
+            ]
+
+            successful_patterns = [
+                {
+                    "proposal_id": insight.proposal_id,
+                    "evidence_summary": insight.evidence_summary[:120],
+                }
+                for insight in insights
+                if insight.outcome == "success"
+            ]
+            failed_patterns = [
+                {
+                    "proposal_id": insight.proposal_id,
+                    "evidence_summary": insight.evidence_summary[:120],
+                }
+                for insight in insights
+                if insight.outcome == "failure"
+            ]
+
+            # Most recent distinct failure signals across execution and
+            # development records (bounded, deduplicated).
+            common_failures: list[str] = []
+            for record in list(execution_records) + list(development_records):
+                if record.metadata.get("success", True):
+                    continue
+                signal = str(
+                    record.metadata.get(
+                        "error", record.metadata.get("test_outcome", "")
+                    )
+                )[:120]
+                if signal and signal not in common_failures:
+                    common_failures.append(signal)
+
+            return {
+                "history": {
+                    "previous_attempts": previous_attempts,
+                    "successful_patterns": successful_patterns,
+                    "failed_patterns": failed_patterns,
+                },
+                "development": {
+                    "recent_runs": recent_runs,
+                    "common_failures": common_failures[:limit],
+                },
+            }
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to build evolution context snapshot"
+            )
+            return {}
+
     # ------------------------------------------------------------------
     # Composition root — public entry point
     # ------------------------------------------------------------------
@@ -1944,6 +2050,7 @@ class Atlas:
         self._decision_intelligence = DecisionIntelligenceEngine(
             knowledge_query=self._knowledge_query,
             repository_map_provider=lambda: self._repository_map,
+            evolution_context_provider=self._evolution_context_snapshot,
         )
 
         # --- Phase 11.0: Create the EvolutionExecutionEngine ---
@@ -2047,6 +2154,11 @@ class Atlas:
         # validation — it never triggers a scan itself.
         self._development_planner = DevelopmentPlanner(
             repository_map_provider=lambda: self._repository_map,
+            planning_context_provider=lambda: (
+                self._decision_intelligence.get_planning_context()
+                if self._decision_intelligence is not None
+                else None
+            ),
         )
         learning_memory = getattr(self._learning_engine, "memory", None)
         self._self_development_loop = SelfDevelopmentLoop(
