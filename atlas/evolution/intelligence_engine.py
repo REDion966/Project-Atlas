@@ -47,7 +47,7 @@ class EvolutionIntelligenceEngine:
       analyze_proposal()
           │
           ├── EvolutionMemory.get_proposal()
-          ├── EvolutionMemory.get_records_by_type("execution")
+          ├── EvolutionMemory.get_records_by_type("execution" | "development")
           ├── ExperienceRepository.get_tracked_goals()
           ├── ExperienceRepository.get_experiences_since()
           │
@@ -393,14 +393,24 @@ class EvolutionIntelligenceEngine:
         self,
         proposal_id: str,
     ) -> EvolutionRecord | None:
-        """Find the execution EvolutionRecord for a given proposal."""
+        """
+        Find the analyzable evolution record for a given proposal.
+
+        Stage B: ``development`` records (from the E5 SelfDevelopmentLoop,
+        bridged by Atlas.run_self_development) are first-class learning
+        inputs alongside ``execution`` records. Both carry the same
+        deterministic ``metadata.success`` contract, so the existing
+        analyzer consumes them unchanged. When a proposal has both kinds,
+        the execution record keeps priority (backward compatibility).
+        """
         if self._evolution_memory is None:
             return None
 
-        records = self._evolution_memory.get_records_by_type("execution")
-        for record in records:
-            if proposal_id in record.related_ids:
-                return record
+        for event_type in ("execution", "development"):
+            records = self._evolution_memory.get_records_by_type(event_type)
+            for record in records:
+                if proposal_id in record.related_ids:
+                    return record
         return None
 
     def _find_tracked_goal(
