@@ -134,6 +134,50 @@ class DevelopmentPlanner:
             except Exception:
                 pass
 
+        # Stage G — decision-quality scoring (advisory only). Synthesizes
+        # the evidence already collected above (repository validation +
+        # history/development/research context) into bounded scores.
+        # Pure computation; can never fail planning.
+        try:
+            from atlas.evolution.decision_quality import (
+                compute_decision_quality,
+            )
+
+            context_payload = development_plan.metadata.get(
+                "planning_context", {}
+            ) or {}
+            validation = development_plan.metadata.get(
+                "repository_validation", {}
+            ) or {}
+            research_section = context_payload.get("research") or {}
+
+            quality = compute_decision_quality(
+                overall_confidence=context_payload.get("overall_confidence"),
+                previous_attempts=(
+                    context_payload.get("history", {}).get(
+                        "previous_attempts"
+                    )
+                ),
+                unknown_target_count=len(validation.get("unknown_targets", [])),
+                known_target_count=len(validation.get("known_targets", [])),
+                dependency_count=int(validation.get("dependency_count", 0)),
+                research_confidence=research_section.get("confidence"),
+                has_research_claim_support=bool(
+                    research_section.get("claim_count")
+                ),
+            )
+            development_plan.metadata["decision_quality"] = quality
+            # Mirror onto the proposal so downstream consumers (approval
+            # surfaces, promotion reviews) see decision quality without
+            # needing the plan object. Best-effort: proposals may be
+            # lightweight stand-ins in some callers.
+            proposal_metadata = getattr(proposal, "metadata", None)
+            if isinstance(proposal_metadata, dict):
+                proposal_metadata["decision_quality"] = quality
+        except Exception:
+            # Advisory scoring must never break planning.
+            pass
+
         return development_plan
 
     # ------------------------------------------------------------------
