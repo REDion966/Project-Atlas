@@ -31,6 +31,9 @@ from atlas.evolution.development_models import (
 )
 from atlas.evolution.models import EvolutionProposal, ProposalStatus
 
+# Depth bound for repository impact expansion (dependents-of-dependents).
+IMPACT_MAX_DEPTH: int = 3
+
 
 class DevelopmentPlannerError(Exception):
     """Raised when DevelopmentPlanner cannot produce a plan."""
@@ -49,7 +52,22 @@ class DevelopmentPlanner:
     * The planner never constructs a sandbox executor or executes code.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, repository_map_provider=None) -> None:
+        """
+        Initialise the planner.
+
+        Args:
+            repository_map_provider: Optional zero-argument callable
+                returning an already-built ``RepositoryMap`` (or None).
+                Stage C awareness-only validation: when a map is available,
+                affected-file targets are checked against it and the
+                dependency impact is expanded into plan metadata. The
+                planner NEVER builds a map itself and never fails because
+                of repository-validation problems — an absent map, a None
+                snapshot, or a raising provider all preserve the historical
+                behavior exactly.
+        """
+        self._repository_map_provider = repository_map_provider
         self._plan_counter = 0
 
     def plan(self, proposal: EvolutionProposal) -> DevelopmentPlan:
@@ -69,7 +87,7 @@ class DevelopmentPlanner:
         plan_id = self._next_plan_id()
         affected_files = self._extract_affected_files(proposal)
         steps = self._build_steps(proposal, affected_files)
-        return DevelopmentPlan(
+        development_plan = DevelopmentPlan(
             plan_id=plan_id,
             proposal_id=proposal.proposal_id,
             title=proposal.title,
@@ -78,9 +96,99 @@ class DevelopmentPlanner:
             affected_files=affected_files,
         )
 
+        # Stage C — impact-aware planning validation (awareness only).
+        # The result is advisory metadata; it can never fail planning.
+        validation = self._validate_targets_against_repository(affected_files)
+        if validation is not None:
+            development_plan.metadata["repository_validation"] = validation
+
+        return development_plan
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _validate_targets_against_repository(
+        self,
+        affected_files: list[str],
+    ) -> dict | None:
+        """
+        Validate affected-file targets against the repository map.
+
+        Stage C awareness-only layer. A target is *known* when it matches
+        either a mapped module's dotted name or its relative path; known
+        targets are expanded with their transitive dependents (impact).
+        Unknown targets are preserved and reported — never dropped, never
+        failed. Returns None when no repository context is available
+        (no provider / None snapshot / provider failure), preserving the
+        historical no-map behavior byte for byte.
+        """
+        if self._repository_map_provider is None:
+            return None
+        try:
+            repository_map = self._repository_map_provider()
+        except Exception:
+            return None
+        if repository_map is None:
+            return None
+
+        try:
+            from atlas.research.repository_map import RepositoryMap
+
+            if not isinstance(repository_map, RepositoryMap):
+                return None
+
+            path_to_module = {
+                info.path: info.module for info in repository_map.modules
+            }
+            known_modules = set(path_to_module.values())
+
+            known_targets: list[str] = []
+            unknown_targets: list[str] = []
+            resolved_modules: list[str] = []
+
+            for target in affected_files:
+                module = path_to_module.get(target)
+                if module is None:
+                    dotted = target.replace("/", ".").removesuffix(".py")
+                    if dotted in known_modules:
+                        module = dotted
+                if module is not None:
+                    known_targets.append(target)
+                    resolved_modules.append(module)
+                else:
+                    unknown_targets.append(target)
+
+            impact_expansion: set[str] = set()
+            related_affected_files: set[str] = set()
+            for module in dict.fromkeys(resolved_modules):
+                for dependent in repository_map.impact_set(
+                    module, max_depth=IMPACT_MAX_DEPTH
+                ):
+                    if dependent in resolved_modules:
+                        continue
+                    impact_expansion.add(dependent)
+                    path = next(
+                        (
+                            info.path
+                            for info in repository_map.modules
+                            if info.module == dependent
+                        ),
+                        "",
+                    )
+                    if path:
+                        related_affected_files.add(path)
+
+            return {
+                "known_targets": known_targets,
+                "unknown_targets": unknown_targets,
+                "impact_expansion": sorted(impact_expansion),
+                "related_affected_files": sorted(related_affected_files),
+                "dependency_count": len(impact_expansion),
+            }
+        except Exception:
+            # Awareness must never break planning.
+            return None
 
     def _validate(self, proposal: EvolutionProposal) -> None:
         if proposal.status != ProposalStatus.APPROVED:

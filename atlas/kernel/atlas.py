@@ -2042,7 +2042,12 @@ class Atlas:
         # existing kernel-owned LearningMemory and the governed approval gate.
         # The loop is bounded, never authorizes, and never writes to the real
         # repository. It is kernel-owned (not registered as a gateway service).
-        self._development_planner = DevelopmentPlanner()
+        # Stage C: the planner receives a CACHE-ONLY repository-map provider
+        # (same pattern as DecisionIntelligence) for awareness-only target
+        # validation — it never triggers a scan itself.
+        self._development_planner = DevelopmentPlanner(
+            repository_map_provider=lambda: self._repository_map,
+        )
         learning_memory = getattr(self._learning_engine, "memory", None)
         self._self_development_loop = SelfDevelopmentLoop(
             planner=self._development_planner,
