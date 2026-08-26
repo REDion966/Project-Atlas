@@ -187,6 +187,8 @@ class ImprovementPlan:
         complexity_estimate: Rough complexity estimate (e.g. "low", "medium", "high").
         target_components: List of component paths affected.
         created_at: When the plan was created.
+        metadata: Optional advisory evidence/context (Stage F — e.g. a
+            bounded research-evidence summary). JSON-safe by convention.
     """
 
     plan_id: str
@@ -198,6 +200,7 @@ class ImprovementPlan:
     complexity_estimate: str = "medium"
     target_components: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
+    metadata: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

@@ -58,6 +58,11 @@ class ProposalGenerator:
         """
         Generate a human-readable engineering proposal from an improvement plan.
 
+        Stage F: bounded evidence carried on ``plan.metadata`` (e.g. a
+        research-evidence summary) is copied into the proposal metadata
+        under ``"planning_evidence"`` — advisory only, never overwriting
+        keys already present.
+
         Args:
             plan: The ImprovementPlan to convert into a proposal.
 
@@ -65,6 +70,7 @@ class ProposalGenerator:
             An EvolutionProposal with detailed rationale, risks, and
             implementation approach.
         """
+        planning_evidence = dict(getattr(plan, "metadata", {}) or {})
         return EvolutionProposal(
             proposal_id=self._next_proposal_id(),
             title=plan.title,
@@ -76,6 +82,11 @@ class ProposalGenerator:
             implementation_approach=self._generate_approach(plan),
             plan=plan,
             status=ProposalStatus.DRAFT,
+            metadata=(
+                {"planning_evidence": planning_evidence}
+                if planning_evidence
+                else {}
+            ),
         )
 
     def generate_proposals(

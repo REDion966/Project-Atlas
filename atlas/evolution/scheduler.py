@@ -91,6 +91,7 @@ class EvolutionScheduler:
         decision_intelligence: DecisionIntelligenceEngine | None = None,
         tick_interval: int = 10,
         min_observations: int = 5,
+        research_evidence_provider: Any = None,
     ) -> None:
         """
         Initialise the evolution scheduler.
@@ -116,6 +117,12 @@ class EvolutionScheduler:
                 Default 10. Minimum 1.
             min_observations: Minimum new observations needed to trigger
                 analysis. Default 5. Minimum 1.
+            research_evidence_provider: Optional CACHE-ONLY zero-argument
+                callable returning a bounded research-evidence dict (or
+                None). Stage F: when present, the current evidence snapshot
+                is passed into plan creation — the scheduler NEVER triggers
+                acquisition itself. Absent provider = identical legacy
+                behavior.
         """
         self._observation_engine = observation_engine
         self._improvement_planner = improvement_planner
@@ -126,6 +133,7 @@ class EvolutionScheduler:
         self._governance_engine = governance_engine
         self._knowledge_pipeline = knowledge_pipeline
         self._decision_intelligence = decision_intelligence
+        self._research_evidence_provider = research_evidence_provider
 
         self._tick_interval = max(1, tick_interval)
         self._min_observations = max(1, min_observations)
@@ -285,12 +293,28 @@ class EvolutionScheduler:
                 last_error=self._last_error,
             )
 
-        # Create improvement plan
-        plan = self._improvement_planner.create_improvement_plan(
-            weaknesses,
-            insights=insights,
-            planning_context=planning_context,
-        )
+        # Create improvement plan (Stage F: cache-only research evidence,
+        # when a provider is wired — the scheduler never triggers acquisition)
+        research_evidence = None
+        if self._research_evidence_provider is not None:
+            try:
+                research_evidence = self._research_evidence_provider()
+            except Exception:
+                research_evidence = None
+
+        if research_evidence:
+            plan = self._improvement_planner.create_improvement_plan(
+                weaknesses,
+                insights=insights,
+                planning_context=planning_context,
+                research_evidence=research_evidence,
+            )
+        else:
+            plan = self._improvement_planner.create_improvement_plan(
+                weaknesses,
+                insights=insights,
+                planning_context=planning_context,
+            )
         if plan is None:
             self._last_observation_count = current_count
             return EvolutionSchedulerResult(

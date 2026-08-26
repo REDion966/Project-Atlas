@@ -584,6 +584,7 @@ class ImprovementPlanner:
         weaknesses: list[Weakness],
         insights: list[EvolutionInsight] | None = None,
         planning_context: PlanningContext | None = None,
+        research_evidence: dict | None = None,
     ) -> ImprovementPlan | None:
         """
         Create a single improvement plan from a list of weaknesses.
@@ -594,6 +595,10 @@ class ImprovementPlanner:
         When a PlanningContext is provided, bottleneck alerts and strategy
         suggestions enrich the plan description and benefit estimate.
 
+        Stage F: when bounded research evidence is provided it is attached
+        verbatim as ``plan.metadata["research"]`` — advisory only, never
+        affecting plan structure or authority.
+
         If no weaknesses are provided, returns None.
 
         Args:
@@ -602,6 +607,8 @@ class ImprovementPlanner:
                 enriched planning context.
             planning_context: Optional PlanningContext with consolidated
                 historical evidence.
+            research_evidence: Optional bounded JSON-safe research-evidence
+                summary (see ``atlas.research.evidence_summary``).
 
         Returns:
             An ImprovementPlan targeting the most critical weaknesses,
@@ -673,6 +680,11 @@ class ImprovementPlanner:
             expected_benefit=expected_benefit,
             complexity_estimate=self._estimate_complexity(sorted_weaknesses),
             target_components=target_components,
+            metadata=(
+                {"research": dict(research_evidence)}
+                if research_evidence
+                else {}
+            ),
         )
 
     def create_all_plans(
@@ -680,6 +692,7 @@ class ImprovementPlanner:
         weaknesses: list[Weakness],
         insights: list[EvolutionInsight] | None = None,
         planning_context: PlanningContext | None = None,
+        research_evidence: dict | None = None,
     ) -> list[ImprovementPlan]:
         """
         Create improvement plans for each distinct area with weaknesses.
@@ -708,6 +721,7 @@ class ImprovementPlanner:
                 area_weaknesses,
                 insights=insights,
                 planning_context=planning_context,
+                research_evidence=research_evidence,
             )
             if plan is not None:
                 plans.append(plan)

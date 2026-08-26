@@ -434,6 +434,9 @@ class Atlas:
             self._repository_map_builder = None
         self._repository_map: Any | None = None
 
+        # --- Stage F: latest bounded research evidence (cache-only) ---
+        self._last_research_evidence: dict | None = None
+
         # --- Phase 13.5: Persistent Evolution Knowledge ---
         self._knowledge_consolidator: EvolutionKnowledgeConsolidator | None = None
         self._knowledge_repository: EvolutionKnowledgeRepository | None = None
@@ -867,12 +870,24 @@ class Atlas:
             raise RuntimeError(
                 "Information acquisition is not wired; Atlas.start() must run first."
             )
-        return self._acquisition_service.acquire(
+        result = self._acquisition_service.acquire(
             question=question,
             sources=sources,
             knowledge_refs=knowledge_refs,
             query_id=query_id,
         )
+
+        # Stage F: cache a bounded, JSON-safe summary of the latest
+        # acquisition so planning context and proposals can carry research
+        # evidence. Cache-only — never triggers another acquisition.
+        try:
+            from atlas.research.evidence_summary import summarize_acquisition
+
+            self._last_research_evidence = summarize_acquisition(result)
+        except Exception:
+            pass
+
+        return result
 
     # ------------------------------------------------------------------
     # Phase F9: Governed Development Cycle (manually invoked; bounded)
@@ -1514,7 +1529,7 @@ class Atlas:
                 if signal and signal not in common_failures:
                     common_failures.append(signal)
 
-            return {
+            snapshot = {
                 "history": {
                     "previous_attempts": previous_attempts,
                     "successful_patterns": successful_patterns,
@@ -1525,6 +1540,15 @@ class Atlas:
                     "common_failures": common_failures[:limit],
                 },
             }
+
+            # Stage F: attach the latest bounded research-evidence summary
+            # (cache-only; acquisition itself is never triggered here).
+            research_evidence = self._last_research_evidence
+            if isinstance(research_evidence, dict) and research_evidence:
+                snapshot["research"] = dict(research_evidence)
+
+            return snapshot
+
         except Exception:
             import logging
 
@@ -2288,6 +2312,7 @@ class Atlas:
             decision_intelligence=self._decision_intelligence,
             tick_interval=10,
             min_observations=5,
+            research_evidence_provider=lambda: self._last_research_evidence,
         )
         self._runtime_coordinator.set_evolution_scheduler(self._evolution_scheduler)
 
