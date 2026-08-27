@@ -3,7 +3,7 @@
 Verifies that Atlas.start() wires every Track C component: long-term
 storage, episodic/procedural repositories, the additive recorder consumer,
 governance (GOV-010), capability handlers, lifecycle metadata, and the
-fail-closed ingest bridge.
+governed-sink ingest bridge.
 """
 
 import tempfile
@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+from atlas.evolution.autonomy.models import EvolutionRequestStatus
 from atlas.evolution.governance.models import ScopeType
 from atlas.experience.models import ExperienceOutcome, StructuredExperience
 from atlas.kernel.atlas import Atlas
@@ -77,7 +78,15 @@ class TestLongTermKernelIntegration(unittest.TestCase):
         self.assertIsNotNone(self.atlas._procedure_extractor)
         self.assertIsNotNone(self.atlas._longterm_consolidator)
         self.assertIsNotNone(self.atlas._longterm_ingest_bridge)
-        self.assertIsNone(self.atlas._longterm_ingest_bridge._sink)
+        # The longterm ingest bridge is wired (post-governed-sink) with the
+        # kernel's single GovernanceIngestSink, so consolidation flows through
+        # the governed evolution path rather than failing closed for lack of a
+        # sink (ATLAS_STATE §19).
+        self.assertIsNotNone(self.atlas._longterm_ingest_bridge._sink)
+        self.assertIs(
+            self.atlas._longterm_ingest_bridge._sink,
+            self.atlas._governed_ingest_sink,
+        )
 
     def test_component_metadata_registered(self) -> None:
         self.atlas.start()
@@ -108,13 +117,28 @@ class TestLongTermKernelIntegration(unittest.TestCase):
             experience.experience_id,
         )
 
-    def test_consolidate_capability_fails_closed(self) -> None:
+    def test_consolidate_capability_governed_sink_routed(self) -> None:
+        # memory.consolidate runs a consolidation pass, records the PENDING
+        # audit record, and hands the governed request through the wired
+        # LongTermIngestBridge. With the kernel's governed sink present the
+        # handoff is accepted (success) and a DRAFTED EvolutionRequest is
+        # persisted in the ScheduleStore — nothing bypasses governance and
+        # no repository mutation happens directly in the handler.
         self.atlas.start()
         handler = self.atlas._capability_registry.get("memory.consolidate")
         self.assertIsNotNone(handler)
         result = handler({})  # type: ignore[operator]
-        self.assertFalse(result.success)
-        self.assertIn("sink", result.error)
+        self.assertTrue(result.success)
+        self.assertTrue(result.output["accepted"])
+        request_id = result.output["request_id"]
+        self.assertTrue(request_id)
+        drafted = self.atlas._schedule_store.list_by_status(
+            EvolutionRequestStatus.DRAFTED
+        )
+        self.assertIn(
+            request_id,
+            [req.request_id for req in drafted],
+        )
 
     def test_shutdown_cleans_up(self) -> None:
         self.atlas.start()

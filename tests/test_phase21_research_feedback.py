@@ -26,7 +26,7 @@ selection path:
   K. No duplicate dispatch occurs (coordinator invoked exactly once).
   L. Public CognitionAPI decision payload remains compatible:
      decision.data["reasoning"]["results"] contains the research result.
-  M. ResearchIngestBridge remains fail-closed and is not bypassed.
+  M. ResearchIngestBridge is wired to the governed sink and is not bypassed.
   N. No additional ResearchCoordinator, LearningEngine, LearningMemory,
      planner, router, or dispatcher instances are accidentally created.
 
@@ -448,12 +448,12 @@ class TestPublicPayload:
 
 
 # ---------------------------------------------------------------------------
-# M. ResearchIngestBridge remains fail-closed
+# M. ResearchIngestBridge is wired to the governed sink
 # ---------------------------------------------------------------------------
 
 
-class TestIngestFailClosed:
-    def test_kernel_ingest_bridge_fail_closed_and_not_bypassed(self, isolated_env):
+class TestIngestIsGoverned:
+    def test_kernel_ingest_bridge_wired_not_bypassed(self, isolated_env):
         atlas = Atlas()
         atlas.start()
         try:
@@ -461,13 +461,17 @@ class TestIngestFailClosed:
             coordinator = atlas.research_coordinator
             assert bridge is not None
             assert coordinator is not None
-            # The coordinator is wired to the governed bridge; the bridge
-            # has no sink and therefore fails closed (never bypassed).
+            # The coordinator is wired to the governed bridge; the bridge now
+            # holds the kernel's single GovernanceIngestSink (post-governed-
+            # sink), so ingestion is routed through the governed evolution
+            # path rather than failing closed for lack of a sink (§19).
             assert coordinator.ingest is bridge
-            assert bridge.has_sink is False
+            assert bridge.has_sink is True
+            assert bridge._sink is atlas._governed_ingest_sink
 
             # A research run completes normally while the bridge stays
-            # fail-closed (no knowledge write, no ingestion).
+            # governed (never bypasses governance into KnowledgeManager
+            # directly).
             result = coordinator.run(
                 ResearchQuery(
                     query_id="q-feedback",
@@ -476,7 +480,8 @@ class TestIngestFailClosed:
                 )
             )
             assert result.query_id == "q-feedback"
-            assert bridge.has_sink is False
+            assert bridge.has_sink is True
+            assert bridge._sink is atlas._governed_ingest_sink
         finally:
             atlas.shutdown()
 

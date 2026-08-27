@@ -174,7 +174,15 @@ class TestAdvancedReasoningKernelIntegration(unittest.TestCase):
     def test_recorder_wired(self) -> None:
         self.atlas.start()
         self.assertIsNotNone(self.atlas._advanced_reasoning_recorder)
-        self.assertIsNone(self.atlas._advanced_reasoning_ingest_bridge._sink)
+        # The advanced-reasoning ingest bridge is wired (post-governed-sink)
+        # with the kernel's single GovernanceIngestSink, so distilled
+        # reasoning insights flow through the governed evolution path rather
+        # than failing closed for lack of a sink (ATLAS_STATE §19).
+        self.assertIsNotNone(self.atlas._advanced_reasoning_ingest_bridge._sink)
+        self.assertIs(
+            self.atlas._advanced_reasoning_ingest_bridge._sink,
+            self.atlas._governed_ingest_sink,
+        )
 
     def test_component_metadata_registered(self) -> None:
         self.atlas.start()
