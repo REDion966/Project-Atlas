@@ -548,3 +548,131 @@ class TestKernelBridge:
         assert pending[0]["status"] == "pending_review"
         assert pending[0]["evidence_complete"] is True
         assert pending[0]["manifest_file_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# H3 — detail view for ONE promotion review
+# ---------------------------------------------------------------------------
+
+
+class TestPromotionDetail:
+    """Read-only detail of one promotion review over the kernel-owned
+    promotion-review state. Purely presentational, never mutating."""
+
+    def _verified_run(self):
+        outcome = DevelopmentOutcome(
+            outcome=DevelopmentOutcomeStatus.SUCCESS,
+            proposal_id="PROP-D1",
+            plan_id="PLAN-D1",
+            iteration=1,
+            verification_passed=True,
+            changed_files=["pkg/k.py"],
+            test_outcome="1 passed",
+        )
+        return DevelopmentRunResult(
+            status=DevelopmentOutcomeStatus.SUCCESS,
+            plan=_plan("PROP-D1"),
+            outcomes=[outcome],
+            iterations_used=1,
+            message="ok",
+        )
+
+    def test_detail_from_bridge_submitted_request(self):
+        memory = EvolutionMemory()
+        kernel = _make_kernel_for_bridge(memory)
+        kernel.submit_development_for_promotion_review(
+            self._verified_run(),
+            proposal_id="PROP-D1",
+            change_manifest=build_change_manifest(
+                _code_changes(("pkg/a.py", "alpha"))
+            ),
+        )
+        # The id an operator copies from ``atlas promotion pending``.
+        request_id = kernel.pending_promotion_reviews()[0]["request_id"]
+
+        detail = kernel.promotion_review_details(request_id)
+        assert detail is not None
+        assert detail["proposal_id"] == "PROP-D1"
+        assert detail["status"] == "pending_review"
+        assert detail["risk_level"] == "low"
+        assert detail["recommendation"] == "ready_for_promotion"
+        assert detail["evidence_complete"] is True
+        assert detail["manifest_file_count"] == 1
+        assert detail["verification_status"] == "passed"
+        assert detail["changed_files"] == ["pkg/k.py"]
+
+    def test_unknown_request_id_returns_none(self):
+        memory = EvolutionMemory()
+        kernel = _make_kernel_for_bridge(memory)
+        assert kernel.promotion_review_details("PROM-UNKNOWN") is None
+
+    def test_empty_request_id_returns_none_fail_soft(self):
+        memory = EvolutionMemory()
+        kernel = _make_kernel_for_bridge(memory)
+        assert kernel.promotion_review_details("") is None
+
+    def test_latest_record_status_reported(self):
+        """With append-only storage, a decided request reports the most
+        recent audit row's status/decision rather than the pending seed."""
+        memory = EvolutionMemory()
+        kernel = _make_kernel_for_bridge(memory)
+        kernel.submit_development_for_promotion_review(
+            self._verified_run(),
+            proposal_id="PROP-D2",
+        )
+        request_id = kernel.pending_promotion_reviews()[0]["request_id"]
+        # Simulate the later APPROVED audit row for the same request id.
+        record = memory.get_records_by_type("promotion_review")[0]
+        decided = replace(
+            record,
+            metadata=dict(
+                record.metadata,
+                status="approved",
+                decided_at=datetime.now().isoformat(),
+                decision_comment="ship it",
+            ),
+        )
+        memory.store_record(decided)
+
+        detail = kernel.promotion_review_details(request_id)
+        assert detail is not None
+        assert detail["status"] == "approved"
+        assert detail["decision_comment"] == "ship it"
+
+    def test_detail_is_json_safe(self):
+        memory = EvolutionMemory()
+        kernel = _make_kernel_for_bridge(memory)
+        kernel.submit_development_for_promotion_review(
+            self._verified_run(),
+            proposal_id="PROP-D3",
+            change_manifest=build_change_manifest(
+                _code_changes(("pkg/a.py", "A"))
+            ),
+        )
+        request_id = kernel.pending_promotion_reviews()[0]["request_id"]
+        detail = kernel.promotion_review_details(request_id)
+        json.dumps(detail)  # must not raise
+
+    def test_detail_never_mutates_gate_or_repository(self):
+        memory = EvolutionMemory()
+        kernel = _make_kernel_for_bridge(memory)
+        kernel.submit_development_for_promotion_review(
+            self._verified_run(),
+            proposal_id="PROP-D4",
+        )
+        request_id = kernel.pending_promotion_reviews()[0]["request_id"]
+        before = len(memory.get_records_by_type("promotion_review"))
+        kernel.promotion_review_details(request_id)
+        after = len(memory.get_records_by_type("promotion_review"))
+        assert before == after == 1
+        # And no execution/approval surface was introduced by the view.
+        for forbidden in ("promote", "execute", "apply"):
+            assert not hasattr(kernel, forbidden)
+
+    def test_missing_gate_returns_none(self):
+        from atlas.kernel.atlas import Atlas
+
+        kernel = Atlas.__new__(Atlas)
+        kernel._evolution_memory = None
+        kernel._promotion_gate = None
+        assert kernel.promotion_review_details("ANY") is None

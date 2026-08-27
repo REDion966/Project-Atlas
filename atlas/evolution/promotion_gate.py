@@ -93,6 +93,22 @@ def _clamp01(value: Any) -> float:
     return max(0.0, min(1.0, number))
 
 
+def _iso_or_empty(value: Any) -> str:
+    """Render a datetime as an ISO-8601 string, fail-soft to empty.
+
+    Deterministic and JSON-safe for display. Any non-datetime input that
+    is already a string is passed through as-is.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value) if value else ""
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -497,6 +513,123 @@ class PromotionGate:
             )
         )
         return [item for item, _ in pending]
+
+    def promotion_review_details(self, request_id: str) -> dict[str, Any] | None:
+        """Stage H: read-only detail of ONE promotion review.
+
+        Resolves a single ``promotion_review`` record by ``request_id``
+        (either the record id or the ``metadata["request_id"]`` shim used
+        by bridge/seed records) and projects its full, bounded, JSON-safe
+        evidence — assessment fields, change manifest, and any decision —
+        for operator review. Purely read-only; never approves, rejects,
+        promotes, or mutates anything. Fail-soft: malformed records are
+        skipped and ``None`` is returned when the request is unknown.
+        """
+        if self._evolution_memory is None or not request_id:
+            return None
+
+        try:
+            records = self._evolution_memory.get_records_by_type(
+                "promotion_review"
+            )
+        except Exception:
+            return None
+
+        candidates: list[Any] = []
+        for record in records:
+            try:
+                metadata = dict(getattr(record, "metadata", {}) or {})
+                rid = getattr(record, "record_id", "") or metadata.get(
+                    "request_id", ""
+                )
+                if rid != request_id:
+                    continue
+                candidates.append(record)
+            except Exception:
+                continue
+
+        if not candidates:
+            return None
+
+        # Append-only storage means one request_id may have several audit
+        # rows (PENDING_REVIEW then APPROVED/REJECTED). Deterministically
+        # report the most recently written record's status.
+        try:
+            latest = max(
+                candidates,
+                key=lambda record: (
+                    getattr(record, "timestamp", None) or datetime.min,
+                    getattr(record, "record_id", "") or "",
+                ),
+            )
+        except Exception:
+            latest = candidates[0]
+
+        try:
+            metadata = dict(getattr(latest, "metadata", {}) or {})
+            related_ids = list(getattr(latest, "related_ids", []) or [])
+
+            request_id = (
+                getattr(latest, "record_id", "") or metadata.get("request_id", "")
+            )
+            proposal_id = metadata.get("proposal_id", "")
+            if not proposal_id and related_ids:
+                proposal_id = str(related_ids[0])
+
+            # Assessment may be nested under ``assessment`` (write path) or
+            # absent (thin bridge/seed records). Fail-soft to empty.
+            assessment = metadata.get("assessment")
+            if not isinstance(assessment, dict):
+                assessment = {}
+
+            status = metadata.get("status", "")
+            risk_level = metadata.get("risk_level") or assessment.get(
+                "risk_level", ""
+            )
+            recommendation = metadata.get("recommendation") or assessment.get(
+                "recommendation", ""
+            )
+
+            manifest = assessment.get("change_manifest")
+            if not isinstance(manifest, dict):
+                manifest = metadata.get("change_manifest", {})
+            if not isinstance(manifest, dict):
+                manifest = {}
+            manifest_files = manifest.get("files", [])
+            if not isinstance(manifest_files, list):
+                manifest_files = []
+            manifest_file_count = len(manifest_files)
+
+            # Latest decision, when present (decided_at / decision_comment).
+            decision_comment = metadata.get("decision_comment", "")
+            decided_at = metadata.get("decided_at", "")
+
+            return {
+                "request_id": request_id,
+                "proposal_id": proposal_id,
+                "status": status,
+                "risk_level": risk_level,
+                "recommendation": recommendation,
+                "created_at": _iso_or_empty(
+                    getattr(latest, "timestamp", "") or metadata.get("created_at", "")
+                ),
+                "decided_at": decided_at,
+                "decision_comment": decision_comment,
+                "change_manifest": manifest,
+                "manifest_file_count": manifest_file_count,
+                "evidence_complete": manifest_file_count > 0,
+                "assessment": assessment,
+                "verification_status": assessment.get("verification_status", ""),
+                "test_summary": assessment.get("test_summary", ""),
+                "changed_files": list(assessment.get("changed_files", []))[
+                    :MAX_CHANGED_FILES_LISTED
+                ],
+                "affected_modules": list(
+                    assessment.get("affected_modules", [])
+                )[:MAX_AFFECTED_MODULES_LISTED],
+            }
+        except Exception:
+            return None
 
     # -- internals -----------------------------------------------------------
 

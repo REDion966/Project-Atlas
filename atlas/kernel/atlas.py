@@ -1583,6 +1583,21 @@ class Atlas:
             return []
         return gate.pending_reviews()
 
+    def promotion_review_details(self, request_id: str) -> dict | None:
+        """Stage H: read-only detail of ONE promotion review.
+
+        Resolves a single existing ``promotion_review`` record by its
+        ``request_id`` and returns the bounded, JSON-safe evidence the
+        operator needs to review it (assessment, change manifest,
+        recommendation, decision, etc.). NEVER approves, rejects, promotes,
+        or executes anything. Fail-soft: returns ``None`` when the request
+        is unknown or the gate is not wired.
+        """
+        gate = self._promotion_gate
+        if gate is None or not request_id:
+            return None
+        return gate.promotion_review_details(request_id)
+
     @property
     def promotion_gate(self) -> PromotionGate:
         """Return the kernel-owned Stage H PromotionGate.

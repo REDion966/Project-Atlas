@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from atlas.cli.promotion_commands import cmd_promotion_pending
+from atlas.cli.promotion_commands import cmd_promotion_pending, cmd_promotion_show
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,8 +49,17 @@ def _fake_atlas(pending):
     return SimpleNamespace(pending_promotion_reviews=lambda: pending)
 
 
+def _fake_atlas_show(detail, found=True):
+    return SimpleNamespace(
+        pending_promotion_reviews=lambda: [],
+        promotion_review_details=lambda request_id: (
+            detail if found else None
+        ),
+    )
+
+
 def _args(**overrides):
-    base = {"action": "pending"}
+    base = {"action": "pending", "request_id": ""}
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -103,6 +112,78 @@ class TestPromotionPendingCommand:
         assert "evidence=incomplete" in out
 
 
+class TestPromotionShowCommand:
+    def test_show_renders_full_detail(self):
+        atlas = _fake_atlas_show(
+            {
+                "request_id": "PROM-1",
+                "proposal_id": "PROP-A",
+                "status": "pending_review",
+                "risk_level": "medium",
+                "recommendation": "needs_review",
+                "created_at": "2026-08-27T00:00:00",
+                "decided_at": "",
+                "decision_comment": "",
+                "evidence_complete": True,
+                "manifest_file_count": 1,
+                "verification_status": "passed",
+                "test_summary": "3 passed",
+                "changed_files": ["pkg/a.py"],
+                "change_manifest": {
+                    "files": [
+                        {"path": "pkg/a.py", "size": 5, "excerpt": "A"}
+                    ],
+                    "truncated": False,
+                },
+            }
+        )
+        out = cmd_promotion_show(atlas, _args(action="show", request_id="PROM-1"))
+        assert "Promotion request: PROM-1" in out
+        assert "proposal_id:       PROP-A" in out
+        assert "status:            pending_review" in out
+        assert "risk_level:        medium" in out
+        assert "recommendation:    needs_review" in out
+        assert "evidence:          complete (1 file(s))" in out
+        assert "verification:      passed" in out
+        assert "test_summary:      3 passed" in out
+        assert "pkg/a.py (5 bytes)" in out
+        assert "excerpt:        A" in out or "A" in out
+
+    def test_unknown_request_id(self):
+        atlas = _fake_atlas_show({}, found=False)
+        out = cmd_promotion_show(atlas, _args(action="show", request_id="PROM-X"))
+        assert out == "Promotion request 'PROM-X' not found."
+
+    def test_missing_request_id(self):
+        atlas = _fake_atlas_show({})
+        out = cmd_promotion_show(atlas, _args(action="show", request_id=""))
+        assert out == "error: promotion show requires a request_id"
+
+    def test_empty_evidence_renders_dashes(self):
+        atlas = _fake_atlas_show(
+            {
+                "request_id": "PROM-2",
+                "proposal_id": "",
+                "status": "pending_review",
+                "risk_level": "",
+                "recommendation": "",
+                "created_at": "",
+                "decided_at": "",
+                "decision_comment": "",
+                "evidence_complete": False,
+                "manifest_file_count": 0,
+                "verification_status": "",
+                "test_summary": "",
+                "changed_files": [],
+                "change_manifest": {"files": [], "truncated": False},
+            }
+        )
+        out = cmd_promotion_show(atlas, _args(action="show", request_id="PROM-2"))
+        assert "proposal_id:       -" in out
+        assert "evidence:          incomplete (0 file(s))" in out
+        assert "verification:      -" in out
+
+
 class TestParserRegistration:
     def test_promotion_group_reachable_via_main(self, monkeypatch, capsys):
         """`atlas promotion pending` is registered and dispatches
@@ -118,6 +199,26 @@ class TestParserRegistration:
         # Atlas boots against a fresh in-memory evolution store; the view
         # is empty unless the operator DB already holds pending reviews.
         assert "No promotion reviews pending." in out
+
+    def test_promotion_show_unknown_registered_via_main(
+        self, monkeypatch, capsys
+    ):
+        """`atlas promotion show <unknown>` is registered and dispatches
+        end-to-end, reporting the request as not found (read-only)."""
+        from atlas.cli import main as cli_main
+
+        monkeypatch.setattr(
+            "atlas.cli.main.load_workspace_service", lambda: MagicMock()
+        )
+        monkeypatch.setattr(
+            "sys.argv",
+            ["atlas", "promotion", "show", "PROM-DOES-NOT-EXIST"],
+        )
+        cli_main.main()
+        out = capsys.readouterr().out
+        # Atlas boots against a fresh in-memory evolution store, so the
+        # request cannot exist; the command fails soft, never resolves.
+        assert "not found" in out
 
 
 _FORBIDDEN_CLI_MODULES = (

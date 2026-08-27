@@ -338,7 +338,12 @@ def main() -> None:
     )
     promotion_parser.add_argument(
         "action",
-        choices=["pending"],
+        choices=["pending", "show"],
+    )
+    promotion_parser.add_argument(
+        "request_id",
+        nargs="?",
+        help="Promotion request id (required for show)",
     )
 
     # -------------------------
@@ -853,23 +858,34 @@ def _run_evolution(args: argparse.Namespace) -> None:
 
 
 def _run_promotion(args: argparse.Namespace) -> None:
-    """Dispatch ``atlas promotion pending``.
+    """Dispatch ``atlas promotion pending|show``.
 
     Stage H — presentation-only, read-only. Delegates to the kernel-owned
-    ``Atlas.pending_promotion_reviews()`` view. Never approves, rejects,
-    promotes, or executes anything.
+    ``Atlas.pending_promotion_reviews()`` view (``pending``) or
+    ``Atlas.promotion_review_details()`` (``show``). Never approves,
+    rejects, promotes, or executes anything.
     """
-    from atlas.cli.promotion_commands import cmd_promotion_pending
+    from atlas.cli.promotion_commands import (
+        cmd_promotion_pending,
+        cmd_promotion_show,
+    )
     from atlas.kernel.atlas import Atlas
 
     if not getattr(args, "action", ""):
-        print("error: promotion requires an action (pending)")
+        print("error: promotion requires an action (pending|show)")
+        return
+
+    if args.action == "show" and not getattr(args, "request_id", ""):
+        print("error: promotion show requires a request_id")
         return
 
     atlas = Atlas()
     try:
         atlas.start()
-        print(cmd_promotion_pending(atlas, args))
+        if args.action == "show":
+            print(cmd_promotion_show(atlas, args))
+        else:
+            print(cmd_promotion_pending(atlas, args))
     except Exception as exc:
         print(f"error: failed to load Atlas: {exc}")
     finally:
