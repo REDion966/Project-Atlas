@@ -10,6 +10,35 @@ and this project adheres to a milestone- and track-based release model
 
 ## [Unreleased] — Foundation Strengthening
 
+### Guided Self-Improvement Evolution Thread (Stage A1→H)
+
+An additive, post-core self-improvement/promotion-review thread built on the
+existing evolution pipeline. Each stage is deterministic, advisory, and
+fail-soft; governance boundaries are preserved throughout.
+
+- **Stage A1** — Repository self-knowledge map (`atlas/research/repository_map.py`).
+- **Stage B** — Evolution intelligence consumes `development` records
+  (`atlas/evolution/intelligence_engine.py`).
+- **Stage C** — Impact-aware development planning validation (advisory).
+- **Stage D** — Context-aware development intelligence.
+- **Stage E** — Promotion gate foundation (`atlas/evolution/promotion_gate.py`):
+  deterministic risk assessment plus bounded `PENDING_REVIEW → APPROVED /
+  REJECTED` lifecycle; APPROVED never mutates the repository.
+- **Stage F** — Research → development intelligence bridge
+  (`atlas/research/evidence_summary.py`).
+- **Stage G** — Decision-quality scoring (`atlas/evolution/decision_quality.py`):
+  deterministic advisory metrics joined into planning context.
+- **Stage H** — Promotion-review visibility:
+  - kernel bridge `Atlas.submit_development_for_promotion_review()` opens
+    `PENDING_REVIEW` audit rows carrying bounded change evidence (no approve/
+    reject/promote/execute);
+  - read-only views `Atlas.pending_promotion_reviews()` and
+    `Atlas.promotion_review_details(request_id)`;
+  - operator CLI `atlas promotion pending` and `atlas promotion show
+    <request_id>` (presentation-only).
+  - Governed-sink integration tests aligned (`test_kernel_advanced_reasoning_integration.py`,
+    `test_kernel_longterm_integration.py`, `test_phase21_research_feedback.py`).
+
 ### Foundation Strengthening Batch 1 — Kernel Composition-Root Decomposition
 
 - Decomposed the monolithic `Atlas.start()` method into 7 private domain

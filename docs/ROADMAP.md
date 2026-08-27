@@ -101,6 +101,40 @@ Post-core work completed on top of Atlas Core, ahead of the v0.20.0 release:
   `observed_count` binds saturated at `2**63 - 1`, eliminating the
   `OverflowError` from unbounded counter accumulation.
 
+### Guided Self-Improvement Evolution Thread (Stage A1→H) — COMPLETE
+
+A lettered, additive post-core thread built on the existing evolution
+pipeline. Each stage is deterministic, advisory, and fail-soft; none of it
+weakens the existing governance boundaries. Reconstructed from source, tests,
+and git history (`534da54..6676566`):
+
+| Stage | Capability | Key implementation / tests |
+|---|---|---|
+| **A1** | Repository self-knowledge map | `atlas/research/repository_map.py`, `test_repository_map.py`, `test_repository_map_kernel.py`, `test_decision_repository_context.py` |
+| **B** | Evolution intelligence from development records | `atlas/evolution/intelligence_engine.py`, `test_development_intelligence_feedback.py` |
+| **C** | Impact-aware development planning (advisory) | `atlas/evolution/development_planner.py`, `test_impact_aware_development_planning.py` |
+| **D** | Context-aware development intelligence | `atlas/evolution/development_planner.py`, `test_development_context_intelligence.py` |
+| **E** | Promotion gate foundation | `atlas/evolution/promotion_gate.py`, `test_promotion_gate.py` |
+| **F** | Research → development intelligence bridge | `atlas/research/evidence_summary.py`, `test_research_evidence_summary.py`, `test_stage_f_bridge.py` |
+| **G** | Decision-quality scoring (advisory) | `atlas/evolution/decision_quality.py`, `test_decision_quality.py`, `test_decision_quality_planning.py` |
+| **H** | Promotion-review visibility (pending + detail) | `atlas/evolution/promotion_gate.py`, `atlas/kernel/atlas.py`, `atlas/cli/promotion_commands.py`, `atlas/cli/main.py`, `test_promotion_review_visibility.py`, `test_promotion_cli.py` |
+
+**Stage H promotion-review subsystem (current state):**
+
+- `PromotionGate` is a deterministic risk assessor plus a bounded
+  `PENDING_REVIEW → APPROVED / REJECTED` review-request lifecycle. APPROVED
+  means *ready for human/operator promotion* — it never mutates the repository.
+  `PROMOTED` is reserved for out-of-scope operator tooling.
+- The kernel bridge `Atlas.submit_development_for_promotion_review()` opens
+  `PENDING_REVIEW` audit rows carrying bounded change evidence; it never
+  approves, rejects, promotes, or executes.
+- Read-only operator surface: `Atlas.pending_promotion_reviews()` (prioritized
+  queue) and `Atlas.promotion_review_details(request_id)` (single-review
+  detail), exposed via `atlas promotion pending` and
+  `atlas promotion show <request_id>` (presentation-only).
+- No approve/reject/promote/execute path is exposed through the CLI; the
+  human-approval boundary remains the only advancement channel.
+
 ---
 
 ## CURRENT — Foundation Strengthening
@@ -133,11 +167,13 @@ There is **NO Phase 23 for Atlas Core**. The next development model is
 
 The immediate next foundation-strengthening focus:
 
-- **Governed ingest sink resolution** — wire the governed `ReasoningIngestSink`
-  (and corresponding Track A/B/C ingest bridges) so that governed evolution
-  can feed distilled insights back into Atlas state.
+- **Governed ingest sink resolution** — **RESOLVED.** The governed
+  `ReasoningIngestSink` (and corresponding Track A/B/C ingest bridges) is wired
+  at runtime; see the DEFERRED section below and `docs/ATLAS_STATE.md` §19.
 - **Episodic context surfacing** — feed long-term episodic memory into the
-  RuntimeCoordinator pipeline so stored experiences influence current processing.
+  RuntimeCoordinator pipeline so stored experiences influence current
+  processing. **Deferred** pending a RuntimeCoordinator review (locked pipeline
+  order).
 
 Remaining already-recorded Track A/C follow-ups (zero required for core
 completion):
@@ -145,8 +181,12 @@ completion):
 - **Track A** follow-ups: knowledge-graph expansion, web source adapter
 - **Track C** follow-ups: semantic-memory upgrades, forgetting-policy tuning
 
-These are not new inventions. The next implementation focus should be governed
-ingest sink resolution (see `docs/ATLAS_STATE.md` §19, §24).
+**No next Stage (e.g. Stage I) is defined.** The Stage A1→H self-improvement
+thread is complete at Stage H. Any further promotion-review capability (for
+example, an operator-facing approve/reject decision surface) would touch the
+human-approval/governance boundary and therefore requires an **explicit,
+owner-approved design** before it may be implemented. Do not infer such a task
+from the existing architecture.
 
 ---
 

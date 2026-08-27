@@ -51,8 +51,8 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
-| Current HEAD | `b92c5d9` (tag `v0.20.0`, branch `phase5-memory-evolution`) |
-| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup) |
+| Current HEAD | `6676566` (branch `phase5-memory-evolution`) |
+| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), plus the **Stage A1→H guided self-improvement thread** (see §27) |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **10** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
@@ -60,10 +60,11 @@ mechanism by which Atlas may change its own operational state.
 
 **CURRENT IMPLEMENTATION:** Atlas v0.20.0 is released at tag `v0.20.0`
 (`b92c5d9`). Foundation Strengthening Batch 1 (kernel composition-root
-decomposition) and Batch 2 (scaffold/legacy cleanup) have been completed on
-the working tree. Full suite: **3260 passed, 0 failed, 57 subtests, 2
-non-blocking warnings** (the 2 warnings are `asyncio.iscoroutinefunction`
-deprecation notices in `test_phase21_research_coordinator.py`).
+decomposition) and Batch 2 (scaffold/legacy cleanup) have been completed, and
+the additive Stage A1→H self-improvement/promotion-review thread (repository
+self-knowledge map, development intelligence, impact/context-aware planning,
+promotion gate, research→development bridge, decision-quality scoring, and
+promotion-review visibility) is complete — see §27.
 
 ---
 
@@ -889,6 +890,63 @@ an explicitly written scope before implementation begins.
 Before any F7 implementation, future work MUST first inspect the existing
 Atlas infrastructure — scheduler, events, task manager, and runtime — and
 reuse what already exists rather than rebuilding existing capabilities.
+
+---
+
+## 27. Guided Self-Improvement Evolution Thread (Stage A1→H) — COMPLETE
+
+A lettered, additive post-core thread built on the existing evolution pipeline.
+Reconstructed from source, tests, and git history (`534da54..6676566`). Each
+stage is deterministic, advisory, and fail-soft; governance boundaries are
+preserved throughout.
+
+| Stage | Capability | Key implementation / tests |
+|---|---|---|
+| **A1** | Repository self-knowledge map | `atlas/research/repository_map.py`, `test_repository_map.py`, `test_repository_map_kernel.py`, `test_decision_repository_context.py` |
+| **B** | Evolution intelligence from development records | `atlas/evolution/intelligence_engine.py`, `test_development_intelligence_feedback.py` |
+| **C** | Impact-aware development planning (advisory) | `atlas/evolution/development_planner.py`, `test_impact_aware_development_planning.py` |
+| **D** | Context-aware development intelligence | `atlas/evolution/development_planner.py`, `test_development_context_intelligence.py` |
+| **E** | Promotion gate foundation | `atlas/evolution/promotion_gate.py`, `test_promotion_gate.py` |
+| **F** | Research → development intelligence bridge | `atlas/research/evidence_summary.py`, `test_research_evidence_summary.py`, `test_stage_f_bridge.py` |
+| **G** | Decision-quality scoring (advisory) | `atlas/evolution/decision_quality.py`, `test_decision_quality.py`, `test_decision_quality_planning.py` |
+| **H** | Promotion-review visibility (pending + detail) | `atlas/evolution/promotion_gate.py`, `atlas/kernel/atlas.py`, `atlas/cli/promotion_commands.py`, `atlas/cli/main.py`, `test_promotion_review_visibility.py`, `test_promotion_cli.py` |
+
+### 27.1 Stage H — Promotion-review subsystem (current state)
+
+- `PromotionGate` is a deterministic risk assessor plus a bounded
+  `PENDING_REVIEW → APPROVED / REJECTED` review-request lifecycle. APPROVED
+  means *ready for human/operator promotion* — it never mutates the repository.
+  `PROMOTED` is reserved for out-of-scope operator tooling.
+- Kernel bridge `Atlas.submit_development_for_promotion_review()` opens
+  `PENDING_REVIEW` audit rows carrying bounded change evidence (via the existing
+  `EvolutionMemory.store_record()` surface). It never approves, rejects,
+  promotes, or executes; nothing advances automatically.
+- Read-only views: `Atlas.pending_promotion_reviews()` (prioritized
+  `PENDING_REVIEW` queue joined with Stage G decision quality) and
+  `Atlas.promotion_review_details(request_id)` (single-review bounded detail).
+- Operator CLI (presentation-only): `atlas promotion pending` and
+  `atlas promotion show <request_id>`. No approve/reject/promote/execute
+  subcommand exists; the human-approval boundary remains the only advancement
+  channel.
+
+### 27.2 Governed-sink integration alignment (COMPLETE)
+
+The governed `ReasoningIngestSink` runtime wiring (previously listed as
+deferred/next) is complete and aligned: `_init_evolution_pipeline()` injects
+the kernel-owned governed sink into the research, longterm, and
+advanced-reasoning bridges. Integration tests were aligned in
+`test_kernel_advanced_reasoning_integration.py`,
+`test_kernel_longterm_integration.py`, and `test_phase21_research_feedback.py`
+(commit `c23aba9`).
+
+### 27.3 Status of the next task
+
+**No next Stage (e.g. Stage I) is defined.** The Stage A1→H thread is complete
+at Stage H. Any further promotion-review capability (for example, an
+operator-facing approve/reject decision surface) would touch the
+human-approval/governance boundary and requires an **explicit, owner-approved
+design** before it may be implemented. Do not infer such a task from the
+existing architecture.
 
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
