@@ -329,6 +329,19 @@ def main() -> None:
     )
 
     # -------------------------
+    # Promotion Review Visibility (Stage H, read-only)
+    # -------------------------
+
+    promotion_parser = subparsers.add_parser(
+        "promotion",
+        help="Promotion review visibility (read-only)",
+    )
+    promotion_parser.add_argument(
+        "action",
+        choices=["pending"],
+    )
+
+    # -------------------------
     # Toolchain Commands (Phase 18.10)
     # -------------------------
 
@@ -621,6 +634,14 @@ def main() -> None:
         return
 
     # -------------------------
+    # Promotion Review Visibility (Stage H, read-only)
+    # -------------------------
+
+    if args.command == "promotion":
+        _run_promotion(args)
+        return
+
+    # -------------------------
     # Resource
     # -------------------------
 
@@ -827,6 +848,30 @@ def _run_evolution(args: argparse.Namespace) -> None:
         if args.action == "status":
             print(cmd_requests_status(schedule_store, args))
             return
+    finally:
+        atlas.shutdown()
+
+
+def _run_promotion(args: argparse.Namespace) -> None:
+    """Dispatch ``atlas promotion pending``.
+
+    Stage H — presentation-only, read-only. Delegates to the kernel-owned
+    ``Atlas.pending_promotion_reviews()`` view. Never approves, rejects,
+    promotes, or executes anything.
+    """
+    from atlas.cli.promotion_commands import cmd_promotion_pending
+    from atlas.kernel.atlas import Atlas
+
+    if not getattr(args, "action", ""):
+        print("error: promotion requires an action (pending)")
+        return
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+        print(cmd_promotion_pending(atlas, args))
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
     finally:
         atlas.shutdown()
 
