@@ -88,8 +88,9 @@ class TestSchemaMigration(StorageTestCase):
 
     def test_schema_version_is_current(self):
         # Phase 19.x added additive long-term tables (migration version 9);
-        # Track D added the advanced_reasoning_traces tables (version 10).
-        self.assertEqual(self.storage.schema_version(), 10)
+        # Track D added the advanced_reasoning_traces tables (version 10);
+        # Persistent Learning added learning_insights (version 11).
+        self.assertEqual(self.storage.schema_version(), 11)
 
     def test_tables_exist(self):
         cursor = self.storage._execute(

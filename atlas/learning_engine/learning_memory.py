@@ -5,6 +5,14 @@ Stores LearningInsight, StrategyPerformance, and FailurePattern instances
 with bounded capacity.
 
 Phase 7.3 — Learning Engine.
+
+Persistent Learning: an optional storage adapter (duck-typed; e.g.
+``SQLiteEvolutionStorage``) may be injected. Insights are dual-written to
+storage on store, and ``restore()`` loads previously persisted insights on
+startup. Strategy/failure/recommendation aggregates remain in-memory only —
+they are derived from insights and rebuilt from the raw stream on restore.
+
+This is a pure logic component: it never imports infrastructure or sqlite3.
 """
 
 from collections import deque
@@ -20,6 +28,82 @@ from atlas.learning_engine.models import (
 )
 
 
+def _iso(value: Any) -> str:
+    """Serialize a datetime to ISO text, fail-soft."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value) if value else ""
+
+
+def _dt(value: Any) -> datetime:
+    """Parse an ISO timestamp back into a datetime, fail-soft."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return datetime.now()
+    return datetime.now()
+
+
+def _insight_to_dict(insight: LearningInsight) -> dict[str, Any]:
+    """Serialize a LearningInsight to a JSON-safe dict."""
+    return {
+        "insight_id": insight.insight_id,
+        "category": insight.category.name,
+        "title": insight.title,
+        "description": insight.description,
+        "importance": insight.importance.name,
+        "confidence": insight.confidence,
+        "observation_count": insight.observation_count,
+        "source_pipeline_ids": list(insight.source_pipeline_ids),
+        "reusable": insight.reusable,
+        "applicable_areas": list(insight.applicable_areas),
+        "created_at": _iso(insight.created_at),
+        "last_updated": _iso(insight.last_updated),
+        "metadata": dict(insight.metadata),
+    }
+
+
+def _insight_from_dict(data: dict[str, Any]) -> LearningInsight:
+    """Reconstruct a LearningInsight from a dict."""
+    from atlas.learning_engine.models import LearningCategory
+
+    def _category(value: str) -> Any:
+        try:
+            return LearningCategory[value]
+        except (KeyError, TypeError):
+            return LearningCategory.OPTIMIZATION
+
+    def _importance(value: str) -> Any:
+        try:
+            return InsightImportance[value]
+        except (KeyError, TypeError):
+            return InsightImportance.MEDIUM
+
+    return LearningInsight(
+        insight_id=data.get("insight_id", ""),
+        category=_category(data.get("category", "")),
+        title=data.get("title", ""),
+        description=data.get("description", ""),
+        importance=_importance(data.get("importance", "")),
+        confidence=float(data.get("confidence", 0.5)),
+        observation_count=int(data.get("observation_count", 1)),
+        source_pipeline_ids=list(data.get("source_pipeline_ids", [])),
+        reusable=bool(data.get("reusable", True)),
+        applicable_areas=list(data.get("applicable_areas", [])),
+        created_at=_dt(data.get("created_at")),
+        last_updated=_dt(data.get("last_updated")),
+        metadata=dict(data.get("metadata", {})),
+    )
+
+
 class LearningMemory:
     """
     Bounded in-memory store for learning data.
@@ -27,7 +111,9 @@ class LearningMemory:
     Maintains separate bounded queues for insights, strategies,
     failure patterns, and recommendations.
 
-    This is a pure logic component with no infrastructure dependencies.
+    Persistent Learning: when ``storage`` is injected, insights are dual-written
+    to storage on ``store_insights`` and restored via ``restore()``. Storage
+    failures are logged and never break the in-memory path.
     """
 
     def __init__(
@@ -36,6 +122,7 @@ class LearningMemory:
         max_strategies: int = 50,
         max_failures: int = 100,
         max_recommendations: int = 100,
+        storage: Any = None,
     ) -> None:
         if any(v <= 0 for v in (max_insights, max_strategies, max_failures, max_recommendations)):
             raise ValueError("All limits must be positive integers")
@@ -44,15 +131,70 @@ class LearningMemory:
         self._strategies: dict[str, StrategyPerformance] = {}
         self._failures: deque[FailurePattern] = deque(maxlen=max_failures)
         self._recommendations: deque[ImprovementRecommendation] = deque(maxlen=max_recommendations)
+        self._storage = storage
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def restore(self) -> None:
+        """Load previously persisted learning insights from storage.
+
+        No-op when no storage is configured or storage is unavailable.
+        Storage failures are logged and never break startup.
+        """
+        if self._storage is None:
+            return
+        loader = getattr(self._storage, "load_learning_insights", None)
+        if not callable(loader):
+            return
+        try:
+            for data in loader():
+                insight = _insight_from_dict(data)
+                if insight.insight_id:
+                    self._insights.append(insight)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to restore learning insights from storage"
+            )
+
+    def bind_storage(self, storage: Any) -> None:
+        """Attach a storage adapter and restore persisted insights.
+
+        Called once the kernel-owned storage adapter exists (after
+        ``_init_tracks``). Fail-soft: a missing or failing storage leaves
+        the memory fully functional in-memory.
+        """
+        self._storage = storage
+        self.restore()
+
+    def _try_storage_write(self, insight: LearningInsight) -> None:
+        """Dual-write a single insight to storage, degrading gracefully."""
+        if self._storage is None:
+            return
+        writer = getattr(self._storage, "store_learning_insight", None)
+        if not callable(writer):
+            return
+        try:
+            writer(_insight_to_dict(insight))
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Failed to persist learning insight %s", insight.insight_id
+            )
 
     # ------------------------------------------------------------------
     # Insights
     # ------------------------------------------------------------------
 
     def store_insights(self, insights: list[LearningInsight]) -> None:
-        """Store multiple insights."""
+        """Store multiple insights, dual-writing each to storage."""
         for insight in insights:
             self._insights.append(insight)
+            self._try_storage_write(insight)
 
     def get_insights(
         self,

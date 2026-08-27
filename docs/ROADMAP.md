@@ -167,6 +167,10 @@ There is **NO Phase 23 for Atlas Core**. The next development model is
 
 The immediate next foundation-strengthening focus:
 
+- **Persistent Learning (first post-A1→H capability)** — **COMPLETE.** Reusable
+  `LearningInsight` objects are now persisted via the existing
+  `SQLiteEvolutionStorage` (additive migration v11) and restored into
+  `LearningMemory` on startup. See `docs/ATLAS_STATE.md` §28.
 - **Governed ingest sink resolution** — **RESOLVED.** The governed
   `ReasoningIngestSink` (and corresponding Track A/B/C ingest bridges) is wired
   at runtime; see the DEFERRED section below and `docs/ATLAS_STATE.md` §19.

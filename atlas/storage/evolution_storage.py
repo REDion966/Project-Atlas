@@ -657,6 +657,61 @@ class SQLiteEvolutionStorage(EvolutionStorage):
         }
 
     # ------------------------------------------------------------------
+    # Persistent learning insights (Persistent Learning)
+    # ------------------------------------------------------------------
+
+    def store_learning_insight(self, data: dict) -> None:
+        """Persist a single reusable learning insight dictionary."""
+        sql = """
+            INSERT OR REPLACE INTO learning_insights (
+                insight_id, category, title, description, importance,
+                confidence, observation_count, source_pipeline_ids,
+                reusable, applicable_areas, created_at, last_updated, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            data.get("insight_id"),
+            data.get("category", ""),
+            data.get("title", ""),
+            data.get("description", ""),
+            data.get("importance", "MEDIUM"),
+            data.get("confidence", 0.5),
+            data.get("observation_count", 1),
+            self._to_json(data.get("source_pipeline_ids", [])),
+            1 if data.get("reusable", True) else 0,
+            self._to_json(data.get("applicable_areas", [])),
+            data.get("created_at", ""),
+            data.get("last_updated", ""),
+            self._to_json(data.get("metadata", {})),
+        )
+        self._run_write(sql, params)
+
+    def load_learning_insights(self) -> list[dict]:
+        """Load all stored learning insights, oldest first."""
+        cursor = self._execute(
+            "SELECT * FROM learning_insights ORDER BY created_at ASC"
+        )
+        return [self._row_to_learning_insight(row) for row in cursor.fetchall()]
+
+    def _row_to_learning_insight(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a learning insight dictionary."""
+        return {
+            "insight_id": row["insight_id"],
+            "category": row["category"],
+            "title": row["title"],
+            "description": row["description"],
+            "importance": row["importance"],
+            "confidence": row["confidence"],
+            "observation_count": row["observation_count"],
+            "source_pipeline_ids": self._from_json(row["source_pipeline_ids"]) or [],
+            "reusable": bool(row["reusable"]),
+            "applicable_areas": self._from_json(row["applicable_areas"]) or [],
+            "created_at": row["created_at"],
+            "last_updated": row["last_updated"],
+            "metadata": self._from_json(row["metadata"]) or {},
+        }
+
+    # ------------------------------------------------------------------
     # Administration
     # ------------------------------------------------------------------
 
@@ -679,6 +734,7 @@ class SQLiteEvolutionStorage(EvolutionStorage):
                 conn.execute("DELETE FROM evolution_knowledge_capabilities")
                 conn.execute("DELETE FROM evolution_knowledge_bottlenecks")
                 conn.execute("DELETE FROM evolution_knowledge_snapshots")
+                conn.execute("DELETE FROM learning_insights")
         except sqlite3.Error:
             self._available = False
             raise

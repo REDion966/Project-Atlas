@@ -1985,6 +1985,17 @@ class Atlas:
                 {"mode": "memory_only"},
             )
 
+        # --- Persistent Learning: bind the kernel-owned evolution storage to
+        #     the LearningEngine's memory and restore previously persisted
+        #     reusable learning insights. Additive; no second store is created
+        #     and storage failures leave the memory fully functional.
+        if self._learning_engine is not None:
+            learning_memory = getattr(self._learning_engine, "memory", None)
+            if learning_memory is not None and hasattr(
+                learning_memory, "bind_storage"
+            ):
+                learning_memory.bind_storage(evolution_storage)
+
         # --- Track A: Instantiate and initialize research storage (Phase 17.6) ---
         self._research_storage = ResearchSQLiteStorage()
         self._research_storage.initialize()

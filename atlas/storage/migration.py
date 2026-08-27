@@ -18,6 +18,8 @@ Phase 18.8 — Added toolchain_* tables for Track B toolchain storage (schema ve
 Phase 19.x — Added episodic_*, procedural_*, memory_consolidation_records
 tables for Track C long-term learning storage (schema version 9).
 Track D — Added reasoning_* tables for advanced-reasoning storage (schema version 10).
+Persistent Learning — Added learning_insights table for reusable runtime/development
+lessons (schema version 11).
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ import sqlite3
 from typing import Any
 
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 
 # Migration chain: version -> list of (sql, description)
@@ -865,6 +867,33 @@ MIGRATIONS: dict[int, list[tuple[str, str]]] = {
             CREATE INDEX IF NOT EXISTS idx_reasoning_strategy_scores_assessment
                 ON reasoning_strategy_scores(assessment_id)
         """, "Index on reasoning strategy score assessment_id"),
+    ],
+    11: [
+        ("""
+            CREATE TABLE IF NOT EXISTS learning_insights (
+                insight_id TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                importance TEXT NOT NULL DEFAULT 'MEDIUM',
+                confidence REAL NOT NULL DEFAULT 0.5,
+                observation_count INTEGER NOT NULL DEFAULT 1,
+                source_pipeline_ids TEXT NOT NULL DEFAULT '[]',
+                reusable INTEGER NOT NULL DEFAULT 1,
+                applicable_areas TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}'
+            )
+        """, "Create learning_insights table for Persistent Learning"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_learning_insights_category
+                ON learning_insights(category)
+        """, "Index on learning insight category"),
+        ("""
+            CREATE INDEX IF NOT EXISTS idx_learning_insights_created_at
+                ON learning_insights(created_at DESC)
+        """, "Index on learning insight created_at"),
     ],
 }
 

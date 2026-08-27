@@ -230,8 +230,8 @@ class TestSQLiteEvolutionStorage:
         assert storage.load_records() == []
 
     def test_schema_version(self, storage):
-        """Schema version is 10 after Track D additive reasoning tables."""
-        assert storage.get_schema_version() == 10
+        """Schema version is 11 after Track D reasoning tables and Persistent Learning."""
+        assert storage.get_schema_version() == 11
 
 
 # ---------------------------------------------------------------------------

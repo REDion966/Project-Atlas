@@ -145,7 +145,7 @@ class TestLifecycle:
     def test_schema_version_is_ten(self, tmp_path):
         adapter = AdvancedReasoningSQLiteStorage(db_path=tmp_path / "db.sqlite")
         adapter.initialize()
-        assert adapter.get_schema_version() == 10
+        assert adapter.get_schema_version() == 11
         adapter.close()
 
 

@@ -54,7 +54,7 @@ mechanism by which Atlas may change its own operational state.
 | Current HEAD | `6676566` (branch `phase5-memory-evolution`) |
 | In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), plus the **Stage A1→H guided self-improvement thread** (see §27) |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
-| Current schema version | **10** |
+| Current schema version | **11** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
 | Era | **Capability Track Era** |
 
@@ -258,13 +258,14 @@ service keys actually registered in `Atlas.start()`).
 
 ## 8. Current Schema Version
 
-**`CURRENT_SCHEMA_VERSION = 10`** (`atlas/storage/migration.py`).
+**`CURRENT_SCHEMA_VERSION = 11`** (`atlas/storage/migration.py`).
 
 This is confirmed by source and by the migration tests
 (`test_evolution_autonomy_storage`, `test_evolution_persistence`,
 `test_experience_storage`, `test_longterm_storage`,
-`test_understanding_storage`), which assert schema version **10** after the
-Track D additive `reasoning_*` tables.
+`test_understanding_storage`), which assert schema version **11** after the
+Track D additive `reasoning_*` tables and the Persistent Learning
+`learning_insights` table.
 
 ## 9. Capability Architecture
 
@@ -947,6 +948,29 @@ operator-facing approve/reject decision surface) would touch the
 human-approval/governance boundary and requires an **explicit, owner-approved
 design** before it may be implemented. Do not infer such a task from the
 existing architecture.
+
+---
+
+## 28. Persistent Learning (first post-A1→H capability)
+
+Closes the gap where reusable `LearningInsight` objects (runtime reflection,
+self-development outcomes, and other validated conclusions carrying
+provenance/confidence) were produced by the `LearningEngine` but lost on
+restart.
+
+- **Storage:** the existing kernel-owned `SQLiteEvolutionStorage` gains
+  `store_learning_insight()` / `load_learning_insights()` plus an additive
+  migration v11 (`learning_insights` table). No new database, store, or
+  retrieval mechanism.
+- **Memory:** `LearningMemory` accepts an optional storage adapter; insights
+  are dual-written on `store_insights()` and restored via `restore()` /
+  `bind_storage()`. Storage failures degrade gracefully to memory-only.
+- **Wiring:** `_init_tracks()` binds the evolution storage into the
+  `LearningEngine` memory after storage initialization.
+- **Quality / governance:** low-quality and transient reasoning is still gated
+  by the existing `InsightConsolidator` thresholds; reuse flows through the
+  existing `CapabilityAnalyzer` learning-provider path. No governance bypass.
+- **Tests:** `tests/test_persistent_learning.py`.
 
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·

@@ -39,6 +39,24 @@ fail-soft; governance boundaries are preserved throughout.
   - Governed-sink integration tests aligned (`test_kernel_advanced_reasoning_integration.py`,
     `test_kernel_longterm_integration.py`, `test_phase21_research_feedback.py`).
 
+### Persistent Learning — reusable learning-insight persistence
+
+The first post-A1→H capability. Closes the gap where reusable
+`LearningInsight` objects (runtime reflection, self-development outcomes, and
+other validated conclusions with provenance/confidence) were produced by the
+`LearningEngine` but lost on restart.
+
+- `LearningMemory` now accepts an optional storage adapter (the existing
+  kernel-owned `SQLiteEvolutionStorage`): insights are dual-written on
+  `store_insights` and restored via `restore()`/`bind_storage()`.
+- Additive migration v11 adds `learning_insights` (schema version **11**).
+- Kernel wires the evolution storage into `LearningMemory` during
+  `_init_tracks()`; storage failures degrade gracefully to memory-only.
+- No new store, retrieval mechanism, provenance system, or governance bypass —
+  the existing evolution storage and governed pipeline are reused.
+- Low-quality/transient reasoning is still gated by the existing
+  `InsightConsolidator` quality thresholds before it reaches memory.
+
 ### Foundation Strengthening Batch 1 — Kernel Composition-Root Decomposition
 
 - Decomposed the monolithic `Atlas.start()` method into 7 private domain

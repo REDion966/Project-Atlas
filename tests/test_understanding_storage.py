@@ -185,8 +185,9 @@ class TestSQLiteUnderstandingLifecycle(unittest.TestCase):
             )
             # Phase 19.x bumped the additive schema version from 8 to 9
             # (long-term episodic/procedural tables); Track D added the
-            # advanced_reasoning_traces tables as additive migration 10.
-            self.assertEqual(cursor.fetchone()[0], 10)
+            # advanced_reasoning_traces tables as additive migration 10;
+            # Persistent Learning added learning_insights as migration 11.
+            self.assertEqual(cursor.fetchone()[0], 11)
         storage.close()
         # Release the extra connection reference so Windows can delete
         # the temp directory during tearDown without PermissionError.
