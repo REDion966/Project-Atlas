@@ -328,8 +328,8 @@ class MemoryDecayPolicy:
     Attributes:
         max_episodes: Maximum number of episodes retained before consolidation.
         max_procedures: Maximum number of procedures retained before consolidation.
-        episode_ttl_days: Episodes older than this many days are candidates for
-            forgetting (0 disables age-based forgetting).
+        episode_ttl_days: Episodes inactive for this many days are candidates
+            for forgetting (0 disables age-based forgetting).
         procedure_ttl_days: Procedures unused for this many days are candidates
             for forgetting (0 disables age-based forgetting).
         min_importance: Episodes/procedures with importance below this threshold
@@ -341,8 +341,8 @@ class MemoryDecayPolicy:
 
     max_episodes: int = 10_000
     max_procedures: int = 1_000
-    episode_ttl_days: int = 0
-    procedure_ttl_days: int = 0
+    episode_ttl_days: int = 90
+    procedure_ttl_days: int = 180
     min_importance: float = 0.1
     consolidation_threshold: int = 3
     enabled: bool = True

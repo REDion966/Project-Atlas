@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from atlas.longterm.catalog import (
     CONSOLIDATION_ID_PREFIX,
@@ -112,12 +112,12 @@ class Consolidator:
                 procedures_merged=tuple(procedures_merged),
             )
 
-        flagged_episodes = self._flag_forgettable(
+        flagged_episodes, episode_flags = self._flag_forgettable(
             episodes_kept,
             ttl_days=self._policy.episode_ttl_days,
             min_importance=self._policy.min_importance,
         )
-        flagged_procedures = self._flag_forgettable(
+        flagged_procedures, procedure_flags = self._flag_forgettable(
             procedures_kept,
             ttl_days=self._policy.procedure_ttl_days,
             min_importance=self._policy.min_importance,
@@ -128,6 +128,8 @@ class Consolidator:
             flagged_procedures,
             episodes_consolidated,
             procedures_merged,
+            episode_flags,
+            procedure_flags,
         )
 
         return ConsolidationResult(
@@ -192,15 +194,22 @@ class Consolidator:
         items: Iterable[Episode | Procedure],
         ttl_days: int,
         min_importance: float,
-    ) -> list[str]:
-        """Return ids of items that are age/importance-based forget candidates.
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        """Return forget-candidate ids plus deterministic per-item detail.
 
         Rules (all deterministic):
           * A stale item (older than ``ttl_days``) is always a candidate
             when ``ttl_days > 0`` and no recent activity exists.
           * An item with importance below ``min_importance`` is a candidate.
+
+        The detail map explains every flag decision: ``reason`` follows the
+        existing policy semantics (an item that is both stale and
+        low-importance reports ``"age"`` — the first criterion of the
+        flagging condition), alongside ``days_inactive`` and the item's
+        ``importance``.
         """
         flagged: list[str] = []
+        details: dict[str, dict[str, Any]] = {}
         for item in items:
             importance = (
                 item.importance
@@ -208,15 +217,24 @@ class Consolidator:
                 else _procedure_importance(item)
             )
             recent = self._last_activity(item)
+            now = self._now_value()
             stale = (
                 ttl_days > 0
                 and recent is not None
-                and recent < self._now_value() - timedelta(days=ttl_days)
+                and recent < now - timedelta(days=ttl_days)
             )
             low_importance = importance < min_importance
             if stale or low_importance:
-                flagged.append(item_id(item))
-        return sorted(flagged)
+                flagged_id = item_id(item)
+                flagged.append(flagged_id)
+                details[flagged_id] = {
+                    "reason": "age" if stale else "importance",
+                    "days_inactive": (
+                        (now - recent).days if recent is not None else 0
+                    ),
+                    "importance": importance,
+                }
+        return sorted(flagged), details
 
     def _build_records(
         self,
@@ -224,6 +242,8 @@ class Consolidator:
         flagged_procedures: list[str],
         episodes_consolidated: list[Episode],
         procedures_merged: list[Procedure],
+        episode_flags: dict[str, dict[str, Any]] | None = None,
+        procedure_flags: dict[str, dict[str, Any]] | None = None,
     ) -> list[ConsolidationRecord]:
         """Emit audit records for every consolidation decision."""
         records: list[ConsolidationRecord] = []
@@ -252,6 +272,7 @@ class Consolidator:
                     target_type="episode",
                     target_ids=flagged_episodes,
                     reason="age/importance-based forgetting candidate",
+                    flags=episode_flags,
                 )
             )
         if flagged_procedures:
@@ -261,6 +282,7 @@ class Consolidator:
                     target_type="procedure",
                     target_ids=flagged_procedures,
                     reason="age/importance-based forgetting candidate",
+                    flags=procedure_flags,
                 )
             )
         return records
@@ -271,9 +293,19 @@ class Consolidator:
         target_type: str,
         target_ids: list[str],
         reason: str,
+        flags: dict[str, dict[str, Any]] | None = None,
     ) -> ConsolidationRecord:
         """Build one deterministic PENDING consolidation record."""
         now = self._now_value()
+        metadata: dict[str, Any] = {
+            "consolidator": "atlas.longterm.consolidator.Consolidator",
+        }
+        if flags:
+            metadata["flags"] = {
+                flagged_id: flags[flagged_id]
+                for flagged_id in sorted(target_ids)
+                if flagged_id in flags
+            }
         return ConsolidationRecord(
             record_id=f"{CONSOLIDATION_ID_PREFIX}:{now:%Y%m%d%H%M%S}:{len(target_ids)}:{target_type}",
             status=ConsolidationStatus.PENDING,
@@ -282,9 +314,7 @@ class Consolidator:
             target_ids=tuple(sorted(target_ids)),
             reason=reason,
             created_at=now,
-            metadata={
-                "consolidator": "atlas.longterm.consolidator.Consolidator",
-            },
+            metadata=metadata,
         )
 
     def _now_value(self) -> datetime:

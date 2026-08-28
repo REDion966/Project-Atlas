@@ -104,7 +104,8 @@ class TestMerge:
 class TestForgetting:
     def test_low_importance_flagged(self):
         consolidator = Consolidator(
-            policy=MemoryDecayPolicy(min_importance=0.4)
+            policy=MemoryDecayPolicy(min_importance=0.4),
+            now=datetime(2026, 1, 10, 12, 0, 0),
         )
         episodes = [
             _make_episode("e1", importance=0.1),
@@ -195,3 +196,192 @@ class TestNoneInputs:
         assert result.ok
         assert result.procedures_kept == ()
         assert result.procedures_flagged == ()
+
+
+class TestDefaultRetentionPolicy:
+    def test_default_policy_flags_100_day_inactive_episode(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        stale = _make_episode(
+            "e_old",
+            started_at=now - timedelta(days=100),
+            ended_at=now - timedelta(days=100),
+        )
+        result = consolidator.consolidate(episodes=[stale])
+        assert result.episodes_flagged == ("e_old",)
+
+    def test_default_policy_keeps_fresh_episode(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        fresh = _make_episode(
+            "e_new",
+            started_at=now - timedelta(days=1),
+            ended_at=now - timedelta(days=1),
+        )
+        result = consolidator.consolidate(episodes=[fresh])
+        assert result.episodes_flagged == ()
+
+    def test_default_policy_flags_200_day_unused_procedure(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        stale = _make_procedure(
+            "p_old",
+            created_at=now - timedelta(days=200),
+            last_used_at=now - timedelta(days=200),
+        )
+        result = consolidator.consolidate(procedures=[stale])
+        assert result.procedures_flagged == ("p_old",)
+
+    def test_default_policy_keeps_fresh_procedure(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        fresh = _make_procedure(
+            "p_new",
+            created_at=now - timedelta(days=1),
+            last_used_at=now - timedelta(days=1),
+        )
+        result = consolidator.consolidate(procedures=[fresh])
+        assert result.procedures_flagged == ()
+
+
+class TestFlagMetadata:
+    def test_age_flags_carry_metadata(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        stale = _make_episode(
+            "e_old",
+            started_at=now - timedelta(days=100),
+            ended_at=now - timedelta(days=100),
+        )
+        result = consolidator.consolidate(episodes=[stale])
+        forget_records = [
+            r for r in result.records if r.operation == "forget"
+        ]
+        assert len(forget_records) == 1
+        assert forget_records[0].metadata["flags"] == {
+            "e_old": {
+                "reason": "age",
+                "days_inactive": 100,
+                "importance": 0.5,
+            }
+        }
+
+    def test_procedure_age_flags_carry_metadata(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        stale = _make_procedure(
+            "p_old",
+            created_at=now - timedelta(days=200),
+            last_used_at=now - timedelta(days=200),
+        )
+        result = consolidator.consolidate(procedures=[stale])
+        forget_records = [
+            r for r in result.records if r.operation == "forget"
+        ]
+        assert forget_records[0].metadata["flags"] == {
+            "p_old": {
+                "reason": "age",
+                "days_inactive": 200,
+                "importance": 0.8,
+            }
+        }
+
+    def test_importance_flags_carry_metadata(self):
+        consolidator = Consolidator(
+            policy=MemoryDecayPolicy(min_importance=0.4),
+            now=datetime(2026, 1, 10, 12, 0, 0),
+        )
+        low = _make_episode("e_low", importance=0.1)
+        result = consolidator.consolidate(episodes=[low])
+        forget_records = [
+            r for r in result.records if r.operation == "forget"
+        ]
+        flags = forget_records[0].metadata["flags"]
+        assert flags["e_low"]["reason"] == "importance"
+        assert flags["e_low"]["importance"] == 0.1
+
+    def test_stale_and_low_importance_reports_age_reason(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(
+            policy=MemoryDecayPolicy(min_importance=0.9),
+            now=now,
+        )
+        episode = _make_episode(
+            "e_sl",
+            importance=0.05,
+            started_at=now - timedelta(days=100),
+            ended_at=now - timedelta(days=100),
+        )
+        result = consolidator.consolidate(episodes=[episode])
+        flags = result.records[0].metadata["flags"]
+        assert flags["e_sl"]["reason"] == "age"
+
+    def test_multiple_flags_sorted_deterministically(self):
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        consolidator = Consolidator(now=now)
+        episodes = [
+            _make_episode(
+                "e_b",
+                started_at=now - timedelta(days=100),
+                ended_at=now - timedelta(days=100),
+            ),
+            _make_episode(
+                "e_a",
+                started_at=now - timedelta(days=120),
+                ended_at=now - timedelta(days=120),
+            ),
+        ]
+        result = consolidator.consolidate(episodes=episodes)
+        assert result.episodes_flagged == ("e_a", "e_b")
+        forget_records = [
+            r for r in result.records if r.operation == "forget"
+        ]
+        flags = forget_records[0].metadata["flags"]
+        assert list(flags.keys()) == ["e_a", "e_b"]
+        assert flags["e_a"]["days_inactive"] == 120
+        assert flags["e_b"]["days_inactive"] == 100
+
+    def test_records_without_flags_have_no_flags_metadata(self):
+        consolidator = Consolidator(now=datetime(2026, 5, 10, 12, 0, 0))
+        low = _make_episode("e1", importance=0.9)
+        high = _make_episode("e1", importance=0.2)
+        result = consolidator.consolidate(episodes=[low, high])
+        dedup_records = [
+            r for r in result.records if r.operation == "dedup"
+        ]
+        assert dedup_records
+        assert "flags" not in dedup_records[0].metadata
+
+    def test_consolidation_does_not_mutate_repositories(self):
+        from atlas.longterm.episode_repository import EpisodicRepository
+        from atlas.longterm.procedure_repository import ProceduralRepository
+
+        now = datetime(2026, 5, 10, 12, 0, 0)
+        episode_repo = EpisodicRepository()
+        procedure_repo = ProceduralRepository()
+        episode_repo.store_episode(
+            _make_episode(
+                "e1",
+                started_at=now - timedelta(days=100),
+                ended_at=now - timedelta(days=100),
+            )
+        )
+        procedure_repo.store_procedure(
+            _make_procedure(
+                "p1",
+                created_at=now - timedelta(days=200),
+                last_used_at=now - timedelta(days=200),
+            )
+        )
+
+        consolidator = Consolidator(now=now)
+        result = consolidator.consolidate(
+            episodes=episode_repo.get_episodes(n=500),
+            procedures=procedure_repo.get_procedures(n=500),
+        )
+        assert result.episodes_flagged == ("e1",)
+        assert result.procedures_flagged == ("p1",)
+        assert episode_repo.episode_count == 1
+        assert procedure_repo.procedure_count == 1
+        assert episode_repo.get_episode("e1") is not None
+        assert procedure_repo.get_procedure("p1") is not None

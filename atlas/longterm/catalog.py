@@ -122,10 +122,10 @@ DEFAULT_MAX_EPISODES: int = 10_000
 DEFAULT_MAX_PROCEDURES: int = 1_000
 
 #: Default episode TTL in days (0 disables age-based forgetting).
-DEFAULT_EPISODE_TTL_DAYS: int = 0
+DEFAULT_EPISODE_TTL_DAYS: int = 90
 
 #: Default procedure TTL in days (0 disables age-based forgetting).
-DEFAULT_PROCEDURE_TTL_DAYS: int = 0
+DEFAULT_PROCEDURE_TTL_DAYS: int = 180
 
 #: Default minimum importance threshold for retention.
 DEFAULT_MIN_IMPORTANCE: float = 0.1

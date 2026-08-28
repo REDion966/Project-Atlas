@@ -397,8 +397,8 @@ class TestMemoryDecayPolicy:
         policy = MemoryDecayPolicy()
         assert policy.max_episodes == 10_000
         assert policy.max_procedures == 1_000
-        assert policy.episode_ttl_days == 0
-        assert policy.procedure_ttl_days == 0
+        assert policy.episode_ttl_days == 90
+        assert policy.procedure_ttl_days == 180
         assert policy.min_importance == 0.1
         assert policy.consolidation_threshold == 3
         assert policy.enabled is True

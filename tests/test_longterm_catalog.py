@@ -101,10 +101,10 @@ class TestDecayPolicyDefaults:
         assert DEFAULT_MAX_PROCEDURES == 1_000
 
     def test_episode_ttl_days(self):
-        assert DEFAULT_EPISODE_TTL_DAYS == 0
+        assert DEFAULT_EPISODE_TTL_DAYS == 90
 
     def test_procedure_ttl_days(self):
-        assert DEFAULT_PROCEDURE_TTL_DAYS == 0
+        assert DEFAULT_PROCEDURE_TTL_DAYS == 180
 
     def test_min_importance(self):
         assert DEFAULT_MIN_IMPORTANCE == 0.1
