@@ -94,6 +94,26 @@ Operationalized the existing principled-forgetting policy (commit `be2bb84`):
   **v11**.
 - Full suite verified: 4,296 tests, 0 failed (pytest exit 0).
 
+### Test Coverage Audit — Placeholder Test-Module Resolution
+
+Closed the recorded test-coverage technical debt (`docs/technical_debt.md`).
+The audit verified that every live surface named by the placeholders already
+had meaningful coverage elsewhere, so the eight 0-byte placeholder modules
+were removed without losing any test content:
+
+- Removed `tests/test_boot.py`, `tests/test_services.py`,
+  `tests/test_ai_service.py`, `tests/test_ai_capabilities.py`,
+  `tests/test_ai_manager_routing.py`, `tests/test_ai_provider_metadata.py`,
+  and `tests/memory/test_memory.py` (each redundant with existing suites —
+  AI fallback/routing/model-abstraction, cognition/memory-service, and the
+  root `tests/test_memory.py`).
+- Removed `tests/test_agent_integration.py` (obsolete — `atlas/agents/` was
+  removed in Foundation Strengthening Batch 2).
+- No additional placeholder modules were found; no source code changed; no
+  meaningful tests were removed.
+- Verified post-change: `pytest --collect-only -q` → 4,291 tests, 0 errors;
+  full suite `python -m pytest -q` → exit code 0, 0 failures.
+
 ### Foundation Strengthening Batch 1 — Kernel Composition-Root Decomposition
 
 - Decomposed the monolithic `Atlas.start()` method into 7 private domain
