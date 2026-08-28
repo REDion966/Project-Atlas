@@ -29,8 +29,8 @@ def longterm_component() -> ComponentMetadata:
         module_path="atlas.longterm.capability_handlers.LongTermCapabilityFactory",
         description=(
             "Capability Track C: episodic recorder, procedure extractor, "
-            "consolidator, episodic/procedural repositories, and long-term "
-            "storage protocol."
+            "consolidator, episodic/procedural repositories, deterministic "
+            "semantic recall, and long-term storage protocol."
         ),
         version=1,
         dependencies=[
@@ -40,6 +40,7 @@ def longterm_component() -> ComponentMetadata:
         provided_capabilities=[
             "memory.episodic_query",
             "memory.procedure_query",
+            "memory.semantic_query",
             "memory.consolidate",
         ],
     )

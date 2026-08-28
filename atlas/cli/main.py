@@ -510,8 +510,16 @@ def main() -> None:
         choices=[
             "episodes",
             "procedures",
+            "search",
             "consolidate",
         ],
+    )
+
+    memory_parser.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Free-text query (required by the search action)",
     )
 
     memory_parser.add_argument(
@@ -1186,18 +1194,19 @@ def _run_reasoning(args: argparse.Namespace) -> None:
 
 
 def _run_memory(args: argparse.Namespace) -> None:
-    """Dispatch ``atlas memory episodes|procedures|consolidate``.
+    """Dispatch ``atlas memory episodes|procedures|search|consolidate``.
 
     Presentation-only: delegates to the Track C capability handlers. Query
-    commands are read-only; ``consolidate`` is governed — it builds a MEMORY
-    EvolutionRequest and passes it through the ingest bridge, never mutating
-    the repositories directly.
+    commands (including ``search``) are read-only; ``consolidate`` is
+    governed — it builds a MEMORY EvolutionRequest and passes it through the
+    ingest bridge, never mutating the repositories directly.
     """
     from atlas.longterm.capability_handlers import LongTermCapabilityFactory
     from atlas.longterm.cli_commands import (
         run_consolidate,
         run_episodes,
         run_procedures,
+        run_search,
     )
 
     factory = LongTermCapabilityFactory()
@@ -1222,6 +1231,10 @@ def _run_memory(args: argparse.Namespace) -> None:
                 args.tool,
             )
         )
+        return
+
+    if args.action == "search":
+        _print_result(run_search(factory, args.query, args.limit))
         return
 
     if args.action == "consolidate":

@@ -1,5 +1,7 @@
 """Track C — LongTermCapabilityFactory tests (Batch 4)."""
 
+from datetime import datetime
+
 from atlas.longterm.capability_handlers import LongTermCapabilityFactory
 from atlas.longterm.episode_repository import EpisodicRepository
 from atlas.longterm.evolution_integration import (
@@ -17,6 +19,18 @@ def _make_episode(episode_id: str, outcome: str = "success") -> Episode:
         kind=EpisodeKind.PIPELINE,
         title=f"Episode {episode_id}",
         outcome=outcome,
+    )
+
+
+def _make_tagged_episode(episode_id: str, tag: str) -> Episode:
+    return Episode(
+        episode_id=episode_id,
+        kind=EpisodeKind.PIPELINE,
+        title=f"Episode {episode_id}",
+        outcome="success",
+        started_at=datetime(2026, 1, 1, 12, 0, 0),
+        ended_at=datetime(2026, 1, 1, 12, 0, 5),
+        tags=(tag,),
     )
 
 
@@ -41,8 +55,9 @@ class TestRegistration:
         factory.register(registry)
         assert registry.has("memory.episodic_query")
         assert registry.has("memory.procedure_query")
+        assert registry.has("memory.semantic_query")
         assert registry.has("memory.consolidate")
-        assert registry.count == 3
+        assert registry.count == 4
 
 
 class TestEpisodicQuery:
@@ -131,3 +146,78 @@ class TestConsolidate:
         result = factory.handlers()["memory.consolidate"]({})
         assert not result.success
         assert "refused" in result.error
+
+
+class TestSemanticQuery:
+    def _factory_with_tagged(self, count: int = 2) -> LongTermCapabilityFactory:
+        repository = EpisodicRepository()
+        for i in range(count):
+            repository.store_episode(_make_tagged_episode(f"ep{i}", "alpha"))
+        return LongTermCapabilityFactory(
+            episodes=repository, procedures=ProceduralRepository()
+        )
+
+    def test_successful_query(self):
+        factory = self._factory_with_tagged()
+        result = factory.handlers()["memory.semantic_query"]({"query": "alpha"})
+        assert result.success
+        assert result.output["count"] == 2
+        assert result.metadata["count"] == 2
+        first = result.output["results"][0]
+        assert first["type"] == "episode"
+        assert first["item"]["episode_id"].startswith("ep")
+        assert first["matched_fields"] == ("tags",)
+
+    def test_missing_query_fails_closed(self):
+        factory = self._factory_with_tagged()
+        result = factory.handlers()["memory.semantic_query"]({})
+        assert not result.success
+        assert "query" in result.error
+
+    def test_blank_query_fails_closed(self):
+        factory = self._factory_with_tagged()
+        result = factory.handlers()["memory.semantic_query"]({"query": "   "})
+        assert not result.success
+        assert "query" in result.error
+
+    def test_non_string_query_fails_closed(self):
+        factory = self._factory_with_tagged()
+        result = factory.handlers()["memory.semantic_query"]({"query": 123})
+        assert not result.success
+        assert "query" in result.error
+
+    def test_limit_defaults_and_coercion(self):
+        factory = self._factory_with_tagged(1)
+        result = factory.handlers()["memory.semantic_query"](
+            {"query": "alpha", "limit": "many"}
+        )
+        assert result.success
+        assert result.output["count"] == 1
+
+    def test_limit_capped_at_500(self):
+        repository = EpisodicRepository()
+        for i in range(505):
+            repository.store_episode(
+                _make_tagged_episode(f"ep-{i:03d}", "bulk")
+            )
+        factory = LongTermCapabilityFactory(episodes=repository)
+        result = factory.handlers()["memory.semantic_query"](
+            {"query": "bulk", "limit": 10_000}
+        )
+        assert result.success
+        assert result.output["count"] == 500
+
+    def test_handler_is_read_only(self):
+        factory = self._factory_with_tagged()
+        before = (
+            factory.episodes.episode_count,
+            factory.procedures.procedure_count,
+        )
+        factory.handlers()["memory.semantic_query"]({"query": "alpha"})
+        factory.handlers()["memory.semantic_query"]({})
+        after = (
+            factory.episodes.episode_count,
+            factory.procedures.procedure_count,
+        )
+        assert before == after
+        assert factory.episodes.get_episode("ep0") is not None

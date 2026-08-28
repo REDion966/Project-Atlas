@@ -1,10 +1,11 @@
 """Atlas Long-Term Learning — Capability Handlers (Track C, Batch 4).
 
-Registers the three Track C capabilities following the Atlas
+Registers the Track C capabilities following the Atlas
 ``CapabilityRegistry`` pattern (``CapabilityHandler = Callable[[dict], ExecutionResult]``):
 
   memory.episodic_query  — query recent episodes by time/outcome
   memory.procedure_query — query distilled procedures by category/tool
+  memory.semantic_query  — deterministic semantic recall across both stores
   memory.consolidate     — run a consolidation pass (governed)
 
 Handlers are pure bridges: all work is delegated to injected components
@@ -32,6 +33,7 @@ from atlas.longterm.evolution_integration import (
 )
 from atlas.longterm.models import ConsolidationRecord, ConsolidationStatus
 from atlas.longterm.procedure_repository import ProceduralRepository
+from atlas.longterm.semantic_recall import SemanticRecallEngine
 
 from atlas.reasoning.execution.models import ExecutionResult
 from atlas.reasoning.execution.registry import CapabilityRegistry
@@ -60,6 +62,10 @@ class LongTermCapabilityFactory:
         self._evolution = evolve_bridge or LongTermIngestBridge(
             tracker=self._tracker
         )
+        self._recall = SemanticRecallEngine(
+            episodes=self._episodes,
+            procedures=self._procedures,
+        )
 
     @property
     def episodes(self) -> EpisodicRepository:
@@ -74,15 +80,16 @@ class LongTermCapabilityFactory:
     # ------------------------------------------------------------------
 
     def handlers(self) -> dict[str, CapabilityHandler]:
-        """Return the three long-term capabilities keyed by name."""
+        """Return the long-term capabilities keyed by name."""
         return {
             "memory.episodic_query": self._episodic_query_handler,
             "memory.procedure_query": self._procedure_query_handler,
+            "memory.semantic_query": self._semantic_query_handler,
             "memory.consolidate": self._consolidate_handler,
         }
 
     def register(self, registry: CapabilityRegistry) -> None:
-        """Register all three handlers into a ``CapabilityRegistry``."""
+        """Register all long-term handlers into a ``CapabilityRegistry``."""
         for name, handler in self.handlers().items():
             registry.register(name, handler)
 
@@ -172,6 +179,49 @@ class LongTermCapabilityFactory:
                 success=False,
                 error=str(exc),
                 metadata={"handler": "memory.procedure_query"},
+            )
+
+    # ------------------------------------------------------------------
+    # memory.semantic_query — deterministic semantic recall (read-only)
+    # ------------------------------------------------------------------
+
+    def _semantic_query_handler(self, params: dict[str, Any]) -> ExecutionResult:
+        """Recall episodes and procedures relevant to a free-text query.
+
+        Params:
+            query (str, required): non-empty free-text query.
+            limit (int, optional): Max results (default 100, cap 500).
+
+        Strictly read-only: delegates to the injected
+        :class:`SemanticRecallEngine`; repositories and storage are never
+        mutated. Malformed or missing ``query`` fails closed.
+        """
+        try:
+            query = params.get("query")
+            if not isinstance(query, str) or not query.strip():
+                return ExecutionResult(
+                    capability="memory.semantic_query",
+                    success=False,
+                    error="memory.semantic_query requires a non-empty 'query' string",
+                    metadata={"handler": "memory.semantic_query"},
+                )
+            limit = self._normalize_limit(params.get("limit"))
+            results = self._recall.recall(query, limit=limit)
+            return ExecutionResult(
+                capability="memory.semantic_query",
+                success=True,
+                output={"results": results, "count": len(results)},
+                metadata={
+                    "handler": "memory.semantic_query",
+                    "count": len(results),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            return ExecutionResult(
+                capability="memory.semantic_query",
+                success=False,
+                error=str(exc),
+                metadata={"handler": "memory.semantic_query"},
             )
 
     # ------------------------------------------------------------------

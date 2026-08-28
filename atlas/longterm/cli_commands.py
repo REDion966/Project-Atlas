@@ -4,6 +4,7 @@ Presentation-only wrappers for the Track C surface:
 
   atlas memory episodes   — query recent episodes (outcome / limit filters)
   atlas memory procedures — query distilled procedures (category / tool filters)
+  atlas memory search     — deterministic semantic recall across both stores
   atlas memory consolidate — GOVERNED consolidation through the evolution
                              ingest bridge (never mutates repositories)
 
@@ -59,6 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--tool", default="", help="Filter by referenced tool name"
     )
 
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Deterministic semantic recall across episodes and procedures",
+    )
+    search_parser.add_argument(
+        "query", help="Free-text query (required)"
+    )
+    search_parser.add_argument(
+        "--limit", type=int, default=100, help="Max results (capped at 500)"
+    )
+
     consolidate_parser = subparsers.add_parser(
         "consolidate", help="Run governed consolidation"
     )
@@ -112,6 +124,21 @@ def run_procedures(
     return handler(params)
 
 
+def run_search(
+    factory: LongTermCapabilityFactory,
+    query: str,
+    limit: int = 100,
+) -> ExecutionResult:
+    """Present ``atlas memory search`` (via the semantic_query handler).
+
+    Read-only: delegates to the deterministic semantic-recall capability;
+    repositories, storage, and governance state are never mutated.
+    """
+    handler = factory.handlers()["memory.semantic_query"]
+    params: dict = {"query": query, "limit": limit}
+    return handler(params)
+
+
 def run_consolidate(
     factory: LongTermCapabilityFactory,
     bridge: LongTermIngestBridge | None = None,
@@ -151,6 +178,9 @@ def main(argv: list[str] | None = None) -> int:
         return _print_result(result)
     if args.action == "procedures":
         result = run_procedures(factory, args.limit, args.category, args.tool)
+        return _print_result(result)
+    if args.action == "search":
+        result = run_search(factory, args.query, args.limit)
         return _print_result(result)
     if args.action == "consolidate":
         result = run_consolidate(factory, dry_run=args.dry_run)
