@@ -51,8 +51,8 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
-| Current HEAD | `6676566` (branch `phase5-memory-evolution`) |
-| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), plus the **Stage A1→H guided self-improvement thread** (see §27) |
+| Current HEAD | `be2bb84` (branch `phase5-memory-evolution`) |
+| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), the **Stage A1→H guided self-improvement thread** (see §27), and the completed **Track C post-core follow-ups** — Persistent Learning, deterministic semantic recall, forgetting-policy operationalization (see §28–§29) |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
@@ -64,7 +64,10 @@ decomposition) and Batch 2 (scaffold/legacy cleanup) have been completed, and
 the additive Stage A1→H self-improvement/promotion-review thread (repository
 self-knowledge map, development intelligence, impact/context-aware planning,
 promotion gate, research→development bridge, decision-quality scoring, and
-promotion-review visibility) is complete — see §27.
+promotion-review visibility) is complete — see §27. The Track C post-core
+follow-ups — Persistent Learning (`5bfa615`), deterministic semantic recall
+(`57f0063`), and forgetting-policy operationalization (`be2bb84`) — are also
+complete; the schema remains **v11** (see §28–§29).
 
 ---
 
@@ -114,6 +117,8 @@ CLI.
 `LongTermSQLiteStorage` (`episodic_*`/`procedural_*`/`memory_consolidation_records`,
 migration v9), `memory.*` capability handlers, governed LONGTERM_INGEST
 (**GOV-010**), `atlas memory` CLI, and kernel wiring inside `Atlas.start()`.
+Post-core follow-ups — Persistent Learning (§28), deterministic semantic
+recall, and forgetting-policy operationalization (§29) — are complete.
 
 ### 3.4 Track D — Advanced Reasoning (IMPLEMENTED & runtime-integrated)
 See §18–§20 for the full architecture description.
@@ -265,7 +270,8 @@ This is confirmed by source and by the migration tests
 `test_experience_storage`, `test_longterm_storage`,
 `test_understanding_storage`), which assert schema version **11** after the
 Track D additive `reasoning_*` tables and the Persistent Learning
-`learning_insights` table.
+`learning_insights` table. The deterministic-semantic-recall and
+forgetting-policy batches added no migrations; the schema remains **11**.
 
 ## 9. Capability Architecture
 
@@ -453,6 +459,11 @@ trace recorder, repositories, causal/hypotheses/verify/meta engines, models,
 protocols, wiring, evolution integration, import-boundary scans, and
 kernel integration.
 
+**Verified Track C post-core follow-up executions:** deterministic semantic
+recall batch (`57f0063`) — full suite 4,285 tests, 0 failed (pytest exit 0);
+forgetting-policy batch (`be2bb84`) — full suite 4,296 tests, 0 failed
+(pytest exit 0).
+
 ## 16. Architectural Invariants
 
 - **CURRENT IMPLEMENTATION** vs **ARCHITECTURAL INVARIANT** vs **DEFERRED** vs
@@ -513,15 +524,16 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
   so distilled reasoning insights flow through the Phase 16
   schedule-store/dispatcher queue under GOV-011. Reasoning artifacts are
   persisted regardless; nothing remains deferred on this path.
-- Track A deferred follow-ups: knowledge-graph expansion, web adapter.
+- Track A deferred follow-ups: knowledge-graph expansion.
   (The research coordinator — formerly a deferred Track A item — is complete
-  as Phase 21.)
+  as Phase 21; the web source adapter was delivered by post-Core F8.)
 - Track B deferred follow-ups are **complete** as Phase 22 (skill authoring/
   promotion, CONDITIONAL and PARALLEL execution). No Track B deferred items
   remain.
 - Track C deferred follow-ups: feeding episodic context into working memory /
-  `ContextEngine` (requires RuntimeCoordinator review), semantic memory
-  upgrades, forgetting-policy tuning.
+  `ContextEngine` (requires RuntimeCoordinator review).
+  (The remaining Track C follow-ups — deterministic semantic recall and
+  forgetting-policy tuning — are complete; see §29.)
 - Phase 16: boot activation of staged config + SAFE_MODE rollback are part of
   the governed-autonomy design but remain governed-path behavior; CODE scope is
   unreachable by constitutional design.
@@ -956,7 +968,7 @@ existing architecture.
 Closes the gap where reusable `LearningInsight` objects (runtime reflection,
 self-development outcomes, and other validated conclusions carrying
 provenance/confidence) were produced by the `LearningEngine` but lost on
-restart.
+restart (commit `5bfa615`).
 
 - **Storage:** the existing kernel-owned `SQLiteEvolutionStorage` gains
   `store_learning_insight()` / `load_learning_insights()` plus an additive
@@ -972,12 +984,83 @@ restart.
   existing `CapabilityAnalyzer` learning-provider path. No governance bypass.
 - **Tests:** `tests/test_persistent_learning.py`.
 
+---
+
+## 29. Track C Post-Core Follow-Ups (post-Persistent Learning)
+
+Both remaining recorded Track C follow-ups are complete, additive, verified,
+and require no migration — the schema remains **v11**.
+
+### 29.1 Deterministic Semantic Recall (commit `57f0063`)
+
+Closes the retrieval half of the memory story: stored long-term knowledge
+(episodes + procedures) becomes deterministically recallable.
+
+- **Engine:** `atlas/longterm/semantic_recall.py` — `SemanticRecallEngine`,
+  a pure, read-only ranker over the EXISTING `EpisodicRepository` /
+  `ProceduralRepository`. Queries are tokenized into lowercase alphanumeric
+  tokens (length ≥ 2); fields are scored with fixed weights (tags 3.0,
+  name/title 2.0, tool names 2.0, category/kind/outcome 1.5,
+  summary/description 1.0) × a coverage multiplier (distinct matched query
+  tokens / total query tokens), rounded to 4 decimals; zero-match items are
+  excluded; empty/whitespace queries return no results; results are bounded
+  (hard cap 500) and sorted by `(-score, type, id)`.
+- **Explainability / provenance:** every result carries
+  `{type, score, matched_tokens, matched_fields, item}` where `item` is the
+  complete existing `to_dict()` representation of the underlying
+  Episode/Procedure. No new provenance infrastructure.
+- **Surface:** registered additively as the read-only `memory.semantic_query`
+  capability via `LongTermCapabilityFactory` (`query` required and
+  fail-closed when missing/blank/non-string; `limit` default 100, capped
+  500) and exposed as the presentation-only
+  `atlas memory search <query> [--limit N]` CLI. Pure module: no SQLite, no
+  kernel, no AI/LLM, no events; repositories and storage are never mutated.
+- **Storage:** none added — recall reads in-memory state restored from the
+  existing v9 tables; schema remains **v11**.
+- **Tests:** `tests/test_longterm_semantic_recall.py` plus handler/wiring/CLI
+  updates. Full suite verified: 4,285 tests, 0 failed (pytest exit 0).
+
+### 29.2 Forgetting-Policy Operationalization (commit `be2bb84`)
+
+The existing principled-forgetting machinery was complete and tested but
+inert under the shipped default configuration (`*_ttl_days = 0`).
+
+- **Defaults:** `MemoryDecayPolicy` and `catalog` defaults are now
+  operational — `episode_ttl_days = 90`, `procedure_ttl_days = 180`
+  (`min_importance` 0.1, `max_*` bounds, and `enabled = True` unchanged). The
+  kernel-owned default `Consolidator()` therefore emits real, bounded,
+  deterministic forgetting candidates.
+- **Explainability:** every flagged item carries deterministic metadata
+  (`metadata["flags"] = {item_id: {reason, days_inactive, importance}}`;
+  reason precedence is "age" over "importance", per the existing flagging
+  condition); the public `episodes_flagged`/`procedures_flagged` tuples are
+  unchanged.
+- **Governance:** consolidation flags remain advisory `PENDING`
+  `ConsolidationRecord`s ingested through GOV-010 — **no applier exists and
+  nothing deletes, merges, or mutates memory**; repositories and storage are
+  untouched by consolidation. The governed payload builder is unchanged.
+- **Tests:** `tests/test_longterm_consolidator.py` (plus model/catalog
+  default assertions). Full suite verified: 4,296 tests, 0 failed
+  (pytest exit 0).
+
+### 29.3 Status of the next task
+
+**No next implementation task is currently defined.** The recorded Track C
+follow-ups are complete. The remaining recorded direction (Track A
+knowledge-graph expansion) and the deferred episodic-context integration
+(require RuntimeCoordinator review) need an explicitly written,
+owner-approved scope before implementation begins. **No next Stage (e.g.
+Stage I) is defined.**
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
 2973 passed, 57 subtests, 0 failed, 0 errors) · Release update: 2026-08-16
 (v0.20.0 released at b92c5d9; 3260 passed, 0 failed, 57 subtests, 2
 non-blocking warnings) · Foundation Strengthening: Batch 1 (kernel
-decomposition) and Batch 2 (scaffold cleanup) completed. · Project Atlas —
+decomposition) and Batch 2 (scaffold cleanup) completed. · Track C post-core
+follow-ups reconciled: 2026-08-28 (Persistent Learning 5bfa615, deterministic
+semantic recall 57f0063, forgetting-policy operationalization be2bb84; schema
+v11; no implementation NEXT currently defined). Project Atlas —
 docs/ATLAS_STATE.md. This document is the authoritative current architecture
 handbook and replaces all earlier ATLAS_STATE revisions.*

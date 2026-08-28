@@ -135,6 +135,36 @@ and git history (`534da54..6676566`):
 - No approve/reject/promote/execute path is exposed through the CLI; the
   human-approval boundary remains the only advancement channel.
 
+### Track C Post-Core Follow-Ups (COMPLETE)
+
+The recorded Track C follow-ups are complete, in three verified batches
+(schema remains **v11** throughout — no new migrations):
+
+- **Persistent Learning** (`5bfa615`) — reusable `LearningInsight` objects
+  persist via the existing `SQLiteEvolutionStorage` (additive migration v11,
+  `learning_insights` table) and restore into `LearningMemory` on startup;
+  storage failures degrade gracefully to memory-only. See
+  `docs/ATLAS_STATE.md` §28.
+- **Deterministic Semantic Recall** (`57f0063`) — pure `SemanticRecallEngine`
+  (`atlas/longterm/semantic_recall.py`) ranks stored episodes and procedures
+  by deterministic token overlap (tags 3.0 / name·title 2.0 / tool 2.0 /
+  category·kind·outcome 1.5 / summary·description 1.0, × coverage
+  multiplier), bounded (hard cap 500), sorted by `(-score, type, id)`, fully
+  explained (matched tokens/fields), and provenance-preserving (complete
+  `to_dict()` payloads). Registered additively as the read-only
+  `memory.semantic_query` capability and exposed via
+  `atlas memory search <query> [--limit N]`. No new storage, no retrieval
+  subsystem, no AI/LLM involvement.
+- **Forgetting-Policy Operationalization** (`be2bb84`) — the existing
+  `MemoryDecayPolicy` defaults are now operational (episodes inactive > 90
+  days, procedures unused > 180 days; `min_importance` 0.1 unchanged), and
+  every forget flag carries deterministic reason metadata
+  (`metadata["flags"]`). Consolidation flags remain advisory PENDING records
+  through GOV-010 — no applier exists and nothing deletes memory.
+
+Full suite verified at each batch: **4,285 tests** (semantic recall) and
+**4,296 tests** (forgetting policy), **0 failed** (pytest exit 0).
+
 ---
 
 ## CURRENT — Foundation Strengthening
@@ -165,25 +195,28 @@ There is **NO Phase 23 for Atlas Core**. The next development model is
 
 ## NEXT — Foundation Strengthening / Post-Core Work
 
-The immediate next foundation-strengthening focus:
+**No implementation NEXT is currently defined.** The recorded Track C
+follow-ups — Persistent Learning, deterministic semantic recall, and
+forgetting-policy tuning — are COMPLETE (see the Track C Post-Core Follow-Ups
+subsection above and `docs/ATLAS_STATE.md` §28–§29). No further task carries
+an approved design. Any future work requires an explicitly written,
+owner-approved scope/direction before implementation begins
+(inspect-before-build remains in force).
 
-- **Persistent Learning (first post-A1→H capability)** — **COMPLETE.** Reusable
-  `LearningInsight` objects are now persisted via the existing
-  `SQLiteEvolutionStorage` (additive migration v11) and restored into
-  `LearningMemory` on startup. See `docs/ATLAS_STATE.md` §28.
-- **Governed ingest sink resolution** — **RESOLVED.** The governed
-  `ReasoningIngestSink` (and corresponding Track A/B/C ingest bridges) is wired
-  at runtime; see the DEFERRED section below and `docs/ATLAS_STATE.md` §19.
+Still-recorded, non-gated follow-up direction (recorded direction only — not
+an approved NEXT task):
+
+- **Track A**: knowledge-graph expansion. (The previously listed web source
+  adapter was delivered by post-Core **F8** —
+  `atlas/research/sources/web.py` + `atlas/research/acquisition.py` — so it
+  is no longer an open follow-up.)
+
+Deferred / owner-gated items (unchanged):
+
 - **Episodic context surfacing** — feed long-term episodic memory into the
   RuntimeCoordinator pipeline so stored experiences influence current
   processing. **Deferred** pending a RuntimeCoordinator review (locked pipeline
   order).
-
-Remaining already-recorded Track A/C follow-ups (zero required for core
-completion):
-
-- **Track A** follow-ups: knowledge-graph expansion, web source adapter
-- **Track C** follow-ups: semantic-memory upgrades, forgetting-policy tuning
 
 **No next Stage (e.g. Stage I) is defined.** The Stage A1→H self-improvement
 thread is complete at Stage H. Any further promotion-review capability (for
@@ -323,5 +356,8 @@ v0.19.1). Core milestone update: 2026-08-14 (Phase 22 COMPLETE — Atlas Core
 complete; post-core guided self-improvement; no Phase 23). Release update:
 2026-08-16 (v0.20.0 released at b92c5d9; 3260 passed, 0 failed, 57 subtests,
 2 non-blocking warnings). Foundation Strengthening: Batch 1 (kernel
-decomposition) and Batch 2 (scaffold cleanup) completed. Project Atlas —
+decomposition) and Batch 2 (scaffold cleanup) completed. Track C post-core
+follow-ups reconciled: 2026-08-28 (Persistent Learning 5bfa615, deterministic
+semantic recall 57f0063, forgetting-policy operationalization be2bb84; schema
+v11; no implementation NEXT currently defined). Project Atlas —
 docs/ROADMAP.md.*

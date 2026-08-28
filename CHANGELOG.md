@@ -41,10 +41,10 @@ fail-soft; governance boundaries are preserved throughout.
 
 ### Persistent Learning — reusable learning-insight persistence
 
-The first post-A1→H capability. Closes the gap where reusable
-`LearningInsight` objects (runtime reflection, self-development outcomes, and
-other validated conclusions with provenance/confidence) were produced by the
-`LearningEngine` but lost on restart.
+The first post-A1→H capability (commit `5bfa615`). Closes the gap where
+reusable `LearningInsight` objects (runtime reflection, self-development
+outcomes, and other validated conclusions with provenance/confidence) were
+produced by the `LearningEngine` but lost on restart.
 
 - `LearningMemory` now accepts an optional storage adapter (the existing
   kernel-owned `SQLiteEvolutionStorage`): insights are dual-written on
@@ -56,6 +56,43 @@ other validated conclusions with provenance/confidence) were produced by the
   the existing evolution storage and governed pipeline are reused.
 - Low-quality/transient reasoning is still gated by the existing
   `InsightConsolidator` quality thresholds before it reaches memory.
+
+### Deterministic Semantic Memory Recall (Track C)
+
+Deterministic, read-only recall over the existing long-term stores
+(commit `57f0063`):
+
+- New pure `SemanticRecallEngine` (`atlas/longterm/semantic_recall.py`) ranks
+  stored episodes and procedures by token overlap with fixed field weights
+  (tags 3.0, name/title 2.0, tool names 2.0, category/kind/outcome 1.5,
+  summary/description 1.0) × a coverage multiplier, rounded to 4 decimals;
+  zero-match items are excluded; results are bounded (hard cap 500) and
+  deterministically ordered (`-score, type, id`).
+- Every result is fully explained (matched tokens/fields) and
+  provenance-preserving (complete existing item `to_dict()` payloads).
+- Registered additively as the `memory.semantic_query` capability (required,
+  fail-closed `query`; `limit` default 100, capped 500) and exposed via
+  `atlas memory search <query> [--limit N]` (presentation-only).
+- No new storage, tables, or retrieval subsystem; schema remains **v11**; no
+  AI/LLM involvement; strictly read-only — repositories and storage are never
+  mutated.
+- Full suite verified: 4,285 tests, 0 failed (pytest exit 0).
+
+### Long-Term Memory Forgetting Policy (Track C)
+
+Operationalized the existing principled-forgetting policy (commit `be2bb84`):
+
+- `MemoryDecayPolicy` defaults are now active: episodes inactive > 90 days and
+  procedures unused > 180 days become deterministic forgetting candidates
+  (`min_importance` 0.1 and all other policy fields unchanged).
+- Every forget flag carries deterministic explanation metadata
+  (`metadata["flags"]`: reason / days_inactive / importance); the public
+  flagged-id tuples are unchanged.
+- Consolidation flags remain advisory PENDING records through the existing
+  GOV-010 governed path — no applier exists and nothing deletes, merges, or
+  mutates memory; repositories and storage are untouched. Schema remains
+  **v11**.
+- Full suite verified: 4,296 tests, 0 failed (pytest exit 0).
 
 ### Foundation Strengthening Batch 1 — Kernel Composition-Root Decomposition
 
@@ -215,8 +252,12 @@ Documentation-only permanent boundary adopted ahead of post-Core F7–F11
 
 ### Test Status
 
-- **3260 passed, 0 failed, 57 subtests, 2 warnings** (identical to v0.20.0
-  release gate).
+- **v0.20.0 release gate:** 3260 passed, 0 failed, 57 subtests, 2 warnings
+  (identical to the v0.20.0 release gate).
+- **Deterministic semantic memory recall batch (`57f0063`):** full suite
+  4,285 tests, 0 failed (pytest exit 0).
+- **Long-term memory forgetting-policy batch (`be2bb84`):** full suite 4,296
+  tests, 0 failed (pytest exit 0).
 
 ---
 
