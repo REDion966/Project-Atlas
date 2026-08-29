@@ -10,6 +10,7 @@ from atlas.config.configuration_models import (
     APIKeySettings,
     ApplicationSettings,
     AtlasSettings,
+    AuthoritySettings,
     ConversationSettings,
     DevelopmentSettings,
     LoggingSettings,
@@ -69,6 +70,11 @@ class Configuration:
                     data.get("development", {}).get(
                         "model_assisted_authoring", False
                     )
+                ),
+            ),
+            authority=AuthoritySettings(
+                owner_name=str(
+                    data.get("authority", {}).get("owner_name", "Owner")
                 ),
             ),
         )

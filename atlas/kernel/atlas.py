@@ -88,6 +88,7 @@ from atlas.evolution.development_cycle import DevelopmentCycleController
 from atlas.evolution.model_assisted_supplier import ModelAssistedChangeSupplier
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
+from atlas.authority.service import AuthorityService
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 from atlas.goals.goal_repository import GoalRepository
 
@@ -369,6 +370,7 @@ class Atlas:
         self._self_observation_engine: SelfObservationEngine | None = None
         self._learning_engine: LearningEngine | None = None
         self._identity_engine: IdentityEngine | None = None
+        self._authority_service: AuthorityService | None = None
 
         # --- Phase 8.3: Goal Intelligence ---
         self._goal_repository: GoalRepository | None = None
@@ -1170,6 +1172,11 @@ class Atlas:
     @property
     def container(self):
         return self._container
+
+    @property
+    def authority_service(self) -> AuthorityService | None:
+        """Return the kernel-owned AuthorityService (P1/B1.1)."""
+        return self._authority_service
 
     @property
     def events(self):
@@ -2262,6 +2269,17 @@ class Atlas:
         self._evolution_memory = EvolutionMemory(storage=self._evolution_storage)
         self._evolution_memory.restore()
 
+        # --- P1/B1.1: Owner/User authority foundation ---
+        # Exactly one logical Owner, designated via [authority] owner_name.
+        # Auditable through the kernel-owned EvolutionMemory (best-effort).
+        owner_name = str(
+            self._config.get("authority", "owner_name", default="Owner")
+        )
+        self._authority_service = AuthorityService(
+            owner_name=owner_name,
+            audit_store=self._evolution_memory,
+        )
+
         # Phase 13.5 decision-pipeline closure: replay restored observations
         # into the scheduler's working set so pre-restart runtime history
         # remains actionable for weakness aggregation (oldest-first).
@@ -2621,6 +2639,7 @@ class Atlas:
         self._container.register("evolution_observer", self._self_observation_engine)
         self._container.register("learning_engine", self._learning_engine)
         self._container.register("identity", self._identity_engine)
+        self._container.register("authority", self._authority_service)
         self._container.register("feedback_coordinator", self._feedback_coordinator)
         self._container.register("goal_repository", self._goal_repository)
         self._container.register("goal_intelligence", self._goal_intelligence_engine)
@@ -2879,6 +2898,7 @@ class Atlas:
         self._self_observation_engine = None
         self._learning_engine = None
         self._identity_engine = None
+        self._authority_service = None
 
         # --- Phase 12.2: Cleanup ---
         self._intelligence_engine = None

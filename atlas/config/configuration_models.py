@@ -76,6 +76,17 @@ class DevelopmentSettings:
 
 
 @dataclass(slots=True)
+class AuthoritySettings:
+    """Owner/authority foundation configuration (P1/B1.1).
+
+    ``owner_name`` designates the single logical Owner. No authentication is
+    configured here; this is only the explicit, stable owner identity.
+    """
+
+    owner_name: str = "Owner"
+
+
+@dataclass(slots=True)
 class LoggingSettings:
     """Logging configuration."""
 
@@ -95,3 +106,5 @@ class AtlasSettings:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     # Optional governed development settings; safe default False.
     development: DevelopmentSettings = field(default_factory=DevelopmentSettings)
+    # Optional authority settings; safe default owner name.
+    authority: AuthoritySettings = field(default_factory=AuthoritySettings)

@@ -41,6 +41,12 @@ history_limit = 20
 [development]
 model_assisted_authoring = false
 
+# Owner/authority foundation (P1/B1.1). Exactly one logical Owner, designated
+# explicitly by name. No authentication here; this only establishes the
+# owner's stable, highest-authority identity.
+[authority]
+owner_name = "Owner"
+
 [api_keys]
 # Set API keys here or via environment variables:
 #   OPENAI_API_KEY, ANTHROPIC_API_KEY
