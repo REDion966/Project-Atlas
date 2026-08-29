@@ -62,6 +62,20 @@ class ResearchSettings:
 
 
 @dataclass(slots=True)
+class DevelopmentSettings:
+    """Governed development-cycle configuration.
+
+    ``model_assisted_authoring`` is the explicit opt-in for the optional
+    model-assisted change supplier (B4). Safe default ``False``: Atlas uses
+    the existing ``DeterministicChangeSupplier`` and no model-assisted
+    authoring occurs unless explicitly enabled. Owner approval, sandbox-only
+    execution, verification, and promotion review remain mandatory.
+    """
+
+    model_assisted_authoring: bool = False
+
+
+@dataclass(slots=True)
 class LoggingSettings:
     """Logging configuration."""
 
@@ -79,3 +93,5 @@ class AtlasSettings:
     # Optional research/acquisition settings; defaults keep the web source
     # adapter deny-by-default.
     research: ResearchSettings = field(default_factory=ResearchSettings)
+    # Optional governed development settings; safe default False.
+    development: DevelopmentSettings = field(default_factory=DevelopmentSettings)

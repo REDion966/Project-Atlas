@@ -32,6 +32,15 @@ allow_fallback = false
 [conversation]
 history_limit = 20
 
+# Governed model-assisted change authoring (B4).
+# Explicit opt-in ONLY: when false (the default), Atlas uses the existing
+# DeterministicChangeSupplier and no model-assisted authoring occurs.
+# When true, the kernel may construct ModelAssistedChangeSupplier and inject
+# it through the existing change_supplier seam. Owner approval, sandbox-only
+# execution, verification, and promotion review remain mandatory.
+[development]
+model_assisted_authoring = false
+
 [api_keys]
 # Set API keys here or via environment variables:
 #   OPENAI_API_KEY, ANTHROPIC_API_KEY

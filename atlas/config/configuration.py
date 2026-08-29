@@ -11,6 +11,7 @@ from atlas.config.configuration_models import (
     ApplicationSettings,
     AtlasSettings,
     ConversationSettings,
+    DevelopmentSettings,
     LoggingSettings,
     ResearchSettings,
 )
@@ -61,6 +62,13 @@ class Configuration:
                     str(h).strip()
                     for h in data.get("research", {}).get("web_allowed_hosts", ())
                     if str(h).strip()
+                ),
+            ),
+            development=DevelopmentSettings(
+                model_assisted_authoring=bool(
+                    data.get("development", {}).get(
+                        "model_assisted_authoring", False
+                    )
                 ),
             ),
         )

@@ -16,6 +16,7 @@ from typing import Any
 
 from atlas.ai.ai_manager import AIManager
 from atlas.ai.routing.profile_loader import load_model_profiles
+from atlas.ai.routing.models import RoutingRequest
 from atlas.ai.routing.registry import ModelProfileRegistry
 from atlas.ai.routing.router import ModelRouter
 from atlas.config.configuration import Configuration
@@ -84,6 +85,7 @@ from atlas.evolution.adaptation.evaluator import AdaptationEvaluator
 from atlas.evolution.adaptation.orchestrator import AdaptationOrchestrator
 from atlas.evolution.operation import OperationController
 from atlas.evolution.development_cycle import DevelopmentCycleController
+from atlas.evolution.model_assisted_supplier import ModelAssistedChangeSupplier
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
@@ -913,9 +915,26 @@ class Atlas:
         PREPARES a bounded DRAFT ``EvolutionProposal`` and submits it to the
         existing approval workflow. It never runs from ``tick()``, never
         starts a daemon, and never authorizes, executes, or promotes.
+
+        B4 (governed model-assisted authoring) — OPT-IN ONLY: when the
+        ``[development] model_assisted_authoring`` config flag is explicitly
+        ``true``, the optional :class:`ModelAssistedChangeSupplier` is
+        constructed and injected through the existing ``change_supplier``
+        seam. When false (the default), ``change_supplier`` stays ``None``
+        and the controller uses the existing ``DeterministicChangeSupplier``
+        — no model is required, no model-assisted authoring occurs.
         """
+        change_supplier = None
+        if bool(
+            self._config.get("development", "model_assisted_authoring", default=False)
+        ):
+            change_supplier = ModelAssistedChangeSupplier(
+                authoring_model=self._model_assisted_authoring_model,
+            )
+
         self._development_controller = DevelopmentCycleController(
             approval_manager=self._approval_manager,
+            change_supplier=change_supplier,
             researcher=(
                 self._acquisition_service.acquire
                 if self._acquisition_service is not None
@@ -924,6 +943,25 @@ class Atlas:
             proposal_store=self._evolution_memory,
             approval_request_store=self._evolution_memory,
         )
+
+    def _model_assisted_authoring_model(self, prompt: str):
+        """Duck-typed authoring model backed by the EXISTING ``AIService``.
+
+        Wired by the kernel composition root; the supplier itself never
+        imports ``atlas.ai``. Uses the existing ``AIService.chat`` routing
+        convention and returns the ``AIResponse.text`` string.
+        """
+        response = self._ai_manager.service.chat(
+            [{"role": "user", "content": prompt}],
+            routing_context=RoutingRequest(
+                complexity=0.8,
+                latency_requirement="any",
+                task_type="development",
+                context_size=len(prompt),
+                metadata={"source": "development_cycle"},
+            ),
+        )
+        return response.text
 
     @property
     def development_controller(self):
