@@ -30,10 +30,13 @@ remains locked and is not enabled; code changes may be produced as reviewable
 artifacts/patches rather than autonomously applied. **Autonomous code mutation
 remains disabled.**
 
-**Latest verified test run (v0.20.0 + Foundation Strengthening Batches 1–2):** `3260 passed`, `57 subtests passed`, `0 failed`, `2 warnings` — the 2 warnings are non-blocking `asyncio.iscoroutinefunction` deprecation warnings in a Phase 21 test.
-*Current test inventory (not a result):* 178+ test files, 766+ test classes, 2958+ test methods.
+**Latest verified test run:** full suite **0 failed** (pytest exit 0) —
+4,291 tests collected, covering all tracks, the post-core improvements, and
+the post-core memory work (Persistent Learning, deterministic semantic
+recall, forgetting-policy operationalization, test-coverage audit).
+*Current test inventory (not a result):* 241 test modules.
 
-**Current schema version:** `10`.
+**Current schema version:** `11`.
 
 ## Major Capabilities & Track Status
 
@@ -66,6 +69,11 @@ remains disabled.**
 - **Hardening** — cognition runtime test correctly routes to Mock Provider
   (Ollama 404 eliminated) and SQLite understanding-counter INTEGER overflow is
   clamped deterministically at `2**63 - 1`.
+- **Post-core memory thread** — Persistent Learning (reusable
+  `LearningInsight` persistence, migration v11), deterministic semantic
+  recall (`memory.semantic_query` capability + `atlas memory search`), and
+  long-term forgetting-policy operationalization (advisory, governed). All
+  additive; schema remains `v11`.
 
 ## Architecture (high level)
 
@@ -154,15 +162,18 @@ docs/                 Documentation
 - **COMPLETED:** Tracks A, B, C, Track D (v0.20), Track A research coordinator
   (Phase 21), Phase 22 — Toolchain Execution & Learned-Skill Progression — and
   post-core F1–F8 + hardening. **Atlas Core is complete at Phase 22.**
-  Foundation Strengthening Batch 1 (kernel decomposition) and Batch 2
-  (scaffold cleanup) are complete.
-- **CURRENT:** Foundation Strengthening — post-release architectural hardening.
-  `SELF_CONFIG`/`INFORMATION` are the enabled governed scopes;
+  Foundation Strengthening Batch 1 (kernel decomposition), Batch 2 (scaffold
+  cleanup), the Stage A1→H guided self-improvement thread, and the Track C
+  post-core follow-ups (Persistent Learning, deterministic semantic recall,
+  forgetting-policy operationalization) are complete.
+- **CURRENT:** Post-core development under the governed self-improvement
+  model. `SELF_CONFIG`/`INFORMATION` are the enabled governed scopes;
   `CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remain locked.
-- **DEFERRED:** Governed `ReasoningIngestSink` runtime wiring remains
-  pending/deferred; `reasoning.ingest` stays fail-closed (sink not wired).
-- **NEXT:** Governed ingest sink resolution, episodic context surfacing,
-  remaining Track A/C follow-ups. None is required for core completion.
+- **DEFERRED:** Episodic-context surfacing (pending a RuntimeCoordinator
+  review).
+- **NEXT:** No implementation NEXT is currently defined; any future work
+  requires an explicitly written, owner-approved scope (see
+  `docs/ROADMAP.md`).
 - **PROPOSED (not approved):** Tracks E, F, G from the Capability Track
   roadmap. See `docs/ROADMAP.md` for details.
 

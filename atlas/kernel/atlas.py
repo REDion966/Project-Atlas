@@ -20,6 +20,8 @@ from atlas.ai.routing.registry import ModelProfileRegistry
 from atlas.ai.routing.router import ModelRouter
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
+from atlas.conversation.development_intake import task_spec_to_development_need
+from atlas.conversation.message import Message
 from atlas.cognition.api import CognitionAPI
 from atlas.events.event_bus import EventBus
 from atlas.kernel.service_container import ServiceContainer
@@ -950,6 +952,51 @@ class Atlas:
             need,
             force_research=force_research,
         )
+
+    # ------------------------------------------------------------------
+    # B3 — Conversational development bridge
+    # ------------------------------------------------------------------
+
+    def _development_bridge(self, spec) -> Message:
+        """Convert a B2 TaskSpec into a bounded governed-development report.
+
+        Maps ``spec`` through the pure ``task_spec_to_development_need``
+        adapter, then delegates to the EXISTING ``run_development_cycle``
+        bridge (F9). The result is a short conversational ``Message``; it
+        never approves, authorizes, executes, or promotes anything.
+        """
+        need = task_spec_to_development_need(spec)
+        if need is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "I could not prepare this as a governed development "
+                    "request. Please clarify the objective and success criteria."
+                ),
+            )
+
+        result = self.run_development_cycle(need)
+
+        lines: list[str] = []
+        if result.ok:
+            lines.append("Development request accepted for governed preparation.")
+            if result.proposal_id:
+                lines.append(f"Proposal ID: {result.proposal_id}")
+            if result.approval_request_id:
+                lines.append(f"Approval Request: {result.approval_request_id}")
+            lines.append(f"Status: {result.proposal_status}")
+            if result.researched:
+                lines.append("Evidence: direct-source research performed.")
+            lines.append(
+                "Stopped at the human approval boundary (PENDING_APPROVAL). "
+                "Nothing is approved, executed, or promoted."
+            )
+        else:
+            lines.append("Development preparation FAILED (fail-closed).")
+            for stage, message in result.failures[:5]:
+                lines.append(f"- {stage}: {message}")
+
+        return Message(role="assistant", content="\n".join(lines))
 
     # ------------------------------------------------------------------
     # Phase F11: Long-Term Self-Management Review (manually invoked)
@@ -2509,6 +2556,7 @@ class Atlas:
             self._ai_manager.service,
             context_engine=context_engine,
             cognition_api=self._cognition_api,
+            development_bridge=self._development_bridge,
         )
 
         # Wire conversation into the runtime coordinator

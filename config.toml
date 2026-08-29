@@ -2,7 +2,7 @@
 
 [application]
 name = "Atlas"
-version = "0.5.0-alpha"
+version = "0.20.0"
 
 [ai]
 provider = "Ollama"
