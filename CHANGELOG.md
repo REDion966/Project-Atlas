@@ -94,6 +94,48 @@ Operationalized the existing principled-forgetting policy (commit `be2bb84`):
   **v11**.
 - Full suite verified: 4,296 tests, 0 failed (pytest exit 0).
 
+### Conversational Development Intake (B1+B2+B3)
+
+Committed together at `ce12fb8` (branch `phase5-memory-evolution`). An
+additive, post-core milestone connecting casual conversational development
+requests to the EXISTING governed development-cycle preparation flow. No new
+subsystem, governance surface, storage, schema, or execution mechanism;
+the RuntimeCoordinator 15-stage order and all locked packages remain
+untouched.
+
+- **B1 — README/config reconciliation:** `README.md` updated to the
+  post-core state (schema v11, 4,291-test inventory, post-core memory
+  thread, "no implementation NEXT" roadmap summary); `config.toml` version
+  aligned to `0.20.0`.
+- **B2 — Deterministic conversational task intake**
+  (`atlas/conversation/task_intake.py`): pure, deterministic-first
+  `TaskIntake` producing a bounded, provenance-carrying `TaskSpec` (task
+  type, intent, goal, constraints, priorities, success criteria, ambiguity,
+  confidence, needs_clarification, source, verified). Optional model
+  assistance is an injectable `IntentParser` — OFF by default, output
+  untrusted and sanitized. `ConversationService` propagates the structured
+  goal and `metadata["task"]`; `task_intake=None` preserves the legacy
+  raw-input-as-goal behavior exactly.
+- **B3 — Conversational development bridge**
+  (`atlas/conversation/development_intake.py` + `ConversationService`
+  `development_bridge` + kernel wiring): a pure `TaskSpec → DevelopmentNeed`
+  adapter with clarification gating; DEVELOPMENT_REQUEST routes through the
+  existing `Atlas.run_development_cycle()` (F9) and STOPS at
+  `PENDING_APPROVAL`. The bridge never approves, executes, or promotes;
+  `Atlas.tick()` is unchanged.
+- **Governance:** unchanged. `SELF_CONFIG`/`INFORMATION` remain the enabled
+  governed scopes; `CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remain locked.
+  The deterministic `ChangeSupplier` remains the default; no model-assisted
+  supplier was implemented or wired.
+- **Schema:** remains **v11** (no migration).
+- Tests: `tests/test_conversation_task_intake.py`,
+  `tests/test_conversation_development_intake.py`,
+  `tests/test_conversation_development_bridge.py`, plus
+  `tests/test_conversation_service.py` additions. Full suite green
+  (pytest exit 0); the pre-existing `test_cognition_service_new.py`
+  circular-import issue reproduces only in isolation and is unrelated.
+- **B4 remains undefined and unapproved.**
+
 ### Test Coverage Audit — Placeholder Test-Module Resolution
 
 Closed the recorded test-coverage technical debt (`docs/technical_debt.md`).

@@ -51,8 +51,8 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
-| Current HEAD | `be2bb84` (branch `phase5-memory-evolution`) |
-| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), the **Stage A1→H guided self-improvement thread** (see §27), and the completed **Track C post-core follow-ups** — Persistent Learning, deterministic semantic recall, forgetting-policy operationalization (see §28–§29) |
+| Current HEAD | `ce12fb8` (branch `phase5-memory-evolution`) |
+| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), the **Stage A1→H guided self-improvement thread** (see §27), the completed **Track C post-core follow-ups** — Persistent Learning, deterministic semantic recall, forgetting-policy operationalization (see §28–§29) — and the completed **Conversational Development Intake (B1+B2+B3)** milestone (see §30) |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
@@ -1052,6 +1052,65 @@ knowledge-graph expansion) and the deferred episodic-context integration
 owner-approved scope before implementation begins. **No next Stage (e.g.
 Stage I) is defined.**
 
+---
+
+## 30. Conversational Development Intake (B1+B2+B3) — COMPLETE
+
+A three-batch, additive post-core milestone (committed together at
+`ce12fb8`) that lets a casual conversational development request flow into
+the EXISTING governed development-cycle preparation path. It adds no new
+subsystem, governance surface, storage, schema, or execution mechanism; the
+RuntimeCoordinator 15-stage order and all locked packages remain untouched.
+
+### B1 — README/config reconciliation
+
+- `README.md` updated to the post-core state (schema v11, 4,291-test
+  inventory, post-core memory thread, "no implementation NEXT" roadmap
+  summary) and `config.toml` version aligned to `0.20.0`.
+
+### B2 — Deterministic conversational task intake
+
+- `atlas/conversation/task_intake.py` — pure, deterministic-first
+  `TaskIntake` producing a bounded, provenance-carrying `TaskSpec`
+  (task type, intent, goal, constraints, priorities, success criteria,
+  ambiguity, confidence, needs_clarification, source, verified,
+  model_metadata). Optional model assistance exists only as an injected
+  `IntentParser` protocol; OFF by default, output untrusted and sanitized.
+- `ConversationService` runs intake at the conversation seam: the structured
+  goal travels as `goal`, the full `TaskSpec` as `metadata["task"]`, and the
+  deterministic task type is reflected in the existing model-routing request.
+  `task_intake=None` restores the legacy raw-input-as-goal behavior exactly.
+- Tests: `tests/test_conversation_task_intake.py` +
+  `tests/test_conversation_service.py` additions.
+
+### B3 — Conversational development bridge
+
+- `atlas/conversation/development_intake.py` — pure `TaskSpec →
+  DevelopmentNeed` adapter plus clarification gating. DEVELOPMENT_REQUEST
+  only; under-specified requests are refused; never fabricates
+  `code_changes`/`test_files`.
+- `ConversationService` gains an optional duck-typed `development_bridge`
+  (no `atlas.evolution` import); DEVELOPMENT_REQUEST routes through it
+  exactly once, clarification short-circuits, and a missing bridge preserves
+  legacy behavior.
+- Kernel wiring: `Atlas._development_bridge` maps `TaskSpec →
+  DevelopmentNeed` and calls the EXISTING `Atlas.run_development_cycle()`
+  (F9), which submits a bounded DRAFT `EvolutionProposal` to the existing
+  `ApprovalManager` and STOPS at `PENDING_APPROVAL`. Nothing is approved,
+  executed, or promoted by the bridge.
+- Tests: `tests/test_conversation_development_intake.py`,
+  `tests/test_conversation_development_bridge.py`.
+
+### Status
+
+- **COMPLETE** — committed at `ce12fb8` (10 files, +1898/−24).
+- Full suite verified green (pytest exit 0) at the B3 implementation pass;
+  the pre-existing `test_cognition_service_new.py` circular-import issue
+  reproduces only in isolation and is unrelated to B1–B3.
+- **B4 remains undefined and unapproved.** No implementation NEXT is
+  currently defined; any future work requires an explicitly written,
+  owner-approved scope before implementation begins.
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
@@ -1061,6 +1120,8 @@ non-blocking warnings) · Foundation Strengthening: Batch 1 (kernel
 decomposition) and Batch 2 (scaffold cleanup) completed. · Track C post-core
 follow-ups reconciled: 2026-08-28 (Persistent Learning 5bfa615, deterministic
 semantic recall 57f0063, forgetting-policy operationalization be2bb84; schema
-v11; no implementation NEXT currently defined). Project Atlas —
-docs/ATLAS_STATE.md. This document is the authoritative current architecture
-handbook and replaces all earlier ATLAS_STATE revisions.*
+v11; no implementation NEXT currently defined). · Conversational Development
+Intake (B1+B2+B3) reconciled: 2026-08-29 (committed ce12fb8; schema v11;
+B4 remains undefined/unapproved; no implementation NEXT currently defined).
+Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
+current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

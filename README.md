@@ -74,6 +74,11 @@ recall, forgetting-policy operationalization, test-coverage audit).
   recall (`memory.semantic_query` capability + `atlas memory search`), and
   long-term forgetting-policy operationalization (advisory, governed). All
   additive; schema remains `v11`.
+- **Conversational development intake (B1+B2+B3)** — a casual conversational
+  development request is classified deterministically (`TaskIntake`/`TaskSpec`),
+  converted into a governed `DevelopmentNeed`, and routed through the existing
+  development-cycle preparation flow, stopping at the human approval boundary
+  (`PENDING_APPROVAL`). Additive; schema remains `v11`; no governance bypass.
 
 ## Architecture (high level)
 

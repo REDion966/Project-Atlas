@@ -135,6 +135,38 @@ and git history (`534da54..6676566`):
 - No approve/reject/promote/execute path is exposed through the CLI; the
   human-approval boundary remains the only advancement channel.
 
+### Conversational Development Intake (B1+B2+B3) — COMPLETE
+
+A three-batch, additive post-core milestone committed together at `ce12fb8`
+(branch `phase5-memory-evolution`). It connects casual conversational
+development requests to the EXISTING governed development-cycle preparation
+flow without adding a subsystem, governance surface, storage, schema, or
+execution mechanism:
+
+- **B1 — README/config reconciliation:** `README.md` brought to the
+  post-core state (schema v11, 4,291-test inventory, post-core memory
+  thread) and `config.toml` version aligned to `0.20.0`.
+- **B2 — Deterministic conversational task intake**
+  (`atlas/conversation/task_intake.py`): pure `TaskIntake` → bounded
+  `TaskSpec` (task type, intent, goal, constraints, priorities, success
+  criteria, ambiguity, needs_clarification, provenance). Optional model
+  assistance is an injectable `IntentParser`, OFF by default, output
+  untrusted. The conversation seam propagates the structured goal and
+  `metadata["task"]`; `task_intake=None` preserves legacy behavior.
+- **B3 — Conversational development bridge**
+  (`atlas/conversation/development_intake.py` + `ConversationService`
+  `development_bridge` + kernel wiring): a pure `TaskSpec → DevelopmentNeed`
+  adapter with clarification gating, routing `DEVELOPMENT_REQUEST` through
+  the existing `Atlas.run_development_cycle()` (F9) and STOPPING at
+  `PENDING_APPROVAL`. Nothing is approved, executed, or promoted by the
+  bridge; `Atlas.tick()`, the RuntimeCoordinator 15-stage order, and all
+  locked packages remain untouched.
+- Tests: `tests/test_conversation_task_intake.py`,
+  `tests/test_conversation_development_intake.py`,
+  `tests/test_conversation_development_bridge.py`, plus
+  `tests/test_conversation_service.py` additions.
+- **B4 remains undefined and unapproved** — see NEXT below.
+
 ### Track C Post-Core Follow-Ups (COMPLETE)
 
 The recorded Track C follow-ups are complete, in three verified batches
@@ -311,7 +343,7 @@ implementation begins (inspect-before-build remains in force).
 - Every state mutation depends on the **Evolution Framework** (gateway +
   sole-owner dispatcher). No capability bypasses governance.
 - New persistence must be **additive** via `atlas/storage/migration.py`
-  (currently schema **v10**).
+  (currently schema **v11**).
 - Adding a capability handler or component requires following the
   `CapabilityRegistry` factory + `ComponentMetadata` patterns.
 - Track-private services stay **outside** the ServiceContainer
@@ -351,7 +383,7 @@ documents as current.
 
 ---
 
-*Authoritative re-write: 2026-08-08 (post-Track-D, schema v10, ahead of
+*Authoritative re-write: 2026-08-08 (post-Track-D, schema v11, ahead of
 v0.19.1). Core milestone update: 2026-08-14 (Phase 22 COMPLETE — Atlas Core
 complete; post-core guided self-improvement; no Phase 23). Release update:
 2026-08-16 (v0.20.0 released at b92c5d9; 3260 passed, 0 failed, 57 subtests,
@@ -359,5 +391,7 @@ complete; post-core guided self-improvement; no Phase 23). Release update:
 decomposition) and Batch 2 (scaffold cleanup) completed. Track C post-core
 follow-ups reconciled: 2026-08-28 (Persistent Learning 5bfa615, deterministic
 semantic recall 57f0063, forgetting-policy operationalization be2bb84; schema
-v11; no implementation NEXT currently defined). Project Atlas —
-docs/ROADMAP.md.*
+v11; no implementation NEXT currently defined). Conversational Development
+Intake (B1+B2+B3) reconciled: 2026-08-29 (committed ce12fb8; schema v11;
+B4 remains undefined/unapproved; no implementation NEXT currently defined).
+Project Atlas — docs/ROADMAP.md.*
