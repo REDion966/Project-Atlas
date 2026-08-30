@@ -4,8 +4,10 @@ Atlas Conversation Service
 Coordinates Atlas conversations.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from atlas.ai.routing.models import RoutingRequest
 from atlas.cognition.api import CognitionAPI
@@ -19,6 +21,10 @@ from atlas.memory.context.context_engine import ContextEngine
 from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
 
+if TYPE_CHECKING:
+    from atlas.session.context import SessionContext
+    from atlas.session.models import Session
+
 
 class ConversationService:
     """Coordinates the complete conversation pipeline."""
@@ -30,6 +36,7 @@ class ConversationService:
         cognition_api: CognitionAPI | None = None,
         task_intake: TaskIntake | None = TaskIntake(),
         development_bridge: Callable[[TaskSpec], Message | str] | None = None,
+        session_context: SessionContext | None = None,
     ):
         """
         Initialize the conversation service.
@@ -70,6 +77,8 @@ class ConversationService:
         self._cognition_api = cognition_api
         self._task_intake = task_intake
         self._development_bridge = development_bridge
+        self._session_context: SessionContext | None = session_context
+        self._last_session_context: SessionContext | None = session_context
 
         # Create the initial conversation.
         self._conversation = self._history.create()
@@ -80,13 +89,41 @@ class ConversationService:
 
         return self._conversation
 
+    @property
+    def session_context(self) -> SessionContext | None:
+        return self._session_context
+
+    @property
+    def last_session_context(self) -> SessionContext | None:
+        return self._last_session_context
+
+    def set_session_context(self, session_context: SessionContext | None) -> None:
+        if session_context is not None:
+            from atlas.session.context import SessionContext as _SC
+
+            if not isinstance(session_context, _SC):
+                raise ValueError("session_context must be a valid SessionContext or None (fail-closed)")
+        self._session_context = session_context
+        self._last_session_context = session_context
+
+    def bind_session(self, session: Session) -> SessionContext:
+        from atlas.session.context import SessionContext as _SC
+
+        ctx = _SC.from_session(session)
+        self.set_session_context(ctx)
+        return ctx
+
     def send(
         self,
         text: str,
+        session_context: SessionContext | None = None,
     ) -> Message:
         """
         Send a user message through Atlas.
         """
+
+        active_session = session_context if session_context is not None else self._session_context
+        self._last_session_context = active_session
 
         user_message = Message(
             role="user",
@@ -100,6 +137,7 @@ class ConversationService:
         context = self._context.build(
             self._conversation,
             memory_query=text,
+            session_context=active_session,
         )
 
         # --- Phase 5.6: Optional cognition context ---
@@ -108,17 +146,38 @@ class ConversationService:
         # seam with deterministic task intake: the raw input is preserved, the
         # structured goal travels in goal, and the full TaskSpec travels in
         # metadata["task"]. task_intake=None restores the legacy behavior.
+        # P1/B1.2 — session_context is carried as attribution on TaskSpec and
+        # as session/session_context in the cognition metadata so P2
+        # orchestration can inspect it.
         spec = self._intake(text, len(self._conversation.messages))
+        if spec is not None and active_session is not None:
+            spec = self._attach_session_to_spec(spec, active_session)
         development_response = self._maybe_handle_development_request(spec)
         if development_response is not None:
             self._conversation.add_message(development_response)
             return development_response
 
         if self._cognition_api is not None:
+            cognition_metadata: dict | None = None
+            if spec is not None:
+                cognition_metadata = {"task": spec.to_dict()}
+            else:
+                cognition_metadata = None
+            if active_session is not None:
+                _session_meta = {
+                    "session_id": active_session.session_id,
+                    "principal_id": active_session.principal_id,
+                    "authority": active_session.authority.value,
+                }
+                if cognition_metadata is None:
+                    cognition_metadata = {"session": _session_meta, "session_context": _session_meta}
+                else:
+                    cognition_metadata["session"] = _session_meta
+                    cognition_metadata["session_context"] = _session_meta
             decision = self._cognition_api.process(
                 user_input=text,
                 goal=spec.goal_string() if spec is not None else text,
-                metadata={"task": spec.to_dict()} if spec is not None else None,
+                metadata=cognition_metadata,
             )
 
             context.append(
@@ -165,10 +224,14 @@ class ConversationService:
     def stream(
         self,
         text: str,
+        session_context: SessionContext | None = None,
     ):
         """
         Stream a response through Atlas.
         """
+
+        active_session = session_context if session_context is not None else self._session_context
+        self._last_session_context = active_session
 
         user_message = Message(
             role="user",
@@ -182,6 +245,7 @@ class ConversationService:
         context = self._context.build(
             self._conversation,
             memory_query=text,
+            session_context=active_session,
         )
 
         # --- Phase 5.6: Optional cognition context ---
@@ -190,7 +254,10 @@ class ConversationService:
         # seam with deterministic task intake: the raw input is preserved, the
         # structured goal travels in goal, and the full TaskSpec travels in
         # metadata["task"]. task_intake=None restores the legacy behavior.
+        # P1/B1.2 — session attribution as above.
         spec = self._intake(text, len(self._conversation.messages))
+        if spec is not None and active_session is not None:
+            spec = self._attach_session_to_spec(spec, active_session)
         development_response = self._maybe_handle_development_request(spec)
         if development_response is not None:
             self._conversation.add_message(development_response)
@@ -198,10 +265,24 @@ class ConversationService:
             return
 
         if self._cognition_api is not None:
+            cognition_metadata = None
+            if spec is not None:
+                cognition_metadata = {"task": spec.to_dict()}
+            if active_session is not None:
+                _session_meta = {
+                    "session_id": active_session.session_id,
+                    "principal_id": active_session.principal_id,
+                    "authority": active_session.authority.value,
+                }
+                if cognition_metadata is None:
+                    cognition_metadata = {"session": _session_meta, "session_context": _session_meta}
+                else:
+                    cognition_metadata["session"] = _session_meta
+                    cognition_metadata["session_context"] = _session_meta
             decision = self._cognition_api.process(
                 user_input=text,
                 goal=spec.goal_string() if spec is not None else text,
-                metadata={"task": spec.to_dict()} if spec is not None else None,
+                metadata=cognition_metadata,
             )
 
             context.append(
@@ -290,6 +371,16 @@ class ConversationService:
         if self._task_intake is None:
             return None
         return self._task_intake.intake(text, history_length=history_length)
+
+    @staticmethod
+    def _attach_session_to_spec(spec: TaskSpec, session_context: SessionContext) -> TaskSpec:
+        enriched = dict(spec.context) if isinstance(spec.context, dict) else {}
+        enriched["session_id"] = session_context.session_id
+        enriched["principal_id"] = session_context.principal_id
+        enriched["authority"] = session_context.authority.value
+        from dataclasses import replace as _replace
+
+        return _replace(spec, context=enriched)
 
     def _maybe_handle_development_request(
         self,

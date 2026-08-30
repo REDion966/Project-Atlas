@@ -4,8 +4,15 @@ Atlas Context Manager
 Builds the conversational context for Atlas.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from atlas.conversation.conversation import Conversation
 from atlas.memory.context.context_engine import ContextEngine
+
+if TYPE_CHECKING:
+    from atlas.session.context import SessionContext
 
 
 class ContextManager:
@@ -21,21 +28,23 @@ class ContextManager:
         self,
         conversation: Conversation,
         memory_query: str | None = None,
+        session_context: SessionContext | None = None,
     ) -> list:
         """
         Build the context for the current conversation.
 
         Includes:
         - Conversation messages
-        - Relevant memories
+        - Relevant memories (scoped by session when provided)
         """
 
-        context = []
+        context: list[Any] = []
 
         if self._context_engine and memory_query:
-            memories = self._context_engine.build_context(
-                query=memory_query,
-            )
+            kwargs: dict[str, Any] = {"query": memory_query}
+            if session_context is not None:
+                kwargs["session_context"] = session_context
+            memories = self._context_engine.build_context(**kwargs)  # type: ignore[arg-type]
 
             context.extend(memories)
 

@@ -7,6 +7,8 @@ then ranks results.
 
 from __future__ import annotations
 
+from typing import Any
+
 from atlas.memory.enums import MemoryImportance
 from atlas.memory.models.memory import Memory
 from atlas.memory.ranking.ranking_engine import RankingEngine
@@ -30,8 +32,13 @@ class MemorySearchEngine:
         tags: list[str] | None = None,
         minimum_importance: int | None = None,
         limit: int | None = None,
+        session_context: Any | None = None,
     ) -> list[Memory]:
-        """Search memories with optional filters."""
+        """Search memories with optional filters.
+
+        P1/B1.2 — ``session_context`` is attribution only (recorded, not
+        filtering) until storage namespacing is justified.
+        """
 
         raw = self._repository.load()
 
@@ -66,4 +73,9 @@ class MemorySearchEngine:
         if limit is not None:
             memories = memories[:limit]
 
+        self._last_session_context = session_context
         return memories
+
+    @property
+    def last_session_context(self) -> Any | None:
+        return getattr(self, "_last_session_context", None)

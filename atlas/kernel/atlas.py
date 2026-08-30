@@ -89,6 +89,8 @@ from atlas.evolution.model_assisted_supplier import ModelAssistedChangeSupplier
 from atlas.learning_engine.learning_engine import LearningEngine
 from atlas.identity.identity_engine import IdentityEngine
 from atlas.authority.service import AuthorityService
+from atlas.session.manager import SessionManager
+from atlas.session.context import SessionContext
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 from atlas.goals.goal_repository import GoalRepository
 
@@ -371,6 +373,8 @@ class Atlas:
         self._learning_engine: LearningEngine | None = None
         self._identity_engine: IdentityEngine | None = None
         self._authority_service: AuthorityService | None = None
+        self._session_manager: SessionManager | None = None
+        self._session_context: SessionContext | None = None
 
         # --- Phase 8.3: Goal Intelligence ---
         self._goal_repository: GoalRepository | None = None
@@ -1177,6 +1181,34 @@ class Atlas:
     def authority_service(self) -> AuthorityService | None:
         """Return the kernel-owned AuthorityService (P1/B1.1)."""
         return self._authority_service
+
+    @property
+    def session_manager(self) -> SessionManager | None:
+        """Return the kernel-owned SessionManager (P1/B1.2)."""
+        return self._session_manager
+
+    @property
+    def session_context(self) -> SessionContext | None:
+        """Return the current Owner SessionContext (P1/B1.2)."""
+        return self._session_context
+
+    def start_user_session(self, principal_id: str) -> SessionContext:
+        """Create a USER session for ``principal_id`` (fail-closed).
+
+        Validates the principal through AuthorityService; an unknown principal
+        raises ``PermissionError`` and no session is created.
+        """
+        if self._session_manager is None or self._authority_service is None:
+            raise RuntimeError("Session surfaces are not wired; Atlas.start() must run first.")
+        session = self._session_manager.create_session(principal_id)
+        ctx = SessionContext.from_session(session, action="user_session")
+        return ctx
+
+    def set_session_context(self, session_context: SessionContext | None) -> None:
+        """Set the active session context for subsequent conversations."""
+        self._session_context = session_context
+        if self._conversation is not None:
+            self._conversation.set_session_context(session_context)
 
     @property
     def events(self):
@@ -2608,11 +2640,23 @@ class Atlas:
 
         context_engine = ContextEngine(memory_service=self._memory_service)
 
+        # --- P1/B1.2: Session-scoped context ---
+        # In-memory session registry bound to the kernel-owned AuthorityService.
+        # An Owner session is established for the current single-owner CLI flow;
+        # User sessions are created on demand via start_user_session().
+        self._session_manager = SessionManager(authority_service=self._authority_service)  # type: ignore[arg-type]
+        try:
+            _owner_session = self._session_manager.create_session(self._authority_service.owner.principal_id)  # type: ignore[union-attr]
+            self._session_context = SessionContext.from_session(_owner_session, action="owner_session")
+        except Exception:
+            self._session_context = None
+
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
             cognition_api=self._cognition_api,
             development_bridge=self._development_bridge,
+            session_context=self._session_context,
         )
 
         # Wire conversation into the runtime coordinator
@@ -2899,6 +2943,8 @@ class Atlas:
         self._learning_engine = None
         self._identity_engine = None
         self._authority_service = None
+        self._session_manager = None
+        self._session_context = None
 
         # --- Phase 12.2: Cleanup ---
         self._intelligence_engine = None
