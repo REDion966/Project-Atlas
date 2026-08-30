@@ -13,6 +13,7 @@ from atlas.ai.routing.models import RoutingRequest
 from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
+from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.history import History
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
@@ -37,6 +38,7 @@ class ConversationService:
         task_intake: TaskIntake | None = TaskIntake(),
         development_bridge: Callable[[TaskSpec], Message | str] | None = None,
         session_context: SessionContext | None = None,
+        orchestration_resolver: Callable[[TaskSpec, SessionContext | None], object | None] | None = None,
     ):
         """
         Initialize the conversation service.
@@ -77,6 +79,7 @@ class ConversationService:
         self._cognition_api = cognition_api
         self._task_intake = task_intake
         self._development_bridge = development_bridge
+        self._orchestration_resolver = orchestration_resolver
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
 
@@ -152,10 +155,21 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # Development semantics win — run it first and never reroute development
+        # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
         if development_response is not None:
             self._conversation.add_message(development_response)
             return development_response
+
+        orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
+        if orchestration_response is not None:
+            # The orchestration bridge is fail-closed against missing
+            # SessionContext at its own layer (so the conversation service
+            # does not need to drop the message even when the resolver is
+            # bound to a kernel-owned session).
+            self._conversation.add_message(orchestration_response)
+            return orchestration_response
 
         if self._cognition_api is not None:
             cognition_metadata: dict | None = None
@@ -262,6 +276,12 @@ class ConversationService:
         if development_response is not None:
             self._conversation.add_message(development_response)
             yield development_response.content
+            return
+
+        orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
+        if orchestration_response is not None:
+            self._conversation.add_message(orchestration_response)
+            yield orchestration_response.content
             return
 
         if self._cognition_api is not None:
@@ -381,6 +401,69 @@ class ConversationService:
         from dataclasses import replace as _replace
 
         return _replace(spec, context=enriched)
+
+    def _maybe_handle_orchestration_request(
+        self,
+        spec: TaskSpec | None,
+        session_context: SessionContext | None,
+    ) -> Message | None:
+        """Route ACTION/INFORMATION requests through the orchestration layer.
+
+        Informationally routed: development requests never arrive here (the
+        existing development bridge runs first). Non-actionable types return
+        None. When the typed request cannot be safely resolved into a bounded
+        target (underspecified / no bounded tool target), a bounded
+        clarification message is returned rather than invented work. The
+        resolver's ``None`` is always surfaced as clarification, not silent
+        fallback.
+        """
+        if spec is None or self._orchestration_resolver is None:
+            return None
+        # Development semantics win: never reroute development requests.
+        if spec.task_type is TaskType.DEVELOPMENT_REQUEST:
+            return None
+        if spec.task_type not in (TaskType.ACTION_REQUEST, TaskType.INFORMATION_REQUEST):
+            return None
+        # Honor TaskIntake's ambiguity gate deterministically.
+        if bool(getattr(spec, "needs_clarification", False)):
+            return self._orchestration_clarification_message(spec)
+        # Resolver is the single decision surface: it never invents targets;
+        # a ``None`` return means the typed request is not boundedly
+        # actionable → bounded clarification (additive; never silently falls
+        # through to the legacy path). The per-request session is forwarded
+        # so the kernel bridge can attribute the execution to the exact
+        # caller session rather than the kernel-bound default.
+        result = self._orchestration_resolver(spec, session_context)
+        if result is None:
+            return self._orchestration_clarification_message(spec)
+        if isinstance(result, Message):
+            return result
+        if isinstance(result, dict):
+            content = str(result.get("content", "") or "").strip()
+            meta = result.get("metadata", {}) or {}
+            role = str(result.get("role", "assistant") or "assistant")
+            if content:
+                return Message(role=role, content=content, metadata=dict(meta))
+        if isinstance(result, str):
+            return Message(role="assistant", content=result.strip())
+        # Never swallow a typed, non-clarification request silently.
+        return self._orchestration_clarification_message(spec)
+
+    @staticmethod
+    def _orchestration_clarification_message(spec: TaskSpec) -> Message:
+        """Bounded clarification for orchestrated ACTION/INFORMATION requests."""
+        lines = [
+            "I need a bit more detail before I can run this.",
+        ]
+        questions = getattr(spec.ambiguity, "clarification_questions", ()) or ()
+        for question in tuple(questions)[:8]:
+            lines.append(f"- {question}")
+        if len(lines) == 1:
+            # Fall back to a deterministic bounded rephrase of the ambiguous
+            # slot (the intent is bounded; ambiguity is bounded; together
+            # this is still deterministic).
+            lines.append("- What outcome or detail would tell me this is done?")
+        return Message(role="assistant", content="\n".join(lines))
 
     def _maybe_handle_development_request(
         self,

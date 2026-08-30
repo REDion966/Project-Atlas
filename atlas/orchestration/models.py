@@ -34,12 +34,16 @@ class OrchestrationStatus(str, Enum):
 class NodeKind(str, Enum):
     """Kinds of nodes a step graph may contain.
 
-    B2.1 emits only ``CAPABILITY``. ``TOOL`` is a future node kind, defined
-    here as the minimal structural boundary for B2.2 but never emitted yet.
+    B2.1 emits only ``CAPABILITY``. ``TOOL``, ``WORKSPACE``, ``RESEARCH``,
+    and ``GOAL`` are future node kinds, defined here as the minimal
+    structural boundary for B2.2 but never emitted by the planner.
     """
 
     CAPABILITY = "capability"
     TOOL = "tool"
+    WORKSPACE = "workspace"
+    RESEARCH = "research"
+    GOAL = "goal"
 
 
 class EdgeKind(str, Enum):

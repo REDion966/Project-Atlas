@@ -91,6 +91,7 @@ from atlas.identity.identity_engine import IdentityEngine
 from atlas.authority.service import AuthorityService
 from atlas.session.manager import SessionManager
 from atlas.session.context import SessionContext
+from atlas.orchestration.executor import OrchestrationExecutor
 from atlas.goals.goal_intelligence_engine import GoalIntelligenceEngine
 from atlas.goals.goal_repository import GoalRepository
 
@@ -375,6 +376,7 @@ class Atlas:
         self._authority_service: AuthorityService | None = None
         self._session_manager: SessionManager | None = None
         self._session_context: SessionContext | None = None
+        self._orchestration_executor: OrchestrationExecutor | None = None
 
         # --- Phase 8.3: Goal Intelligence ---
         self._goal_repository: GoalRepository | None = None
@@ -1001,6 +1003,48 @@ class Atlas:
     # B3 — Conversational development bridge
     # ------------------------------------------------------------------
 
+    def _orchestration_bridge(self, spec, session_context=None) -> Message:
+        """Convert a B2 ACTION/INFORMATION TaskSpec into an orchestration result."""
+        from atlas.orchestration.execution_models import ExecutionRequest
+        from atlas.orchestration.reporting import orchestration_result_to_message
+        from atlas.orchestration.target_resolution import task_spec_to_execution_steps
+
+        # The per-request session (forwarded by ConversationService) is
+        # authoritative; only fall back to the kernel-bound session when none
+        # was provided (backward compatibility for kernel-driven calls).
+        request_session = session_context
+        if request_session is None:
+            request_session = getattr(self, "_session_context", None)
+
+        steps = task_spec_to_execution_steps(
+            spec,
+            tool_targets=self._registered_tool_targets(),
+        )
+        if steps is None:
+            return None  # type: ignore[return-value]
+
+        executor = getattr(self, "_orchestration_executor", None)
+
+        # Reuse the bounded per-request SessionContext; the bridge never
+        # derives authority from user text and never trusts ``spec.context``.
+        result = executor.execute(
+            ExecutionRequest(
+                steps=tuple(steps),
+                session_context=request_session,
+            )
+        )
+        return orchestration_result_to_message(result, intent=spec.intent)
+
+    def _registered_tool_targets(self) -> set[str]:
+        """Return the set of registered tool names (bounded, deterministic)."""
+        registry = getattr(self, "_tool_registry", None)
+        if registry is None:
+            return set()
+        try:
+            return {tool.name for tool in registry.list()}
+        except Exception:
+            return set()
+
     def _development_bridge(self, spec) -> Message:
         """Convert a B2 TaskSpec into a bounded governed-development report.
 
@@ -1191,6 +1235,11 @@ class Atlas:
     def session_context(self) -> SessionContext | None:
         """Return the current Owner SessionContext (P1/B1.2)."""
         return self._session_context
+
+    @property
+    def orchestration_executor(self) -> OrchestrationExecutor | None:
+        """Return the kernel-owned OrchestrationExecutor (P2/B2.2)."""
+        return self._orchestration_executor
 
     def start_user_session(self, principal_id: str) -> SessionContext:
         """Create a USER session for ``principal_id`` (fail-closed).
@@ -2656,11 +2705,27 @@ class Atlas:
             context_engine=context_engine,
             cognition_api=self._cognition_api,
             development_bridge=self._development_bridge,
+            orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
         )
 
         # Wire conversation into the runtime coordinator
         self._runtime_coordinator._conversation_service = self._conversation
+
+        # --- P2/B2.2: Governed orchestration executor ---
+        # Composes EXISTING execution seams only (ToolExecutor,
+        # CapabilityDispatcher, InformationAcquisitionService, AuthorityService).
+        # WorkspaceService is not kernel-owned, so the workspace seam fails
+        # closed. Kernel-private (no container registration — the container
+        # key-set is exact-set-tested); never touches tick().
+        self._orchestration_executor = OrchestrationExecutor(
+            capability_registry=self._capability_registry,
+            capability_dispatcher=self._capability_dispatcher,
+            tool_executor=self._tool_executor,
+            workspace_service=None,
+            research_service=self._acquisition_service,
+            authority_service=self._authority_service,
+        )
 
         # --- Phase 13.2: Register core components in the registry ---
         self._register_components()
@@ -2945,6 +3010,7 @@ class Atlas:
         self._authority_service = None
         self._session_manager = None
         self._session_context = None
+        self._orchestration_executor = None
 
         # --- Phase 12.2: Cleanup ---
         self._intelligence_engine = None
