@@ -2716,6 +2716,24 @@ class Atlas:
         except Exception:
             self._session_context = None
 
+        # --- P3/B3.1: Interaction capture ---
+        # One InteractionRecorder + InteractionRepository for per-user
+        # preference & correction capture. Kernel-private (not registered
+        # in the container; the container key-set is exact-set-tested).
+        # Never auto-runs; never executes anything; never touches
+        # tick()/RuntimeCoordinator.
+        try:
+            from atlas.interaction.recorder import InteractionRecorder
+            from atlas.interaction.repository import InteractionRepository
+
+            self._interaction_repository = InteractionRepository()
+            self._interaction_recorder = InteractionRecorder(
+                repository=self._interaction_repository,
+            )
+        except Exception:
+            self._interaction_repository = None
+            self._interaction_recorder = None
+
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
@@ -3034,6 +3052,10 @@ class Atlas:
         self._session_manager = None
         self._session_context = None
         self._orchestration_executor = None
+
+        # --- P3/B3.1: Interaction capture cleanup ---
+        self._interaction_repository = None
+        self._interaction_recorder = None
 
         # --- Phase 12.2: Cleanup ---
         self._intelligence_engine = None
