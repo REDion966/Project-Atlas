@@ -579,6 +579,15 @@ class Atlas:
         # tick(); an external host calls ``run_self_management_review()``.
         self._self_management_review: SelfManagementReview | None = None
 
+        # --- P5: Proactive Advisory (advisory-only, never autonomous) ---
+        # Composes the EXISTING F1/F10/F11/B3.x/P4 signals into one bounded
+        # user-facing advisory report. Never invokes a tool, capability,
+        # orchestration, development, governance, approval, or promotion
+        # path directly; the report's ``suggested_action`` is a bounded hint
+        # for the operator. Never runs from tick(); an external host calls
+        # ``run_proactive_advisory()``.
+        self._proactive_advisor: Any | None = None
+
     # ------------------------------------------------------------------
     # Public entry / on-demand observation cycle
     # ------------------------------------------------------------------
@@ -1122,6 +1131,32 @@ class Atlas:
             availability=self._ai_availability,
         )
 
+    def _init_proactive_advisor(self) -> None:
+        """P5: additively wire the proactive advisor.
+
+        Composes the EXISTING F1/F10/F11 signals and the B3.x/P4 seams into
+        one bounded, principal-scoped advisory report. Each dependency is
+        optional; missing seams degrade to a report with no items from that
+        source. Never auto-runs; never invokes a tool, capability,
+        orchestration, development, governance, approval, or promotion path
+        directly. Kernel-private (not registered in the ServiceContainer
+        because the container key-set is exact-set-tested).
+        """
+        try:
+            from atlas.advisory.advisor import ProactiveAdvisor
+
+            self._proactive_advisor = ProactiveAdvisor(
+                environment_observer=self._environment_observer,
+                availability=self._ai_availability,
+                self_management_review=self._self_management_review,
+                interaction_bridge=getattr(
+                    self, "_interaction_learning_bridge", None
+                ),
+                collective_governance=getattr(self, "_collective_governance", None),
+            )
+        except Exception:
+            self._proactive_advisor = None
+
     def confirm_development_approval(self, proposal_id: str, comment: str = ""):
         """Explicit human confirmation of a persisted development proposal.
 
@@ -1228,6 +1263,40 @@ class Atlas:
                 "run first."
             )
         return self._self_management_review.run_review()
+
+    @property
+    def proactive_advisor(self):
+        """Return the kernel-owned ProactiveAdvisor (P5)."""
+        return self._proactive_advisor
+
+    def run_proactive_advisory(self, principal_id: str = ""):
+        """Manually trigger ONE bounded proactive advisory report (P5).
+
+        Composes the EXISTING F1/F10/F11 signals and the B3.x/P4 seams into
+        a bounded, principal-scoped, JSON-safe advisory report. Each
+        ``AdvisoryItem`` is INERT — the report's ``suggested_action`` is a
+        bounded hint naming an existing governed path; the advisor never
+        invokes a tool, capability, orchestration, development, governance,
+        approval, or promotion boundary directly.
+
+        Owner / User authority is preserved: the report carries the
+        ``requires_owner`` flag per item; a USER never receives an item whose
+        suggested action names an OWNER-only governed path (the bridge
+        filters these out at the CLI surface; the underlying seam is
+        preserved for Owner-only presentation).
+
+        Args:
+            principal_id: The principal to scope the report to. Required for
+                principal-scoped sources (B3.x interaction bridge).
+
+        Returns:
+            An :class:`atlas.advisory.models.AdvisoryReport`.
+        """
+        if self._proactive_advisor is None:
+            raise RuntimeError(
+                "Proactive advisor is not wired; Atlas.start() must run first."
+            )
+        return self._proactive_advisor.run_advisory(principal_id=principal_id or "")
 
     # ------------------------------------------------------------------
     # Properties
@@ -1922,6 +1991,13 @@ class Atlas:
         # Read-only aggregation of durable evidence; nothing auto-runs,
         # no daemon, no execution, no persistence of its own.
         self._init_self_management_review()
+
+        # Domain 6j — P5: Proactive Advisory (advisory-only, no execution)
+        # Composes the EXISTING F1/F10/F11 and B3.x/P4 seams into one bounded,
+        # principal-scoped advisory report. Never invokes a tool, capability,
+        # orchestration, development, governance, approval, or promotion path
+        # directly. Kernel-private; never runs from tick().
+        self._init_proactive_advisor()
 
         # Domain 7 — RuntimeCoordinator, scheduler, goal execution,
         #   cognition service, conversation, component registry, container
@@ -3121,6 +3197,9 @@ class Atlas:
         # --- P4: Collective learning cleanup ---
         self._collective_repository = None
         self._collective_governance = None
+
+        # --- P5: Proactive Advisor cleanup ---
+        self._proactive_advisor = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
