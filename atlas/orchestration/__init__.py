@@ -22,6 +22,7 @@ from atlas.orchestration.execution_models import (
 )
 from atlas.orchestration.executor import OrchestrationExecutor
 from atlas.orchestration.target_resolution import task_spec_to_execution_steps
+from atlas.orchestration.experience import build_orchestration_experience
 from atlas.orchestration.reporting import orchestration_result_to_message
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     "StepGraph",
     "StepNode",
     "new_run_id",
+    "build_orchestration_experience",
     "orchestration_result_to_message",
     "task_spec_to_execution_steps",
 ]

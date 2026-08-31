@@ -402,6 +402,63 @@ class ConversationService:
 
         return _replace(spec, context=enriched)
 
+    def set_experience_capture(self, accumulator) -> None:
+        """Inject the ExperienceAccumulator used for orchestration capture."""
+        self._capture_accumulator = accumulator
+
+    def _record_orchestration_experience(
+        self,
+        *,
+        spec: TaskSpec,
+        result_obj: object | None,
+        text: str,
+    ) -> None:
+        try:
+            acc = getattr(self, "_capture_accumulator", None)
+            if acc is None or not hasattr(acc, "record_orchestration"):
+                return
+            history_len = len(getattr(self._conversation, "messages", ()) or ())
+            acc.record_orchestration(
+                user_input=text,
+                task_spec=spec,
+                result=result_obj,
+                conversation_history_length=history_len,
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _dict_to_orchestration_result(payload: dict):
+        try:
+            from datetime import datetime as _dt
+            steps = []
+            for s in (payload.get("steps", ()) or ()):
+                if isinstance(s, dict):
+                    steps.append(type("_Step", (), {
+                        "target": s.get("target", ""),
+                        "state": type("_St", (), {"value": s.get("state", "")})(),
+                        "kind": type("_K", (), {"value": s.get("kind", "")})(),
+                    })())
+            obj = type("_R", (), {})()
+            obj.status = type("_S", (), {"value": payload.get("status", "")})()
+            obj.session_id = payload.get("session_id")
+            obj.principal_id = payload.get("principal_id")
+            obj.authority = payload.get("authority")
+            obj.elapsed_ms = payload.get("elapsed_ms", 0.0)
+            obj.completed_count = payload.get("completed_count", 0)
+            obj.failed_count = payload.get("failed_count", 0)
+            obj.steps = tuple(steps)
+            obj.created_at = None
+            ca = payload.get("created_at")
+            if isinstance(ca, str):
+                try:
+                    obj.created_at = _dt.fromisoformat(ca)
+                except Exception:
+                    pass
+            return obj
+        except Exception:
+            return None
+
     def _maybe_handle_orchestration_request(
         self,
         spec: TaskSpec | None,
@@ -437,13 +494,25 @@ class ConversationService:
         if result is None:
             return self._orchestration_clarification_message(spec)
         if isinstance(result, Message):
+            if isinstance(result.metadata, dict):
+                payload = result.metadata.get("orchestration")
+                if isinstance(payload, dict):
+                    obj = self._dict_to_orchestration_result(payload)
+                    if obj is not None:
+                        self._record_orchestration_experience(spec=spec, result_obj=obj, text=spec.goal if hasattr(spec, "goal") else "")
             return result
         if isinstance(result, dict):
             content = str(result.get("content", "") or "").strip()
             meta = result.get("metadata", {}) or {}
             role = str(result.get("role", "assistant") or "assistant")
             if content:
-                return Message(role=role, content=content, metadata=dict(meta))
+                msg = Message(role=role, content=content, metadata=dict(meta))
+                orch = meta.get("orchestration") if isinstance(meta, dict) else None
+                if isinstance(orch, dict):
+                    obj2 = self._dict_to_orchestration_result(orch)
+                    if obj2 is not None:
+                        self._record_orchestration_experience(spec=spec, result_obj=obj2, text=spec.goal if hasattr(spec, "goal") else "")
+                return msg
         if isinstance(result, str):
             return Message(role="assistant", content=result.strip())
         # Never swallow a typed, non-clarification request silently.

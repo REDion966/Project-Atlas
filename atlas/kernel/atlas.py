@@ -1033,6 +1033,22 @@ class Atlas:
                 session_context=request_session,
             )
         )
+        # P2/B2.4 — Additive experience capture. Record the completed
+        # orchestration run as a StructuredExperience through the kernel-owned
+        # ExperienceAccumulator (SQLite dual-write, best-effort). Failures are
+        # swallowed so reporting is never blocked. No schema change, no
+        # RuntimeCoordinator change, no authority/context bypass.
+        try:
+            acc = getattr(self, "_experience_accumulator", None)
+            if acc is not None and hasattr(acc, "record_orchestration"):
+                acc.record_orchestration(
+                    user_input=spec.goal if hasattr(spec, "goal") else "",
+                    task_spec=spec,
+                    result=result,
+                    conversation_history_length=0,
+                )
+        except Exception:
+            pass
         return orchestration_result_to_message(result, intent=spec.intent)
 
     def _registered_tool_targets(self) -> set[str]:
@@ -2708,6 +2724,13 @@ class Atlas:
             orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
         )
+        # P2/B2.4 — wire orchestration experience capture through the
+        # existing ExperienceAccumulator (no schema/migration, no tick change).
+        try:
+            if hasattr(self._conversation, "set_experience_capture"):
+                self._conversation.set_experience_capture(self._experience_accumulator)
+        except Exception:
+            pass
 
         # Wire conversation into the runtime coordinator
         self._runtime_coordinator._conversation_service = self._conversation

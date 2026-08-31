@@ -114,6 +114,46 @@ class ExperienceAccumulator:
         """
         self._experience_counter = max(0, n)
 
+    def record_orchestration(
+        self,
+        *,
+        user_input: str = "",
+        task_spec: Any | None = None,
+        result: Any | None = None,
+        conversation_history_length: int = 0,
+    ) -> StructuredExperience | None:
+        """Record a completed orchestration run as a StructuredExperience.
+
+        Additive P2/B2.4 bridge: delegates to the pure
+        ``build_orchestration_experience`` constructor and persists the result
+        through the kernel-owned ExperienceRepository (SQLite dual-write when
+        available). Fail-closed: returns None when result is missing and never
+        raises. Best-effort: storage failures are swallowed.
+        """
+        if result is None:
+            return None
+        try:
+            from atlas.orchestration.experience import build_orchestration_experience
+        except Exception:
+            return None
+        self._experience_counter += 1
+        experience_id = f"EXP-{self._experience_counter:08d}"
+        exp = build_orchestration_experience(
+            experience_id=experience_id,
+            user_input=user_input,
+            task_spec=task_spec,
+            result=result,
+            conversation_history_length=conversation_history_length,
+        )
+        if exp is None:
+            self._experience_counter -= 1
+            return None
+        try:
+            self._repository.store_experience(exp)
+        except Exception:
+            pass
+        return exp
+
     # ------------------------------------------------------------------
     # Extraction helpers (all defensive against missing attributes)
     # ------------------------------------------------------------------
