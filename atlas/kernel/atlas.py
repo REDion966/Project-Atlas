@@ -2716,23 +2716,39 @@ class Atlas:
         except Exception:
             self._session_context = None
 
-        # --- P3/B3.1: Interaction capture ---
-        # One InteractionRecorder + InteractionRepository for per-user
-        # preference & correction capture. Kernel-private (not registered
-        # in the container; the container key-set is exact-set-tested).
-        # Never auto-runs; never executes anything; never touches
-        # tick()/RuntimeCoordinator.
+        # --- P3/B3.1+B3.2: Interaction capture + learning integration ---
+        # One InteractionRecorder + InteractionRepository (B3.1) and one
+        # InteractionLearningBridge (B3.2) composing the EXISTING
+        # LearningMemory into a principal-scoped, advisory planning-context
+        # provider. Kernel-private (not registered in the container; the
+        # container key-set is exact-set-tested). Never auto-runs; never
+        # executes anything; never touches tick()/RuntimeCoordinator.
         try:
+            from atlas.interaction.learning_bridge import InteractionLearningBridge
             from atlas.interaction.recorder import InteractionRecorder
             from atlas.interaction.repository import InteractionRepository
 
+            learning_memory = getattr(self._learning_engine, "memory", None)
             self._interaction_repository = InteractionRepository()
             self._interaction_recorder = InteractionRecorder(
                 repository=self._interaction_repository,
             )
+            self._interaction_learning_bridge = InteractionLearningBridge(
+                repository=self._interaction_repository,
+                learning_memory=learning_memory,
+            )
+            provider = self._interaction_learning_bridge.planning_context_provider(
+                self._session_context.principal_id
+                if self._session_context is not None
+                else ""
+            )
+            if provider is not None:
+                self._interaction_context_provider = provider
         except Exception:
             self._interaction_repository = None
             self._interaction_recorder = None
+            self._interaction_learning_bridge = None
+            self._interaction_context_provider = None
 
         self._conversation = ConversationService(
             self._ai_manager.service,
@@ -3053,9 +3069,11 @@ class Atlas:
         self._session_context = None
         self._orchestration_executor = None
 
-        # --- P3/B3.1: Interaction capture cleanup ---
+        # --- P3/B3.1+B3.2: Interaction capture cleanup ---
         self._interaction_repository = None
         self._interaction_recorder = None
+        self._interaction_learning_bridge = None
+        self._interaction_context_provider = None
 
         # --- Phase 12.2: Cleanup ---
         self._intelligence_engine = None
