@@ -2769,6 +2769,25 @@ class Atlas:
         # Wire conversation into the runtime coordinator
         self._runtime_coordinator._conversation_service = self._conversation
 
+        # --- P4: Collective learning (candidate → governed approval → collective) ---
+        # One kernel-owned CollectiveRepository + CollectiveGovernance, driven by
+        # the EXISTING ApprovalManager + AuthorityService + EvolutionMemory.
+        # Kernel-private (not registered in ServiceContainer — the container key-set
+        # is exact-set-tested). Never auto-runs; never touches tick()/RuntimeCoordinator.
+        try:
+            from atlas.collective.governance import CollectiveGovernance
+            from atlas.collective.repository import CollectiveRepository
+            self._collective_repository = CollectiveRepository()
+            self._collective_governance = CollectiveGovernance(
+                repository=self._collective_repository,
+                authority_service=self._authority_service,
+                approval_manager=self._approval_manager,
+                evolution_memory=self._evolution_memory,
+            )
+        except Exception:
+            self._collective_repository = None
+            self._collective_governance = None
+
         # --- P2/B2.2: Governed orchestration executor ---
         # Composes EXISTING execution seams only (ToolExecutor,
         # CapabilityDispatcher, InformationAcquisitionService, AuthorityService).
@@ -3098,6 +3117,10 @@ class Atlas:
         self._self_management_review = None
         self._boot_activation = None
         self._boot_report = None
+
+        # --- P4: Collective learning cleanup ---
+        self._collective_repository = None
+        self._collective_governance = None
 
         # --- Phase 15.0: Cleanup ---
         self._goal_executor = None
