@@ -436,6 +436,9 @@ class Atlas:
         self._model_profile_registry: ModelProfileRegistry | None = None
         self._model_router: ModelRouter | None = None
 
+        # --- Phase 6.1: Deterministic Fallback Resolver ---
+        self._deterministic_fallback: Any | None = None
+
         self._learning_manager: LearningManager | None = None
         self._knowledge_feedback: KnowledgeFeedback | None = None
         self._started = False
@@ -984,6 +987,11 @@ class Atlas:
     def development_controller(self):
         """Return the kernel-owned DevelopmentCycleController (Phase F9)."""
         return self._development_controller
+
+    @property
+    def deterministic_fallback(self):
+        """Return the kernel-owned DeterministicFallbackResolver (Phase 6.1)."""
+        return self._deterministic_fallback
 
     def run_development_cycle(
         self,
@@ -2826,6 +2834,17 @@ class Atlas:
             self._interaction_learning_bridge = None
             self._interaction_context_provider = None
 
+        # --- Phase 6.1: Deterministic Fallback Resolver ---
+        try:
+            from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
+
+            self._deterministic_fallback = DeterministicFallbackResolver(
+                knowledge_manager=self._knowledge_manager,
+                tool_registry=self._tool_registry,
+            )
+        except Exception:
+            self._deterministic_fallback = None
+
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
@@ -2833,6 +2852,7 @@ class Atlas:
             development_bridge=self._development_bridge,
             orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
+            fallback_resolver=self._deterministic_fallback,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).
@@ -3276,6 +3296,7 @@ class Atlas:
         self._tool_executor = None
         self._tool_selector = None
         self._tool_registry = None
+        self._deterministic_fallback = None
         self._model_profile_registry = None
         self._model_router = None
 

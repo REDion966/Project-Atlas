@@ -23,6 +23,7 @@ from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
 
 if TYPE_CHECKING:
+    from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
     from atlas.session.context import SessionContext
     from atlas.session.models import Session
 
@@ -39,6 +40,7 @@ class ConversationService:
         development_bridge: Callable[[TaskSpec], Message | str] | None = None,
         session_context: SessionContext | None = None,
         orchestration_resolver: Callable[[TaskSpec, SessionContext | None], object | None] | None = None,
+        fallback_resolver: DeterministicFallbackResolver | None = None,
     ):
         """
         Initialize the conversation service.
@@ -64,6 +66,16 @@ class ConversationService:
                 string. Wired by the composition root; this module never
                 imports the evolution package. When absent, a development
                 request falls through to the normal conversation path.
+
+            session_context:
+                Optional default SessionContext.
+
+            orchestration_resolver:
+                Optional orchestration bridge for ACTION/INFORMATION requests.
+
+            fallback_resolver:
+                Optional DeterministicFallbackResolver for model-unavailable
+                degraded operation.
         """
 
         self._history = History()
@@ -80,6 +92,7 @@ class ConversationService:
         self._task_intake = task_intake
         self._development_bridge = development_bridge
         self._orchestration_resolver = orchestration_resolver
+        self._fallback_resolver = fallback_resolver
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
 
@@ -91,6 +104,13 @@ class ConversationService:
         """Return the active conversation."""
 
         return self._conversation
+
+    @property
+    def fallback_resolver(self) -> DeterministicFallbackResolver | None:
+        return self._fallback_resolver
+
+    def set_fallback_resolver(self, resolver: DeterministicFallbackResolver | None) -> None:
+        self._fallback_resolver = resolver
 
     @property
     def session_context(self) -> SessionContext | None:
@@ -219,15 +239,37 @@ class ConversationService:
             context
         )
 
-        response = self._ai.chat(
-            prompt,
-            routing_context=self._build_routing_request(text, spec),
-        )
-
-        assistant_message = Message(
-            role="assistant",
-            content=response.text,
-        )
+        try:
+            response = self._ai.chat(
+                prompt,
+                routing_context=self._build_routing_request(text, spec),
+            )
+            assistant_message = Message(
+                role="assistant",
+                content=response.text,
+            )
+        except Exception as exc:
+            # External AI unavailable, unreachable, or failed -> deterministic fallback
+            if self._fallback_resolver is not None:
+                assistant_message = self._fallback_resolver.resolve(
+                    text=text,
+                    spec=spec,
+                    session_context=active_session,
+                    error_context=str(exc),
+                )
+            else:
+                assistant_message = Message(
+                    role="assistant",
+                    content=(
+                        "External AI inference is currently unavailable and no deterministic "
+                        "fallback resolver is configured."
+                    ),
+                    metadata={
+                        "degraded": True,
+                        "model_available": False,
+                        "error": str(exc),
+                    },
+                )
 
         self._conversation.add_message(
             assistant_message
@@ -332,12 +374,36 @@ class ConversationService:
 
         assistant_text = ""
 
-        for chunk in self._ai.stream_chat(
-            prompt,
-            routing_context=self._build_routing_request(text, spec),
-        ):
-            assistant_text += chunk
-            yield chunk
+        try:
+            for chunk in self._ai.stream_chat(
+                prompt,
+                routing_context=self._build_routing_request(text, spec),
+            ):
+                assistant_text += chunk
+                yield chunk
+        except Exception as exc:
+            if not assistant_text:
+                # Stream failed before/at token generation -> deterministic fallback stream
+                if self._fallback_resolver is not None:
+                    for chunk in self._fallback_resolver.resolve_stream(
+                        text=text,
+                        spec=spec,
+                        session_context=active_session,
+                        error_context=str(exc),
+                    ):
+                        assistant_text += chunk
+                        yield chunk
+                else:
+                    msg = (
+                        "External AI inference is currently unavailable and no deterministic "
+                        "fallback resolver is configured."
+                    )
+                    assistant_text = msg
+                    yield msg
+            else:
+                note = "\n\n[Stream interrupted: external AI model connection lost]"
+                assistant_text += note
+                yield note
 
         assistant_message = Message(
             role="assistant",
