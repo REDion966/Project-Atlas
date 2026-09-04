@@ -20,3 +20,6 @@ MagicMock/
 
 # Atlas Runtime Data (SQLite databases, conversation exports)
 atlas_data/
+
+# Command Code local state
+.commandcode/
