@@ -95,14 +95,17 @@ the only channel by which Atlas may change its own operational state.
 ## Development Environment
 
 ```bash
-# Python 3.10+ recommended; create a virtual environment
+# Python 3.11+ required; create a virtual environment
 python -m venv .venv
 
 # Activate (Windows PowerShell)
 .venv\Scripts\Activate.ps1
 
-# Install dependencies
+# Install runtime dependencies
 pip install -r requirements.txt
+
+# Install runtime + development/test dependencies
+pip install -e ".[test]"
 ```
 
 ## Running the Test Suite

@@ -3,14 +3,17 @@ name = "atlas"
 version = "0.1.0"
 description = "Atlas AI Operating System"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 
 authors = [
     { name = "AB AL Mamun" }
 ]
 
-dependencies = []
+dependencies = ["requests>=2.28"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
 
 [project.scripts]
 atlas = "atlas.cli.main:main"
@@ -27,7 +30,7 @@ show_missing = true
 
 [tool.ruff]
 line-length = 88
-target-version = "py314"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -39,6 +42,9 @@ select = [
 ]
 
 ignore = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["atlas"]
 
 [build-system]
 requires = ["hatchling"]
