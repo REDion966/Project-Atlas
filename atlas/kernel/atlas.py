@@ -22,6 +22,8 @@ from atlas.ai.routing.router import ModelRouter
 from atlas.config.configuration import Configuration
 from atlas.conversation.conversation_service import ConversationService
 from atlas.conversation.development_intake import task_spec_to_development_need
+from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
+from atlas.conversation.development_need_detector import AdvisorySignal
 from atlas.conversation.message import Message
 from atlas.cognition.api import CognitionAPI
 from atlas.events.event_bus import EventBus
@@ -1165,12 +1167,79 @@ class Atlas:
         except Exception:
             self._proactive_advisor = None
 
-    def confirm_development_approval(self, proposal_id: str, comment: str = ""):
+    def _require_development_authority(self, session_context, action: str) -> None:
+        """Fail-closed OWNER authorization for a development action.
+
+        Resolves the acting identity through the EXISTING authoritative
+        session model (SessionManager + SessionContext), never through a
+        caller-supplied principal id. The SessionManager only contains
+        sessions created through AuthorityService, so a fabricated, missing,
+        or conflicting identity is rejected before any OWNER check:
+
+          * missing/unknown session context -> fail closed
+          * unknown session id in SessionManager -> fail closed
+          * principal/session mismatch -> fail closed
+          * principal resolved by AuthorityService -> assert OWNER
+
+        Raises (fail-closed) on missing/mismatched identity or insufficient
+        authority.
+        """
+        if session_context is None:
+            raise RuntimeError(
+                "Development action requires an active session context "
+                "(fail-closed)."
+            )
+        manager = getattr(self, "_session_manager", None)
+        authority = getattr(self, "_authority_service", None)
+        if manager is None or authority is None:
+            raise RuntimeError(
+                "Session/authority services are not wired; Atlas.start() must "
+                "run first."
+            )
+        session_id = getattr(session_context, "session_id", "")
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise RuntimeError(
+                "Development action requires an active session (fail-closed)."
+            )
+        session = manager.get(session_id)
+        if session is None:
+            raise RuntimeError(
+                f"Unknown session '{session_id}' for development {action} "
+                "(fail-closed)."
+            )
+        # The session is immutable and was created by SessionManager from a
+        # resolved Principal. Re-resolve through AuthorityService and reject
+        # any mismatch between the caller's context and the authoritative
+        # session so a conflicting identity claim can never be honored.
+        principal_id = session.principal_id
+        if getattr(session_context, "principal_id", "") != principal_id:
+            raise RuntimeError(
+                f"Mismatched session/principal for development {action} "
+                "(fail-closed)."
+            )
+        if authority.resolve(principal_id) is None:
+            raise RuntimeError(
+                f"Unknown principal '{principal_id}' for development {action} "
+                "(fail-closed)."
+            )
+        decision = authority.assert_owner(principal_id, action=action)
+        if decision.denied:
+            raise RuntimeError(
+                f"Development {action} denied for principal '{principal_id}': "
+                f"{decision.reason or 'owner authority required'}"
+            )
+
+    def confirm_development_approval(
+        self, session_context, proposal_id: str, comment: str = ""
+    ):
         """Explicit human confirmation of a persisted development proposal.
 
         Operational Maturity track — the cross-process human gate for F9
         proposals. Composes EXISTING machinery only:
 
+          * AUTHORIZES the acting identity resolved from ``session_context``
+            through the EXISTING SessionManager + AuthorityService
+            (OWNER-only), BEFORE any status transition,
           * loads the persisted PENDING_APPROVAL proposal from
             EvolutionMemory (restored from EvolutionSQLiteStorage),
           * locates its pending ApprovalRequest,
@@ -1181,9 +1250,14 @@ class Atlas:
 
         Never executes, schedules, or promotes anything; sandbox execution of
         the approved proposal happens separately via
-        ``run_development_execution()``. Fail-closed on missing proposals,
-        wrong states, or missing pending requests.
+        ``run_development_execution()``. Fail-closed on authorization failure,
+        missing proposals, wrong states, or missing pending requests.
         """
+        # P7.6 — authorization boundary BEFORE the PENDING_APPROVAL status
+        # transition. Only the Owner may approve; the check trusts the
+        # authoritative session-resolved principal, never a caller-supplied id.
+        self._require_development_authority(session_context, action="approval")
+
         memory = self._evolution_memory
         manager = self._approval_manager
         if memory is None or manager is None:
@@ -1220,8 +1294,12 @@ class Atlas:
         memory.update_proposal_status(proposal_id, ProposalStatus.APPROVED)
         return proposal
 
-    def run_development_execution(self, proposal_id: str):
+    def run_development_execution(self, session_context, proposal_id: str):
         """Execute an APPROVED, persisted development proposal.
+
+        P7.6 — AUTHORIZES the acting identity resolved from
+        ``session_context`` through the EXISTING SessionManager +
+        AuthorityService (OWNER-only) BEFORE loading or executing anything.
 
         Loads the proposal from EvolutionMemory, requires APPROVED state,
         then runs the EXISTING DevelopmentPlanner + SelfDevelopmentLoop path
@@ -1229,6 +1307,9 @@ class Atlas:
         LearningMemory evidence). Read-only with respect to the real
         repository; never approves/authorizes/promotes anything.
         """
+        # P7.6 — authorization boundary BEFORE any execution.
+        self._require_development_authority(session_context, action="execution")
+
         memory = self._evolution_memory
         planner = self._development_planner
         loop = self._self_development_loop
@@ -1305,6 +1386,80 @@ class Atlas:
                 "Proactive advisor is not wired; Atlas.start() must run first."
             )
         return self._proactive_advisor.run_advisory(principal_id=principal_id or "")
+
+    # ------------------------------------------------------------------
+    # P7.7 — Advisory-input integration (composition boundary)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def project_advisory(item: Any) -> AdvisorySignal | None:
+        """Project one P5 ``AdvisoryItem`` into a conversation-owned
+        :class:`AdvisorySignal` (P7.7).
+
+        This is the ONLY place that maps advisory runtime data into the P7
+        conversation input shape. Conversation never imports ``atlas.advisory``;
+        the kernel performs the projection at the composition boundary and
+        injects the immutable signal into the conversation layer.
+
+        Returns ``None`` when the item lacks the minimal fields the detector
+        needs (no summary and no suggested action), so non-improvement items
+        never reach P7.
+        """
+        if item is None:
+            return None
+        summary = str(getattr(item, "summary", "") or "").strip()
+        suggested_action = str(getattr(item, "suggested_action", "") or "").strip()
+        if not summary and not suggested_action:
+            return None
+        evidence_ids = getattr(item, "evidence_ids", ()) or ()
+        try:
+            evidence_ids = tuple(str(e)[:128] for e in evidence_ids if e)[:8]
+        except TypeError:
+            evidence_ids = ()
+        # NOTE: authority is intentionally NOT projected. AdvisoryItem carries
+        # no authority, only requires_owner. The authoritative session context
+        # (not advisory content) binds the pending confirmation and governs the
+        # development action (P7.6); inventing authority here would misattribute
+        # provenance and must never elevate a USER to OWNER.
+        return AdvisorySignal(
+            kind=str(getattr(item, "kind", "") or ""),
+            summary=summary[:400],
+            suggested_action=suggested_action[:200],
+            evidence_ids=evidence_ids,
+            principal_id=str(getattr(item, "principal_id", "") or "")[:128],
+            authority="",
+        )
+
+    def feed_advisory(self, report: Any, session_context: Any = None) -> list[Message]:
+        """Feed a P5 :class:`AdvisoryReport` into the P7 conversational path
+        (P7.7).
+
+        Each item is projected (via :meth:`project_advisory`) into a bounded
+        :class:`AdvisorySignal` and handed to the conversation service, which
+        runs P7.2 detection + P7.3 explanation. Advisory alone NEVER invokes
+        the development bridge; only explicit human confirmation can.
+
+        Multiple opportunities are handled deterministically: each signal is
+        fed in report order, and the conversation layer's single pending-
+        confirmation slot bounds state. Unrelated/non-improvement items project
+        to ``None`` and are skipped silently.
+
+        Returns the list of explanation :class:`Message`s produced (one per
+        detected opportunity). An empty list means no opportunity was detected.
+        """
+        if report is None:
+            return []
+        items = getattr(report, "items", ()) or ()
+        session = session_context if session_context is not None else self._session_context
+        messages: list[Message] = []
+        for item in items:
+            signal = self.project_advisory(item)
+            if signal is None:
+                continue
+            message = self._conversation.handle_advisory(signal, session)
+            if message is not None:
+                messages.append(message)
+        return messages
 
     # ------------------------------------------------------------------
     # Properties
@@ -1881,6 +2036,7 @@ class Atlas:
 
     def submit_development_for_promotion_review(
         self,
+        session_context,
         run_result: Any,
         proposal_id: str = "",
         change_manifest: dict[str, Any] | None = None,
@@ -1888,6 +2044,10 @@ class Atlas:
     ) -> PromotionRequest:
         """Stage H: bridge a verified ``DevelopmentRunResult`` into a
         ``PENDING_REVIEW`` audit row carrying bounded change evidence.
+
+        P7.6 — AUTHORIZES the acting identity resolved from
+        ``session_context`` through the EXISTING SessionManager +
+        AuthorityService (OWNER-only) BEFORE opening any review.
 
         Manual, additive, read-only with respect to the repository:
 
@@ -1909,6 +2069,9 @@ class Atlas:
         * Never auto-runs. There is no daemon, no tick-loop wiring, and
           no SDL integration. The host invokes this method explicitly.
         """
+        # P7.6 — authorization boundary BEFORE any review submission.
+        self._require_development_authority(session_context, action="promotion_review")
+
         gate = self._promotion_gate
         if gate is None:
             raise RuntimeError(
@@ -2853,6 +3016,7 @@ class Atlas:
             orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
             fallback_resolver=self._deterministic_fallback,
+            development_need_coordinator=DevelopmentNeedCoordinator(),
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).

@@ -123,8 +123,15 @@ def _capture(atlas):
 
 
 def _approve_cli(atlas, proposal_id, message="operator approval"):
-    """Session-B human confirmation through the EXISTING kernel gate."""
-    atlas.confirm_development_approval(proposal_id, comment=message)
+    """Session-B human confirmation through the EXISTING kernel gate.
+
+    The operator is the single Owner; the kernel AUTHORIZES the operator's
+    authoritative session through the EXISTING SessionManager +
+    AuthorityService before any status transition.
+    """
+    atlas.confirm_development_approval(
+        atlas.session_context, proposal_id, comment=message
+    )
 
 
 class TestCrossProcessPersistence:
@@ -190,11 +197,13 @@ class TestCrossProcessApprovalCli:
     def test_confirm_across_processes(self, monkeypatch, tmp_path):
         proposal_id = self._prepare(monkeypatch, tmp_path)
 
-        # Session 2: operator confirms through the kernel gate.
+        # Session 2: operator confirms through the kernel gate. The operator is
+        # the single Owner; the kernel AUTHORIZES the principal through the
+        # EXISTING AuthorityService before any status transition.
         atlas2 = _started_atlas(monkeypatch, tmp_path)
         try:
             atlas2.confirm_development_approval(
-                proposal_id, comment="operator ok"
+                atlas2.session_context, proposal_id, comment="operator ok"
             )
             proposal = atlas2.execution_engine.get_proposal(proposal_id)
             assert proposal.status is ProposalStatus.APPROVED
@@ -213,7 +222,9 @@ class TestCrossProcessApprovalCli:
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             with pytest.raises(RuntimeError, match="not found"):
-                atlas.confirm_development_approval("DEV-DOES-NOT-EXIST")
+                atlas.confirm_development_approval(
+                    atlas.session_context, "DEV-DOES-NOT-EXIST"
+                )
         finally:
             atlas.shutdown()
 

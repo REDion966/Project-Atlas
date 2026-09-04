@@ -381,13 +381,24 @@ def _make_kernel_for_bridge(memory: EvolutionMemory):
     """Construct a minimal Atlas kernel surface for bridge tests.
 
     We deliberately bypass ``Atlas.start()`` (which requires a full
-    Configuration) and wire only the two attributes touched by the
-    Stage H bridge: ``_evolution_memory`` and ``_promotion_gate``.
-    Mirrors the read-only view the kernel exposes to operators.
+    Configuration) and wire the attributes touched by the Stage H bridge:
+    ``_evolution_memory``, ``_promotion_gate``, an ``_authority_service``,
+    a ``_session_manager``, and an owner ``_session_context`` so the P7.6
+    OWNER authorization boundary can be enforced against the canonical
+    session identity (fail-closed). Mirrors the read-only view the kernel
+    exposes to operators.
     """
+    from atlas.authority.service import AuthorityService
     from atlas.kernel.atlas import Atlas
+    from atlas.session.context import SessionContext
+    from atlas.session.manager import SessionManager
 
     kernel = Atlas.__new__(Atlas)
+    kernel._authority_service = AuthorityService(owner_name="Owner")
+    kernel._session_manager = SessionManager(authority_service=kernel._authority_service)
+    kernel._session_context = SessionContext.from_session(
+        kernel._session_manager.create_session("owner"), action="owner_session"
+    )
     kernel._evolution_memory = memory
     kernel._promotion_gate = PromotionGate(evolution_memory=memory)
     return kernel
@@ -426,6 +437,7 @@ class TestKernelBridge:
         )
 
         request = kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-K1",
             change_manifest=manifest,
@@ -447,6 +459,7 @@ class TestKernelBridge:
         )
 
         kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-K2",
             change_manifest=manifest,
@@ -470,6 +483,7 @@ class TestKernelBridge:
         kernel = _make_kernel_for_bridge(memory)
 
         request = kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-K3",
         )
@@ -521,6 +535,7 @@ class TestKernelBridge:
 
         with pytest.raises(RuntimeError):
             kernel.submit_development_for_promotion_review(
+                None,
                 self._verified_run(),
                 proposal_id="PROP-K4",
             )
@@ -535,6 +550,7 @@ class TestKernelBridge:
         kernel = _make_kernel_for_bridge(memory)
 
         kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-K5",
             change_manifest=build_change_manifest(
@@ -581,6 +597,7 @@ class TestPromotionDetail:
         memory = EvolutionMemory()
         kernel = _make_kernel_for_bridge(memory)
         kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-D1",
             change_manifest=build_change_manifest(
@@ -617,6 +634,7 @@ class TestPromotionDetail:
         memory = EvolutionMemory()
         kernel = _make_kernel_for_bridge(memory)
         kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-D2",
         )
@@ -643,6 +661,7 @@ class TestPromotionDetail:
         memory = EvolutionMemory()
         kernel = _make_kernel_for_bridge(memory)
         kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-D3",
             change_manifest=build_change_manifest(
@@ -657,6 +676,7 @@ class TestPromotionDetail:
         memory = EvolutionMemory()
         kernel = _make_kernel_for_bridge(memory)
         kernel.submit_development_for_promotion_review(
+            kernel._session_context,
             self._verified_run(),
             proposal_id="PROP-D4",
         )

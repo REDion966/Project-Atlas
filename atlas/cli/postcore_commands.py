@@ -21,6 +21,18 @@ from __future__ import annotations
 import json
 
 
+def _operator_session(atlas):
+    """Resolve the authoritative operator session context.
+
+    The Atlas CLI is the operator surface; the kernel establishes an Owner
+    SessionContext during ``start()`` (the single-owner CLI flow). This helper
+    hands that immutable context to the kernel bridge, which resolves and
+    authorizes identity through the EXISTING SessionManager + AuthorityService.
+    It never fabricates an identity and never supplies a raw principal id.
+    """
+    return getattr(atlas, "session_context", None)
+
+
 def _safe_mode_line(atlas) -> str:
     """Return a SAFE_MODE notice line when boot recovery narrowed autonomy."""
     try:
@@ -271,9 +283,13 @@ def cmd_confirm(atlas, args) -> str:
     if not proposal_id:
         return "error: confirm requires --proposal-id"
     comment = getattr(args, "comment", "") or ""
+    # The operator is the single Owner; the kernel AUTHORIZES the operator's
+    # authoritative session through SessionManager + AuthorityService before
+    # any status transition.
+    session_context = _operator_session(atlas)
     try:
         proposal = atlas.confirm_development_approval(
-            proposal_id, comment=comment
+            session_context, proposal_id, comment=comment
         )
     except RuntimeError as exc:
         return f"error: {exc}"
@@ -298,8 +314,12 @@ def cmd_execute(atlas, args) -> str:
     if not proposal_id:
         return "error: execute requires --proposal-id"
 
+    # The operator is the single Owner; the kernel AUTHORIZES the operator's
+    # authoritative session through SessionManager + AuthorityService before
+    # any execution.
+    session_context = _operator_session(atlas)
     try:
-        run_result = atlas.run_development_execution(proposal_id)
+        run_result = atlas.run_development_execution(session_context, proposal_id)
     except RuntimeError as exc:
         return f"error: {exc}"
 

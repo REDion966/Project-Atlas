@@ -14,6 +14,11 @@ from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
+from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
+from atlas.conversation.development_outcome_reporter import (
+    DevelopmentOutcomeReporter,
+    snapshot_from_result,
+)
 from atlas.conversation.history import History
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
@@ -41,6 +46,8 @@ class ConversationService:
         session_context: SessionContext | None = None,
         orchestration_resolver: Callable[[TaskSpec, SessionContext | None], object | None] | None = None,
         fallback_resolver: DeterministicFallbackResolver | None = None,
+        development_need_coordinator: DevelopmentNeedCoordinator | None = None,
+        outcome_reporter: DevelopmentOutcomeReporter | None = None,
     ):
         """
         Initialize the conversation service.
@@ -93,6 +100,8 @@ class ConversationService:
         self._development_bridge = development_bridge
         self._orchestration_resolver = orchestration_resolver
         self._fallback_resolver = fallback_resolver
+        self._development_need_coordinator = development_need_coordinator
+        self._outcome_reporter = outcome_reporter
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
 
@@ -181,6 +190,13 @@ class ConversationService:
         if development_response is not None:
             self._conversation.add_message(development_response)
             return development_response
+
+        # P7.4 — route a pending confirmation reply through the local
+        # coordinator (conversation-owned; never reaches F9 directly).
+        coordinated = self._maybe_handle_development_need_confirmation(text, active_session)
+        if coordinated is not None:
+            self._conversation.add_message(coordinated)
+            return coordinated
 
         orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
         if orchestration_response is not None:
@@ -558,6 +574,13 @@ class ConversationService:
         # caller session rather than the kernel-bound default.
         result = self._orchestration_resolver(spec, session_context)
         if result is None:
+            # P7.4 — a well-specified ACTION request whose target could not be
+            # resolved is a genuine deterministic capability-gap signal. When a
+            # coordinator is wired, surface an explanation (which records the
+            # pending confirmation) instead of the generic clarification.
+            detected = self._maybe_detect_development_need(spec)
+            if detected is not None:
+                return detected
             return self._orchestration_clarification_message(spec)
         if isinstance(result, Message):
             if isinstance(result.metadata, dict):
@@ -626,10 +649,30 @@ class ConversationService:
             return result
         if isinstance(result, str):
             return Message(role="assistant", content=result)
+        # P7.5 — the bridge returned an authoritative F9 result object rather
+        # than a pre-rendered Message. Project it through the reporter so the
+        # conversational surface sees a truthful, provenance-preserving report.
+        if self._outcome_reporter is not None:
+            provenance = self._provenance_from_spec(spec)
+            return self._outcome_reporter.report(
+                snapshot_from_result(result, **provenance)
+            )
         return Message(
             role="assistant",
             content="The development request could not be prepared.",
         )
+
+    @staticmethod
+    def _provenance_from_spec(spec: TaskSpec) -> dict[str, str]:
+        """Extract provenance from a spec's context (already attached by the
+        conversation service). Never elevates authority."""
+        ctx = getattr(spec, "context", {}) or {}
+        out: dict[str, str] = {}
+        for key in ("session_id", "principal_id", "authority"):
+            value = ctx.get(key)
+            if isinstance(value, str) and value:
+                out[key] = value
+        return out
 
     @staticmethod
     def _clarification_message(spec: TaskSpec) -> Message:
@@ -642,6 +685,64 @@ class ConversationService:
         for question in tuple(questions)[:8]:
             lines.append(f"- {question}")
         return Message(role="assistant", content="\n".join(lines))
+
+    def _maybe_handle_development_need_confirmation(
+        self,
+        text: str,
+        session_context: SessionContext | None,
+    ) -> Message | None:
+        """Route a reply against a pending P7 confirmation through the local
+        coordinator (conversation-owned; never reaches F9 directly)."""
+        coordinator = self._development_need_coordinator
+        if coordinator is None or not coordinator.has_pending:
+            return None
+
+        outcome = coordinator.handle_reply(text, session_context)
+        if outcome is None:
+            return None
+        if isinstance(outcome, Message):
+            return outcome
+        # CONFIRMED -> DEVELOPMENT_REQUEST TaskSpec -> existing bridge.
+        return self._maybe_handle_development_request(outcome)
+
+    def handle_advisory(self, advisory_signal, session_context: SessionContext | None = None):
+        """Feed a bounded P5 advisory signal into the P7 detection/dialogue path
+        (P7.7).
+
+        Advisory alone NEVER invokes the development bridge. If the signal
+        detects an improvement opportunity, this returns an explanation
+        :class:`Message` and records a pending confirmation bound to the session
+        context. The actual development bridge is reachable ONLY through
+        subsequent explicit human confirmation (``send("yes")``).
+
+        Returns ``None`` when no coordinator is wired or no opportunity is
+        detected.
+        """
+        coordinator = self._development_need_coordinator
+        if coordinator is None:
+            return None
+        active_session = session_context if session_context is not None else self._session_context
+        message = coordinator.advisory_input(advisory_signal, active_session)
+        if message is None:
+            return None
+        self._conversation.add_message(message)
+        return message
+
+    def _maybe_detect_development_need(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Surface a P7 explanation for a genuine deterministic unresolved-
+        action/capability-gap signal. Returns ``None`` when no coordinator is
+        wired or no signal is detected."""
+        coordinator = self._development_need_coordinator
+        if coordinator is None:
+            return None
+        if spec is None or spec.task_type is not TaskType.ACTION_REQUEST:
+            return None
+        if bool(spec.needs_clarification):
+            return None
+        return coordinator.detect_unresolved_action(spec)
 
     def save(self) -> Path:
         """
