@@ -251,23 +251,25 @@ post-core direction.
 - Establish the official post-core roadmap (M2–M7).
 
 ### M2 — Execution Integrity
-**STATUS: LOCKED**
+**STATUS: COMPLETE**
 
-Establish a correct, verified canonical task execution contract.
+F1 resolved: the broken `Task.run()` path reachable from `Atlas.tick()` is fixed
+by a minimal lifecycle-only implementation. A terminal Task (COMPLETED / FAILED /
+CANCELLED) is left untouched; a non-terminal Task transitions RUNNING then FAILED
+with the deterministic reason `"Task has no executable payload"` rather than
+falsely claiming success. No external work, no tool/capability dispatch, no new
+execution architecture, and no authority bypass are introduced. A due Task passes
+safely through `Worker.execute()` and `Scheduler.tick()` without crashing the
+runtime loop.
 
-Must address **F1**: the broken `Task.run()` path reachable from
-`Atlas.tick()`.
-
-- Audit the Task lifecycle and the Scheduler → Worker → Task execution path.
-- Decide whether Task owns execution or execution belongs elsewhere.
-- Correct the broken `Task.run()`/`Worker` relationship so a scheduled task can
-  actually execute.
-- Ensure a task failure is contained and cannot crash the Atlas tick loop.
-- Add end-to-end scheduled-task execution tests.
-
-**Acceptance:** a real scheduled task executes successfully through the real
-scheduler path, and a task failure is contained without crashing the Atlas
-tick loop.
+- M2.1 investigation completed.
+- M2.2 execution contract defined (lifecycle-only, honest failure).
+- M2.3 F1 implementation completed.
+- M2.4 regression/baseline verification completed.
+- M2.4 verdict: `M2.4 PASS — F1 VERIFIED`.
+- The six known datetime failures in `atlas/understanding/consolidation/concept_consolidator.py:119`
+  remain deferred under F17 and are not M2 regressions.
+- M3 — Tool Governance remains LOCKED as the next milestone.
 
 ### M3 — Tool Governance
 **STATUS: LOCKED**

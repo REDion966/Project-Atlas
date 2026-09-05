@@ -96,3 +96,25 @@ class Task:
         """
 
         self.status = TaskStatus.RUNNING
+
+    def run(self) -> None:
+        """Execute the task.
+
+        The current :class:`Task` model defines no executable payload, handler,
+        capability or tool target, so no external work can be performed. A
+        terminal task is left untouched; a non-terminal task transitions to
+        RUNNING and then to FAILED with a deterministic reason rather than
+        falsely claiming successful execution.
+
+        Returns:
+            ``None``.
+        """
+        if self.status in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        ):
+            return None
+        self.start()
+        self.fail("Task has no executable payload")
+        return None
