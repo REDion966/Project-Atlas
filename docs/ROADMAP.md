@@ -225,37 +225,175 @@ There is **NO Phase 23 for Atlas Core**. The next development model is
 
 ---
 
-## NEXT — Foundation Strengthening / Post-Core Work
+## Post-Core Development
 
-**No implementation NEXT is currently defined.** The recorded Track C
-follow-ups — Persistent Learning, deterministic semantic recall, and
-forgetting-policy tuning — are COMPLETE (see the Track C Post-Core Follow-Ups
-subsection above and `docs/ATLAS_STATE.md` §28–§29). No further task carries
-an approved design. Any future work requires an explicitly written,
-owner-approved scope/direction before implementation begins
-(inspect-before-build remains in force).
+Atlas Core is complete (Phase 22, v0.20.0). Development now follows the
+post-core milestone sequence below. Each milestone is locked until the
+preceding milestone is accepted. M2–M7 scope is defined by acceptance
+contract, not by premature implementation.
 
-Still-recorded, non-gated follow-up direction (recorded direction only — not
-an approved NEXT task):
+### M0 — GitHub Synchronization
+**STATUS: COMPLETE**
 
-- **Track A**: knowledge-graph expansion. (The previously listed web source
-  adapter was delivered by post-Core **F8** —
-  `atlas/research/sources/web.py` + `atlas/research/acquisition.py` — so it
-  is no longer an open follow-up.)
+Local and remote histories are synchronized at a verified checkpoint with a
+clean working tree.
+
+### M1 — Roadmap Reconciliation
+**STATUS: IN PROGRESS**
+
+Reconcile the original P1–P7 core plan, the authoritative forward roadmap, the
+current-state handbook, and the actual implementation into one official
+post-core direction.
+
+- Inspect repository state, git history, and existing roadmap/state documents.
+- Independently verify the actual implementation and tests for P1–P7.
+- Classify findings (blockers / strengthen / debt / future / closed).
+- Establish the official post-core roadmap (M2–M7).
+
+### M2 — Execution Integrity
+**STATUS: LOCKED**
+
+Establish a correct, verified canonical task execution contract.
+
+Must address **F1**: the broken `Task.run()` path reachable from
+`Atlas.tick()`.
+
+- Audit the Task lifecycle and the Scheduler → Worker → Task execution path.
+- Decide whether Task owns execution or execution belongs elsewhere.
+- Correct the broken `Task.run()`/`Worker` relationship so a scheduled task can
+  actually execute.
+- Ensure a task failure is contained and cannot crash the Atlas tick loop.
+- Add end-to-end scheduled-task execution tests.
+
+**Acceptance:** a real scheduled task executes successfully through the real
+scheduler path, and a task failure is contained without crashing the Atlas
+tick loop.
+
+### M3 — Tool Governance
+**STATUS: LOCKED**
+
+Establish one governed tool execution boundary.
+
+Must address **F2**: `ToolExecutor` currently has no authority/governance
+enforcement and depends on its callers for governance.
+
+- Audit `ToolExecutor` / `ToolEngine` / registry / handler relationships.
+- Define the canonical governed tool execution boundary.
+- Require authority/governance context; fail closed when it is missing.
+- Remove direct unsafe execution paths where necessary while preserving existing
+  legitimate orchestration behavior.
+- Add authorization and regression tests.
+
+**Acceptance:** every tool execution passes through a verified governed
+execution boundary, and an invocation without a valid authority/governance
+context is denied.
+
+### M4 — Self-Development Hardening
+**STATUS: LOCKED**
+
+Strengthen the existing P7 self-development pipeline without redesigning it.
+
+- Preserve verified development results and establish durable
+  promotion/application handling.
+- Ensure repository safety and maintain sandbox isolation.
+- Strengthen the promotion approval flow.
+- Verify artifacts/results required for governed promotion.
+- Add regression tests.
+
+**Acceptance:** a development proposal moves through the existing governed
+lifecycle and produces a durable, reviewable, verifiable result suitable for
+an approved promotion/application path.
+
+> Do NOT replace P7. Do NOT weaken OWNER approval. Do NOT remove sandboxing.
+> Do NOT make autonomous repository modification unrestricted.
+
+### M5 — Governance Assurance
+**STATUS: LOCKED**
+
+Focused assurance pass over privileged operations after M2–M4.
+
+- AuthorityService, SessionContext ownership, and RuleEngine behavior.
+- Fail-closed behavior for all privileged-operation paths.
+- CODE and IDENTITY constitutional protection.
+- Governance regression tests.
+
+**Acceptance:** every privileged operation has one verified authority/governance
+path with regression coverage for fail-closed behavior.
+
+### M6 — Canonical Execution Architecture
+**STATUS: LOCKED**
+
+Document and enforce the final execution architecture before major capability
+expansion.
+
+Address **F3**: canonical execution ownership must be clarified and enforced.
+
+Map each execution system (OrchestrationExecutor, Tool execution,
+Task/Scheduler, GoalExecutionEngine, EvolutionScheduler,
+DevelopmentCycleController, SelfDevelopmentLoop, and any others discovered
+during M2–M5) for: ownership, responsibility, entry point, caller,
+canonical/supporting/specialized/legacy status, governance boundary, and
+relationship to other execution systems.
+
+**Acceptance:** a future Atlas module has one obvious, documented, governed
+integration path for each kind of execution.
+
+> Do NOT blindly merge execution systems. Specialized systems may remain
+> specialized when justified.
+
+### F17 — Datetime Policy
+**STATUS: LOCKED (hardening item, performed within M2–M5 as appropriate)**
+
+Normalize internal timestamps to UTC-aware datetimes and eliminate naive/aware
+mixing.
+
+**Acceptance:** no production path mixes naive and UTC-aware timestamps; relevant
+serialization/comparison tests pass.
+
+### M7 — Capability Expansion
+**STATUS: LOCKED (scope deliberately flexible)**
+
+Only after M2–M6 are complete should Atlas substantially expand capabilities.
+Potential areas: workspace capabilities, stronger planning, richer autonomous
+operation, advanced capability modules, future Atlas-built modules. Detailed
+scope is not locked until M2–M6 are accepted.
+
+---
+
+## Future Queue (explicitly deferred)
+
+The following are deferred and must not silently become M2–M6 scope:
+
+- Registry consolidation
+- Legacy cognition cleanup
+- Workspace filesystem facade
+- Structured logging
+- SQLite architecture cleanup
+- Python 3.11 test portability cleanup
+- Async/concurrency work
+- Plugin SDK
+- Web/API server
+- Distributed execution
+
+---
+
+## NEXT
+
+The next milestone is **M2 — Execution Integrity** (see Post-Core Development
+above). The recorded Track C follow-ups (Persistent Learning, deterministic
+semantic recall, forgetting-policy tuning) are COMPLETE. No further task carries
+an approved design beyond the locked post-core sequence.
 
 Deferred / owner-gated items (unchanged):
 
 - **Episodic context surfacing** — feed long-term episodic memory into the
-  RuntimeCoordinator pipeline so stored experiences influence current
-  processing. **Deferred** pending a RuntimeCoordinator review (locked pipeline
-  order).
+  RuntimeCoordinator pipeline. **Deferred** pending a RuntimeCoordinator review
+  (locked pipeline order).
 
 **No next Stage (e.g. Stage I) is defined.** The Stage A1→H self-improvement
-thread is complete at Stage H. Any further promotion-review capability (for
-example, an operator-facing approve/reject decision surface) would touch the
-human-approval/governance boundary and therefore requires an **explicit,
-owner-approved design** before it may be implemented. Do not infer such a task
-from the existing architecture.
+thread is complete at Stage H. Any further promotion-review capability would
+touch the human-approval/governance boundary and therefore requires an
+explicit, owner-approved design before it may be implemented.
 
 ---
 
