@@ -7,6 +7,8 @@ Pure data management with no infrastructure dependencies.
 Phase 6.9 — Tool Intelligence Foundation.
 """
 
+from __future__ import annotations
+
 from atlas.tools.models import Tool
 
 
