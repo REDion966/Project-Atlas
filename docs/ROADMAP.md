@@ -239,16 +239,19 @@ Local and remote histories are synchronized at a verified checkpoint with a
 clean working tree.
 
 ### M1 — Roadmap Reconciliation
-**STATUS: IN PROGRESS**
+**STATUS: COMPLETE**
 
-Reconcile the original P1–P7 core plan, the authoritative forward roadmap, the
-current-state handbook, and the actual implementation into one official
-post-core direction.
+Reconciled the original P1–P7 core plan, the authoritative forward roadmap
+(`ROADMAP.md`), the current-state handbook (`ATLAS_STATE.md`), and the actual
+implementation into one official post-core direction.
 
-- Inspect repository state, git history, and existing roadmap/state documents.
-- Independently verify the actual implementation and tests for P1–P7.
-- Classify findings (blockers / strengthen / debt / future / closed).
-- Establish the official post-core roadmap (M2–M7).
+- M1.1 roadmap investigation completed.
+- M1.2 P1–P7 implementation reconciliation completed and independently verified.
+- M1.3 findings classified (blockers / strengthen / debt / future / closed).
+- M1.4 official post-core roadmap (M0–M7) established.
+- M1.5 final state and git-consistency verification passed.
+- Commit: `53b198b`.
+- M2 — Execution Integrity became the next active milestone.
 
 ### M2 — Execution Integrity
 **STATUS: COMPLETE**
@@ -272,23 +275,35 @@ runtime loop.
 - M3 — Tool Governance remains LOCKED as the next milestone.
 
 ### M3 — Tool Governance
-**STATUS: LOCKED**
+**STATUS: COMPLETE**
 
-Establish one governed tool execution boundary.
+Established the tool-execution governance invariant without modifying
+`ToolExecutor` or `ToolEngine`.
 
-Must address **F2**: `ToolExecutor` currently has no authority/governance
-enforcement and depends on its callers for governance.
+**M3.1 — Investigation.** Tool governance was investigated across ToolRegistry,
+ToolSelector, ToolExecutor, ToolEngine, OrchestrationExecutor, AuthorityService,
+SessionContext, and P7.6 development authorization. F2 was confirmed as an
+important architectural concern (a structural bypass exists via ToolEngine) rather
+than an active privileged bypass, since privileged development operations already
+route through governed boundaries.
 
-- Audit `ToolExecutor` / `ToolEngine` / registry / handler relationships.
-- Define the canonical governed tool execution boundary.
-- Require authority/governance context; fail closed when it is missing.
-- Remove direct unsafe execution paths where necessary while preserving existing
-  legitimate orchestration behavior.
-- Add authorization and regression tests.
+**M3.2 — Contract.** The approved architectural decision was **caller-owned
+governance**: privileged tool execution must pass through the canonical governed
+boundary — `SessionContext` → authoritative identity/session validation →
+`AuthorityService` → `OrchestrationExecutor._authorize()` → `ToolExecutor` →
+handler. P7.6 privileged development actions retain their existing kernel
+authorization boundary. `ToolExecutor` and `ToolEngine` are intentionally not
+governance boundaries.
 
-**Acceptance:** every tool execution passes through a verified governed
-execution boundary, and an invocation without a valid authority/governance
-context is denied.
+**M3.3 — Implementation.** Added explicit governance regression/invariant tests
+without modifying `ToolExecutor` or `ToolEngine`. Commit: `977d06e`.
+
+**M3.4 — Verification.** Independent verification confirmed: canonical tool
+execution is authorized before dispatch; unauthorized execution fails closed;
+`ToolExecutor` remains caller-trusting; `ToolEngine` remains advisory in current
+production usage; no privileged bypass was found; P7.6 authorization remains
+intact; M2 execution integrity remains intact. Full suite: 4918 passed, 0
+failures. F3 and F17 remain deferred.
 
 ### M4 — Self-Development Hardening
 **STATUS: LOCKED**
