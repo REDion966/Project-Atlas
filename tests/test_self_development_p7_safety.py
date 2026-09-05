@@ -22,10 +22,18 @@ import tempfile
 import pytest
 
 from atlas.evolution.approval_manager import ApprovalManager
+import os
+from unittest.mock import patch
+
 from atlas.evolution.autonomy.code_sandbox import (
     CodeChangeSet,
     CodeSandbox,
     SandboxPathError,
+)
+from atlas.evolution.autonomy.sandbox_tools import (  # noqa: F401
+    _ALLOWED_ENV_KEYS,
+    _controlled_env,
+    _is_secret_key,
 )
 from atlas.evolution.development_models import (
     DevelopmentOutcome,
@@ -268,3 +276,52 @@ class TestSandboxPathConfinement:
                         outside.unlink()
             finally:
                 sandbox.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# M4.3 — Sandbox environment boundary.
+#
+# The M4.1 investigation flagged that sandboxed execution might inherit the
+# full Atlas process environment. The production code already mitigates this:
+# ``sandbox_tools._spawn`` passes ``_controlled_env()`` — a minimal,
+# allow-listed environment — to every child subprocess. These tests pin that
+# contract so it cannot silently regress.
+# ---------------------------------------------------------------------------
+
+
+class TestSandboxEnvironmentBoundary:
+    """Child-process environment must be allow-listed, not inherited."""
+
+    def test_controlled_env_is_subset_of_allow_list(self) -> None:
+        env = _controlled_env()
+        # Every key in the controlled env must be on the allow list.
+        for key in env:
+            assert key in _ALLOWED_ENV_KEYS or key == "PYTHONDONTWRITEBYTECODE"
+
+    def test_credential_keys_are_excluded(self) -> None:
+        # Simulate a credential-bearing variable in the host environment.
+        with patch.dict(
+            os.environ,
+            {"MY_APP_SECRET_KEY": "super-secret", "OPENAI_API_KEY": "sk-xxx"},
+            clear=False,
+        ):
+            env = _controlled_env()
+            assert "MY_APP_SECRET_KEY" not in env
+            assert "OPENAI_API_KEY" not in env
+
+    def test_secret_key_detection(self) -> None:
+        # Representative credential markers must be detected.
+        for name in (
+            "API_KEY", "DB_PASSWORD", "AUTH_TOKEN", "AWS_SECRET",
+            "GITHUB_CREDENTIAL", "PRIVATE_KEY", "AUTHORIZATION",
+        ):
+            assert _is_secret_key(name), f"{name!r} should be flagged as secret"
+
+    def test_non_secret_allow_listed_keys_pass(self) -> None:
+        # Allow-listed non-credential keys are not falsely flagged.
+        for name in ("PATH", "TEMP", "SYSTEMROOT", "WINDIR"):
+            assert not _is_secret_key(name), f"{name!r} should not be flagged"
+
+    def test_controlled_env_preserves_pythondontwritebytecode(self) -> None:
+        env = _controlled_env()
+        assert env.get("PYTHONDONTWRITEBYTECODE") == "1"

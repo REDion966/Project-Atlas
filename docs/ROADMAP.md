@@ -306,16 +306,39 @@ intact; M2 execution integrity remains intact. Full suite: 4918 passed, 0
 failures. F3 and F17 remain deferred.
 
 ### M4 — Self-Development Hardening
-**STATUS: LOCKED**
+**STATUS: COMPLETE**
 
-Strengthen the existing P7 self-development pipeline without redesigning it.
+Hardened the existing P7 self-development pipeline without redesigning it.
 
-- Preserve verified development results and establish durable
-  promotion/application handling.
-- Ensure repository safety and maintain sandbox isolation.
-- Strengthen the promotion approval flow.
-- Verify artifacts/results required for governed promotion.
-- Add regression tests.
+**M4.1 — Investigation.** The full conversational self-development lifecycle was
+mapped and verified against actual code: detection → dialogue → confirmation →
+F9 bridge → DRAFT → PENDING_APPROVAL → OWNER approval → APPROVED →
+DevelopmentPlanner → CodeSandbox IMPLEMENT → pytest VERIFY →
+DevelopmentOutcome/LearningInsight → PENDING_REVIEW. Every trust boundary
+(SessionContext → SessionManager → AuthorityService → OWNER) was verified.
+No production privileged bypass or sandbox escape was found.
+
+**M4.2 — Safety invariants regression-tested.** Added 25 focused regression
+tests pinning three invariants: (A) failed/partial development outcomes remain
+explicitly FAILED in learning and are never recorded as successful/trusted; (B)
+approval replay is rejected — a consumed approval cannot be re-applied; (C)
+sandbox path confinement rejects parent traversal, absolute paths, Windows drive
+prefixes, dot segments, and symlink escapes. No production behavior was changed.
+
+**M4.3 — Sandbox environment boundary.** The M4.1 concern that sandboxed
+execution might inherit the full Atlas process environment was found to be
+already mitigated in production: ``sandbox_tools._spawn`` passes
+``_controlled_env()`` — a minimal, allow-listed environment — to every child
+subprocess. Credential-bearing keys (KEY/SECRET/PASSWORD/TOKEN/CREDENTIAL/
+AUTHORIZATION/PRIVATE) are explicitly excluded. ``shell=False`` and fixed
+command lists are used. No production change was made; 5 regression tests pin
+this contract.
+
+**M4.4 — Independent verification.** All M4 invariants pass; M2/M3 regressions
+remain green; relevant P7 regression: 385 passed. Full suite: 4948 passed,
+0 failures.
+
+M5 — Governance Assurance remains LOCKED as the next milestone.
 
 **Acceptance:** a development proposal moves through the existing governed
 lifecycle and produces a durable, reviewable, verifiable result suitable for
