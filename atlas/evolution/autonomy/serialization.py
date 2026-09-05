@@ -17,12 +17,18 @@ Pure serialization logic. No business rules.
 
 from __future__ import annotations
 
+import types
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Type, TypeVar, Union, get_type_hints
+from typing import Any, Dict, List, Type, TypeVar, Union, get_args, get_origin, get_type_hints
 
 T = TypeVar("T")
+
+#: PEP 604 (``X | Y``) unions carry ``types.UnionType`` origin on Python 3.11,
+#: while ``typing.Union``/``typing.Optional`` carry ``typing.Union``. Accepting
+#: both keeps datetime/nested Optional fields deserializing on 3.11+.
+_UNION_ORIGINS = (Union, types.UnionType)
 
 
 def to_serializable(obj: Any) -> Any:
@@ -52,11 +58,11 @@ def from_serializable(value: Any, cls: Type[T]) -> T:
     if value is None:
         return None  # type: ignore[return-value]
 
-    origin = getattr(cls, "__origin__", None)
+    origin = get_origin(cls)
 
-    # Optional[X]
-    if origin is Union:
-        args = cls.__args__  # type: ignore[attr-defined]
+    # Optional[X] / Union[X, None]  (PEP 604 and typing.Union)
+    if origin in _UNION_ORIGINS:
+        args = get_args(cls)
         if type(None) in args:
             non_none = [a for a in args if a is not type(None)]
             if len(non_none) == 1:
@@ -99,11 +105,11 @@ def _deserialize_field(value: Any, field_type: Any) -> Any:
     if value is None:
         return None
 
-    origin = getattr(field_type, "__origin__", None)
+    origin = get_origin(field_type)
 
-    # Optional[X]
-    if origin is Union:
-        args = field_type.__args__
+    # Optional[X] / Union[X, None]  (PEP 604 and typing.Union)
+    if origin in _UNION_ORIGINS:
+        args = get_args(field_type)
         if type(None) in args:
             non_none = [a for a in args if a is not type(None)]
             if len(non_none) == 1:
@@ -112,12 +118,12 @@ def _deserialize_field(value: Any, field_type: Any) -> Any:
 
     # list[X]
     if origin in (list, List):
-        arg = field_type.__args__[0]
+        (arg,) = get_args(field_type)
         return [_deserialize_field(item, arg) for item in value]
 
     # dict[K, V]
     if origin in (dict, Dict):
-        key_type, val_type = field_type.__args__
+        key_type, val_type = get_args(field_type)
         return {
             _deserialize_field(k, key_type): _deserialize_field(v, val_type)
             for k, v in value.items()

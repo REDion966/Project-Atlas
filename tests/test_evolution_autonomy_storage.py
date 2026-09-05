@@ -42,6 +42,8 @@ from atlas.evolution.autonomy.models import (
     VerificationResult,
     VersionTarget,
 )
+from atlas.evolution.autonomy.serialization import from_serializable, to_serializable
+
 from atlas.evolution.governance.models import ScopeType
 from atlas.evolution.models import ExecutionLevel
 from atlas.storage.autonomy_storage import AutonomySQLiteStorage
@@ -462,6 +464,56 @@ class TestSerializationRoundTrip(StorageTestCase):
         loaded = self.storage.load_request("REQ-W")
         self.assertEqual(loaded.schedule.window_start, start)
         self.assertEqual(loaded.schedule.window_end, end)
+
+    def test_optional_datetime_is_datetime_not_string(self):
+        """PEP 604 ``datetime | None`` fields must deserialize to real datetimes
+        on Python 3.11, not remain as ISO strings."""
+        start = datetime(2026, 3, 15, 9, 30, 45)
+        auth = EvolutionAuthorization(
+            request_id="REQ-OPT",
+            authorized_by="user:cli",
+            mode=AuthorizationMode.EXPLICIT,
+            granted_at=start,
+            expires_at=start,
+        )
+        ser = to_serializable(auth)
+        # Sanity: serialization turns the datetime into an ISO string.
+        self.assertEqual(ser["expires_at"], start.isoformat())
+        restored = from_serializable(ser, EvolutionAuthorization)
+        self.assertIsInstance(restored.expires_at, datetime)
+        self.assertEqual(restored.expires_at, start)
+
+    def test_optional_datetime_none_stays_none(self):
+        """``None`` expiry must round-trip as ``None``, not as a string."""
+        auth = EvolutionAuthorization(
+            request_id="REQ-NONE",
+            authorized_by="user:cli",
+            mode=AuthorizationMode.EXPLICIT,
+        )
+        ser = to_serializable(auth)
+        self.assertIsNone(ser["expires_at"])
+        restored = from_serializable(ser, EvolutionAuthorization)
+        self.assertIsNone(restored.expires_at)
+
+    def test_schedule_window_optional_datetimes_round_trip(self):
+        """All ``datetime | None`` schedule fields deserialize correctly."""
+        start = datetime(2026, 1, 1, 9, 0, 0)
+        end = datetime(2026, 1, 1, 17, 0, 0)
+        sched = EvolutionSchedule(
+            scheduled_at=start,
+            window_start=start,
+            window_end=end,
+            cooldown_until=start,
+            expired_at=None,
+        )
+        ser = to_serializable(sched)
+        restored = from_serializable(ser, EvolutionSchedule)
+        self.assertIsInstance(restored.window_start, datetime)
+        self.assertIsInstance(restored.window_end, datetime)
+        self.assertIsInstance(restored.cooldown_until, datetime)
+        self.assertIsNone(restored.expired_at)
+        self.assertEqual(restored.window_start, start)
+        self.assertEqual(restored.window_end, end)
 
 
 if __name__ == "__main__":
