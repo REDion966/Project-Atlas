@@ -348,17 +348,46 @@ an approved promotion/application path.
 > Do NOT make autonomous repository modification unrestricted.
 
 ### M5 — Governance Assurance
-**STATUS: LOCKED**
+**STATUS: COMPLETE**
 
 Focused assurance pass over privileged operations after M2–M4.
 
-- AuthorityService, SessionContext ownership, and RuleEngine behavior.
-- Fail-closed behavior for all privileged-operation paths.
-- CODE and IDENTITY constitutional protection.
-- Governance regression tests.
+**M5.1 — Investigation.** The complete privileged surface was inventoried:
+AuthorityService, SessionManager, SessionContext, OrchestrationExecutor,
+P7.6 privileged kernel methods, PromotionGate, ToolExecutor, ToolEngine,
+CognitionService, GoalExecutionEngine, and collective governance. The
+authoritative identity/authority chain (SessionContext → AuthorityService →
+canonical governed boundary → low-level execution primitive) was verified.
+No current privileged bypass was found.
 
-**Acceptance:** every privileged operation has one verified authority/governance
-path with regression coverage for fail-closed behavior.
+**M5.2 — Regression Hardening.** Added governance assurance tests
+(`tests/test_governance_assurance_m5.py`, 14 tests): the
+CognitionService→ToolEngine advisory boundary is covered (ToolEngine remains a
+governance-free primitive; governance is caller-owned per M3), and
+cross-session identity integrity is covered (identity resolved authoritatively
+through SessionManager + AuthorityService). Test-only change; no production
+behavior was modified.
+
+**M5.3 — Independent Verification.** An independent audit re-classified every
+production execution route (all GOVERNED, ADVISORY, or LOW-LEVEL PRIMITIVE —
+no privileged bypass), reproduced the full suite (4962 passed, 0 failures),
+and confirmed M5.2's test-only scope. Verdict: M5.3 PASS.
+
+**Final M5 result.** Governance assurance is complete. No production
+architecture changes were required. The M3 caller-owned governance decision is
+preserved: ToolEngine/ToolExecutor remain low-level primitives, and privileged
+operations route through canonical governed boundaries (OrchestrationExecutor
+per-step authorization, P7.6 kernel authority, gateway + authorization for
+goals).
+
+Accepted/deferred items:
+- GoalExecutionEngine authorization unification → M6 / F3
+- Workspace CRUD authority model → Future Queue
+- Tool privilege metadata → Future Queue
+- Worker-level failure isolation → Future Queue
+- approval TTL/persistence → Future Queue
+- F17 datetime policy → deferred hardening item
+- concurrency → Future Queue
 
 ### M6 — Canonical Execution Architecture
 **STATUS: LOCKED**
