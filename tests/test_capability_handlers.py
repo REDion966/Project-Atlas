@@ -272,3 +272,21 @@ def test_knowledge_handler_does_not_mutate_manager():
 
     # Manager should only record the query, not be mutated
     assert len(manager.queries) == 1
+
+
+def test_knowledge_handler_handles_query_exception():
+    """Handler converts KnowledgeManager.query() exceptions to failed ExecutionResult."""
+    from atlas.knowledge.capability_handlers import KnowledgeRetrievalHandlerFactory
+
+    class ExplodingKnowledgeManager:
+        def query(self, text: str):
+            raise RuntimeError("knowledge base unavailable")
+
+    factory = KnowledgeRetrievalHandlerFactory(knowledge_manager=ExplodingKnowledgeManager())
+    handlers = factory.handlers()
+
+    result = handlers["knowledge_retrieval"]({"query": "test"})
+
+    assert result.success is False
+    assert result.capability == "knowledge_retrieval"
+    assert "failed" in result.error.lower() or "unavailable" in result.error.lower()

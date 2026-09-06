@@ -71,12 +71,21 @@ class KnowledgeRetrievalHandlerFactory:
     def _query_handler(self, params: dict[str, Any]) -> ExecutionResult:
         """Query the knowledge base for information.
 
+        Read-only capability: delegates to :meth:`KnowledgeManager.query`
+        without mutating any state.
+
         Params:
-            query (str, required): non-empty query string.
-            limit (int, optional): maximum number of results.
+            query (str, required): non-empty query string. Whitespace-only
+                strings are treated as missing and fail closed.
+            limit (int, optional): maximum number of results to return.
+                Must be a positive integer. Non-integer, zero, negative,
+                or boolean values are ignored (no limit applied).
 
         Returns:
-            ExecutionResult with query results on success.
+            ExecutionResult with ``success=True`` and ``output`` containing
+            ``results`` (list of dicts with ``title``, ``content``, ``source``)
+            and ``count`` on success; ``success=False`` with ``error`` set on
+            invalid input or knowledge-base failure.
         """
         query = params.get("query")
         if not isinstance(query, str) or not query.strip():
