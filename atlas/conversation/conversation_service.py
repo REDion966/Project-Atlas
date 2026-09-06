@@ -16,6 +16,7 @@ from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.conversation_state import ConversationStateManager
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
+from atlas.conversation.reference_resolution import ConversationReferenceResolver
 from atlas.conversation.development_outcome_reporter import (
     DevelopmentOutcomeReporter,
     snapshot_from_result,
@@ -50,6 +51,7 @@ class ConversationService:
         development_need_coordinator: DevelopmentNeedCoordinator | None = None,
         outcome_reporter: DevelopmentOutcomeReporter | None = None,
         state_manager: ConversationStateManager | None = None,
+        reference_resolver: ConversationReferenceResolver | None = None,
     ):
         """
         Initialize the conversation service.
@@ -105,6 +107,7 @@ class ConversationService:
         self._development_need_coordinator = development_need_coordinator
         self._outcome_reporter = outcome_reporter
         self._state_manager = state_manager or ConversationStateManager()
+        self._reference_resolver = reference_resolver or ConversationReferenceResolver()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
 
@@ -121,6 +124,20 @@ class ConversationService:
     def state_manager(self) -> ConversationStateManager:
         """Return the conversational state manager for this conversation."""
         return self._state_manager
+
+    @property
+    def reference_resolver(self) -> ConversationReferenceResolver:
+        """Return the conversational reference resolver."""
+        return self._reference_resolver
+
+    def resolve_reference(self, query: str) -> ReferenceResolutionResult:
+        """Resolve a conversational reference against current state.
+
+        Convenience wrapper around :meth:`ConversationReferenceResolver.resolve`
+        using this service's current :class:`ConversationState`.
+        """
+        from atlas.conversation.reference_resolution import ReferenceResolutionResult
+        return self._reference_resolver.resolve(query, self._state_manager.state)
 
     @property
     def fallback_resolver(self) -> DeterministicFallbackResolver | None:
