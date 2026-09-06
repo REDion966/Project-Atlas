@@ -10,13 +10,18 @@ Phase 7.1 — Understanding Engine.
 
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from atlas.understanding.models import (
     Concept,
     ConceptDomain,
 )
+
+
+def _aware_utc(dt: datetime) -> datetime:
+    """Normalize a datetime to aware UTC for safe comparison."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 class ConceptExtractor:
@@ -257,7 +262,8 @@ class ConceptExtractor:
                 if concept.confidence > existing.confidence:
                     existing.confidence = concept.confidence
                 existing.frequency += concept.frequency
-                if concept.last_seen > existing.last_seen:
+                # Normalize timestamps to aware UTC for safe comparison
+                if _aware_utc(concept.last_seen) > _aware_utc(existing.last_seen):
                     existing.last_seen = concept.last_seen
             else:
                 by_label[concept.label] = concept

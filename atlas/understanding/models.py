@@ -6,7 +6,7 @@ Phase 7.1 — Understanding Engine.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum, auto
 from typing import Any
 
@@ -50,8 +50,12 @@ class Concept:
     confidence: float = 0.5
     source: str = ""
     frequency: int = 1
-    first_seen: datetime = field(default_factory=datetime.now)
-    last_seen: datetime = field(default_factory=datetime.now)
+    first_seen: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    last_seen: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -176,7 +180,9 @@ class UnderstandingInsight:
     related_concept_ids: list[str] = field(default_factory=list)
     related_pattern_ids: list[str] = field(default_factory=list)
     source: str = ""
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -219,7 +225,9 @@ class BehavioralSignal:
     confidence: float = 0.5
     related_concept_ids: list[str] = field(default_factory=list)
     source: str = ""
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 # ---------------------------------------------------------------------------

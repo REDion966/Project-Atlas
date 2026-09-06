@@ -5,7 +5,7 @@ Tests for model → dict → model identity for all 5 understanding model types.
 """
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from atlas.understanding import serialization
 from atlas.understanding.models import (
@@ -29,8 +29,8 @@ def _make_concept(concept_id: str = "CON-00000001") -> Concept:
         confidence=0.75,
         source="test_source",
         frequency=3,
-        first_seen=datetime(2025, 1, 1, 12, 0, 0),
-        last_seen=datetime(2025, 6, 1, 12, 0, 0),
+        first_seen=datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        last_seen=datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
         metadata={"key": "value"},
     )
 
@@ -43,8 +43,8 @@ def _make_relationship() -> Relationship:
         weight=0.8,
         confidence=0.6,
         observed_count=5,
-        first_observed=datetime(2025, 1, 1, 12, 0, 0),
-        last_observed=datetime(2025, 6, 1, 12, 0, 0),
+        first_observed=datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        last_observed=datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
     )
 
 
@@ -56,8 +56,8 @@ def _make_pattern() -> Pattern:
         confidence=0.65,
         related_concept_ids=["CON-00000001", "CON-00000002"],
         frequency=2,
-        first_observed=datetime(2025, 2, 1, 12, 0, 0),
-        last_observed=datetime(2025, 5, 1, 12, 0, 0),
+        first_observed=datetime(2025, 2, 1, 12, 0, 0, tzinfo=timezone.utc),
+        last_observed=datetime(2025, 5, 1, 12, 0, 0, tzinfo=timezone.utc),
     )
 
 
@@ -71,7 +71,7 @@ def _make_insight() -> UnderstandingInsight:
         related_concept_ids=["CON-00000001"],
         related_pattern_ids=["PAT-00000001"],
         source="test_source",
-        timestamp=datetime(2025, 3, 1, 12, 0, 0),
+        timestamp=datetime(2025, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
         metadata={"origin": "test"},
     )
 
@@ -84,7 +84,7 @@ def _make_signal() -> BehavioralSignal:
         confidence=0.55,
         related_concept_ids=["CON-00000001"],
         source="test_source",
-        timestamp=datetime(2025, 4, 1, 12, 0, 0),
+        timestamp=datetime(2025, 4, 1, 12, 0, 0, tzinfo=timezone.utc),
     )
 
 

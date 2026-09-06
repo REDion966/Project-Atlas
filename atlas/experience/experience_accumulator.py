@@ -7,7 +7,7 @@ PipelineResult) into a structured experience record and stores it.
 Pure logic. No infrastructure. No RuntimeCoordinator dependency.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from atlas.experience.models import ExperienceOutcome, StructuredExperience
@@ -49,7 +49,10 @@ class ExperienceAccumulator:
         experience_id = f"EXP-{self._experience_counter:08d}"
 
         timestamp = getattr(result, "metrics", None)
-        timestamp = getattr(timestamp, "completed_at", None) or datetime.now()
+        timestamp = getattr(timestamp, "completed_at", None) or datetime.now(timezone.utc)
+        # Normalize to aware UTC (completed_at may be naive from older code)
+        if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
 
         duration_ms = getattr(getattr(result, "metrics", None), "total_duration_ms", 0.0)
         pipeline_path = getattr(getattr(result, "metrics", None), "pipeline_path", [])

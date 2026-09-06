@@ -8,7 +8,7 @@ does NOT need to manually synchronize.
 Pure logic. No AI. Deterministic label/domain matching.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from atlas.understanding.models import Concept, ConceptDomain
@@ -109,6 +109,20 @@ class ConceptConsolidator:
             sources.append(secondary.source)
         metadata["merge_count"] = metadata.get("merge_count", 0) + 1
 
+        # Normalize timestamps to aware UTC for safe comparison
+        primary_first = primary.first_seen
+        primary_last = primary.last_seen
+        secondary_first = secondary.first_seen
+        secondary_last = secondary.last_seen
+        if primary_first.tzinfo is None:
+            primary_first = primary_first.replace(tzinfo=timezone.utc)
+        if primary_last.tzinfo is None:
+            primary_last = primary_last.replace(tzinfo=timezone.utc)
+        if secondary_first.tzinfo is None:
+            secondary_first = secondary_first.replace(tzinfo=timezone.utc)
+        if secondary_last.tzinfo is None:
+            secondary_last = secondary_last.replace(tzinfo=timezone.utc)
+
         merged = Concept(
             concept_id=primary.concept_id,
             label=primary.label,
@@ -116,8 +130,8 @@ class ConceptConsolidator:
             confidence=round(new_confidence, 4),
             source=primary.source,
             frequency=new_frequency,
-            first_seen=min(primary.first_seen, secondary.first_seen),
-            last_seen=max(primary.last_seen, secondary.last_seen),
+            first_seen=min(primary_first, secondary_first),
+            last_seen=max(primary_last, secondary_last),
             metadata=metadata,
         )
 

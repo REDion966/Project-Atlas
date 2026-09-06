@@ -8,6 +8,7 @@ Phase 7.1 — Understanding Engine.
 """
 
 from collections import defaultdict
+from datetime import timezone
 from typing import Any
 
 from atlas.understanding.models import (
@@ -15,6 +16,11 @@ from atlas.understanding.models import (
     Relationship,
     RelationshipType,
 )
+
+
+def _aware_utc(dt: datetime) -> datetime:
+    """Normalize a datetime to aware UTC for safe comparison."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 class UnderstandingGraph:
@@ -57,7 +63,8 @@ class UnderstandingGraph:
             existing.frequency += concept.frequency
             if concept.confidence > existing.confidence:
                 existing.confidence = concept.confidence
-            if concept.last_seen > existing.last_seen:
+            # Normalize timestamps to aware UTC for safe comparison
+            if _aware_utc(concept.last_seen) > _aware_utc(existing.last_seen):
                 existing.last_seen = concept.last_seen
             if concept.source:
                 existing.source = concept.source

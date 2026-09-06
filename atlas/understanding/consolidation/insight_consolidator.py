@@ -8,7 +8,7 @@ Prevents UnderstandingMemory from accumulating duplicate insights.
 Pure logic. Deterministic matching on category + summary.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from atlas.understanding.models import UnderstandingInsight
 
@@ -97,7 +97,15 @@ class InsightConsolidator:
         metadata = dict(primary.metadata) if primary.metadata else {}
         metadata["observation_count"] = metadata.get("observation_count", 1) + 1
         metadata["merged_from_id"] = secondary.insight_id
-        metadata["last_merged"] = datetime.now().isoformat()
+        metadata["last_merged"] = datetime.now(timezone.utc).isoformat()
+
+        # Normalize timestamps to aware UTC for safe comparison
+        primary_ts = primary.timestamp
+        secondary_ts = secondary.timestamp
+        if primary_ts.tzinfo is None:
+            primary_ts = primary_ts.replace(tzinfo=timezone.utc)
+        if secondary_ts.tzinfo is None:
+            secondary_ts = secondary_ts.replace(tzinfo=timezone.utc)
 
         return UnderstandingInsight(
             insight_id=primary.insight_id,
@@ -108,7 +116,7 @@ class InsightConsolidator:
             related_concept_ids=combined_concepts,
             related_pattern_ids=combined_patterns,
             source=primary.source,
-            timestamp=max(primary.timestamp, secondary.timestamp),
+            timestamp=max(primary_ts, secondary_ts),
             metadata=metadata,
         )
 

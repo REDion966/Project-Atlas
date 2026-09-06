@@ -9,7 +9,7 @@ Pure logic. No infrastructure. No storage. No services.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from atlas.experience.models import (
@@ -322,8 +322,8 @@ class ExperienceBridge:
             weight=weight,
             confidence=min(source.confidence, target.confidence),
             observed_count=1,
-            first_observed=datetime.now(),
-            last_observed=datetime.now(),
+            first_observed=datetime.now(timezone.utc),
+            last_observed=datetime.now(timezone.utc),
         )
 
     # ------------------------------------------------------------------
@@ -425,8 +425,8 @@ class ExperienceBridge:
             confidence=round(confidence, 4),
             related_concept_ids=related_concept_ids,
             frequency=1,
-            first_observed=datetime.now(),
-            last_observed=datetime.now(),
+            first_observed=datetime.now(timezone.utc),
+            last_observed=datetime.now(timezone.utc),
         )
 
     # ------------------------------------------------------------------
@@ -507,6 +507,6 @@ class ExperienceBridge:
             related_concept_ids=related_concept_ids,
             related_pattern_ids=related_pattern_ids or [],
             source=source,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             metadata={"origin": "experience_bridge"},
         )

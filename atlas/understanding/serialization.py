@@ -9,7 +9,7 @@ models.py and the SQLite adapter.
 No infrastructure imports. No database imports.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -37,12 +37,22 @@ def _iso(dt: datetime) -> str:
 
 
 def _parse_iso(value: Any) -> datetime:
-    """Parse an ISO 8601 string into a datetime."""
+    """Parse an ISO 8601 string into a timezone-aware UTC datetime.
+
+    Aware values are preserved. Naive values (legacy persisted timestamps) are
+    interpreted as UTC and made aware so all downstream comparisons are
+    between aware UTC values.
+    """
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo is not None else value.replace(
+            tzinfo=timezone.utc
+        )
     if not value:
-        return datetime.now()
-    return datetime.fromisoformat(str(value))
+        return datetime.now(timezone.utc)
+    parsed = datetime.fromisoformat(str(value))
+    return parsed if parsed.tzinfo is not None else parsed.replace(
+        tzinfo=timezone.utc
+    )
 
 
 def _as_enum_name(value: Any, enum_cls: type[Enum]) -> Enum:
