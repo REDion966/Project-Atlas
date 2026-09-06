@@ -372,6 +372,7 @@ class ApprovalRequest:
     risks: str
     expected_benefit: str
     proposal_fingerprint: str = ""
+    scope_fingerprint: str = ""
     decision: ApprovalDecision = ApprovalDecision.PENDING
     decision_comment: str = ""
     created_at: datetime = field(default_factory=datetime.now)
@@ -380,7 +381,7 @@ class ApprovalRequest:
     def is_valid_for(self, proposal: EvolutionProposal) -> bool:
         """Check if this approval is still valid for the given proposal.
 
-        An approval is valid only if both the proposal_id AND the
+        An approval is valid only if the proposal_id AND the
         proposal_fingerprint match. This prevents an old approval from
         authorizing a changed proposal.
 
@@ -398,6 +399,28 @@ class ApprovalRequest:
             proposal.proposal_fingerprint or proposal.compute_fingerprint()
         )
         return self.proposal_fingerprint == current_fingerprint
+
+    def is_valid_scope(self, request: Any) -> bool:
+        """Check if the execution scope matches the approved scope.
+
+        This prevents an approved proposal from executing a different
+        change set than what was approved.
+
+        Args:
+            request: The EvolutionRequest or object with a
+                ``compute_scope_fingerprint()`` method or
+                ``scope_fingerprint`` attribute.
+
+        Returns:
+            True if the scope is valid for this approval.
+        """
+        if not self.scope_fingerprint:
+            # No scope binding; fall back to proposal-only validation
+            return True
+        current = getattr(request, "scope_fingerprint", None)
+        if not current and hasattr(request, "compute_scope_fingerprint"):
+            current = request.compute_scope_fingerprint()
+        return self.scope_fingerprint == current
 
 
 # ---------------------------------------------------------------------------

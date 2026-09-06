@@ -46,6 +46,7 @@ class ApprovalManager:
     def create_approval_request(
         self,
         proposal: EvolutionProposal,
+        scope_fingerprint: str = "",
     ) -> ApprovalRequest:
         """
         Create an approval request for a proposal.
@@ -54,6 +55,10 @@ class ApprovalManager:
 
         Args:
             proposal: The EvolutionProposal requiring approval.
+            scope_fingerprint: Optional fingerprint of the exact change
+                set (from EvolutionRequest.change_payload) that is approved
+                for execution. When provided, execution is bound to this
+                exact scope.
 
         Returns:
             An ApprovalRequest ready for user review.
@@ -85,6 +90,7 @@ class ApprovalManager:
             request_id=self._next_request_id(),
             proposal_id=proposal.proposal_id,
             proposal_fingerprint=fingerprint,
+            scope_fingerprint=scope_fingerprint,
             title=proposal.title,
             description=proposal.summary,
             rationale=proposal.rationale,

@@ -281,3 +281,202 @@ class TestLevel1Level2Preservation:
         # "execute" contains neither approve/accept/authorize cues
         spec = TaskIntake().intake("Execute the approved proposal.")
         assert spec.task_type is TaskType.EXECUTION_REQUEST
+
+
+class TestScopeFingerprintBinding:
+    """Exact change-set binding tests."""
+
+    def test_same_payload_same_fingerprint(self):
+        """Identical change payloads produce identical fingerprints."""
+        from atlas.evolution.autonomy.models import EvolutionRequest, ScopeType
+
+        req1 = EvolutionRequest(
+            request_id="R1",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "content", "other.py": "data"},
+        )
+        req2 = EvolutionRequest(
+            request_id="R2",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "content", "other.py": "data"},
+        )
+        fp1 = req1.compute_scope_fingerprint()
+        fp2 = req2.compute_scope_fingerprint()
+        assert fp1 == fp2
+        assert len(fp1) > 0
+
+    def test_different_payload_different_fingerprint(self):
+        """Changed payload produces different fingerprint."""
+        from atlas.evolution.autonomy.models import EvolutionRequest, ScopeType
+
+        req1 = EvolutionRequest(
+            request_id="R1",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "content_v1"},
+        )
+        req2 = EvolutionRequest(
+            request_id="R2",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "content_v2"},
+        )
+        assert req1.compute_scope_fingerprint() != req2.compute_scope_fingerprint()
+
+    def test_scope_expansion_rejected(self):
+        """Approved scope A cannot execute change set B."""
+        from atlas.evolution.autonomy.models import EvolutionRequest, ScopeType
+        from atlas.evolution.models import ApprovalRequest
+
+        # Approved scope
+        approved_req = EvolutionRequest(
+            request_id="R1",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "approved_content"},
+        )
+        approved_fp = approved_req.compute_scope_fingerprint()
+
+        # Create real approval with scope bound
+        approval = ApprovalRequest(
+            request_id="APPR-1",
+            proposal_id="PROP-1",
+            title="Test",
+            description="Test",
+            rationale="Test",
+            risks="Test",
+            expected_benefit="Test",
+            proposal_fingerprint="prop_fp",
+            scope_fingerprint=approved_fp,
+        )
+
+        # Attempt to execute different scope
+        different_req = EvolutionRequest(
+            request_id="R2",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "different_content", "extra.py": "added"},
+        )
+
+        # The approval's scope validation should reject
+        assert approval.is_valid_scope(different_req) is False
+
+        # Same scope should be valid
+        same_req = EvolutionRequest(
+            request_id="R3",
+            source="test",
+            target_scope=ScopeType.CONFIG,
+            change_payload={"file.py": "approved_content"},
+        )
+        assert approval.is_valid_scope(same_req) is True
+
+    def test_approval_scope_validation_method(self):
+        """ApprovalRequest.is_valid_scope() works correctly."""
+        from atlas.evolution.models import ApprovalRequest
+
+        approval = ApprovalRequest(
+            request_id="APPR-1",
+            proposal_id="PROP-1",
+            title="Test",
+            description="Test",
+            rationale="Test",
+            risks="Test",
+            expected_benefit="Test",
+            proposal_fingerprint="prop_fp",
+            scope_fingerprint="scope_fp_123",
+        )
+
+        # Matching scope
+        matching = MagicMock()
+        matching.scope_fingerprint = "scope_fp_123"
+        assert approval.is_valid_scope(matching) is True
+
+        # Different scope
+        different = MagicMock()
+        different.scope_fingerprint = "different_fp"
+        assert approval.is_valid_scope(different) is False
+
+        # No scope binding (fallback to proposal-only)
+        no_scope = ApprovalRequest(
+            request_id="APPR-2",
+            proposal_id="PROP-2",
+            title="Test",
+            description="Test",
+            rationale="Test",
+            risks="Test",
+            expected_benefit="Test",
+            proposal_fingerprint="prop_fp",
+        )
+        # Without scope binding, any request passes scope validation
+        assert no_scope.is_valid_scope(matching) is True
+
+
+class TestDurableReplayProtection:
+    """Durable replay protection tests."""
+
+    def _make_proposal(self):
+        """Create a proposal mock that passes validation."""
+        from atlas.evolution.models import ProposalStatus
+        proposal = MagicMock()
+        proposal.proposal_id = "PROP-1"
+        proposal.proposal_fingerprint = "fp123"
+        proposal.status = ProposalStatus.APPROVED
+        return proposal
+
+    def _make_approval(self):
+        """Create an approval mock that passes validation."""
+        approval = MagicMock()
+        approval.request_id = "APPR-1"
+        approval.proposal_id = "PROP-1"
+        approval.proposal_fingerprint = "fp123"
+        approval.scope_fingerprint = ""
+        approval.is_valid_for.return_value = True
+        return approval
+
+    def test_execution_persisted_to_storage(self, tmp_path):
+        """Execution records persist to SQLite storage."""
+        storage_path = tmp_path / "executions.db"
+        service = Level3ExecutionService(storage_path=storage_path)
+
+        proposal = self._make_proposal()
+        approval = self._make_approval()
+
+        message, record = service.execute(proposal, approval)
+
+        assert record.execution_status == "succeeded"
+
+        # Record should be persisted
+        assert record.execution_id in service._execution_records
+
+        # Verify SQLite has the record
+        import sqlite3
+        conn = sqlite3.connect(str(storage_path))
+        rows = conn.execute(
+            "SELECT execution_id FROM execution_records WHERE proposal_id = ?",
+            ("PROP-1",),
+        ).fetchall()
+        conn.close()
+        assert len(rows) == 1
+        assert rows[0][0] == record.execution_id
+
+    def test_replay_rejected_after_restart(self, tmp_path):
+        """Replay protection survives service reconstruction."""
+        storage_path = tmp_path / "executions.db"
+
+        # First service instance - execute
+        service1 = Level3ExecutionService(storage_path=storage_path)
+        proposal = self._make_proposal()
+        approval = self._make_approval()
+
+        message1, record1 = service1.execute(proposal, approval)
+        assert record1.execution_status == "succeeded"
+
+        # Reconstruct service (simulates process restart)
+        service2 = Level3ExecutionService(storage_path=storage_path)
+
+        # Replay attempt should be rejected
+        message2, record2 = service2.execute(proposal, approval)
+        assert record2.execution_status == "rejected"
+        assert "already been executed" in record2.error

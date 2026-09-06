@@ -42,6 +42,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from atlas.conversation.message import Message
@@ -60,6 +61,7 @@ class ExecutionAuditRecord:
     approval_id: str
     authorization_status: str  # "authorized" | "unauthorized" | "skipped"
     execution_status: str  # "succeeded" | "failed" | "rejected" | "unauthorized"
+    scope_fingerprint: str = ""
     error: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -85,8 +87,8 @@ class Level3ExecutionService:
 
     The service enforces:
     - Exact proposal validation (ID + fingerprint + approval)
-    - Scope validation
-    - Replay/duplicate execution protection
+    - Scope validation (exact change-set binding)
+    - Replay/duplicate execution protection (durable)
     - Explicit authorization requirement
     - Audit trail
     """
@@ -95,6 +97,7 @@ class Level3ExecutionService:
         self,
         authorization_manager: Any = None,
         application_engine: Any = None,
+        storage_path: str | Path | None = None,
     ) -> None:
         """Initialise the Level 3 execution service.
 
@@ -103,10 +106,92 @@ class Level3ExecutionService:
                 execution authority. If None, authorization is skipped (test mode).
             application_engine: The ApplicationEngine used to apply mutations.
                 If None, execution is simulated (test mode).
+            storage_path: Optional path to a SQLite database for durable
+                execution records. If None, records are process-local only.
         """
         self._authorization_manager = authorization_manager
         self._application_engine = application_engine
         self._execution_records: dict[str, ExecutionAuditRecord] = {}
+        self._storage_path = Path(storage_path) if storage_path else None
+        if self._storage_path is not None:
+            self._init_storage()
+
+    def _init_storage(self) -> None:
+        """Initialize SQLite storage for durable execution records."""
+        import sqlite3
+
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self._storage_path))
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS execution_records (
+                    execution_id TEXT PRIMARY KEY,
+                    proposal_id TEXT NOT NULL,
+                    proposal_fingerprint TEXT NOT NULL,
+                    scope_fingerprint TEXT NOT NULL,
+                    approval_id TEXT NOT NULL,
+                    authorization_status TEXT NOT NULL,
+                    execution_status TEXT NOT NULL,
+                    error TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_execution_proposal
+                ON execution_records (proposal_id)
+            """)
+            conn.commit()
+            # Load existing records into memory
+            rows = conn.execute(
+                "SELECT * FROM execution_records"
+            ).fetchall()
+            for row in rows:
+                record = ExecutionAuditRecord(
+                    execution_id=row[0],
+                    proposal_id=row[1],
+                    proposal_fingerprint=row[2],
+                    scope_fingerprint=row[3],
+                    approval_id=row[4],
+                    authorization_status=row[5],
+                    execution_status=row[6],
+                    error=row[7],
+                    timestamp=datetime.fromisoformat(row[8]),
+                )
+                self._execution_records[record.execution_id] = record
+        finally:
+            conn.close()
+
+    def _persist_record(self, record: ExecutionAuditRecord) -> None:
+        """Persist an execution record to durable storage."""
+        if self._storage_path is None:
+            return
+        import sqlite3
+
+        conn = sqlite3.connect(str(self._storage_path))
+        try:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO execution_records
+                (execution_id, proposal_id, proposal_fingerprint,
+                 scope_fingerprint, approval_id, authorization_status,
+                 execution_status, error, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.execution_id,
+                    record.proposal_id,
+                    record.proposal_fingerprint,
+                    record.scope_fingerprint,
+                    record.approval_id,
+                    record.authorization_status,
+                    record.execution_status,
+                    record.error,
+                    record.timestamp.isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def execute(
         self,
@@ -133,12 +218,14 @@ class Level3ExecutionService:
                 execution_id=execution_id,
                 proposal_id=getattr(proposal, "proposal_id", "unknown"),
                 proposal_fingerprint=getattr(approval, "proposal_fingerprint", ""),
+                scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                 approval_id=getattr(approval, "request_id", "unknown"),
                 authorization_status="skipped",
                 execution_status="rejected",
                 error=validation_error,
             )
             self._execution_records[execution_id] = record
+            self._persist_record(record)
             return (
                 Message(
                     role="assistant",
@@ -155,12 +242,14 @@ class Level3ExecutionService:
                 execution_id=execution_id,
                 proposal_id=proposal.proposal_id,
                 proposal_fingerprint=approval.proposal_fingerprint,
+                scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                 approval_id=approval.request_id,
                 authorization_status="skipped",
                 execution_status="rejected",
                 error=replay_error,
             )
             self._execution_records[execution_id] = record
+            self._persist_record(record)
             return (
                 Message(
                     role="assistant",
@@ -170,19 +259,21 @@ class Level3ExecutionService:
                 record,
             )
 
-        # Step 3: Validate scope
-        scope_error = self._validate_scope(proposal, scope)
+        # Step 3: Validate scope (exact change-set binding)
+        scope_error = self._validate_scope(proposal, approval, request=scope)
         if scope_error:
             record = ExecutionAuditRecord(
                 execution_id=execution_id,
                 proposal_id=proposal.proposal_id,
                 proposal_fingerprint=approval.proposal_fingerprint,
+                scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                 approval_id=approval.request_id,
                 authorization_status="skipped",
                 execution_status="rejected",
                 error=scope_error,
             )
             self._execution_records[execution_id] = record
+            self._persist_record(record)
             return (
                 Message(
                     role="assistant",
@@ -201,12 +292,14 @@ class Level3ExecutionService:
                     execution_id=execution_id,
                     proposal_id=proposal.proposal_id,
                     proposal_fingerprint=approval.proposal_fingerprint,
+                    scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                     approval_id=approval.request_id,
                     authorization_status="unauthorized",
                     execution_status="unauthorized",
                     error=auth_result.reason,
                 )
                 self._execution_records[execution_id] = record
+                self._persist_record(record)
                 return (
                     Message(
                         role="assistant",
@@ -241,12 +334,14 @@ class Level3ExecutionService:
             execution_id=execution_id,
             proposal_id=proposal.proposal_id,
             proposal_fingerprint=approval.proposal_fingerprint,
+            scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
             approval_id=approval.request_id,
             authorization_status=auth_status,
             execution_status=exec_status,
             error=error,
         )
         self._execution_records[execution_id] = record
+        self._persist_record(record)
 
         if exec_status == "succeeded":
             content = (
@@ -322,24 +417,49 @@ class Level3ExecutionService:
 
         return None
 
-    def _validate_scope(self, proposal: Any, scope: Any) -> Optional[str]:
+    def _validate_scope(
+        self,
+        proposal: Any,
+        approval: Any,
+        request: Any = None,
+    ) -> Optional[str]:
         """Validate execution scope matches approved scope.
+
+        Uses the scope fingerprint bound to the approval to verify that
+        the exact change set being executed matches what was approved.
+
+        Args:
+            proposal: The proposal being executed.
+            approval: The approval with bound scope fingerprint.
+            request: The actual execution request (EvolutionRequest) whose
+                change_payload must match the approved scope.
 
         Returns:
             Error message if scope mismatch, None if OK.
         """
-        # If no scope provided, use proposal's inherent scope
-        if scope is None:
+        # Get the approved scope fingerprint from the approval
+        approved_scope = getattr(approval, "scope_fingerprint", "")
+        if not approved_scope:
+            # No scope binding; fall back to proposal-only validation
             return None
 
-        # Compare scope fingerprints if available
-        proposal_scope = getattr(proposal, "scope_fingerprint", None)
-        if proposal_scope and hasattr(scope, "fingerprint"):
-            if proposal_scope != scope.fingerprint:
-                return (
-                    "Execution scope does not match approved scope. "
-                    "Scope expansion is not permitted."
-                )
+        # Compute current scope fingerprint from the request
+        current_scope = None
+        if request is not None:
+            current_scope = getattr(request, "scope_fingerprint", None)
+            if not current_scope and hasattr(request, "compute_scope_fingerprint"):
+                current_scope = request.compute_scope_fingerprint()
+        if current_scope is None:
+            current_scope = getattr(proposal, "scope_fingerprint", None)
+        if current_scope is None and hasattr(proposal, "compute_scope_fingerprint"):
+            current_scope = proposal.compute_scope_fingerprint()
+
+        if current_scope and approved_scope != current_scope:
+            return (
+                "Execution scope does not match approved scope. "
+                "The change set has changed since approval. "
+                "Scope expansion is not permitted."
+            )
 
         return None
 

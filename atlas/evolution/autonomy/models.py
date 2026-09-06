@@ -360,7 +360,33 @@ class EvolutionRequest:
     parent_request_ids: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    scope_fingerprint: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def compute_scope_fingerprint(self) -> str:
+        """Compute a deterministic fingerprint from the change payload.
+
+        The fingerprint is derived from the canonical serialization of
+        ``change_payload``, excluding any non-deterministic fields. Same
+        payload always produces the same fingerprint; any change to the
+        payload produces a different fingerprint.
+
+        Returns:
+            A hex string fingerprint. Empty payload yields empty fingerprint.
+        """
+        import hashlib
+        import json
+
+        if not self.change_payload:
+            return ""
+        # Canonical JSON serialization: sorted keys, no whitespace
+        canonical = json.dumps(
+            self.change_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
