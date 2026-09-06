@@ -134,7 +134,7 @@ class TestLevel3ExecutionService:
 
         message, record = service.execute(proposal, approval)
 
-        assert record.execution_status == "rejected"
+        assert record.execution_status == "failed"
         assert "not valid" in record.error.lower()
 
     def test_wrong_proposal_id_rejected(self):
@@ -145,7 +145,7 @@ class TestLevel3ExecutionService:
 
         message, record = service.execute(proposal, approval)
 
-        assert record.execution_status == "rejected"
+        assert record.execution_status == "failed"
 
     def test_rejected_approval_cannot_execute(self):
         """Rejected approval cannot execute."""
@@ -155,10 +155,10 @@ class TestLevel3ExecutionService:
 
         message, record = service.execute(proposal, approval)
 
-        assert record.execution_status == "rejected"
+        assert record.execution_status == "failed"
 
-    def test_replay_protection(self):
-        """Duplicate execution is rejected."""
+    def test_replay_protection_succeeded(self):
+        """Duplicate execution is rejected after success."""
         service = Level3ExecutionService()
         proposal = self._make_proposal()
         approval = self._make_approval()
@@ -169,8 +169,85 @@ class TestLevel3ExecutionService:
 
         # Second execution rejected
         message2, record2 = service.execute(proposal, approval)
-        assert record2.execution_status == "rejected"
+        assert record2.execution_status == "failed"
         assert "already been executed" in record2.error
+
+    def test_replay_protection_unknown(self):
+        """UNKNOWN execution state blocks retry."""
+        service = Level3ExecutionService()
+        proposal = self._make_proposal()
+        approval = self._make_approval()
+
+        # Manually insert an UNKNOWN record (simulating crash during mutation)
+        unknown_record = ExecutionAuditRecord(
+            execution_id="UNKNOWN-EXEC",
+            proposal_id="PROP-1",
+            proposal_fingerprint="fp123",
+            scope_fingerprint="",
+            approval_id="APPR-1",
+            authorization_status="authorized",
+            execution_status="unknown",
+            error="simulated crash",
+        )
+        service._execution_records["UNKNOWN-EXEC"] = unknown_record
+
+        # Retry should be blocked
+        message, record = service.execute(proposal, approval)
+        assert record.execution_status == "failed"
+        assert "uncertain" in record.error.lower()
+
+    def test_dry_run_no_mutation(self):
+        """Dry-run validates but does not mutate."""
+        service = Level3ExecutionService()  # No engine wired
+        proposal = self._make_proposal()
+        approval = self._make_approval()
+
+        message, record = service.execute(proposal, approval, dry_run=True)
+
+        assert record.execution_status == "pending"
+        assert "dry-run" in message.content.lower()
+        assert "no changes were made" in message.content.lower()
+
+    def test_execution_lifecycle_states(self):
+        """Execution follows correct lifecycle states."""
+        service = Level3ExecutionService()
+        proposal = self._make_proposal()
+        approval = self._make_approval()
+
+        # After successful execution, record should be SUCCEEDED
+        message, record = service.execute(proposal, approval)
+        assert record.execution_status == "succeeded"
+        assert record.is_terminal is True
+        assert record.is_retriable is False
+
+    def test_unknown_state_properties(self):
+        """UNKNOWN state has correct properties."""
+        unknown = ExecutionAuditRecord(
+            execution_id="exec-1",
+            proposal_id="PROP-1",
+            proposal_fingerprint="fp123",
+            scope_fingerprint="scope_fp",
+            approval_id="APPR-1",
+            authorization_status="authorized",
+            execution_status="unknown",
+        )
+        assert unknown.is_terminal is True
+        assert unknown.is_retriable is False
+
+    def test_failed_state_properties(self):
+        """FAILED state has correct properties."""
+        failed = ExecutionAuditRecord(
+            execution_id="exec-1",
+            proposal_id="PROP-1",
+            proposal_fingerprint="fp123",
+            scope_fingerprint="",
+            approval_id="APPR-1",
+            authorization_status="skipped",
+            execution_status="failed",
+            error="validation error",
+        )
+        assert failed.is_terminal is True
+        assert failed.is_retriable is True  # Failed before mutation is safe to retry
 
     def test_audit_record_created(self):
         """Execution creates structured audit record."""
@@ -229,7 +306,7 @@ class TestLevel3ExecutionService:
 
         message, record = service.execute(proposal, approval)
 
-        assert record.execution_status == "unauthorized"
+        assert record.execution_status == "failed"
         assert record.authorization_status == "unauthorized"
 
 
@@ -476,7 +553,7 @@ class TestDurableReplayProtection:
         # Reconstruct service (simulates process restart)
         service2 = Level3ExecutionService(storage_path=storage_path)
 
-        # Replay attempt should be rejected
+        # Replay attempt should be rejected (failed in new lifecycle)
         message2, record2 = service2.execute(proposal, approval)
-        assert record2.execution_status == "rejected"
+        assert record2.execution_status == "failed"
         assert "already been executed" in record2.error

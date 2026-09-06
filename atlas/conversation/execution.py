@@ -53,6 +53,13 @@ class ExecutionAuditRecord:
     """Immutable audit record for one Level 3 execution attempt.
 
     Attributable to proposal, approval, authorization, and result.
+
+    Execution lifecycle states:
+      PENDING  - request received, validation passed, mutation not yet attempted
+      STARTED  - mutation attempt beginning
+      SUCCEEDED - execution completed successfully
+      FAILED   - execution failed before any mutation occurred
+      UNKNOWN  - execution state uncertain (crash during/after mutation)
     """
 
     execution_id: str
@@ -60,8 +67,9 @@ class ExecutionAuditRecord:
     proposal_fingerprint: str
     approval_id: str
     authorization_status: str  # "authorized" | "unauthorized" | "skipped"
-    execution_status: str  # "succeeded" | "failed" | "rejected" | "unauthorized"
+    execution_status: str  # "pending" | "started" | "succeeded" | "failed" | "unknown"
     scope_fingerprint: str = ""
+    context_id: str = ""  # task/conversation context for attribution
     error: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -73,9 +81,25 @@ class ExecutionAuditRecord:
             "approval_id": self.approval_id,
             "authorization_status": self.authorization_status,
             "execution_status": self.execution_status,
+            "scope_fingerprint": self.scope_fingerprint,
+            "context_id": self.context_id,
             "error": self.error,
             "timestamp": self.timestamp.isoformat(),
         }
+
+    @property
+    def is_terminal(self) -> bool:
+        """True when execution reached a definite end state."""
+        return self.execution_status in ("succeeded", "failed", "unknown")
+
+    @property
+    def is_retriable(self) -> bool:
+        """True when explicit retry is safe.
+
+        Only FAILED (pre-mutation) is safely retriable.
+        UNKNOWN requires explicit resolution first.
+        """
+        return self.execution_status == "failed"
 
 
 class Level3ExecutionService:
@@ -198,13 +222,25 @@ class Level3ExecutionService:
         proposal: Any,
         approval: Any,
         scope: Any = None,
+        context_id: str = "",
+        dry_run: bool = False,
     ) -> tuple[Message, ExecutionAuditRecord]:
         """Execute an approved proposal through the full Level 3 contract.
+
+        Execution lifecycle:
+          1. Validation (proposal, replay, scope) → FAILED if invalid
+          2. Authorization → unauthorized if refused
+          3. PENDING record written (mutation not yet attempted)
+          4. STARTED record written (mutation attempt beginning)
+          5. ApplicationEngine.apply() (governed mutation boundary)
+          6. SUCCEEDED or UNKNOWN result recorded
 
         Args:
             proposal: The EvolutionProposal to execute.
             approval: The ApprovalRequest authorizing this execution.
             scope: Optional execution scope for validation.
+            context_id: Task/conversation context for attribution.
+            dry_run: If True, validate everything but skip mutation.
 
         Returns:
             A tuple of (Message describing the result, ExecutionAuditRecord).
@@ -221,7 +257,8 @@ class Level3ExecutionService:
                 scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                 approval_id=getattr(approval, "request_id", "unknown"),
                 authorization_status="skipped",
-                execution_status="rejected",
+                execution_status="failed",
+                context_id=context_id,
                 error=validation_error,
             )
             self._execution_records[execution_id] = record
@@ -229,7 +266,7 @@ class Level3ExecutionService:
             return (
                 Message(
                     role="assistant",
-                    content=f"Execution rejected: {validation_error}",
+                    content=f"Execution failed: {validation_error}",
                     metadata={"execution": record.to_dict()},
                 ),
                 record,
@@ -245,7 +282,8 @@ class Level3ExecutionService:
                 scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                 approval_id=approval.request_id,
                 authorization_status="skipped",
-                execution_status="rejected",
+                execution_status="failed",
+                context_id=context_id,
                 error=replay_error,
             )
             self._execution_records[execution_id] = record
@@ -253,7 +291,7 @@ class Level3ExecutionService:
             return (
                 Message(
                     role="assistant",
-                    content=f"Execution rejected: {replay_error}",
+                    content=f"Execution failed: {replay_error}",
                     metadata={"execution": record.to_dict()},
                 ),
                 record,
@@ -269,7 +307,8 @@ class Level3ExecutionService:
                 scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                 approval_id=approval.request_id,
                 authorization_status="skipped",
-                execution_status="rejected",
+                execution_status="failed",
+                context_id=context_id,
                 error=scope_error,
             )
             self._execution_records[execution_id] = record
@@ -277,7 +316,7 @@ class Level3ExecutionService:
             return (
                 Message(
                     role="assistant",
-                    content=f"Execution rejected: {scope_error}",
+                    content=f"Execution failed: {scope_error}",
                     metadata={"execution": record.to_dict()},
                 ),
                 record,
@@ -295,7 +334,8 @@ class Level3ExecutionService:
                     scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
                     approval_id=approval.request_id,
                     authorization_status="unauthorized",
-                    execution_status="unauthorized",
+                    execution_status="failed",
+                    context_id=context_id,
                     error=auth_result.reason,
                 )
                 self._execution_records[execution_id] = record
@@ -313,24 +353,80 @@ class Level3ExecutionService:
                 )
             auth_status = "authorized"
 
-        # Step 5: Mark as executed (replay protection)
-        self._mark_executed(proposal, approval)
+        # Step 5: Write PENDING record (validation passed, mutation not yet attempted)
+        pending_record = ExecutionAuditRecord(
+            execution_id=execution_id,
+            proposal_id=proposal.proposal_id,
+            proposal_fingerprint=approval.proposal_fingerprint,
+            scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
+            approval_id=approval.request_id,
+            authorization_status=auth_status,
+            execution_status="pending",
+            context_id=context_id,
+        )
+        self._execution_records[execution_id] = pending_record
+        self._persist_record(pending_record)
 
-        # Step 6: Application (delegated to ApplicationEngine)
-        if self._application_engine is not None:
-            try:
+        # If dry-run, stop here without mutation
+        if dry_run:
+            return (
+                Message(
+                    role="assistant",
+                    content=(
+                        f"Dry-run validation passed for proposal "
+                        f"'{proposal.proposal_id}'. "
+                        "No changes were made. "
+                        "Execution would proceed with proper authorization."
+                    ),
+                    metadata={
+                        "execution": pending_record.to_dict(),
+                        "dry_run": True,
+                    },
+                ),
+                pending_record,
+            )
+
+        # Step 6: Write STARTED record (mutation attempt beginning)
+        # This is written BEFORE mutation so that a crash during/after mutation
+        # leaves the execution in UNKNOWN state rather than silently disappearing.
+        started_record = ExecutionAuditRecord(
+            execution_id=execution_id,
+            proposal_id=proposal.proposal_id,
+            proposal_fingerprint=approval.proposal_fingerprint,
+            scope_fingerprint=getattr(approval, "scope_fingerprint", ""),
+            approval_id=approval.request_id,
+            authorization_status=auth_status,
+            execution_status="started",
+            context_id=context_id,
+        )
+        self._execution_records[execution_id] = started_record
+        self._persist_record(started_record)
+
+        # Step 7: Application (delegated to ApplicationEngine)
+        # This is the governed mutation boundary. A crash here leaves the
+        # execution in UNKNOWN state — we cannot know if mutation occurred.
+        exec_status = "unknown"
+        error = ""
+        try:
+            if self._application_engine is not None:
                 result = self._application_engine.apply(proposal)
-                exec_status = "succeeded" if result.success else "failed"
+                if result.success:
+                    exec_status = "succeeded"
+                else:
+                    # ApplicationEngine failed explicitly — mutation did not occur
+                    exec_status = "failed"
                 error = result.error or ""
-            except Exception as exc:
-                exec_status = "failed"
-                error = str(exc)
-        else:
-            # Test/simulation mode: no actual execution
-            exec_status = "succeeded"
-            error = ""
+            else:
+                # Test/simulation mode: no actual execution
+                exec_status = "succeeded"
+        except Exception as exc:
+            # Exception during mutation — state is uncertain.
+            # We do NOT know if partial mutation occurred.
+            exec_status = "unknown"
+            error = str(exc)
 
-        record = ExecutionAuditRecord(
+        # Step 8: Write final record (SUCCEEDED, FAILED, or UNKNOWN)
+        final_record = ExecutionAuditRecord(
             execution_id=execution_id,
             proposal_id=proposal.proposal_id,
             proposal_fingerprint=approval.proposal_fingerprint,
@@ -338,10 +434,11 @@ class Level3ExecutionService:
             approval_id=approval.request_id,
             authorization_status=auth_status,
             execution_status=exec_status,
+            context_id=context_id,
             error=error,
         )
-        self._execution_records[execution_id] = record
-        self._persist_record(record)
+        self._execution_records[execution_id] = final_record
+        self._persist_record(final_record)
 
         if exec_status == "succeeded":
             content = (
@@ -349,19 +446,26 @@ class Level3ExecutionService:
                 f"Execution ID: {execution_id}. "
                 "No further action taken."
             )
-        else:
+        elif exec_status == "failed":
             content = (
                 f"Execution failed for proposal '{proposal.proposal_id}': {error}. "
                 "No changes were made."
+            )
+        else:  # unknown
+            content = (
+                f"Execution state uncertain for proposal '{proposal.proposal_id}'. "
+                f"Execution ID: {execution_id}. "
+                "The process may have been interrupted during mutation. "
+                "Manual verification required before retry."
             )
 
         return (
             Message(
                 role="assistant",
                 content=content,
-                metadata={"execution": record.to_dict()},
+                metadata={"execution": final_record.to_dict()},
             ),
-            record,
+            final_record,
         )
 
     def _validate_proposal(self, proposal: Any, approval: Any) -> Optional[str]:
@@ -396,6 +500,14 @@ class Level3ExecutionService:
     def _check_replay(self, proposal: Any, approval: Any) -> Optional[str]:
         """Check for replay/duplicate execution.
 
+        Blocks retry for:
+        - SUCCEEDED: already executed successfully
+        - UNKNOWN: execution state uncertain (may have partially mutated)
+
+        Allows retry for:
+        - FAILED: failed before mutation occurred
+        - PENDING/STARTED: should not normally occur, but safe to block
+
         Returns:
             Error message if replay detected, None if OK.
         """
@@ -403,16 +515,22 @@ class Level3ExecutionService:
         if not proposal_id:
             return None
 
-        # Check if this proposal has already been executed
+        # Check if this proposal has already been executed or is uncertain
         for record in self._execution_records.values():
-            if (
-                record.proposal_id == proposal_id
-                and record.execution_status == "succeeded"
-            ):
+            if record.proposal_id != proposal_id:
+                continue
+            if record.execution_status == "succeeded":
                 return (
                     f"Proposal '{proposal_id}' has already been executed "
                     f"(execution {record.execution_id}). "
                     "Duplicate execution is not permitted."
+                )
+            if record.execution_status == "unknown":
+                return (
+                    f"Proposal '{proposal_id}' has an uncertain execution state "
+                    f"(execution {record.execution_id}). "
+                    "The process may have been interrupted during mutation. "
+                    "Manual verification required before retry."
                 )
 
         return None
