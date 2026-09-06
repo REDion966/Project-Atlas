@@ -222,9 +222,11 @@ from atlas.advanced_reasoning.wiring import (
 from atlas.storage.advanced_reasoning_storage import AdvancedReasoningSQLiteStorage
 
 # --- Phase 16: Autonomy persistence wiring ---
+from atlas.evolution.autonomy.authorization_manager import AuthorizationManager
 from atlas.evolution.autonomy.autonomy_request_adapter import (
     AutonomyRequestAdapter,
 )
+from atlas.evolution.autonomy.models import AutonomyPolicy
 from atlas.kernel.autonomy_wiring import (
     init_autonomy_application_engine,
     init_autonomy_dispatcher,
@@ -2712,19 +2714,35 @@ class Atlas:
             init_autonomy_persistence(self._event_bus)
         )
 
+        # --- Phase 16: AuthorizationManager (kernel-private) ---
+        # Enforces authority at the execution boundary. Uses the same
+        # AutonomyPolicy as the ScheduleStore so authorization decisions are
+        # consistent with the governed pipeline. Wired into the
+        # ApplicationEngine so that ``apply`` refuses unauthorized requests
+        # independently of any upstream caller.
+        self._authorization_manager = AuthorizationManager(
+            policy=(
+                self._schedule_store.policy
+                if self._schedule_store is not None
+                else AutonomyPolicy()  # disabled by default — no autonomy
+            ),
+        )
+
         # --- Phase 16: ApplicationEngine (kernel-private) ---
         # Constructed after all required services (memory, knowledge, config,
         # capability registry) and the shared autonomy storage exist. Uses the
         # Batch 9 production adapters: readers for all four state scopes,
         # writers for MEMORY/KNOWLEDGE only (the Batch 10 INFORMATION
         # boundary). Not registered in ServiceContainer. No execution path is
-        # created by construction alone.
+        # created by construction alone. The authorization_manager enforces
+        # authority at the execution boundary so the engine cannot be bypassed.
         self._application_engine = init_autonomy_application_engine(
             storage=self._autonomy_storage,
             knowledge_manager=self._knowledge_manager,
             memory_service=self._memory_service,
             configuration=self._config,
             capability_registry=self._capability_registry,
+            authorization_manager=self._authorization_manager,
         )
 
         # --- Phase 16: AutonomyRequestAdapter (sole translator) ---

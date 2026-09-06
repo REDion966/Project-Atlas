@@ -81,6 +81,11 @@ class ApplicationEngine:
       - readers: dict[ScopeType, StateReader] for snapshot/verification.
       - writers: dict[ScopeType, StateWriter] for mutations.
       - clock: optional callable returning datetime.now() for tests.
+      - authorization_manager: optional AuthorizationManager used to enforce
+        authority at the execution boundary. When present, ``apply`` refuses
+        any request whose authorization is missing, expired, mismatched, or
+        otherwise invalid — independently of any upstream caller. This ensures
+        the execution boundary cannot be bypassed by calling ``apply`` directly.
     """
 
     registry: ApplierRegistry
@@ -88,6 +93,7 @@ class ApplicationEngine:
     readers: dict[ScopeType, StateReader] = field(default_factory=dict)
     writers: dict[ScopeType, StateWriter] = field(default_factory=dict)
     clock: Any = field(default_factory=lambda: datetime.now)
+    authorization_manager: Any = None
 
     def __post_init__(self) -> None:
         if self.registry is None:
@@ -103,6 +109,10 @@ class ApplicationEngine:
         """Apply ``request`` to its target state domain.
 
         Steps:
+          0. Enforce authority at the execution boundary (when an
+             ``AuthorizationManager`` is wired). This is independent of any
+             upstream caller and cannot be bypassed by calling ``apply``
+             directly.
           1. Resolve applier; fail closed if none.
           2. Resolve reader/writer for the scope.
           3. Run can_apply pre-check.
@@ -113,6 +123,19 @@ class ApplicationEngine:
         """
         when = now if now is not None else self.clock()
         scope = request.target_scope
+
+        # 0. Enforce authority at the execution boundary.
+        manager = self.authorization_manager
+        if manager is not None:
+            decision = manager.is_authorized(request, now=when)
+            if not decision.authorized:
+                return self._failure(
+                    request,
+                    f"Authorization refused at execution boundary: "
+                    f"{decision.reason}",
+                    "REFUSED",
+                    when,
+                )
 
         # 1. Resolve applier.
         try:

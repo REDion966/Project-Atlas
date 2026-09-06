@@ -112,6 +112,7 @@ def init_autonomy_application_engine(
     memory_service: MemoryManagerService,
     configuration: Configuration,
     capability_registry: CapabilityRegistry,
+    authorization_manager: Any = None,
 ) -> ApplicationEngine:
     """Create and return the kernel-owned Phase 16 ApplicationEngine.
 
@@ -167,6 +168,7 @@ def init_autonomy_application_engine(
         snapshot_storage=storage,
         readers=readers,
         writers=writers,
+        authorization_manager=authorization_manager,
     )
 
 
