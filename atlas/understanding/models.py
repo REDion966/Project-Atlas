@@ -99,8 +99,12 @@ class Relationship:
     weight: float = 0.5
     confidence: float = 0.5
     observed_count: int = 1
-    first_observed: datetime = field(default_factory=datetime.now)
-    last_observed: datetime = field(default_factory=datetime.now)
+    first_observed: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    last_observed: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +134,12 @@ class Pattern:
     confidence: float = 0.5
     related_concept_ids: list[str] = field(default_factory=list)
     frequency: int = 1
-    first_observed: datetime = field(default_factory=datetime.now)
-    last_observed: datetime = field(default_factory=datetime.now)
+    first_observed: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    last_observed: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 # ---------------------------------------------------------------------------
