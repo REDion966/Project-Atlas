@@ -85,8 +85,9 @@ class ConversationStateManager:
     One instance per conversation/session context. Not global mutable state.
     Thread-safe in the sense that each context holds its own manager.
 
-    This is the minimal P9.1 lifecycle surface: create/read/update/clear.
-    P9.2 enriches this with integration semantics.
+    P9.1 established create/read/update/clear.
+    P9.2 adds lifecycle semantics: turn boundaries, topic replacement,
+    explicit expiration, and result recording.
     """
 
     def __init__(self, state: Optional[ConversationState] = None) -> None:
@@ -97,11 +98,16 @@ class ConversationStateManager:
         """Return the current immutable state."""
         return self._state
 
+    # ------------------------------------------------------------------
+    # P9.1 surface (preserved)
+    # ------------------------------------------------------------------
+
     def update(self, **fields: Any) -> ConversationState:
         """Return a new state with the given fields merged (immutable update).
 
         Unknown fields are ignored so callers cannot accidentally inject
-        state the contract does not define.
+        state the contract does not define. Does NOT regenerate turn_id —
+        minor refinements stay within the same turn.
         """
         known = {f.name for f in self._state.__dataclass_fields__.values()}
         merged = {
@@ -121,3 +127,91 @@ class ConversationStateManager:
         if field_name not in self._state.__dataclass_fields__:
             return self._state
         return self.update(**{field_name: None})
+
+    # ------------------------------------------------------------------
+    # P9.2 lifecycle
+    # ------------------------------------------------------------------
+
+    def begin_turn(self) -> ConversationState:
+        """Begin a new turn: regenerate turn_id, preserve all other state.
+
+        A turn boundary is explicit and deterministic — the caller decides
+        when a new turn begins. Minor updates within a turn do NOT change
+        turn_id.
+        """
+        return self.update(turn_id=str(uuid.uuid4()))
+
+    def replace_topic(
+        self,
+        new_subject: str,
+        *,
+        new_task: Optional[str] = None,
+        new_investigation: Optional[str] = None,
+        **other_fields: Any,
+    ) -> ConversationState:
+        """Handle a conflicting-topic transition deterministically.
+
+        Rules (applied in order):
+          1. An active ``current_task`` is demoted to ``relevant_prior_action``
+             (unless a new task is supplied, in which case the old task is
+             dropped — it is superseded, not accumulated).
+          2. ``current_subject`` is replaced by ``new_subject``.
+          3. ``current_task`` is set to ``new_task`` (or cleared).
+          4. ``current_investigation`` is set to ``new_investigation`` (or cleared).
+          5. ``development_intent`` is preserved (may still apply).
+          6. ``pending_question`` / ``pending_confirmation`` are preserved
+             (still awaiting response).
+          7. ``latest_result`` is preserved (carries forward).
+          8. ``turn_id`` is regenerated (new topic = new turn).
+          9. Any ``**other_fields`` are merged on top.
+        """
+        fields: dict[str, Any] = {
+            "current_subject": new_subject,
+            "current_task": new_task,
+            "current_investigation": new_investigation,
+            "turn_id": str(uuid.uuid4()),
+        }
+        if new_task is not None:
+            # Old task superseded entirely.
+            fields["relevant_prior_action"] = None
+        elif self._state.current_task is not None:
+            # Active task demoted to prior action.
+            fields["relevant_prior_action"] = self._state.current_task
+        fields.update(other_fields)
+        return self.update(**fields)
+
+    def expire_field(self, field_name: str) -> ConversationState:
+        """Explicitly expire a field (set to None).
+
+        Expiration is deterministic and caller-driven: there is no time-based
+        lifecycle primitive in Atlas, so a field expires only when explicitly
+        marked expired or replaced. Unknown names are ignored.
+        """
+        return self.reset_field(field_name)
+
+    def record_result(self, result: str) -> ConversationState:
+        """Record a meaningful result.
+
+        Sets ``latest_result``. If there is an active ``current_task``, it is
+        demoted to ``relevant_prior_action`` (the task produced this result).
+        """
+        fields: dict[str, Any] = {"latest_result": result}
+        if self._state.current_task is not None:
+            fields["relevant_prior_action"] = self._state.current_task
+        return self.update(**fields)
+
+    def complete_task(self, result: Optional[str] = None) -> ConversationState:
+        """Mark the current task as complete.
+
+        Moves ``current_task`` to ``relevant_prior_action``, clears
+        ``current_task`` and ``current_investigation``. Optionally records
+        a ``latest_result``.
+        """
+        fields: dict[str, Any] = {
+            "relevant_prior_action": self._state.current_task,
+            "current_task": None,
+            "current_investigation": None,
+        }
+        if result is not None:
+            fields["latest_result"] = result
+        return self.update(**fields)

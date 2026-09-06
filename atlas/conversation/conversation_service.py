@@ -14,6 +14,7 @@ from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
+from atlas.conversation.conversation_state import ConversationStateManager
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.development_outcome_reporter import (
     DevelopmentOutcomeReporter,
@@ -48,6 +49,7 @@ class ConversationService:
         fallback_resolver: DeterministicFallbackResolver | None = None,
         development_need_coordinator: DevelopmentNeedCoordinator | None = None,
         outcome_reporter: DevelopmentOutcomeReporter | None = None,
+        state_manager: ConversationStateManager | None = None,
     ):
         """
         Initialize the conversation service.
@@ -102,6 +104,7 @@ class ConversationService:
         self._fallback_resolver = fallback_resolver
         self._development_need_coordinator = development_need_coordinator
         self._outcome_reporter = outcome_reporter
+        self._state_manager = state_manager or ConversationStateManager()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
 
@@ -113,6 +116,11 @@ class ConversationService:
         """Return the active conversation."""
 
         return self._conversation
+
+    @property
+    def state_manager(self) -> ConversationStateManager:
+        """Return the conversational state manager for this conversation."""
+        return self._state_manager
 
     @property
     def fallback_resolver(self) -> DeterministicFallbackResolver | None:
