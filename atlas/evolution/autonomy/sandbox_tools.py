@@ -162,10 +162,21 @@ class SandboxRunReport:
         )
 
 
-def _bounded(text: str, limit: int = MAX_OUTPUT_BYTES) -> tuple[str, bool]:
-    """Truncate ``text`` to ``limit`` bytes; return ``(text, truncated)``."""
+def _bounded(text: str | bytes, limit: int = MAX_OUTPUT_BYTES) -> tuple[str, bool]:
+    """Truncate ``text`` to ``limit`` bytes; return ``(text, truncated)``.
+
+    Accepts both ``str`` and ``bytes``. Bytes are decoded once at the boundary
+    using ``errors="replace"`` so invalid UTF-8 never propagates and the
+    truncation logic always operates on a decoded string. This prevents
+    ``AttributeError: 'bytes' object has no attribute 'encode'`` when timeout
+    handling receives bytes output.
+    """
     if text is None:
         return "", False
+    # Normalize bytes -> str at the boundary. Doubles as the decode step so the
+    # later encode/decode-for-truncation operates only on str.
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
     suffix = "\n...[truncated]"
     encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= limit:

@@ -462,5 +462,132 @@ class TestSafetyBoundaries(unittest.TestCase):
             self.assertEqual(wrapped.read_text("probe.txt"), "hello")
 
 
+class TestC2SandboxOutputSafety(unittest.TestCase):
+    """P10.1 — C2 sandbox safety: bytes/str boundary, timeout safety, and
+    malformed output handling.
+
+    The core invariant: timeout/error handling must never crash because of an
+    unexpected bytes/string representation in captured output.
+    """
+
+    def test_bounded_accepts_bytes(self):
+        """_bounded() must not raise AttributeError on bytes input."""
+        from atlas.evolution.autonomy.sandbox_tools import _bounded
+        raw = b"hello bytes world"
+        kept, truncated = _bounded(raw)
+        self.assertIsInstance(kept, str)
+        self.assertFalse(truncated)
+        self.assertEqual(kept, "hello bytes world")
+
+    def test_bounded_accepts_str(self):
+        """_bounded() preserves existing str behavior."""
+        from atlas.evolution.autonomy.sandbox_tools import _bounded
+        kept, truncated = _bounded("hello str")
+        self.assertEqual(kept, "hello str")
+        self.assertFalse(truncated)
+
+    def test_bounded_truncates_bytes(self):
+        """Bytes output exceeding the limit is truncated deterministically."""
+        from atlas.evolution.autonomy.sandbox_tools import (
+            MAX_OUTPUT_BYTES,
+            _bounded,
+        )
+        big = b"Z" * (MAX_OUTPUT_BYTES * 2)
+        kept, truncated = _bounded(big)
+        self.assertTrue(truncated)
+        self.assertIsInstance(kept, str)
+        self.assertLessEqual(len(kept.encode("utf-8")), MAX_OUTPUT_BYTES)
+
+    def test_bounded_handles_empty(self):
+        """Empty str and bytes are handled safely."""
+        from atlas.evolution.autonomy.sandbox_tools import _bounded
+        self.assertEqual(_bounded(""), ("", False))
+        self.assertEqual(_bounded(b""), ("", False))
+        self.assertEqual(_bounded(None), ("", False))
+
+    def test_bounded_handles_invalid_utf8_bytes(self):
+        """Invalid UTF-8 sequences are replaced, never raise."""
+        from atlas.evolution.autonomy.sandbox_tools import _bounded
+        raw = b"valid \xff\xfe invalid"
+        kept, truncated = _bounded(raw)
+        self.assertIsInstance(kept, str)
+        self.assertIn("valid", kept)
+
+    def test_bounded_handles_mixed_type_safely(self):
+        """Both str and bytes produce str output."""
+        from atlas.evolution.autonomy.sandbox_tools import _bounded
+        s_kept, _ = _bounded("text")
+        b_kept, _ = _bounded(b"bytes")
+        self.assertIsInstance(s_kept, str)
+        self.assertIsInstance(b_kept, str)
+
+
+class TestC2TimeoutSafety(unittest.TestCase):
+    """P10.1 — timeout path must remain safe with bytes output."""
+
+    def test_timeout_with_bytes_output_does_not_crash(self):
+        """The previously identified defect: timeout + bytes output must not
+        raise AttributeError: 'bytes' object has no attribute 'encode'."""
+        from atlas.evolution.autonomy.sandbox_tools import (
+            SandboxRunReport,
+            _bounded,
+        )
+        # Simulate the timeout path receiving bytes (as can happen at the
+        # timeout boundary with incomplete multi-byte output).
+        bytes_stdout = b"partial output before timeout \xff\xfe"
+        bytes_stderr = b""
+        # This is the exact call pattern from _spawn()'s timeout handler.
+        stdout_kept, stdout_trunc = _bounded(bytes_stdout)
+        stderr_kept, stderr_trunc = _bounded(bytes_stderr)
+        # Must produce a valid report, not crash.
+        report = SandboxRunReport(
+            operation="pytest",
+            success=False,
+            outcome="timeout",
+            stdout=stdout_kept,
+            stderr=stderr_kept,
+            stdout_truncated=stdout_trunc,
+            stderr_truncated=stderr_trunc,
+        )
+        self.assertEqual(report.outcome, "timeout")
+        self.assertIsInstance(report.stdout, str)
+
+    def test_timeout_kills_process(self):
+        """A timed-out operation reports timeout and does not hang."""
+        with SandboxWorkspace.create() as ws:
+            _write_git(ws, "slow_test.py",
+                       "import time\n\ndef test_slow():\n    time.sleep(10)\n")
+            result = pytest_tool().handler(
+                {"workspace": ws.path, "target": "slow_test.py",
+                 "timeout_seconds": 0.5}
+            )
+            self.assertFalse(result.success)
+            self.assertEqual(result.output["outcome"], "timeout")
+
+    def test_normal_execution_string_output(self):
+        """Normal completion yields string output."""
+        with SandboxWorkspace.create() as ws:
+            _write_git(ws, "ok_test.py",
+                       "def test_ok():\n    assert True\n")
+            result = pytest_tool().handler(
+                {"workspace": ws.path, "target": "ok_test.py"}
+            )
+            self.assertTrue(result.success)
+            self.assertIsInstance(result.output["stdout"], str)
+            self.assertIsInstance(result.output["stderr"], str)
+
+    def test_repeated_execution_isolated(self):
+        """Repeated sandbox calls remain isolated with no state leakage."""
+        with SandboxWorkspace.create() as ws:
+            _write_git(ws, "a_test.py", "def test_a():\n    assert True\n")
+            r1 = pytest_tool().handler(
+                {"workspace": ws.path, "target": "a_test.py"})
+            r2 = pytest_tool().handler(
+                {"workspace": ws.path, "target": "a_test.py"})
+            self.assertEqual(r1.output["outcome"], r2.output["outcome"])
+            self.assertTrue(r1.success)
+            self.assertTrue(r2.success)
+
+
 if __name__ == "__main__":
     unittest.main()
