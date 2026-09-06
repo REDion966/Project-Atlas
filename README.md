@@ -9,6 +9,18 @@ human ownership and oversight.
 
 > *AI models are tools. Atlas is the intelligence. Models may change. Atlas remains.*
 
+> **Project Started (GitHub): July 10, 2026**
+
+---
+
+## Atlas Timeline
+
+- **July 10, 2026** — Project Atlas GitHub repository created
+- **July 2026** — Core foundation and workspace architecture
+- **August 2026** — Intelligence, reasoning, self-development, and conversational architecture
+- **September 2026** — Memory evolution, capability productionization, and conversational state
+- **Next** — Reference resolution → completing the conversational state layer
+
 ---
 
 ## Current Status
