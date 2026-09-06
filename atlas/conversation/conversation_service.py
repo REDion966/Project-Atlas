@@ -221,6 +221,13 @@ class ConversationService:
             if investigation_response is not None:
                 self._conversation.add_message(investigation_response)
                 return investigation_response
+        # Approval semantics — explicit approval for a pending proposal.
+        # Must be explicit; ambiguous responses are not treated as approval.
+        if spec is not None and spec.task_type is TaskType.APPROVAL:
+            approval_response = self._maybe_handle_approval(spec)
+            if approval_response is not None:
+                self._conversation.add_message(approval_response)
+                return approval_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -788,6 +795,62 @@ class ConversationService:
                     "modification_status": report.modification_status,
                     "findings_count": len(report.findings),
                     "affected_files": list(report.affected_files),
+                },
+            },
+        )
+
+    def _maybe_handle_approval(self, spec: TaskSpec) -> Message | None:
+        """Handle an explicit APPROVAL request.
+
+        Approval is only valid when:
+        1. There is an active proposal (active_proposal_id in state).
+        2. The approval is explicit (not ambiguous like "okay").
+        3. The proposal fingerprint matches (strict binding).
+
+        Approval does NOT:
+        - Modify any files
+        - Call ApplicationEngine.apply()
+        - Create execution authorization
+        - Automatically transition to Level 3
+
+        Args:
+            spec: the classified APPROVAL TaskSpec.
+
+        Returns:
+            A Message describing the approval result, or None if no active
+            proposal exists to approve.
+        """
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.active_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no active proposal to approve. "
+                    "Please create a proposal first."
+                ),
+                metadata={"approval": {"status": "no_active_proposal"}},
+            )
+
+        # Record the approval in state
+        if self._state_manager is not None:
+            self._state_manager.update(
+                pending_approval_id=None,  # approval consumed
+                latest_result=f"Proposal {state.active_proposal_id} approved",
+            )
+
+        return Message(
+            role="assistant",
+            content=(
+                f"Proposal '{state.active_proposal_id}' has been approved. "
+                "No changes have been made. "
+                "Implementation will require a separate explicit step."
+            ),
+            metadata={
+                "approval": {
+                    "status": "approved",
+                    "proposal_id": state.active_proposal_id,
+                    "fingerprint": state.active_proposal_fingerprint,
+                    "modification_status": "NONE",
                 },
             },
         )

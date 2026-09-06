@@ -46,6 +46,16 @@ class ConversationState:
     # Stable reference of an active investigation, when one exists.
     current_investigation: Optional[str] = None
 
+    # Stable reference of an active proposal, when one exists.
+    active_proposal_id: Optional[str] = None
+
+    # Fingerprint of the active proposal at the time of approval, for strict
+    # binding verification.
+    active_proposal_fingerprint: Optional[str] = None
+
+    # Stable reference of a pending approval, when one exists.
+    pending_approval_id: Optional[str] = None
+
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
 
@@ -70,6 +80,9 @@ class ConversationState:
             "current_subject": self.current_subject,
             "current_task": self.current_task,
             "current_investigation": self.current_investigation,
+            "active_proposal_id": self.active_proposal_id,
+            "active_proposal_fingerprint": self.active_proposal_fingerprint,
+            "pending_approval_id": self.pending_approval_id,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

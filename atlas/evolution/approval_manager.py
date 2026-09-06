@@ -75,9 +75,16 @@ class ApprovalManager:
 
         proposal.status = ProposalStatus.PENDING_APPROVAL
 
+        # Compute and bind the proposal fingerprint for strict approval binding
+        fingerprint = (
+            proposal.proposal_fingerprint or proposal.compute_fingerprint()
+        )
+        proposal.proposal_fingerprint = fingerprint
+
         return ApprovalRequest(
             request_id=self._next_request_id(),
             proposal_id=proposal.proposal_id,
+            proposal_fingerprint=fingerprint,
             title=proposal.title,
             description=proposal.summary,
             rationale=proposal.rationale,

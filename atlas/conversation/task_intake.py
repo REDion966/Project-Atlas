@@ -60,6 +60,7 @@ class TaskType(Enum):
     ACTION_REQUEST = "action_request"
     DEVELOPMENT_REQUEST = "development_request"
     INVESTIGATION_REQUEST = "investigation_request"
+    APPROVAL = "approval"
     UNKNOWN = "unknown"
 
 
@@ -122,6 +123,36 @@ _NEGATION_PREFIXES: tuple[str, ...] = (
     "do not",
     "never",
     "no",
+)
+
+#: Explicit approval phrases that indicate the user is approving a proposal.
+_APPROVAL_CUES: frozenset[str] = frozenset(
+    {
+        "approve",
+        "approved",
+        "approval",
+        "accept",
+        "accepted",
+        "authorize",
+        "authorized",
+    }
+)
+
+#: Ambiguous responses that must NOT be treated as approval.
+_AMBIGUOUS_RESPONSES: frozenset[str] = frozenset(
+    {
+        "ok",
+        "okay",
+        "sure",
+        "fine",
+        "sounds good",
+        "looks good",
+        "looks fine",
+        "makes sense",
+        "go ahead",
+        "do it",
+        "proceed",
+    }
 )
 
 _ACTION_CUES: frozenset[str] = frozenset(
@@ -282,6 +313,31 @@ def _is_negated(text: str, cue: str) -> bool:
         return False
     prefix = lowered[:idx].rstrip()
     return any(prefix.endswith(neg) for neg in _NEGATION_PREFIXES)
+
+
+def _is_explicit_approval(text: str) -> bool:
+    """Return True when the text contains explicit approval language.
+
+    Explicit approval requires unambiguous approval cues (e.g. "approve",
+    "accept", "authorize"). Ambiguous responses like "okay", "sounds good",
+    "go ahead" are NOT treated as approval.
+
+    Args:
+        text: the normalized request text.
+
+    Returns:
+        True if the text contains explicit approval language.
+    """
+    lowered = text.lower()
+    # Must contain an explicit approval cue
+    has_approval_cue = any(cue in lowered for cue in _APPROVAL_CUES)
+    if not has_approval_cue:
+        return False
+    # Must NOT be negated (e.g. "don't approve")
+    for cue in _APPROVAL_CUES:
+        if cue in lowered and _is_negated(lowered, cue):
+            return False
+    return True
 
 
 def _stable_hash(text: str) -> str:
@@ -490,7 +546,12 @@ class TaskIntake:
         if not _tokens(normalized):
             return TaskType.UNKNOWN
 
-        # Investigation cues are checked first and take precedence.
+        # Explicit approval is checked first. It requires unambiguous approval
+        # language and cannot be ambiguous conversational responses.
+        if _is_explicit_approval(normalized):
+            return TaskType.APPROVAL
+
+        # Investigation cues are checked next and take precedence.
         # They are read-only by intent and must not be routed to development.
         investigation = _first_hit(lowered, _INVESTIGATION_CUES)
         if investigation:

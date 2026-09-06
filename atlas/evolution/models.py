@@ -282,6 +282,8 @@ class EvolutionProposal:
         rejection_reason: If rejected, the reason for rejection.
         created_at: When the proposal was created.
         approved_at: When the proposal was approved (if applicable).
+        proposal_fingerprint: Deterministic hash of proposal content for
+            strict approval binding. Same content → same fingerprint.
         metadata: Optional additional context.
     """
 
@@ -298,7 +300,32 @@ class EvolutionProposal:
     rejection_reason: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     approved_at: datetime | None = None
+    proposal_fingerprint: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def compute_fingerprint(self) -> str:
+        """Compute a deterministic fingerprint from proposal content.
+
+        The fingerprint is derived from the immutable content fields that
+        define WHAT is being proposed. It excludes status, timestamps, and
+        metadata that may change without altering the proposal's substance.
+
+        Returns:
+            A hex string fingerprint. Same content always produces the same
+            fingerprint.
+        """
+        import hashlib
+
+        content = "|".join([
+            self.title,
+            self.summary,
+            self.rationale,
+            self.expected_benefit,
+            self.risks,
+            self.impact_analysis,
+            self.implementation_approach,
+        ])
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +350,9 @@ class ApprovalRequest:
     Attributes:
         request_id: Unique identifier for this request.
         proposal_id: The proposal requiring approval.
+        proposal_fingerprint: Fingerprint of the proposal content at the time
+            of approval. Used to verify the proposal has not changed since
+            approval was granted.
         title: Short title of the request.
         description: Full description for the user.
         rationale: Why this change is needed.
@@ -341,10 +371,33 @@ class ApprovalRequest:
     rationale: str
     risks: str
     expected_benefit: str
+    proposal_fingerprint: str = ""
     decision: ApprovalDecision = ApprovalDecision.PENDING
     decision_comment: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     decided_at: datetime | None = None
+
+    def is_valid_for(self, proposal: EvolutionProposal) -> bool:
+        """Check if this approval is still valid for the given proposal.
+
+        An approval is valid only if both the proposal_id AND the
+        proposal_fingerprint match. This prevents an old approval from
+        authorizing a changed proposal.
+
+        Args:
+            proposal: The proposal to validate against.
+
+        Returns:
+            True if the approval is valid for this exact proposal version.
+        """
+        if self.proposal_id != proposal.proposal_id:
+            return False
+        if not self.proposal_fingerprint:
+            return False
+        current_fingerprint = (
+            proposal.proposal_fingerprint or proposal.compute_fingerprint()
+        )
+        return self.proposal_fingerprint == current_fingerprint
 
 
 # ---------------------------------------------------------------------------
