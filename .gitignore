@@ -23,3 +23,6 @@ atlas_data/
 
 # Command Code local state
 .commandcode/
+
+# Pytest console output dumps
+pytest_*.txt
