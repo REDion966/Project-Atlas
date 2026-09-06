@@ -390,25 +390,38 @@ Accepted/deferred items:
 - concurrency → Future Queue
 
 ### M6 — Canonical Execution Architecture
-**STATUS: LOCKED**
+**STATUS: COMPLETE**
 
-Document and enforce the final execution architecture before major capability
-expansion.
+Distributed execution ownership architecture established with three explicit
+top-level execution owners:
 
-Address **F3**: canonical execution ownership must be clarified and enforced.
+- **OrchestrationExecutor** — multi-step orchestration (per-step AuthorityService)
+- **GoalExecutionEngine** — user-authorized goal execution (gateway + authorization)
+- **SelfDevelopmentLoop** — sandboxed code development (P7 pre-approved proposal)
 
-Map each execution system (OrchestrationExecutor, Tool execution,
-Task/Scheduler, GoalExecutionEngine, EvolutionScheduler,
-DevelopmentCycleController, SelfDevelopmentLoop, and any others discovered
-during M2–M5) for: ownership, responsibility, entry point, caller,
-canonical/supporting/specialized/legacy status, governance boundary, and
-relationship to other execution systems.
+Non-owner boundaries enforced:
 
-**Acceptance:** a future Atlas module has one obvious, documented, governed
-integration path for each kind of execution.
+- **ToolExecutor/ToolEngine** — low-level primitives (caller-owned governance, M3/M5)
+- **CapabilityDispatcher** — dispatcher (handler lookup + invocation)
+- **ToolChainExecutor** — sub-primitive (wired through CapabilityDispatcher)
+- **RuntimeCoordinator/EvolutionScheduler** — coordinators (no direct execution)
+- **EvolutionExecutionGateway** — governance gate (RuleEngine evaluation)
+- **TaskManager/Scheduler/Worker** — legacy execution-free subsystem (M2 no-op)
 
-> Do NOT blindly merge execution systems. Specialized systems may remain
-> specialized when justified.
+**Closure record:**
+
+- Architectural analysis: `architecture_analysis.md` (M6.1)
+- Architectural tests: `tests/test_execution_ownership_m6.py` (M6.4)
+- Independent verification: M6.5 (test quality + architecture audit)
+- Independent architectural audit: M6.6 (reconstructed architecture from production code)
+- T8 tautological assertion corrected: M6.6.1 (one-line test fix)
+- Final full suite: 4982 passed, 2 skipped, 0 failures
+- **No production refactoring required** — architecture was already correct;
+  M6 documented and tested existing boundaries
+- Governance M2/M3/M4/M5/P7 preserved
+
+> Do NOT blindly merge execution systems. Specialized systems remain
+> specialized.
 
 ### F17 — Datetime Policy
 **STATUS: LOCKED (hardening item, performed within M2–M5 as appropriate)**
