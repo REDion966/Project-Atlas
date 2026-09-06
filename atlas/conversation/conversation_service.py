@@ -15,6 +15,7 @@ from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.conversation_state import ConversationStateManager
+from atlas.conversation.investigation import InvestigationService
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.reference_resolution import ConversationReferenceResolver
 from atlas.conversation.development_outcome_reporter import (
@@ -52,6 +53,7 @@ class ConversationService:
         outcome_reporter: DevelopmentOutcomeReporter | None = None,
         state_manager: ConversationStateManager | None = None,
         reference_resolver: ConversationReferenceResolver | None = None,
+        investigation_service: InvestigationService | None = None,
     ):
         """
         Initialize the conversation service.
@@ -107,6 +109,7 @@ class ConversationService:
         self._development_need_coordinator = development_need_coordinator
         self._outcome_reporter = outcome_reporter
         self._state_manager = state_manager or ConversationStateManager()
+        self._investigation_service = investigation_service
         self._reference_resolver = reference_resolver or ConversationReferenceResolver()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
@@ -209,6 +212,15 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # Investigation semantics — read-only, takes precedence over
+        # development because investigation cannot mutate state.
+        if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
+            investigation_response = self._maybe_handle_investigation_request(
+                spec, original_text=text
+            )
+            if investigation_response is not None:
+                self._conversation.add_message(investigation_response)
+                return investigation_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -355,6 +367,16 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # Investigation semantics — read-only, takes precedence over
+        # development because investigation cannot mutate state.
+        if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
+            investigation_response = self._maybe_handle_investigation_request(
+                spec, original_text=text
+            )
+            if investigation_response is not None:
+                self._conversation.add_message(investigation_response)
+                yield investigation_response.content
+                return
         development_response = self._maybe_handle_development_request(spec)
         if development_response is not None:
             self._conversation.add_message(development_response)
@@ -729,6 +751,46 @@ class ConversationService:
             return outcome
         # CONFIRMED -> DEVELOPMENT_REQUEST TaskSpec -> existing bridge.
         return self._maybe_handle_development_request(outcome)
+
+    def _maybe_handle_investigation_request(
+        self,
+        spec: TaskSpec,
+        original_text: str | None = None,
+    ) -> Message | None:
+        """Route an INVESTIGATION_REQUEST to a read-only investigation.
+
+        Investigation is strictly read-only: it inspects the repository and
+        produces a report, but never modifies anything. The investigation
+        result is recorded in ConversationState.current_investigation.
+        """
+        if self._investigation_service is None:
+            return None
+
+        # Prefer the original user text as the investigation target so the
+        # investigation service can extract the real subject (e.g. "F17
+        # failures") rather than the development-oriented intent extraction.
+        target = original_text or spec.goal or spec.intent or "unspecified issue"
+        report = self._investigation_service.investigate(target)
+
+        # Record the investigation in conversation state
+        if self._state_manager is not None:
+            self._state_manager.update(
+                current_investigation=report.target,
+                latest_result=report.diagnosis,
+            )
+
+        return Message(
+            role="assistant",
+            content=report.to_markdown(),
+            metadata={
+                "investigation": {
+                    "target": report.target,
+                    "modification_status": report.modification_status,
+                    "findings_count": len(report.findings),
+                    "affected_files": list(report.affected_files),
+                },
+            },
+        )
 
     def handle_advisory(self, advisory_signal, session_context: SessionContext | None = None):
         """Feed a bounded P5 advisory signal into the P7 detection/dialogue path

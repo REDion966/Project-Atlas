@@ -24,6 +24,7 @@ from atlas.conversation.conversation_service import ConversationService
 from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.development_need_detector import AdvisorySignal
+from atlas.conversation.investigation import InvestigationService
 from atlas.conversation.message import Message
 from atlas.cognition.api import CognitionAPI
 from atlas.events.event_bus import EventBus
@@ -3042,6 +3043,7 @@ class Atlas:
             session_context=self._session_context,
             fallback_resolver=self._deterministic_fallback,
             development_need_coordinator=DevelopmentNeedCoordinator(),
+            investigation_service=InvestigationService(),
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).

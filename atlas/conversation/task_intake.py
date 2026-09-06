@@ -59,6 +59,7 @@ class TaskType(Enum):
     INFORMATION_REQUEST = "information_request"
     ACTION_REQUEST = "action_request"
     DEVELOPMENT_REQUEST = "development_request"
+    INVESTIGATION_REQUEST = "investigation_request"
     UNKNOWN = "unknown"
 
 
@@ -97,6 +98,30 @@ _DEVELOPMENT_CUES: frozenset[str] = frozenset(
 
 _SELF_TARGETS: frozenset[str] = frozenset(
     {"atlas", "yourself", "your self", "a module", "a capability", "the framework"}
+)
+
+_INVESTIGATION_CUES: frozenset[str] = frozenset(
+    {
+        "investigate",
+        "investigation",
+        "diagnose",
+        "diagnosis",
+        "inspect",
+        "examine",
+        "analyze",
+        "analysis",
+        "trace",
+        "debug",
+    }
+)
+
+#: Phrases that negate the following cue, preventing misclassification.
+_NEGATION_PREFIXES: tuple[str, ...] = (
+    "don't",
+    "dont",
+    "do not",
+    "never",
+    "no",
 )
 
 _ACTION_CUES: frozenset[str] = frozenset(
@@ -241,6 +266,22 @@ def _tokens(text: str) -> tuple[str, ...]:
         if len(raw) >= _MIN_TOKEN_LEN:
             seen.setdefault(raw, None)
     return tuple(seen)
+
+
+def _is_negated(text: str, cue: str) -> bool:
+    """Return True when ``cue`` appears in ``text`` immediately after a
+    negation prefix (e.g. "don't modify" -> ``modify`` is negated).
+
+    This is intentionally narrow: it only detects the common contraction/
+    adverb negation patterns required to prevent misclassification of
+    explicit read-only boundaries such as "don't modify anything yet".
+    """
+    lowered = text.lower()
+    idx = lowered.find(cue)
+    if idx <= 0:
+        return False
+    prefix = lowered[:idx].rstrip()
+    return any(prefix.endswith(neg) for neg in _NEGATION_PREFIXES)
 
 
 def _stable_hash(text: str) -> str:
@@ -449,7 +490,19 @@ class TaskIntake:
         if not _tokens(normalized):
             return TaskType.UNKNOWN
 
-        development = _first_hit(lowered, _DEVELOPMENT_CUES) and (
+        # Investigation cues are checked first and take precedence.
+        # They are read-only by intent and must not be routed to development.
+        investigation = _first_hit(lowered, _INVESTIGATION_CUES)
+        if investigation:
+            return TaskType.INVESTIGATION_REQUEST
+
+        # Development cues are only treated as development when NOT negated.
+        # "don't modify" must not become a development request.
+        development_cue_hit = _first_hit(lowered, _DEVELOPMENT_CUES)
+        development_negated = any(
+            _is_negated(lowered, cue) for cue in _DEVELOPMENT_CUES if cue in lowered
+        )
+        development = (development_cue_hit and not development_negated) and (
             _first_hit(lowered, _SELF_TARGETS)
             or "capability" in lowered
             or "module" in lowered
