@@ -8,7 +8,7 @@ Phase 7.1 — Understanding Engine.
 """
 
 from collections import defaultdict
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from atlas.understanding.models import (
