@@ -32,21 +32,6 @@ def conversation_handler(params: dict) -> ExecutionResult:
     )
 
 
-def knowledge_retrieval_handler(params: dict) -> ExecutionResult:
-    """
-    Default handler for the ``knowledge_retrieval`` capability.
-
-    Returns a successful execution result indicating a knowledge query
-    placeholder response.
-    """
-    return ExecutionResult(
-        capability="knowledge_retrieval",
-        success=True,
-        output={"status": "handled", "message": "Knowledge request acknowledged."},
-        metadata={"handler": "knowledge_retrieval_handler"},
-    )
-
-
 def analysis_handler(params: dict) -> ExecutionResult:
     """
     Default handler for the ``analysis`` capability.
@@ -95,7 +80,6 @@ def noop_handler(params: dict) -> ExecutionResult:
 
 DEFAULT_HANDLERS: dict[str, Callable[[dict], ExecutionResult]] = {
     "conversation": conversation_handler,
-    "knowledge_retrieval": knowledge_retrieval_handler,
     "analysis": analysis_handler,
     "task_execution": task_execution_handler,
     "noop": noop_handler,

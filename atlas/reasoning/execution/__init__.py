@@ -11,7 +11,6 @@ from atlas.reasoning.execution.routing import CapabilityRouter
 from atlas.reasoning.execution.handlers import (
     DEFAULT_HANDLERS,
     conversation_handler,
-    knowledge_retrieval_handler,
     analysis_handler,
     task_execution_handler,
     noop_handler,
@@ -27,7 +26,6 @@ __all__ = [
     "CapabilityRouter",
     "DEFAULT_HANDLERS",
     "conversation_handler",
-    "knowledge_retrieval_handler",
     "analysis_handler",
     "task_execution_handler",
     "noop_handler",

@@ -38,6 +38,7 @@ from atlas.memory.search.search_engine import MemorySearchEngine
 from atlas.memory.service.memory_manager_service import MemoryManagerService
 
 from atlas.knowledge.knowledge_manager import KnowledgeManager
+from atlas.knowledge.capability_handlers import KnowledgeRetrievalHandlerFactory
 
 from atlas.learning.learning_manager import LearningManager
 from atlas.learning.knowledge_feedback import KnowledgeFeedback
@@ -2264,6 +2265,12 @@ class Atlas:
         # --- Track B: Register toolchain capability handlers (Phase 18.7) ---
         self._toolchain_factory = ToolchainCapabilityFactory()
         self._toolchain_factory.register(self._capability_registry)
+
+        # --- Knowledge: Register knowledge retrieval capability handler ---
+        self._knowledge_factory = KnowledgeRetrievalHandlerFactory(
+            knowledge_manager=self._knowledge_manager,
+        )
+        self._knowledge_factory.register(self._capability_registry)
 
         self._reasoning_controller = ReasoningController()
         # --- Phase 20 Batch 4: create the LearningEngine before the
