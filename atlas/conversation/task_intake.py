@@ -61,6 +61,7 @@ class TaskType(Enum):
     DEVELOPMENT_REQUEST = "development_request"
     INVESTIGATION_REQUEST = "investigation_request"
     APPROVAL = "approval"
+    EXECUTION_REQUEST = "execution_request"
     UNKNOWN = "unknown"
 
 
@@ -152,6 +153,26 @@ _AMBIGUOUS_RESPONSES: frozenset[str] = frozenset(
         "go ahead",
         "do it",
         "proceed",
+    }
+)
+
+#: Explicit execution request phrases.
+#: These cues indicate the user wants to execute an already-approved proposal.
+#: NOTE: Bare "implement" or "apply" without "approved" context is ambiguous
+#: and may indicate development intent (Level 2). Only unambiguous execution
+#: language or "implement/apply the approved" triggers Level 3.
+_EXECUTION_CUES: frozenset[str] = frozenset(
+    {
+        "execute",
+        "execute the approved",
+        "run the approved",
+        "perform the approved",
+        "implement the approved",
+        "apply the approved",
+        "begin implementation",
+        "start implementation",
+        "proceed with implementation",
+        "carry out the approved",
     }
 )
 
@@ -335,6 +356,31 @@ def _is_explicit_approval(text: str) -> bool:
         return False
     # Must NOT be negated (e.g. "don't approve")
     for cue in _APPROVAL_CUES:
+        if cue in lowered and _is_negated(lowered, cue):
+            return False
+    return True
+
+
+def _is_explicit_execution(text: str) -> bool:
+    """Return True when the text contains explicit execution language.
+
+    Explicit execution requires unambiguous execution cues (e.g. "execute",
+    "implement", "apply the approved proposal"). Ambiguous responses like
+    "okay", "go ahead", "do it" are NOT treated as execution.
+
+    Args:
+        text: the normalized request text.
+
+    Returns:
+        True if the text contains explicit execution language.
+    """
+    lowered = text.lower()
+    # Must contain an explicit execution cue
+    has_execution_cue = any(cue in lowered for cue in _EXECUTION_CUES)
+    if not has_execution_cue:
+        return False
+    # Must NOT be negated (e.g. "don't execute")
+    for cue in _EXECUTION_CUES:
         if cue in lowered and _is_negated(lowered, cue):
             return False
     return True
@@ -546,7 +592,12 @@ class TaskIntake:
         if not _tokens(normalized):
             return TaskType.UNKNOWN
 
-        # Explicit approval is checked first. It requires unambiguous approval
+        # Explicit execution is checked first. It requires unambiguous execution
+        # language and cannot be ambiguous conversational responses.
+        if _is_explicit_execution(normalized):
+            return TaskType.EXECUTION_REQUEST
+
+        # Explicit approval is checked next. It requires unambiguous approval
         # language and cannot be ambiguous conversational responses.
         if _is_explicit_approval(normalized):
             return TaskType.APPROVAL

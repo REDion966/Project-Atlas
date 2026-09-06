@@ -7,6 +7,7 @@ Coordinates Atlas conversations.
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from atlas.ai.routing.models import RoutingRequest
@@ -15,6 +16,7 @@ from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.conversation_state import ConversationStateManager
+from atlas.conversation.execution import Level3ExecutionService
 from atlas.conversation.investigation import InvestigationService
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.reference_resolution import ConversationReferenceResolver
@@ -36,6 +38,31 @@ if TYPE_CHECKING:
     from atlas.session.models import Session
 
 
+@dataclass(frozen=True, slots=True)
+class _ApprovalRef:
+    """Minimal approval reference for Level 3 validation."""
+
+    request_id: str
+    proposal_id: str
+    proposal_fingerprint: str = ""
+
+    def is_valid_for(self, proposal: Any) -> bool:
+        if self.proposal_id != proposal.proposal_id:
+            return False
+        if not self.proposal_fingerprint:
+            return False
+        current = getattr(proposal, "proposal_fingerprint", "") or ""
+        return self.proposal_fingerprint == current
+
+
+@dataclass(frozen=True, slots=True)
+class _ProposalRef:
+    """Minimal proposal reference for Level 3 validation."""
+
+    proposal_id: str
+    proposal_fingerprint: str = ""
+
+
 class ConversationService:
     """Coordinates the complete conversation pipeline."""
 
@@ -54,6 +81,7 @@ class ConversationService:
         state_manager: ConversationStateManager | None = None,
         reference_resolver: ConversationReferenceResolver | None = None,
         investigation_service: InvestigationService | None = None,
+        execution_service: Level3ExecutionService | None = None,
     ):
         """
         Initialize the conversation service.
@@ -110,6 +138,7 @@ class ConversationService:
         self._outcome_reporter = outcome_reporter
         self._state_manager = state_manager or ConversationStateManager()
         self._investigation_service = investigation_service
+        self._execution_service = execution_service
         self._reference_resolver = reference_resolver or ConversationReferenceResolver()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
@@ -228,6 +257,13 @@ class ConversationService:
             if approval_response is not None:
                 self._conversation.add_message(approval_response)
                 return approval_response
+        # Execution semantics — explicit execution of an approved proposal.
+        # Must be explicit; approval alone does not execute.
+        if spec is not None and spec.task_type is TaskType.EXECUTION_REQUEST:
+            execution_response = self._maybe_handle_execution_request(spec)
+            if execution_response is not None:
+                self._conversation.add_message(execution_response)
+                return execution_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -383,6 +419,13 @@ class ConversationService:
             if investigation_response is not None:
                 self._conversation.add_message(investigation_response)
                 yield investigation_response.content
+                return
+        # Execution semantics — explicit execution of an approved proposal.
+        if spec is not None and spec.task_type is TaskType.EXECUTION_REQUEST:
+            execution_response = self._maybe_handle_execution_request(spec)
+            if execution_response is not None:
+                self._conversation.add_message(execution_response)
+                yield execution_response.content
                 return
         development_response = self._maybe_handle_development_request(spec)
         if development_response is not None:
@@ -854,6 +897,94 @@ class ConversationService:
                 },
             },
         )
+
+    def _maybe_handle_execution_request(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Handle an explicit EXECUTION_REQUEST.
+
+        Execution is only valid when:
+        1. There is an active proposal (active_proposal_id in state).
+        2. The execution request is explicit (not ambiguous like "okay").
+        3. The proposal has a valid approval (matching fingerprint).
+        4. Authorization is granted.
+
+        Execution does NOT:
+        - Treat approval as authorization
+        - Execute without explicit execution request
+        - Allow stale approvals to execute
+        - Allow replay of already-executed proposals
+        - Automatically transition from analysis/recommendation
+
+        Args:
+            spec: the classified EXECUTION_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the execution result, or None if no
+            execution service is wired.
+        """
+        if self._execution_service is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Execution service is not available. "
+                    "Proposal remains approved but not executed."
+                ),
+                metadata={"execution": {"status": "service_unavailable"}},
+            )
+
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.active_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no active proposal to execute. "
+                    "Please create and approve a proposal first."
+                ),
+                metadata={"execution": {"status": "no_active_proposal"}},
+            )
+
+        # Validate approval exists and is valid
+        if not state.active_proposal_fingerprint:
+            return Message(
+                role="assistant",
+                content=(
+                    "No valid approval found for the active proposal. "
+                    "Please approve the proposal before execution."
+                ),
+                metadata={"execution": {"status": "no_valid_approval"}},
+            )
+
+        # Build a minimal approval object for validation
+        approval = _ApprovalRef(
+            request_id=state.pending_approval_id or "unknown",
+            proposal_id=state.active_proposal_id,
+            proposal_fingerprint=state.active_proposal_fingerprint,
+        )
+
+        # Build a minimal proposal object for validation
+        proposal = _ProposalRef(
+            proposal_id=state.active_proposal_id,
+            proposal_fingerprint=state.active_proposal_fingerprint,
+        )
+
+        # Execute through Level 3 service
+        message, record = self._execution_service.execute(
+            proposal=proposal,
+            approval=approval,
+        )
+
+        # Update conversation state
+        if self._state_manager is not None:
+            self._state_manager.update(
+                latest_result=(
+                    f"Execution {record.execution_id}: "
+                    f"{record.execution_status}"
+                ),
+            )
+
+        return message
 
     def handle_advisory(self, advisory_signal, session_context: SessionContext | None = None):
         """Feed a bounded P5 advisory signal into the P7 detection/dialogue path
