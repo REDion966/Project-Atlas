@@ -136,3 +136,39 @@ class TestInvestigationReport:
         md = report.to_markdown()
         assert "F17" in md
         assert "mixed naive/aware datetimes" in md
+
+
+class TestP14_1RoutingRegression:
+    """P14.1 — tool/action identifiers must not trigger investigation routing.
+
+    Investigation cues use word-boundary matching so that a cue like "inspect"
+    matches standalone investigation language but does NOT match when it appears
+    as a substring of a tool/action identifier such as "code_inspector".
+    """
+
+    @pytest.mark.parametrize("text", [
+        "Run code_inspector to find files.",
+        "execute code_inspector on the project",
+        "use the code_analyzer tool",
+        "run the debugger on this function",
+        "invoke code_tracer to find the bug",
+    ])
+    def test_tool_name_with_investigation_substring_not_investigation(self, text):
+        """Tool/action identifiers containing investigation cues are not investigation."""
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is not TaskType.INVESTIGATION_REQUEST
+
+    @pytest.mark.parametrize("text", [
+        "inspect the repository",
+        "inspect the datetime handling",
+        "please inspect this code carefully",
+        "analyze the failure mode",
+        "trace the error to its source",
+        "debug the comparison issue",
+        "examine the log output",
+        "diagnose the performance problem",
+    ])
+    def test_genuine_investigation_language_still_investigation(self, text):
+        """Standalone investigation cues in normal language remain investigation."""
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST

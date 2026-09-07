@@ -263,10 +263,24 @@ def _clauses(text: str) -> list[str]:
     ]
 
 
-def _first_hit(text: str, cues: frozenset[str] | tuple[str, ...]) -> bool:
-    """Return True when any cue is present (whole-cue match)."""
+def _first_hit(
+    text: str,
+    cues: frozenset[str] | tuple[str, ...],
+    *,
+    word_boundary: bool = False,
+) -> bool:
+    """Return True when any cue is present (whole-cue match).
+
+    When ``word_boundary`` is False (default), a cue matches if it appears
+    anywhere in ``text`` as a substring. When True, the cue must appear as
+    a whole word (word-boundary match) so that tool/action identifiers such
+    as ``code_inspector`` do not trigger broad investigation cues such as
+    ``inspect``.
+    """
     lowered = text.lower()
-    return any(cue in lowered for cue in cues)
+    if not word_boundary:
+        return any(cue in lowered for cue in cues)
+    return any(re.search(rf"\b{re.escape(cue)}\b", lowered) for cue in cues)
 
 
 def _extract_items(text: str, cues: tuple[str, ...]) -> tuple[str, ...]:
@@ -604,7 +618,13 @@ class TaskIntake:
 
         # Investigation cues are checked next and take precedence.
         # They are read-only by intent and must not be routed to development.
-        investigation = _first_hit(lowered, _INVESTIGATION_CUES)
+        # Word-boundary matching prevents tool/action identifiers such as
+        # "code_inspector" from triggering broad investigation cues such as
+        # "inspect"; genuine investigation language ("inspect the repo") still
+        # matches because the cue appears as a standalone word.
+        investigation = _first_hit(
+            lowered, _INVESTIGATION_CUES, word_boundary=True
+        )
         if investigation:
             return TaskType.INVESTIGATION_REQUEST
 

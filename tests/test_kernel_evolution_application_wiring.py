@@ -290,8 +290,11 @@ class TestFailClosedScopes(unittest.TestCase):
         provider_before = self.atlas._config.get("ai", "provider")  # noqa: SLF001
         result = self.engine.apply(_config_request())
         self.assertFalse(result.success)
-        # No writer wired → engine refuses before any mutation.
-        self.assertIn("writer", result.error)
+        # Execution-boundary authorization refuses the unauthorized request
+        # before any mutation (previously this was the missing-writer step).
+        self.assertIn("Authorization refused", result.error)
+        # Rejection happens at the authorization boundary, not a lower level.
+        self.assertEqual(result.terminal_status, "REFUSED")
         # Live configuration unchanged (no staged entries, no live mutation).
         self.assertEqual(
             self.atlas._config.get("ai", "provider"),  # noqa: SLF001
@@ -301,7 +304,8 @@ class TestFailClosedScopes(unittest.TestCase):
     def test_capability_apply_fails_cleanly_and_does_not_mutate(self):
         result = self.engine.apply(_capability_request())
         self.assertFalse(result.success)
-        self.assertIn("writer", result.error)
+        self.assertIn("Authorization refused", result.error)
+        self.assertEqual(result.terminal_status, "REFUSED")
         # No rogue capability was registered.
         self.assertFalse(self.atlas._capability_registry.has("RogueCap"))  # noqa: SLF001
 
