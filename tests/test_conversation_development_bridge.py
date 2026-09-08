@@ -156,15 +156,26 @@ class TestArchitectureGuards:
             .read_text(encoding="utf-8")
         )
         tree = ast.parse(source)
+        # P17 approved the governed conversational approval + execution paths,
+        # which intentionally bind the conversation layer to the EXISTING
+        # ApprovalManager and the EXISTING proposal/request status enums.
+        # Every other atlas.evolution import remains forbidden (execution
+        # engine, autonomy, planner, ...).
+        allowed_modules = {
+            "atlas.evolution.approval_manager",
+            "atlas.evolution.models",
+        }
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
-                assert not node.module.startswith(
-                    "atlas.evolution"
+                assert (
+                    node.module in allowed_modules
+                    or not node.module.startswith("atlas.evolution")
                 ), "ConversationService imports evolution"
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    assert not alias.name.startswith(
-                        "atlas.evolution"
+                    assert (
+                        alias.name in allowed_modules
+                        or not alias.name.startswith("atlas.evolution")
                     ), "ConversationService imports evolution"
 
     def test_task_intake_has_no_evolution_import(self):

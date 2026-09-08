@@ -1125,6 +1125,76 @@ class Atlas:
 
         return Message(role="assistant", content="\n".join(lines))
 
+    def _development_execution_bridge(
+        self,
+        session_context,
+        proposal: "atlas.evolution.models.EvolutionProposal",
+        request: "atlas.evolution.models.ApprovalRequest",
+    ) -> Message:
+        """Bridge an already-approved conversational proposal into governed execution.
+
+        Persists the live EvolutionProposal and its decided ApprovalRequest into
+        the EXISTING EvolutionMemory stores, then delegates to the EXISTING
+        ``run_development_execution`` (OWNER-gated, DevelopmentPlanner,
+        SelfDevelopmentLoop: sandboxed implementation, pytest verification,
+        snapshot/rollback, DevelopmentOutcome).
+
+        This is the single sanctioned seam: the conversation layer resolves and
+        validates the real objects; this method owns persistence + execution.
+        It never authorizes, never applies directly, and never promotes.
+        """
+        if proposal is None or request is None:
+            raise RuntimeError("Execution requires a proposal and approval request.")
+
+        memory = self._evolution_memory
+        if memory is None:
+            raise RuntimeError(
+                "Evolution memory is not wired; Atlas.start() must run first."
+            )
+
+        # Persist the live objects so run_development_execution can resolve them
+        # by proposal_id exactly as the F9 track does.
+        memory.store_proposal(proposal)
+        memory.store_approval_request(request)
+
+        # Delegate to the existing governed development execution path. This
+        # re-runs the OWNER authority gate and requires APPROVED status.
+        result = self.run_development_execution(session_context, proposal.proposal_id)
+
+        return self._development_execution_message(result)
+
+    @staticmethod
+    def _development_execution_message(result: Any) -> Message:
+        """Convert a DevelopmentRunResult into a conversational Message."""
+        status = getattr(result, "status", None)
+        status_name = getattr(status, "name", str(status)) if status is not None else "unknown"
+        iterations = getattr(result, "iterations_used", 0)
+        outcomes = getattr(result, "outcomes", None) or []
+        message_text = getattr(result, "message", "") or ""
+
+        lines = [f"## Development Execution: {status_name}"]
+        if message_text:
+            lines.append("")
+            lines.append(message_text)
+        lines.append("")
+        lines.append(f"**Iterations used:** {iterations}")
+        lines.append(f"**Outcomes recorded:** {len(outcomes)}")
+
+        exec_status = "succeeded" if status_name == "SUCCESS" else status_name.lower()
+
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "execution": {
+                    "status": exec_status,
+                    "result_status": status_name,
+                    "iterations_used": iterations,
+                    "outcomes_count": len(outcomes),
+                },
+            },
+        )
+
     # ------------------------------------------------------------------
     # Phase F11: Long-Term Self-Management Review (manually invoked)
     # ------------------------------------------------------------------
@@ -3044,6 +3114,8 @@ class Atlas:
             fallback_resolver=self._deterministic_fallback,
             development_need_coordinator=DevelopmentNeedCoordinator(),
             investigation_service=InvestigationService(),
+            approval_manager=self._approval_manager,
+            development_execution_bridge=self._development_execution_bridge,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).

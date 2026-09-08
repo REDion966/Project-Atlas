@@ -44,31 +44,6 @@ if TYPE_CHECKING:
     from atlas.session.models import Session
 
 
-@dataclass(frozen=True, slots=True)
-class _ApprovalRef:
-    """Minimal approval reference for Level 3 validation."""
-
-    request_id: str
-    proposal_id: str
-    proposal_fingerprint: str = ""
-
-    def is_valid_for(self, proposal: Any) -> bool:
-        if self.proposal_id != proposal.proposal_id:
-            return False
-        if not self.proposal_fingerprint:
-            return False
-        current = getattr(proposal, "proposal_fingerprint", "") or ""
-        return self.proposal_fingerprint == current
-
-
-@dataclass(frozen=True, slots=True)
-class _ProposalRef:
-    """Minimal proposal reference for Level 3 validation."""
-
-    proposal_id: str
-    proposal_fingerprint: str = ""
-
-
 class ConversationService:
     """Coordinates the complete conversation pipeline."""
 
@@ -89,6 +64,7 @@ class ConversationService:
         investigation_service: InvestigationService | None = None,
         execution_service: Level3ExecutionService | None = None,
         approval_manager: ApprovalManager | None = None,
+        development_execution_bridge: Callable[..., Any] | None = None,
     ):
         """
         Initialize the conversation service.
@@ -128,6 +104,15 @@ class ConversationService:
             approval_manager:
                 Optional ApprovalManager for creating real approval requests.
                 When ``None``, planning requests cannot create approval requests.
+
+            development_execution_bridge:
+                Optional duck-typed callable that bridges an already-approved
+                conversational proposal/request into the EXISTING kernel
+                governed-development-execution infrastructure. Signature:
+
+                    (session_context, proposal, request) -> Message
+
+                When ``None``, execution requests cannot be carried out.
         """
 
         self._history = History()
@@ -153,6 +138,7 @@ class ConversationService:
         self._proposal_converter = InvestigationProposalConverter()
         self._execution_service = execution_service
         self._approval_manager = approval_manager
+        self._development_execution_bridge = development_execution_bridge
         self._reference_resolver = reference_resolver or ConversationReferenceResolver()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
@@ -1356,89 +1342,194 @@ class ConversationService:
         self,
         spec: TaskSpec,
     ) -> Message | None:
-        """Handle an explicit EXECUTION_REQUEST.
+        """Handle an explicit EXECUTION_REQUEST via the D2 governed bridge.
+
+        Bridges an ALREADY-APPROVED conversational EvolutionProposal and its
+        decided ApprovalRequest into the EXISTING kernel governed-development-
+        execution infrastructure:
+
+            resolve real proposal + request
+                → validate identity / fingerprint / status / decision
+                → OWNER authority
+                → existing EvolutionMemory stores
+                → existing governed development execution
+                → STOP
 
         Execution is only valid when:
-        1. There is an active proposal (active_proposal_id in state).
+        1. There is an active approved proposal (evolution_proposal_id in state).
         2. The execution request is explicit (not ambiguous like "okay").
-        3. The proposal has a valid approval (matching fingerprint).
-        4. Authorization is granted.
+        3. The real proposal/request can be resolved from conversation registries.
+        4. The proposal is APPROVED and the request is APPROVED.
+        5. Identity and fingerprint bind exactly.
+        6. OWNER authority is granted (enforced by the kernel bridge).
 
         Execution does NOT:
         - Treat approval as authorization
         - Execute without explicit execution request
         - Allow stale approvals to execute
         - Allow replay of already-executed proposals
-        - Automatically transition from analysis/recommendation
+        - Call Level3ExecutionService, ApplicationEngine, or AuthorizationManager
+        - Mutate any files directly
 
         Args:
             spec: the classified EXECUTION_REQUEST TaskSpec.
 
         Returns:
-            A Message describing the execution result, or None if no
-            execution service is wired.
+            A Message describing the execution result.
         """
-        if self._execution_service is None:
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
             return Message(
                 role="assistant",
                 content=(
-                    "Execution service is not available. "
+                    "No active session. Execution requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"execution": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required at the conversation boundary.
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "Execution requires OWNER authority. "
+                    "This session is not authorized to execute proposals."
+                ),
+                metadata={"execution": {"status": "unauthorized"}},
+            )
+
+        # 3. The development-execution bridge must be wired.
+        if self._development_execution_bridge is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Development execution bridge is not available. "
                     "Proposal remains approved but not executed."
                 ),
-                metadata={"execution": {"status": "service_unavailable"}},
+                metadata={"execution": {"status": "no_bridge"}},
             )
 
         state = self._state_manager.state if self._state_manager else None
-        if state is None or not state.active_proposal_id:
+        if state is None or not state.evolution_proposal_id:
             return Message(
                 role="assistant",
                 content=(
-                    "There is no active proposal to execute. "
-                    "Please create and approve a proposal first."
+                    "There is no approved development proposal to execute. "
+                    "Please investigate an issue, plan it, and approve it first."
                 ),
                 metadata={"execution": {"status": "no_active_proposal"}},
             )
 
-        # Validate approval exists and is valid
-        if not state.active_proposal_fingerprint:
+        # 4. Resolve the REAL live objects from the conversation registries.
+        proposal = self._resolve_evolution_proposal(state.evolution_proposal_id)
+        if proposal is None:
             return Message(
                 role="assistant",
                 content=(
-                    "No valid approval found for the active proposal. "
+                    "The approved proposal could not be resolved. "
+                    "Please plan the proposal again."
+                ),
+                metadata={"execution": {"status": "proposal_not_found"}},
+            )
+        request = self._resolve_approved_request(state.evolution_proposal_id)
+        if request is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approved request could not be resolved. "
+                    "Please approve the proposal again."
+                ),
+                metadata={"execution": {"status": "request_not_found"}},
+            )
+
+        # 5. Cross-validate identity + status + fingerprint BEFORE the bridge.
+        from atlas.evolution.models import ApprovalDecision, ProposalStatus
+
+        if proposal.status != ProposalStatus.APPROVED:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Proposal '{proposal.proposal_id}' is "
+                    f"'{proposal.status.name}', not APPROVED. "
+                    "Only approved proposals can be executed."
+                ),
+                metadata={"execution": {"status": "not_approved"}},
+            )
+        if request.decision != ApprovalDecision.APPROVED:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request has not been approved. "
                     "Please approve the proposal before execution."
                 ),
-                metadata={"execution": {"status": "no_valid_approval"}},
+                metadata={"execution": {"status": "not_approved"}},
             )
-
-        # Build a minimal approval object for validation
-        approval = _ApprovalRef(
-            request_id=state.pending_approval_id or "unknown",
-            proposal_id=state.active_proposal_id,
-            proposal_fingerprint=state.active_proposal_fingerprint,
-        )
-
-        # Build a minimal proposal object for validation
-        proposal = _ProposalRef(
-            proposal_id=state.active_proposal_id,
-            proposal_fingerprint=state.active_proposal_fingerprint,
-        )
-
-        # Execute through Level 3 service
-        message, record = self._execution_service.execute(
-            proposal=proposal,
-            approval=approval,
-        )
-
-        # Update conversation state
-        if self._state_manager is not None:
-            self._state_manager.update(
-                latest_result=(
-                    f"Execution {record.execution_id}: "
-                    f"{record.execution_status}"
+        if request.proposal_id != proposal.proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request does not match the active proposal. "
+                    "Execution refused."
                 ),
+                metadata={"execution": {"status": "identity_mismatch"}},
             )
+        if not request.is_valid_for(proposal):
+            return Message(
+                role="assistant",
+                content=(
+                    "The proposal has changed since the approval request was "
+                    "created. Execution refused. Please approve again."
+                ),
+                metadata={"execution": {"status": "fingerprint_mismatch"}},
+            )
+
+        # 6. Delegate to the existing governed development-execution bridge.
+        try:
+            message = self._development_execution_bridge(
+                active_session, proposal, request
+            )
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Development execution could not proceed: {exc}. "
+                    "No changes were made."
+                ),
+                metadata={"execution": {"status": "execution_failed", "error": str(exc)}},
+            )
+
+        # 7. Record the result.
+        if self._state_manager is not None:
+            exec_status = getattr(
+                getattr(message, "metadata", None),
+                "get",
+                lambda *_a, **_k: None,
+            )
+            latest = "Execution requested"
+            if isinstance(message.metadata, dict):
+                latest = (
+                    f"Execution {message.metadata.get('execution', {}).get('status', 'requested')}"
+                )
+            self._state_manager.update(latest_result=latest)
 
         return message
+
+    def _resolve_approved_request(self, proposal_id: str) -> Any | None:
+        """Resolve the decided APPROVED ApprovalRequest for a proposal.
+
+        After approval, ``pending_approval_id`` is consumed (set to None), so
+        the request is found by scanning the live registry for the entry whose
+        proposal_id matches and whose decision is APPROVED.
+        """
+        for req in self._active_approval_requests.values():
+            if (
+                getattr(req, "proposal_id", None) == proposal_id
+                and getattr(getattr(req, "decision", None), "name", "") == "APPROVED"
+            ):
+                return req
+        return None
 
     def handle_advisory(self, advisory_signal, session_context: SessionContext | None = None):
         """Feed a bounded P5 advisory signal into the P7 detection/dialogue path

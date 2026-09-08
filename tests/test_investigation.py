@@ -1334,3 +1334,348 @@ class TestRejectionClassification:
         """Approval cues still classify as APPROVAL, not rejection."""
         spec = TaskIntake().intake("approve this proposal")
         assert spec.task_type is TaskType.APPROVAL
+
+
+class TestDevelopmentExecutionBridge:
+    """P17 — D2 governed development-execution bridge tests.
+
+    Proves the conversation layer resolves the REAL approved EvolutionProposal
+    and ApprovalRequest, validates identity/fingerprint/status/decision, and
+    delegates to the existing kernel development-execution bridge — without
+    calling Level3ExecutionService, ApplicationEngine, or AuthorizationManager.
+    """
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    def _owner_session(self):
+        from atlas.authority.service import AuthorityService
+        from atlas.session.context import SessionContext
+        from atlas.session.manager import SessionManager
+
+        authority = AuthorityService("Owner")
+        manager = SessionManager(authority)
+        return SessionContext.from_session(manager.create_session("owner"))
+
+    def _user_session(self):
+        from atlas.authority.service import AuthorityService
+        from atlas.session.context import SessionContext
+        from atlas.session.manager import SessionManager
+
+        authority = AuthorityService("Owner")
+        authority.add_user("Alice", principal_id="alice")
+        manager = SessionManager(authority)
+        return SessionContext.from_session(manager.create_session("alice"))
+
+    @pytest.fixture
+    def service(self, failing_ai):
+        from atlas.conversation.message import Message
+
+        captured = {}
+
+        def bridge(session_context, proposal, request):
+            captured["session"] = session_context
+            captured["proposal"] = proposal
+            captured["request"] = request
+            return Message(
+                role="assistant",
+                content="bridged",
+                metadata={"execution": {"status": "succeeded"}},
+            )
+
+        svc = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+            development_execution_bridge=bridge,
+        )
+        svc._test_bridge = captured
+        return svc
+
+    def _prepare_approved(self, service, session):
+        service.send("Investigate the memory architecture", session_context=session)
+        service.send("Plan this improvement", session_context=session)
+        service.send("Approve this proposal", session_context=session)
+        state = service.state_manager.state
+        assert state.evolution_proposal_id is not None
+        return state
+
+    def test_full_flow_delegates_real_objects(self, service):
+        """investigate → plan → approve → execute delegates real objects."""
+        session = self._owner_session()
+        self._prepare_approved(service, session)
+
+        response = service.send("Execute the approved proposal", session_context=session)
+
+        assert response.role == "assistant"
+        captured = service._test_bridge
+        assert captured["session"] is session
+        # Real objects, not fabricated refs.
+        assert hasattr(captured["proposal"], "status")
+        assert hasattr(captured["request"], "decision")
+        assert captured["proposal"].status == ProposalStatus.APPROVED
+        assert captured["request"].decision == ApprovalDecision.APPROVED
+        assert captured["request"].proposal_id == captured["proposal"].proposal_id
+
+    def test_execution_requires_session(self, service):
+        """Execution without a session fails closed."""
+        response = service.send("Execute the approved proposal")
+        assert "no active session" in response.content.lower()
+        assert "session" not in service._test_bridge
+
+    def test_execution_requires_owner(self, service):
+        """Non-OWNER cannot execute."""
+        session = self._user_session()
+        self._prepare_approved(service, session)
+        before = dict(service._test_bridge)
+
+        response = service.send("Execute the approved proposal", session_context=session)
+
+        assert "owner authority" in response.content.lower()
+        assert service._test_bridge == before  # bridge not called
+
+    def test_execution_requires_bridge(self, failing_ai):
+        """Execution without a wired bridge fails closed."""
+        svc = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+        )
+        session = self._owner_session()
+        self._prepare_approved(svc, session)
+
+        response = svc.send("Execute the approved proposal", session_context=session)
+
+        assert "not available" in response.content.lower()
+
+    def test_execution_requires_approved_proposal(self, service):
+        """Execution without an approved proposal fails closed."""
+        session = self._owner_session()
+        response = service.send("Execute the approved proposal", session_context=session)
+        assert "no approved development proposal" in response.content.lower()
+        assert "session" not in service._test_bridge
+
+    def test_proposal_not_approved_refused(self, service):
+        """A proposal that is not APPROVED is refused (no bridge call)."""
+        session = self._owner_session()
+        service.send("Investigate the memory architecture", session_context=session)
+        service.send("Plan this improvement", session_context=session)
+        # Do NOT approve — proposal is PENDING_APPROVAL, request is PENDING.
+        before = dict(service._test_bridge)
+
+        response = service.send("Execute the approved proposal", session_context=session)
+
+        # Neither the proposal nor the request is APPROVED, so the bridge is
+        # never called and execution is refused.
+        content = response.content.lower()
+        assert (
+            "not approved" in content
+            or "could not be resolved" in content
+            or "no approved" in content
+        )
+        assert service._test_bridge == before
+
+    def test_fingerprint_mismatch_refused(self, service):
+        """Changed proposal content fails fingerprint validation."""
+        session = self._owner_session()
+        self._prepare_approved(service, session)
+
+        # Tamper with the live proposal after approval.
+        proposal = service._resolve_evolution_proposal(
+            service.state_manager.state.evolution_proposal_id
+        )
+        proposal.title = "Tampered"
+        proposal.proposal_fingerprint = ""
+        before = dict(service._test_bridge)
+
+        response = service.send("Execute the approved proposal", session_context=session)
+
+        assert "changed" in response.content.lower()
+        assert service._test_bridge == before
+
+    def test_stream_execution_parity(self, service):
+        """stream() execution reaches the same governed bridge."""
+        session = self._owner_session()
+        self._prepare_approved(service, session)
+
+        chunks = list(
+            service.stream("Execute the approved proposal", session_context=session)
+        )
+        assert "".join(chunks)
+        assert service._test_bridge["session"] is session
+        assert service._test_bridge["proposal"].status == ProposalStatus.APPROVED
+
+    def test_cross_session_isolation(self, failing_ai):
+        """Service B cannot execute service A's approved proposal."""
+        captured = {}
+
+        def bridge(session_context, proposal, request):
+            captured["called"] = True
+            return Message(role="assistant", content="bridged")
+
+        svc_a = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+            development_execution_bridge=bridge,
+        )
+        svc_b = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+            development_execution_bridge=bridge,
+        )
+        session_a = self._owner_session()
+        svc_a.send("Investigate the memory architecture", session_context=session_a)
+        svc_a.send("Plan this improvement", session_context=session_a)
+        svc_a.send("Approve this proposal", session_context=session_a)
+        assert svc_a.state_manager.state.evolution_proposal_id is not None
+
+        session_b = self._owner_session()
+        response = svc_b.send("Execute the approved proposal", session_context=session_b)
+
+        assert "no approved development proposal" in response.content.lower()
+        assert "called" not in captured
+
+    def test_no_level3_or_authorization_calls(self, service):
+        """The bridge must NOT call Level3ExecutionService or AuthorizationManager."""
+        import atlas.conversation.conversation_service as cs_module
+
+        session = self._owner_session()
+        self._prepare_approved(service, session)
+
+        # Confirm the obsolete ref classes are gone.
+        assert not hasattr(cs_module, "_ApprovalRef")
+        assert not hasattr(cs_module, "_ProposalRef")
+
+        # The handler should not touch execution_service (Level3).
+        service._execution_service = None  # would have been used by old path
+        response = service.send("Execute the approved proposal", session_context=session)
+
+        # If execution failed, surface the underlying error for debugging.
+        exec_meta = response.metadata.get("execution", {})
+        if exec_meta.get("status") == "execution_failed":
+            raise AssertionError(
+                f"Bridge raised: {exec_meta.get('error')!r}"
+            )
+
+        assert exec_meta.get("status") == "succeeded"
+
+
+class TestKernelDevelopmentExecutionBridge:
+    """P17 — kernel _development_execution_bridge persistence + delegation."""
+
+    def _make_atlas(self, tmp_path, monkeypatch):
+        import atlas.kernel.atlas as kernel_mod
+        from tests.test_durable_guided_improvement import _storage_class
+
+        monkeypatch.setattr(
+            "atlas.kernel.atlas.SQLiteEvolutionStorage",
+            _storage_class(tmp_path),
+        )
+        atlas = kernel_mod.Atlas()
+        atlas.start()
+        return atlas
+
+    def test_bridge_persists_and_delegates(self, tmp_path, monkeypatch):
+        """Bridge persists proposal + request and delegates to run_development_execution."""
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            from atlas.evolution.models import (
+                ApprovalDecision,
+                ApprovalRequest,
+                EvolutionProposal,
+                ImprovementPlan,
+                ImprovementPriority,
+                ProposalStatus,
+            )
+
+            # Use the atlas's OWN authoritative owner session so the
+            # _require_development_authority gate recognizes it.
+            session = atlas.session_context
+            assert session is not None
+
+            plan = ImprovementPlan(
+                plan_id="PLAN-TEST",
+                title="Test",
+                description="Test plan",
+                priority=ImprovementPriority.MEDIUM,
+                target_components=("atlas/memory",),
+            )
+            proposal = EvolutionProposal(
+                proposal_id="PROP-TEST-001",
+                title="Improve: test",
+                summary="Test",
+                rationale="Test",
+                expected_benefit="Test",
+                risks="Low",
+                impact_analysis="Test",
+                implementation_approach="Test",
+                plan=plan,
+                status=ProposalStatus.APPROVED,
+            )
+            request = ApprovalRequest(
+                request_id="APPR-TEST-001",
+                proposal_id="PROP-TEST-001",
+                title="Test",
+                description="Test",
+                rationale="Test",
+                risks="Low",
+                expected_benefit="Test",
+                proposal_fingerprint=proposal.proposal_fingerprint,
+                decision=ApprovalDecision.APPROVED,
+            )
+
+            # Spy on run_development_execution.
+            called = {}
+            original = atlas.run_development_execution
+
+            def spy(sc, pid):
+                called["session"] = sc
+                called["proposal_id"] = pid
+                return original(sc, pid)
+
+            atlas.run_development_execution = spy
+
+            message = atlas._development_execution_bridge(session, proposal, request)
+
+            # Persisted into EvolutionMemory.
+            assert atlas._evolution_memory.get_proposal("PROP-TEST-001") is not None
+            persisted_reqs = [
+                r for r in atlas._evolution_memory.get_all_approval_requests()
+                if r.proposal_id == "PROP-TEST-001"
+            ]
+            assert len(persisted_reqs) >= 1
+
+            # Delegated to run_development_execution with the right ID.
+            assert called["proposal_id"] == "PROP-TEST-001"
+            assert called["session"] is session
+
+            # Returns a conversational Message. The proposal carries no actual
+            # code changes, so the loop refuses with INVALID_OBJECTIVE — which
+            # is a valid terminal status proving delegation reached the loop.
+            assert message.role == "assistant"
+            assert message.metadata["execution"]["status"] in (
+                "succeeded",
+                "invalid_objective",
+                "iterations_exhausted",
+                "governance_denied",
+            )
+        finally:
+            atlas.shutdown()
