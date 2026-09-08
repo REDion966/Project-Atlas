@@ -17,7 +17,12 @@ from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.conversation_state import ConversationStateManager
 from atlas.conversation.execution import Level3ExecutionService
-from atlas.conversation.investigation import InvestigationService
+from atlas.conversation.investigation import (
+    InvestigationProposal,
+    InvestigationProposalConverter,
+    InvestigationProposalGenerator,
+    InvestigationService,
+)
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.reference_resolution import ConversationReferenceResolver
 from atlas.conversation.development_outcome_reporter import (
@@ -28,6 +33,7 @@ from atlas.conversation.history import History
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
+from atlas.evolution.approval_manager import ApprovalManager
 from atlas.memory.context.context_engine import ContextEngine
 from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
@@ -82,6 +88,7 @@ class ConversationService:
         reference_resolver: ConversationReferenceResolver | None = None,
         investigation_service: InvestigationService | None = None,
         execution_service: Level3ExecutionService | None = None,
+        approval_manager: ApprovalManager | None = None,
     ):
         """
         Initialize the conversation service.
@@ -117,6 +124,10 @@ class ConversationService:
             fallback_resolver:
                 Optional DeterministicFallbackResolver for model-unavailable
                 degraded operation.
+
+            approval_manager:
+                Optional ApprovalManager for creating real approval requests.
+                When ``None``, planning requests cannot create approval requests.
         """
 
         self._history = History()
@@ -138,10 +149,17 @@ class ConversationService:
         self._outcome_reporter = outcome_reporter
         self._state_manager = state_manager or ConversationStateManager()
         self._investigation_service = investigation_service
+        self._proposal_generator = InvestigationProposalGenerator()
+        self._proposal_converter = InvestigationProposalConverter()
         self._execution_service = execution_service
+        self._approval_manager = approval_manager
         self._reference_resolver = reference_resolver or ConversationReferenceResolver()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
+
+        # Transient registry of active InvestigationProposals keyed by proposal_id.
+        # Conversation-scoped (not global) to preserve cross-session isolation.
+        self._active_proposals: dict[str, InvestigationProposal] = {}
 
         # Create the initial conversation.
         self._conversation = self._history.create()
@@ -257,6 +275,14 @@ class ConversationService:
             if approval_response is not None:
                 self._conversation.add_message(approval_response)
                 return approval_response
+        # Planning semantics — convert an investigation proposal into a
+        # governed development proposal that enters the ApprovalManager lifecycle.
+        # Must be explicit; requires an active InvestigationProposal.
+        if spec is not None and spec.task_type is TaskType.PLANNING_REQUEST:
+            planning_response = self._maybe_handle_planning_request(spec)
+            if planning_response is not None:
+                self._conversation.add_message(planning_response)
+                return planning_response
         # Execution semantics — explicit execution of an approved proposal.
         # Must be explicit; approval alone does not execute.
         if spec is not None and spec.task_type is TaskType.EXECUTION_REQUEST:
@@ -419,6 +445,14 @@ class ConversationService:
             if investigation_response is not None:
                 self._conversation.add_message(investigation_response)
                 yield investigation_response.content
+                return
+        # Planning semantics — convert an investigation proposal into a
+        # governed development proposal that enters the ApprovalManager lifecycle.
+        if spec is not None and spec.task_type is TaskType.PLANNING_REQUEST:
+            planning_response = self._maybe_handle_planning_request(spec)
+            if planning_response is not None:
+                self._conversation.add_message(planning_response)
+                yield planning_response.content
                 return
         # Execution semantics — explicit execution of an approved proposal.
         if spec is not None and spec.task_type is TaskType.EXECUTION_REQUEST:
@@ -812,6 +846,10 @@ class ConversationService:
         Investigation is strictly read-only: it inspects the repository and
         produces a report, but never modifies anything. The investigation
         result is recorded in ConversationState.current_investigation.
+
+        When the investigation uncovers a meaningful improvement, a governed
+        development proposal is generated and presented. No changes are made;
+        the proposal requires explicit approval before any work begins.
         """
         if self._investigation_service is None:
             return None
@@ -829,15 +867,214 @@ class ConversationService:
                 latest_result=report.diagnosis,
             )
 
+        # Build the base investigation report content.
+        content_parts = [report.to_markdown()]
+
+        # Attempt proposal generation when a meaningful improvement exists.
+        proposal = self._proposal_generator.generate_proposal(report)
+        proposal_meta: dict[str, Any] = {}
+        if proposal is not None:
+            # Register the proposal for later resolution (e.g., planning).
+            self._register_proposal(proposal)
+            # Record the proposal in conversation state for continuity.
+            if self._state_manager is not None:
+                self._state_manager.update(
+                    active_proposal_id=proposal.proposal_id,
+                    active_proposal_fingerprint=proposal.fingerprint,
+                )
+            content_parts.append(
+                "\n---\n\n"
+                f"## Development Proposal: {proposal.title}\n\n"
+                f"{proposal.evidence_summary}\n\n"
+                f"**Components:** {', '.join(proposal.components[:5])}\n"
+                f"**Proposal ID:** {proposal.proposal_id}\n"
+                f"**Status:** {proposal.status}\n\n"
+                "No changes have been made. This proposal requires your "
+                "explicit approval before any work begins."
+            )
+            proposal_meta = {
+                "proposal_id": proposal.proposal_id,
+                "proposal_status": proposal.status,
+                "proposal_fingerprint": proposal.fingerprint,
+            }
+        else:
+            content_parts.append(
+                "\n---\n\n"
+                "No actionable development proposal was generated from this "
+                "investigation."
+            )
+
+        metadata: dict[str, Any] = {
+            "investigation": {
+                "target": report.target,
+                "modification_status": report.modification_status,
+                "findings_count": len(report.findings),
+                "affected_files": list(report.affected_files),
+            },
+        }
+        if proposal_meta:
+            metadata["proposal"] = proposal_meta
+
         return Message(
             role="assistant",
-            content=report.to_markdown(),
+            content="\n".join(content_parts),
+            metadata=metadata,
+        )
+
+    def _register_proposal(self, proposal: InvestigationProposal) -> None:
+        """Register an InvestigationProposal for later resolution.
+
+        Stores the proposal in a transient, conversation-scoped registry
+        so it can be resolved by ID during planning requests.
+
+        Args:
+            proposal: The InvestigationProposal to register.
+        """
+        self._active_proposals[proposal.proposal_id] = proposal
+
+    def _resolve_proposal(self, proposal_id: str) -> InvestigationProposal | None:
+        """Resolve an InvestigationProposal by ID.
+
+        Args:
+            proposal_id: The ID of the proposal to resolve.
+
+        Returns:
+            The InvestigationProposal if found, None otherwise.
+        """
+        return self._active_proposals.get(proposal_id)
+
+    def _maybe_handle_planning_request(self, spec: TaskSpec) -> Message | None:
+        """Handle an explicit PLANNING_REQUEST.
+
+        Converts the active InvestigationProposal into a governed
+        EvolutionProposal (DRAFT) and submits it to ApprovalManager
+        for approval.
+
+        Planning is only valid when:
+        1. There is an active InvestigationProposal (active_proposal_id in state).
+        2. The planning request is explicit (not ambiguous like "okay").
+        3. An ApprovalManager is wired.
+
+        Planning does NOT:
+        - Modify any files
+        - Call ApplicationEngine.apply()
+        - Create execution authorization
+        - Auto-approve anything
+        - Bypass ApprovalManager
+
+        Args:
+            spec: the classified PLANNING_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the planning result, or None if no active
+            proposal exists to plan.
+        """
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.active_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no active investigation proposal to plan. "
+                    "Please investigate an issue first to create a proposal."
+                ),
+                metadata={"planning": {"status": "no_active_proposal"}},
+            )
+
+        # Resolve the actual InvestigationProposal object
+        inv_proposal = self._resolve_proposal(state.active_proposal_id)
+        if inv_proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The active proposal could not be resolved. "
+                    "Please investigate the issue again to create a new proposal."
+                ),
+                metadata={"planning": {"status": "proposal_not_found"}},
+            )
+
+        # Verify the proposal fingerprint matches (strict binding)
+        if state.active_proposal_fingerprint != inv_proposal.fingerprint:
+            return Message(
+                role="assistant",
+                content=(
+                    "The proposal fingerprint does not match. "
+                    "The proposal may have changed. "
+                    "Please investigate the issue again."
+                ),
+                metadata={"planning": {"status": "fingerprint_mismatch"}},
+            )
+
+        # Check ApprovalManager is available
+        if self._approval_manager is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Approval manager is not available. "
+                    "The proposal could not be submitted for approval."
+                ),
+                metadata={"planning": {"status": "no_approval_manager"}},
+            )
+
+        # Convert InvestigationProposal → EvolutionProposal (DRAFT)
+        try:
+            ev_proposal = self._proposal_converter.convert(inv_proposal)
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Failed to convert proposal: {exc}. "
+                    "Please investigate the issue again."
+                ),
+                metadata={"planning": {"status": "conversion_failed", "error": str(exc)}},
+            )
+
+        # Submit to ApprovalManager
+        try:
+            approval_request = self._approval_manager.create_approval_request(ev_proposal)
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Failed to submit proposal for approval: {exc}. "
+                    "Please try again."
+                ),
+                metadata={"planning": {"status": "approval_failed", "error": str(exc)}},
+            )
+
+        # Update conversation state
+        if self._state_manager is not None:
+            self._state_manager.update(
+                evolution_proposal_id=ev_proposal.proposal_id,
+                pending_approval_id=approval_request.request_id,
+                latest_result=(
+                    f"Proposal '{ev_proposal.proposal_id}' submitted for approval "
+                    f"as '{approval_request.request_id}'"
+                ),
+            )
+
+        return Message(
+            role="assistant",
+            content=(
+                f"## Development Proposal Prepared\n\n"
+                f"**Title:** {ev_proposal.title}\n"
+                f"**Evolution Proposal ID:** {ev_proposal.proposal_id}\n"
+                f"**Approval Request ID:** {approval_request.request_id}\n"
+                f"**Status:** {ev_proposal.status.name}\n\n"
+                f"This proposal was derived from investigation "
+                f"'{inv_proposal.investigation_target}'.\n\n"
+                f"**Components:** {', '.join(ev_proposal.plan.target_components[:5])}\n"
+                f"**Affected files:** {', '.join(ev_proposal.metadata.get('affected_files', [])[:5])}\n\n"
+                f"No changes have been made. This proposal requires your "
+                f"explicit approval before any work begins."
+            ),
             metadata={
-                "investigation": {
-                    "target": report.target,
-                    "modification_status": report.modification_status,
-                    "findings_count": len(report.findings),
-                    "affected_files": list(report.affected_files),
+                "planning": {
+                    "status": "prepared",
+                    "investigation_proposal_id": inv_proposal.proposal_id,
+                    "evolution_proposal_id": ev_proposal.proposal_id,
+                    "approval_request_id": approval_request.request_id,
+                    "proposal_status": ev_proposal.status.name,
+                    "approval_status": approval_request.decision.name,
                 },
             },
         )

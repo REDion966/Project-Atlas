@@ -56,6 +56,11 @@ class ConversationState:
     # Stable reference of a pending approval, when one exists.
     pending_approval_id: Optional[str] = None
 
+    # Stable reference of a converted EvolutionProposal (from InvestigationProposal),
+    # when one exists. Tracks the governed development proposal created from
+    # an investigation.
+    evolution_proposal_id: Optional[str] = None
+
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
 
@@ -83,6 +88,7 @@ class ConversationState:
             "active_proposal_id": self.active_proposal_id,
             "active_proposal_fingerprint": self.active_proposal_fingerprint,
             "pending_approval_id": self.pending_approval_id,
+            "evolution_proposal_id": self.evolution_proposal_id,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

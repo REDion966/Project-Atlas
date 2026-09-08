@@ -62,6 +62,7 @@ class TaskType(Enum):
     INVESTIGATION_REQUEST = "investigation_request"
     APPROVAL = "approval"
     EXECUTION_REQUEST = "execution_request"
+    PLANNING_REQUEST = "planning_request"
     UNKNOWN = "unknown"
 
 
@@ -114,6 +115,24 @@ _INVESTIGATION_CUES: frozenset[str] = frozenset(
         "analysis",
         "trace",
         "debug",
+    }
+)
+
+#: Explicit planning phrases that indicate the user wants to convert an
+#: investigation proposal into a development proposal.
+#: NOTE: Phrases containing "approval" are excluded because they conflict
+#: with APPROVAL classification (checked earlier in the ordering).
+_PLANNING_CUES: frozenset[str] = frozenset(
+    {
+        "plan this",
+        "plan this improvement",
+        "prepare a development proposal",
+        "convert this proposal",
+        "convert this investigation",
+        "prepare a development plan",
+        "create a development proposal",
+        "make this a development proposal",
+        "plan the improvement",
     }
 )
 
@@ -615,6 +634,14 @@ class TaskIntake:
         # language and cannot be ambiguous conversational responses.
         if _is_explicit_approval(normalized):
             return TaskType.APPROVAL
+
+        # Explicit planning phrases are checked next. They indicate the user
+        # wants to convert an investigation proposal into a development
+        # proposal. Checked before investigation because some planning phrases
+        # contain investigation-related words (e.g., "convert this investigation").
+        planning = _first_hit(lowered, _PLANNING_CUES)
+        if planning:
+            return TaskType.PLANNING_REQUEST
 
         # Investigation cues are checked next and take precedence.
         # They are read-only by intent and must not be routed to development.
