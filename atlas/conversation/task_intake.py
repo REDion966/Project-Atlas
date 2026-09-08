@@ -63,6 +63,7 @@ class TaskType(Enum):
     APPROVAL = "approval"
     EXECUTION_REQUEST = "execution_request"
     PLANNING_REQUEST = "planning_request"
+    REJECTION_REQUEST = "rejection_request"
     UNKNOWN = "unknown"
 
 
@@ -172,6 +173,22 @@ _AMBIGUOUS_RESPONSES: frozenset[str] = frozenset(
         "go ahead",
         "do it",
         "proceed",
+    }
+)
+
+#: Explicit rejection phrases that indicate the user is rejecting a proposal.
+#: Symmetric with _APPROVAL_CUES. Ambiguous responses must NOT be treated
+#: as rejection. NOTE: "disapprove" variants are excluded because they
+#: contain "approve" as a substring and APPROVAL is checked first.
+_REJECTION_CUES: frozenset[str] = frozenset(
+    {
+        "reject",
+        "rejected",
+        "rejection",
+        "decline",
+        "declined",
+        "deny",
+        "denied",
     }
 )
 
@@ -389,6 +406,31 @@ def _is_explicit_approval(text: str) -> bool:
         return False
     # Must NOT be negated (e.g. "don't approve")
     for cue in _APPROVAL_CUES:
+        if cue in lowered and _is_negated(lowered, cue):
+            return False
+    return True
+
+
+def _is_explicit_rejection(text: str) -> bool:
+    """Return True when the text contains explicit rejection language.
+
+    Explicit rejection requires unambiguous rejection cues (e.g. "reject",
+    "decline", "deny"). Ambiguous responses like "okay", "sounds good"
+    are NOT treated as rejection.
+
+    Args:
+        text: the normalized request text.
+
+    Returns:
+        True if the text contains explicit rejection language.
+    """
+    lowered = text.lower()
+    # Must contain an explicit rejection cue
+    has_rejection_cue = any(cue in lowered for cue in _REJECTION_CUES)
+    if not has_rejection_cue:
+        return False
+    # Must NOT be negated (e.g. "don't reject")
+    for cue in _REJECTION_CUES:
         if cue in lowered and _is_negated(lowered, cue):
             return False
     return True
@@ -634,6 +676,12 @@ class TaskIntake:
         # language and cannot be ambiguous conversational responses.
         if _is_explicit_approval(normalized):
             return TaskType.APPROVAL
+
+        # Explicit rejection is checked next, symmetric with approval.
+        # It requires unambiguous rejection language and cannot be
+        # ambiguous conversational responses.
+        if _is_explicit_rejection(normalized):
+            return TaskType.REJECTION_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development

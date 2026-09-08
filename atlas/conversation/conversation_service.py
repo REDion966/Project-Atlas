@@ -161,6 +161,13 @@ class ConversationService:
         # Conversation-scoped (not global) to preserve cross-session isolation.
         self._active_proposals: dict[str, InvestigationProposal] = {}
 
+        # Transient registries of live EvolutionProposals and ApprovalRequests
+        # created by the planning handler, keyed by proposal_id / request_id.
+        # Conversation-scoped (not global), never persisted. Required so the
+        # approval handler can resolve the exact objects bound by fingerprint.
+        self._active_evolution_proposals: dict[str, Any] = {}
+        self._active_approval_requests: dict[str, Any] = {}
+
         # Create the initial conversation.
         self._conversation = self._history.create()
 
@@ -268,9 +275,13 @@ class ConversationService:
             if investigation_response is not None:
                 self._conversation.add_message(investigation_response)
                 return investigation_response
-        # Approval semantics — explicit approval for a pending proposal.
-        # Must be explicit; ambiguous responses are not treated as approval.
-        if spec is not None and spec.task_type is TaskType.APPROVAL:
+        # Approval semantics — explicit approval/rejection for a pending
+        # proposal. Must be explicit; ambiguous responses are not treated
+        # as approval.
+        if spec is not None and spec.task_type in (
+            TaskType.APPROVAL,
+            TaskType.REJECTION_REQUEST,
+        ):
             approval_response = self._maybe_handle_approval(spec)
             if approval_response is not None:
                 self._conversation.add_message(approval_response)
@@ -453,6 +464,18 @@ class ConversationService:
             if planning_response is not None:
                 self._conversation.add_message(planning_response)
                 yield planning_response.content
+                return
+        # Approval semantics — explicit approval/rejection of the pending
+        # request through the governed ApprovalManager path (same handler
+        # as send()).
+        if spec is not None and spec.task_type in (
+            TaskType.APPROVAL,
+            TaskType.REJECTION_REQUEST,
+        ):
+            approval_response = self._maybe_handle_approval(spec)
+            if approval_response is not None:
+                self._conversation.add_message(approval_response)
+                yield approval_response.content
                 return
         # Execution semantics — explicit execution of an approved proposal.
         if spec is not None and spec.task_type is TaskType.EXECUTION_REQUEST:
@@ -943,6 +966,22 @@ class ConversationService:
         """
         return self._active_proposals.get(proposal_id)
 
+    def _register_evolution_proposal(self, proposal: Any) -> None:
+        """Register a live EvolutionProposal for later approval resolution."""
+        self._active_evolution_proposals[proposal.proposal_id] = proposal
+
+    def _resolve_evolution_proposal(self, proposal_id: str) -> Any | None:
+        """Resolve a live EvolutionProposal by ID, or None when unknown."""
+        return self._active_evolution_proposals.get(proposal_id)
+
+    def _register_approval_request(self, request: Any) -> None:
+        """Register a live ApprovalRequest for later approval resolution."""
+        self._active_approval_requests[request.request_id] = request
+
+    def _resolve_approval_request(self, request_id: str) -> Any | None:
+        """Resolve a live ApprovalRequest by ID, or None when unknown."""
+        return self._active_approval_requests.get(request_id)
+
     def _maybe_handle_planning_request(self, spec: TaskSpec) -> Message | None:
         """Handle an explicit PLANNING_REQUEST.
 
@@ -1015,6 +1054,22 @@ class ConversationService:
                 metadata={"planning": {"status": "no_approval_manager"}},
             )
 
+        # Refuse duplicate planning while a pending request already exists.
+        # Minting a second request for the same proposal would orphan the
+        # first and weaken the single-pending-request invariant.
+        if state.pending_approval_id:
+            pending = self._resolve_approval_request(state.pending_approval_id)
+            if pending is not None and getattr(pending.decision, "name", "") == "PENDING":
+                return Message(
+                    role="assistant",
+                    content=(
+                        f"Proposal '{state.evolution_proposal_id}' already has a "
+                        f"pending approval request '{state.pending_approval_id}'. "
+                        "Please approve or reject it before planning again."
+                    ),
+                    metadata={"planning": {"status": "already_pending"}},
+                )
+
         # Convert InvestigationProposal → EvolutionProposal (DRAFT)
         try:
             ev_proposal = self._proposal_converter.convert(inv_proposal)
@@ -1040,6 +1095,12 @@ class ConversationService:
                 ),
                 metadata={"planning": {"status": "approval_failed", "error": str(exc)}},
             )
+
+        # Retain the live objects so the approval handler can resolve the
+        # exact instances bound by fingerprint. Registries are instance-scoped
+        # and never persisted.
+        self._register_evolution_proposal(ev_proposal)
+        self._register_approval_request(approval_request)
 
         # Update conversation state
         if self._state_manager is not None:
@@ -1080,60 +1141,216 @@ class ConversationService:
         )
 
     def _maybe_handle_approval(self, spec: TaskSpec) -> Message | None:
-        """Handle an explicit APPROVAL request.
+        """Handle an explicit APPROVAL or REJECTION request.
 
-        Approval is only valid when:
-        1. There is an active proposal (active_proposal_id in state).
-        2. The approval is explicit (not ambiguous like "okay").
-        3. The proposal fingerprint matches (strict binding).
+        Routes the decision through the EXISTING ApprovalManager contract:
+
+            resolve EvolutionProposal + ApprovalRequest
+                → validate identity + fingerprint
+                → OWNER authorization
+                → approve()/reject()
+                → update_proposal_from_decision()
+                → ConversationState update
+                → STOP
 
         Approval does NOT:
         - Modify any files
         - Call ApplicationEngine.apply()
         - Create execution authorization
         - Automatically transition to Level 3
+        - Invoke DevelopmentPlanner or any execution infrastructure
+
+        All resolution and validation occur BEFORE the manager decision
+        call. Any validation failure leaves ConversationState unchanged.
 
         Args:
-            spec: the classified APPROVAL TaskSpec.
+            spec: the classified APPROVAL or REJECTION_REQUEST TaskSpec.
 
         Returns:
-            A Message describing the approval result, or None if no active
-            proposal exists to approve.
+            A Message describing the approval result.
         """
-        state = self._state_manager.state if self._state_manager else None
-        if state is None or not state.active_proposal_id:
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
             return Message(
                 role="assistant",
                 content=(
-                    "There is no active proposal to approve. "
-                    "Please create a proposal first."
+                    "No active session. Approval requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"approval": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "Approval requires OWNER authority. "
+                    "This session is not authorized to approve proposals."
+                ),
+                metadata={"approval": {"status": "unauthorized"}},
+            )
+
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.evolution_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no development proposal awaiting approval. "
+                    "Please investigate an issue and plan it first."
                 ),
                 metadata={"approval": {"status": "no_active_proposal"}},
             )
-
-        # Record the approval in state
-        if self._state_manager is not None:
-            self._state_manager.update(
-                pending_approval_id=None,  # approval consumed
-                latest_result=f"Proposal {state.active_proposal_id} approved",
+        if not state.pending_approval_id:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Proposal '{state.evolution_proposal_id}' has no pending "
+                    "approval request. It may already have been decided."
+                ),
+                metadata={"approval": {"status": "no_pending_request"}},
             )
 
+        # 3. Resolve the live objects from the instance-scoped registries.
+        proposal = self._resolve_evolution_proposal(state.evolution_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The development proposal could not be resolved. "
+                    "Please plan the proposal again."
+                ),
+                metadata={"approval": {"status": "proposal_not_found"}},
+            )
+        request = self._resolve_approval_request(state.pending_approval_id)
+        if request is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request could not be resolved. "
+                    "Please plan the proposal again."
+                ),
+                metadata={"approval": {"status": "request_not_found"}},
+            )
+
+        # 4. Cross-validate identity BEFORE the manager decision call.
+        if request.proposal_id != proposal.proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request does not match the active proposal. "
+                    "Approval refused."
+                ),
+                metadata={"approval": {"status": "identity_mismatch"}},
+            )
+        if not request.is_valid_for(proposal):
+            return Message(
+                role="assistant",
+                content=(
+                    "The proposal has changed since the approval request was "
+                    "created. Approval refused. Please plan the proposal again."
+                ),
+                metadata={"approval": {"status": "fingerprint_mismatch"}},
+            )
+
+        # 5. Check the ApprovalManager is wired.
+        if self._approval_manager is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Approval manager is not available. "
+                    "The decision could not be recorded."
+                ),
+                metadata={"approval": {"status": "no_approval_manager"}},
+            )
+
+        # 6. Determine approve vs reject from the classified task type.
+        is_rejection = spec.task_type is TaskType.REJECTION_REQUEST
+
+        # 7. Record the governed decision. update_proposal_from_decision
+        # maps the decision onto the proposal status.
+        try:
+            if is_rejection:
+                reason = self._rejection_reason_from_spec(spec)
+                self._approval_manager.reject(request, reason=reason)
+            else:
+                comment = self._approval_comment_from_spec(spec)
+                self._approval_manager.approve(request, comment=comment)
+            self._approval_manager.update_proposal_from_decision(proposal, request)
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Approval decision could not be recorded: {exc}. "
+                    "No state was changed."
+                ),
+                metadata={"approval": {"status": "decision_failed", "error": str(exc)}},
+            )
+
+        # 8. Only after the complete governed lifecycle succeeds, consume
+        # the pending request while retaining the decided proposal identity.
+        decision_name = request.decision.name
+        if self._state_manager is not None:
+            self._state_manager.update(
+                pending_approval_id=None,  # request consumed (anti-replay)
+                latest_result=(
+                    f"Proposal '{proposal.proposal_id}' {decision_name} "
+                    f"as '{request.request_id}'"
+                ),
+            )
+
+        if is_rejection:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Proposal '{proposal.proposal_id}' has been rejected. "
+                    "No changes have been made."
+                ),
+                metadata={
+                    "approval": {
+                        "status": "rejected",
+                        "proposal_id": proposal.proposal_id,
+                        "request_id": request.request_id,
+                        "reason": request.decision_comment,
+                        "modification_status": "NONE",
+                    },
+                },
+            )
         return Message(
             role="assistant",
             content=(
-                f"Proposal '{state.active_proposal_id}' has been approved. "
+                f"Proposal '{proposal.proposal_id}' has been approved. "
                 "No changes have been made. "
                 "Implementation will require a separate explicit step."
             ),
             metadata={
                 "approval": {
                     "status": "approved",
-                    "proposal_id": state.active_proposal_id,
-                    "fingerprint": state.active_proposal_fingerprint,
+                    "proposal_id": proposal.proposal_id,
+                    "request_id": request.request_id,
                     "modification_status": "NONE",
                 },
             },
         )
+
+    @staticmethod
+    def _approval_comment_from_spec(spec: TaskSpec) -> str:
+        """Derive a bounded approval comment from the classified request."""
+        intent = (getattr(spec, "intent", "") or "").strip()
+        return intent[:200]
+
+    @staticmethod
+    def _rejection_reason_from_spec(spec: TaskSpec) -> str:
+        """Derive a non-blank rejection reason from the classified request.
+
+        ApprovalManager.reject() requires a non-blank reason, so an empty
+        or unusable message falls back to a fixed default.
+        """
+        intent = (getattr(spec, "intent", "") or "").strip()
+        if intent:
+            return intent[:200]
+        return "Rejected via conversation."
 
     def _maybe_handle_execution_request(
         self,

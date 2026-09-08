@@ -951,3 +951,386 @@ class TestRegressions:
         """P14 negation handling preserved."""
         spec = TaskIntake().intake("don't modify anything")
         assert spec.task_type is not TaskType.DEVELOPMENT_REQUEST
+
+
+class TestApprovalExecution:
+    """P17 — Approval Execution: conversational approval/rejection through
+    the governed ApprovalManager contract."""
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    def _owner_session(self):
+        from atlas.authority.service import AuthorityService
+        from atlas.session.context import SessionContext
+        from atlas.session.manager import SessionManager
+
+        authority = AuthorityService("Owner")
+        manager = SessionManager(authority)
+        return SessionContext.from_session(manager.create_session("owner"))
+
+    def _user_session(self):
+        from atlas.authority.service import AuthorityService
+        from atlas.session.context import SessionContext
+        from atlas.session.manager import SessionManager
+
+        authority = AuthorityService("Owner")
+        authority.add_user("Alice", principal_id="alice")
+        manager = SessionManager(authority)
+        return SessionContext.from_session(manager.create_session("alice"))
+
+    @pytest.fixture
+    def service(self, failing_ai):
+        return ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+        )
+
+    def _prepare_pending(self, service, session):
+        service.send("Investigate the memory architecture", session_context=session)
+        service.send("Plan this improvement", session_context=session)
+        state = service.state_manager.state
+        assert state.evolution_proposal_id is not None
+        assert state.pending_approval_id is not None
+        return state
+
+    def test_full_approval_flow(self, service):
+        """investigate → plan → approve yields APPROVED, consumes pending."""
+        from atlas.evolution.models import ApprovalDecision, ProposalStatus
+
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        inv_id = service.state_manager.state.active_proposal_id
+
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert response.role == "assistant"
+        ev_proposal = service._resolve_evolution_proposal(
+            service.state_manager.state.evolution_proposal_id
+        )
+        assert ev_proposal.status == ProposalStatus.APPROVED
+        assert ev_proposal.approved_at is not None
+        state = service.state_manager.state
+        assert state.pending_approval_id is None
+        assert state.evolution_proposal_id == ev_proposal.proposal_id
+        assert state.active_proposal_id == inv_id
+        assert response.metadata["approval"]["status"] == "approved"
+
+    def test_full_rejection_flow(self, service):
+        """investigate → plan → reject yields REJECTED with reason."""
+        from atlas.evolution.models import ApprovalDecision, ProposalStatus
+
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+
+        response = service.send(
+            "Reject this proposal because the scope is too broad",
+            session_context=session,
+        )
+
+        assert response.role == "assistant"
+        ev_proposal = service._resolve_evolution_proposal(
+            service.state_manager.state.evolution_proposal_id
+        )
+        assert ev_proposal.status == ProposalStatus.REJECTED
+        assert ev_proposal.rejection_reason != ""
+        state = service.state_manager.state
+        assert state.pending_approval_id is None
+        assert state.evolution_proposal_id == ev_proposal.proposal_id
+        assert response.metadata["approval"]["status"] == "rejected"
+
+    def test_missing_pending_request_fails_cleanly(self, service):
+        """Approval with no pending request fails without state change."""
+        session = self._owner_session()
+        service.send("Investigate the memory architecture", session_context=session)
+
+        before = service.state_manager.state
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert response.role == "assistant"
+        assert "no development proposal" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+        assert after.evolution_proposal_id == before.evolution_proposal_id
+
+    def test_missing_evolution_proposal_fails_cleanly(self, service):
+        """Approval with unresolvable proposal fails without state change."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        before = service.state_manager.state
+
+        service._active_evolution_proposals.clear()
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert "could not be resolved" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+        assert after.evolution_proposal_id == before.evolution_proposal_id
+
+    def test_missing_approval_request_fails_cleanly(self, service):
+        """Approval with unresolvable request fails without state change."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        before = service.state_manager.state
+
+        service._active_approval_requests.clear()
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert "could not be resolved" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+
+    def test_identity_mismatch_refused(self, service):
+        """Request bound to a different proposal is refused, state kept."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        before = service.state_manager.state
+
+        request = service._resolve_approval_request(before.pending_approval_id)
+        request.proposal_id = "PROP-OTHER"
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert "does not match" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+
+    def test_fingerprint_mismatch_refused(self, service):
+        """Changed proposal content fails fingerprint validation, state kept."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        before = service.state_manager.state
+
+        proposal = service._resolve_evolution_proposal(before.evolution_proposal_id)
+        proposal.title = "Tampered title"
+        proposal.proposal_fingerprint = ""
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert "changed" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+        assert after.evolution_proposal_id == before.evolution_proposal_id
+
+    def test_non_owner_refused(self, service):
+        """Non-OWNER session cannot approve; manager untouched."""
+        owner_session = self._owner_session()
+        self._prepare_pending(service, owner_session)
+        before = service.state_manager.state
+
+        request = service._resolve_approval_request(before.pending_approval_id)
+        user_session = self._user_session()
+        response = service.send("Approve this proposal", session_context=user_session)
+
+        assert "owner authority" in response.content.lower()
+        from atlas.evolution.models import ApprovalDecision
+
+        assert request.decision == ApprovalDecision.PENDING
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+
+    def test_missing_session_refused(self, service):
+        """Approval without any session fails closed."""
+        before = service.state_manager.state
+        response = service.send("Approve this proposal")
+
+        assert "no active session" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+
+    def test_already_decided_request_respected(self, service):
+        """Second approval surfaces the manager guard without false success."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        service.send("Approve this proposal", session_context=session)
+        assert service.state_manager.state.pending_approval_id is None
+
+        # Simulate a stale duplicate: re-point pending at the decided request.
+        decided_id = next(iter(service._active_approval_requests))
+        ev_id = service.state_manager.state.evolution_proposal_id
+        service.state_manager.update(pending_approval_id=decided_id)
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert "could not be recorded" in response.content.lower()
+        assert service.state_manager.state.evolution_proposal_id == ev_id
+
+    def test_ambiguous_does_not_approve(self, service):
+        """Ambiguous language never reaches the governed handler."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        before = service.state_manager.state
+
+        from atlas.evolution.models import ApprovalDecision
+
+        for text in ("okay", "looks good", "proceed"):
+            service.send(text, session_context=session)
+
+        request = service._resolve_approval_request(before.pending_approval_id)
+        assert request.decision == ApprovalDecision.PENDING
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+
+    def test_stream_approval_parity(self, service):
+        """stream() approval reaches the same governed path as send()."""
+        from atlas.evolution.models import ProposalStatus
+
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+
+        chunks = list(
+            service.stream("Approve this proposal", session_context=session)
+        )
+        assert "".join(chunks)
+
+        ev_proposal = service._resolve_evolution_proposal(
+            service.state_manager.state.evolution_proposal_id
+        )
+        assert ev_proposal.status == ProposalStatus.APPROVED
+        assert service.state_manager.state.pending_approval_id is None
+
+    def test_stream_rejection_parity(self, service):
+        """stream() rejection reaches the same governed path as send()."""
+        from atlas.evolution.models import ProposalStatus
+
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+
+        chunks = list(
+            service.stream(
+                "Reject this proposal because it is out of scope",
+                session_context=session,
+            )
+        )
+        assert "".join(chunks)
+
+        ev_proposal = service._resolve_evolution_proposal(
+            service.state_manager.state.evolution_proposal_id
+        )
+        assert ev_proposal.status == ProposalStatus.REJECTED
+        assert service.state_manager.state.pending_approval_id is None
+
+    def test_rejection_reason_fallback(self, service):
+        """Blank rejection text falls back to the fixed default reason."""
+        handler = ConversationService._rejection_reason_from_spec
+        assert handler is not None
+        from atlas.conversation.task_intake import TaskIntake
+
+        spec = TaskIntake().intake("reject this proposal")
+        # Intent is non-empty here; force the blank path directly.
+        from dataclasses import replace
+
+        blanked = replace(spec, intent="   ")
+        assert (
+            ConversationService._rejection_reason_from_spec(blanked)
+            == "Rejected via conversation."
+        )
+
+    def test_duplicate_planning_refused(self, service):
+        """Second planning while pending refuses; original request survives."""
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+        before = service.state_manager.state
+        count_before = len(service._active_approval_requests)
+
+        response = service.send("Plan this improvement", session_context=session)
+
+        assert "already has a pending approval request" in response.content.lower()
+        after = service.state_manager.state
+        assert after.pending_approval_id == before.pending_approval_id
+        assert after.evolution_proposal_id == before.evolution_proposal_id
+        assert len(service._active_approval_requests) == count_before
+
+    def test_cross_session_isolation(self, failing_ai):
+        """Service B cannot approve service A's pending request."""
+        session_a = self._owner_session()
+        svc_a = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+        )
+        svc_b = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+        )
+        svc_a.send("Investigate the memory architecture", session_context=session_a)
+        svc_a.send("Plan this improvement", session_context=session_a)
+        assert svc_a.state_manager.state.pending_approval_id is not None
+
+        session_b = self._owner_session()
+        response = svc_b.send("Approve this proposal", session_context=session_b)
+
+        assert "no development proposal" in response.content.lower()
+        from atlas.evolution.models import ApprovalDecision
+
+        request = svc_a._resolve_approval_request(
+            svc_a.state_manager.state.pending_approval_id
+        )
+        assert request.decision == ApprovalDecision.PENDING
+
+    def test_no_execution_triggered(self, service):
+        """Approval invokes no planner, engine, or filesystem mutation."""
+        import os
+
+        session = self._owner_session()
+        self._prepare_pending(service, session)
+
+        before: set[str] = set()
+        for root, _dirs, files in os.walk("atlas/memory"):
+            for f in files:
+                before.add(os.path.join(root, f))
+
+        response = service.send("Approve this proposal", session_context=session)
+
+        assert "execution" not in response.metadata.get("approval", {})
+        after: set[str] = set()
+        for root, _dirs, files in os.walk("atlas/memory"):
+            for f in files:
+                after.add(os.path.join(root, f))
+        assert before == after
+
+
+class TestRejectionClassification:
+    """P17 — Explicit rejection classification tests."""
+
+    @pytest.mark.parametrize("text", [
+        "reject this proposal",
+        "rejected",
+        "decline this change",
+        "deny the request",
+        "reject this proposal because the scope is too broad",
+    ])
+    def test_rejection_cues(self, text):
+        """Rejection cues are classified as REJECTION_REQUEST."""
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.REJECTION_REQUEST
+
+    def test_ambiguous_not_rejection(self):
+        """Ambiguous responses are not rejection."""
+        for text in ("okay", "looks good", "sure", "proceed"):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.REJECTION_REQUEST
+
+    def test_negated_rejection_not_rejection(self):
+        """Negated rejection is not rejection."""
+        spec = TaskIntake().intake("don't reject this proposal")
+        assert spec.task_type is not TaskType.REJECTION_REQUEST
+
+    def test_approval_still_approval(self):
+        """Approval cues still classify as APPROVAL, not rejection."""
+        spec = TaskIntake().intake("approve this proposal")
+        assert spec.task_type is TaskType.APPROVAL
