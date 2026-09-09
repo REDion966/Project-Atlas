@@ -365,6 +365,7 @@ class Atlas:
         self._task_manager = TaskManager()
 
         self._conversation: ConversationService | None = None
+        self._proposal_change_supplier = None
         self._memory_service: MemoryManagerService | None = None
         self._knowledge_manager: KnowledgeManager | None = None
         self._cognitive_loop: CognitiveLoop | None = None
@@ -957,6 +958,12 @@ class Atlas:
             change_supplier = ModelAssistedChangeSupplier(
                 authoring_model=self._model_assisted_authoring_model,
             )
+
+        # The same optional supplier instance is exposed to the conversational
+        # P17 authoring seam (ConversationService proposal_change_supplier).
+        # When model-assisted authoring is not opted in, this stays None and
+        # the conversational path remains deterministic/evidence-only.
+        self._proposal_change_supplier = change_supplier
 
         self._development_controller = DevelopmentCycleController(
             approval_manager=self._approval_manager,
@@ -3161,6 +3168,7 @@ class Atlas:
             investigation_service=InvestigationService(),
             approval_manager=self._approval_manager,
             development_execution_bridge=self._development_execution_bridge,
+            proposal_change_supplier=self._proposal_change_supplier,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).

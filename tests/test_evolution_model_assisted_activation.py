@@ -359,3 +359,114 @@ class TestArchitecturalGuards:
                     node.module == p or node.module.startswith(p + ".")
                     for p in forbidden
                 ), f"imports {node.module}"
+
+
+class TestConversationalSeamWiring:
+    """Evolution #6 — the conversational P17 authoring seam receives the
+    already-constructed ModelAssistedChangeSupplier exactly when
+    [development].model_assisted_authoring is opted in, and receives None
+    (deterministic/evidence-only) otherwise. No provider is contacted: the
+    authoring callable is replaced with a deterministic test double."""
+
+    def test_flag_off_conversational_seam_gets_no_supplier(
+        self, monkeypatch, tmp_path, _config_flag
+    ):
+        _config_flag(False)
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            assert (
+                atlas._conversation._proposal_converter._change_supplier  # noqa: SLF001
+                is None
+            )
+
+            # Deterministic/evidence-only behavior is unchanged: planning
+            # still reaches the governed PENDING_APPROVAL stop with no
+            # authored workload.
+            list(atlas.stream("Investigate the memory architecture"))
+            list(atlas.stream("Plan this improvement"))
+            planned = atlas._conversation.conversation.messages[-1]  # noqa: SLF001
+            assert planned.metadata["planning"]["status"] == "prepared"
+            assert "authored_workload" not in planned.metadata["planning"]
+            state = atlas._conversation.state_manager.state  # noqa: SLF001
+            assert state.evolution_proposal_id is not None
+            assert state.pending_approval_id is not None
+        finally:
+            atlas.shutdown()
+
+    def test_flag_on_conversational_seam_receives_model_supplier(
+        self, monkeypatch, tmp_path, _config_flag
+    ):
+        from atlas.evolution.model_assisted_supplier import (
+            ModelAssistedChangeSupplier,
+        )
+
+        _config_flag(True)
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            seam_supplier = (
+                atlas._conversation._proposal_converter._change_supplier  # noqa: SLF001
+            )
+            assert isinstance(seam_supplier, ModelAssistedChangeSupplier)
+            # The SAME already-constructed instance backs both the F9
+            # controller and the conversational seam — no second supplier.
+            assert (
+                seam_supplier
+                is atlas.development_controller._change_supplier  # noqa: SLF001
+            )
+        finally:
+            atlas.shutdown()
+
+    def test_flag_on_conversational_authored_draft_reaches_pending_approval(
+        self, monkeypatch, tmp_path, _config_flag
+    ):
+        """With the flag on, the conversational path authors an unverified
+        draft through the injected supplier, stops at PENDING_APPROVAL, and
+        never auto-approves, executes, or promotes."""
+        _config_flag(True)
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            supplier = (
+                atlas._conversation._proposal_converter._change_supplier  # noqa: SLF001
+            )
+            # Deterministic test double replaces the kernel's AI-backed
+            # callable; no provider is contacted.
+            supplier._authoring_model = (  # noqa: SLF001
+                lambda prompt: _valid_model_payload()
+            )
+
+            approval_manager = atlas._approval_manager  # noqa: SLF001
+            original_approve = approval_manager.approve
+            approval_manager.approve = MagicMock(wraps=original_approve)  # noqa: SLF001
+
+            list(atlas.stream("Investigate the memory architecture"))
+            list(atlas.stream("Plan this improvement"))
+
+            state = atlas._conversation.state_manager.state  # noqa: SLF001
+            assert state.evolution_proposal_id is not None
+            assert state.pending_approval_id is not None
+
+            planned = atlas._conversation.conversation.messages[-1]  # noqa: SLF001
+            planning = planned.metadata["planning"]
+            assert planning["status"] == "prepared"
+            assert planning["authored_workload"] == {
+                "code_changes": 1,
+                "test_files": 1,
+                "change_origin": "model-assisted-draft",
+                "content_status": "unverified-draft",
+            }
+
+            ev_proposal = (
+                atlas._conversation._resolve_evolution_proposal(  # noqa: SLF001
+                    state.evolution_proposal_id
+                )
+            )
+            cycle = ev_proposal.metadata["development_cycle"]
+            assert cycle["change_origin"] == "model-assisted-draft"
+            assert cycle["content_status"] == "unverified-draft"
+            assert ev_proposal.status.name == "PENDING_APPROVAL"
+
+            # Governance: the path stopped at the approval boundary; the
+            # model's draft was never approved, executed, or promoted.
+            approval_manager.approve.assert_not_called()
+        finally:
+            atlas.shutdown()
