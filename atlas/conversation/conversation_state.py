@@ -96,6 +96,12 @@ class ConversationState:
     # L4 autonomy tracking: summary of last L4-specific decision.
     last_l4_decision: Optional[str] = None
 
+    # L5 autonomy tracking: number of objectives coordinated.
+    coordinated_objectives: int = 0
+
+    # L5 autonomy tracking: summary of last L5-specific decision.
+    last_l5_decision: Optional[str] = None
+
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
 
@@ -135,6 +141,8 @@ class ConversationState:
             "last_l3_decision": self.last_l3_decision,
             "capabilities_acquired": self.capabilities_acquired,
             "last_l4_decision": self.last_l4_decision,
+            "coordinated_objectives": self.coordinated_objectives,
+            "last_l5_decision": self.last_l5_decision,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

@@ -1257,3 +1257,232 @@ class AutonomyController:
                 "execution_level": "INFORMATION",
             },
         )
+
+    # ------------------------------------------------------------------
+    # L5 — Cross-objective coordination (FINAL LEVEL)
+    # ------------------------------------------------------------------
+
+    def check_cross_objective_coordination_autonomy(
+        self,
+        objectives: list[Any],
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L5 can coordinate across multiple approved objectives.
+
+        L5 can coordinate across objectives only if:
+        1. Session has OWNER authority
+        2. AutonomyPolicy is enabled
+        3. At least 2 objectives are provided
+        4. All objectives are APPROVED
+        5. Risk level is CRITICAL or below
+        6. Execution level allows AUTONOMOUS
+
+        Args:
+            objectives: List of approved objectives to coordinate.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether coordination is permitted.
+        """
+        # 1. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L5 cross-objective coordination requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 2. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 3. At least 2 objectives required
+        if len(objectives) < 2:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Cross-objective coordination requires at least 2 objectives",
+                evidence={"objective_count": len(objectives)},
+            )
+
+        # 4. All objectives must be APPROVED
+        for i, obj in enumerate(objectives):
+            obj_status = getattr(obj, "status", None)
+            obj_name = getattr(obj_status, "name", str(obj_status))
+            if obj_name != "APPROVED":
+                return AutonomyDecision(
+                    can_proceed=False,
+                    reason=f"Objective {i} status is {obj_name}, not APPROVED",
+                    evidence={"objective_index": i, "objective_status": obj_name},
+                )
+
+        # 5. Risk must be CRITICAL or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.CRITICAL):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L5 cross-objective coordination requires CRITICAL risk tolerance",
+                evidence={"max_risk": "CRITICAL"},
+                escalation_required=True,
+            )
+
+        # 6. Execution level must allow AUTONOMOUS
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.AUTONOMOUS):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L5 cross-objective coordination requires AUTONOMOUS execution level",
+                evidence={"required_level": "AUTONOMOUS"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L5 autonomous cross-objective coordination permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "objective_count": len(objectives),
+                "authority": session_context.authority.value,
+                "risk_level": "CRITICAL",
+                "execution_level": "AUTONOMOUS",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L5 — Priority-based scheduling
+    # ------------------------------------------------------------------
+
+    def check_priority_scheduling_autonomy(
+        self,
+        objectives: list[Any],
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L5 can prioritize work across objectives.
+
+        L5 can prioritize objectives only if:
+        1. Session has OWNER authority
+        2. AutonomyPolicy is enabled
+        3. At least 2 objectives are provided
+        4. All objectives are APPROVED
+
+        Args:
+            objectives: List of approved objectives to prioritize.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether prioritization is permitted.
+        """
+        # 1. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L5 priority scheduling requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 2. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 3. At least 2 objectives required
+        if len(objectives) < 2:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Priority scheduling requires at least 2 objectives",
+                evidence={"objective_count": len(objectives)},
+            )
+
+        # 4. All objectives must be APPROVED
+        for i, obj in enumerate(objectives):
+            obj_status = getattr(obj, "status", None)
+            obj_name = getattr(obj_status, "name", str(obj_status))
+            if obj_name != "APPROVED":
+                return AutonomyDecision(
+                    can_proceed=False,
+                    reason=f"Objective {i} status is {obj_name}, not APPROVED",
+                    evidence={"objective_index": i, "objective_status": obj_name},
+                )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L5 autonomous priority scheduling permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "objective_count": len(objectives),
+                "authority": session_context.authority.value,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L5 — Dependency management
+    # ------------------------------------------------------------------
+
+    def check_dependency_management_autonomy(
+        self,
+        objectives: list[Any],
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L5 can manage dependencies between objectives.
+
+        L5 can manage dependencies only if:
+        1. Session has OWNER authority
+        2. AutonomyPolicy is enabled
+        3. At least 2 objectives are provided
+        4. All objectives are APPROVED
+
+        Args:
+            objectives: List of approved objectives to analyze for dependencies.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether dependency management is permitted.
+        """
+        # 1. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L5 dependency management requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 2. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 3. At least 2 objectives required
+        if len(objectives) < 2:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Dependency management requires at least 2 objectives",
+                evidence={"objective_count": len(objectives)},
+            )
+
+        # 4. All objectives must be APPROVED
+        for i, obj in enumerate(objectives):
+            obj_status = getattr(obj, "status", None)
+            obj_name = getattr(obj_status, "name", str(obj_status))
+            if obj_name != "APPROVED":
+                return AutonomyDecision(
+                    can_proceed=False,
+                    reason=f"Objective {i} status is {obj_name}, not APPROVED",
+                    evidence={"objective_index": i, "objective_status": obj_name},
+                )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L5 autonomous dependency management permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "objective_count": len(objectives),
+                "authority": session_context.authority.value,
+            },
+        )

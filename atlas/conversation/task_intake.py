@@ -71,6 +71,7 @@ class TaskType(Enum):
     L2_AUTONOMY_REQUEST = "l2_autonomy_request"
     L3_AUTONOMY_REQUEST = "l3_autonomy_request"
     L4_AUTONOMY_REQUEST = "l4_autonomy_request"
+    L5_AUTONOMY_REQUEST = "l5_autonomy_request"
     UNKNOWN = "unknown"
 
 
@@ -304,6 +305,21 @@ _L4_AUTONOMY_CUES: frozenset[str] = frozenset(
         "critical risk operation",
         "information level operation",
         "capability acquisition",
+    }
+)
+
+#: Explicit L5 autonomy phrases that indicate the user wants Atlas to
+#: coordinate across multiple objectives, prioritize work, or manage dependencies.
+_L5_AUTONOMY_CUES: frozenset[str] = frozenset(
+    {
+        "coordinate objectives",
+        "coordinate across objectives",
+        "prioritize objectives",
+        "schedule objectives",
+        "manage dependencies",
+        "cross objective coordination",
+        "multi objective orchestration",
+        "objective prioritization",
     }
 )
 
@@ -843,6 +859,12 @@ class TaskIntake:
         l4_autonomy = _first_hit(lowered, _L4_AUTONOMY_CUES)
         if l4_autonomy:
             return TaskType.L4_AUTONOMY_REQUEST
+
+        # Explicit L5 autonomy phrases are checked next. They indicate the user
+        # wants Atlas to coordinate across objectives, prioritize work, or manage dependencies.
+        l5_autonomy = _first_hit(lowered, _L5_AUTONOMY_CUES)
+        if l5_autonomy:
+            return TaskType.L5_AUTONOMY_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development

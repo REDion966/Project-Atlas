@@ -106,6 +106,10 @@ class DevelopmentLifecycleReport:
     capabilities_acquired: int = 0
     last_l4_decision: str | None = None
 
+    # L5 autonomy tracking (FINAL LEVEL)
+    coordinated_objectives: int = 0
+    last_l5_decision: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Report builder
@@ -234,6 +238,10 @@ class DevelopmentReportBuilder:
         capabilities_acquired = getattr(state, "capabilities_acquired", 0) or 0
         last_l4_decision = getattr(state, "last_l4_decision", None)
 
+        # Extract L5-specific tracking (FINAL LEVEL)
+        coordinated_objectives = getattr(state, "coordinated_objectives", 0) or 0
+        last_l5_decision = getattr(state, "last_l5_decision", None)
+
         return DevelopmentLifecycleReport(
             final_conclusion=final_conclusion,
             evidence=evidence,
@@ -256,6 +264,8 @@ class DevelopmentReportBuilder:
             last_l3_decision=last_l3_decision,
             capabilities_acquired=capabilities_acquired,
             last_l4_decision=last_l4_decision,
+            coordinated_objectives=coordinated_objectives,
+            last_l5_decision=last_l5_decision,
         )
 
     @staticmethod

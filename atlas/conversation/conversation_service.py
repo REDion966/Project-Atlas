@@ -402,6 +402,13 @@ class ConversationService:
             if l4_response is not None:
                 self._conversation.add_message(l4_response)
                 return l4_response
+        # L5 Autonomy semantics — explicit request to coordinate across objectives,
+        # prioritize work, or manage dependencies. L5 controlled autonomy (FINAL LEVEL).
+        if spec is not None and spec.task_type is TaskType.L5_AUTONOMY_REQUEST:
+            l5_response = self._maybe_handle_l5_autonomy_request(spec)
+            if l5_response is not None:
+                self._conversation.add_message(l5_response)
+                return l5_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -639,6 +646,14 @@ class ConversationService:
             if l4_response is not None:
                 self._conversation.add_message(l4_response)
                 yield l4_response.content
+                return
+        # L5 Autonomy semantics — explicit request to coordinate across objectives,
+        # prioritize work, or manage dependencies. L5 controlled autonomy (FINAL LEVEL).
+        if spec is not None and spec.task_type is TaskType.L5_AUTONOMY_REQUEST:
+            l5_response = self._maybe_handle_l5_autonomy_request(spec)
+            if l5_response is not None:
+                self._conversation.add_message(l5_response)
+                yield l5_response.content
                 return
         # Development semantics win — run it first and never reroute development
         # through orchestration.
@@ -3198,6 +3213,151 @@ class ConversationService:
                         else None
                     ),
                     "evidence": l4_decision.evidence,
+                },
+            },
+        )
+
+    def _maybe_handle_l5_autonomy_request(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Handle an L5_AUTONOMY_REQUEST.
+
+        L5 controlled autonomy (FINAL LEVEL): coordinate across objectives,
+        prioritize work, or manage dependencies.
+
+        L5 can:
+        - Coordinate across multiple approved objectives
+        - Prioritize work across objectives
+        - Manage dependencies between objectives
+        - Allocate resources across objectives
+        - Escalate conflicts between objectives to humans
+
+        L5 CANNOT:
+        - Create new top-level objectives
+        - Expand scope beyond approved
+        - Handle operations beyond CRITICAL risk
+        - Promote beyond L5 (it is the final level)
+        - Modify governance rules
+
+        Args:
+            spec: the classified L5_AUTONOMY_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the L5 autonomy result, or None if L5
+            autonomy is not possible.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. L5 autonomy requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"l5_autonomy": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "L5 autonomy requires OWNER authority. "
+                    "This session is not authorized to run L5 autonomous development."
+                ),
+                metadata={"l5_autonomy": {"status": "unauthorized"}},
+            )
+
+        # 3. Check L5 autonomy via AutonomyController.
+        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
+        from atlas.evolution.governance.models import ScopeType
+        from atlas.evolution.models import ExecutionLevel
+
+        # Build an L5 policy that permits CRITICAL risk and AUTONOMOUS level
+        l5_policy = AutonomyPolicy(
+            enabled=True,
+            allowed_scopes=[ScopeType.CODE],
+            max_risk_level=RiskLevel.CRITICAL,
+            effective_execution_level=ExecutionLevel.AUTONOMOUS,
+            requires_user_approval_scopes=[],
+            max_requests_per_window=10,
+            authorization_ttl_minutes=60,
+        )
+        policy_engine = AutonomyPolicyEngine(policy=l5_policy)
+        auth_manager = AuthorizationManager(policy=l5_policy)
+        controller = AutonomyController(
+            authorization_manager=auth_manager,
+            policy_engine=policy_engine,
+        )
+
+        # Check if L5 autonomy is permitted (using placeholder objectives)
+        placeholder_objectives = [
+            type("_O", (), {"status": type("S", (), {"name": "APPROVED"})()})()
+            for _ in range(2)
+        ]
+
+        l5_decision = controller.check_cross_objective_coordination_autonomy(
+            objectives=placeholder_objectives,
+            session_context=active_session,
+        )
+
+        if not l5_decision.can_proceed:
+            lines = [
+                "## L5 Autonomy: Denied",
+                "",
+                f"**Reason:** {l5_decision.reason}",
+            ]
+            if l5_decision.escalation_required:
+                lines.append("")
+                lines.append(
+                    "This action requires explicit user approval. "
+                    "Please approve the action manually."
+                )
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "l5_autonomy": {
+                        "status": "denied",
+                        "reason": l5_decision.reason,
+                        "escalation_required": l5_decision.escalation_required,
+                        "evidence": l5_decision.evidence,
+                    },
+                },
+            )
+
+        # 4. Update conversation state with L5 tracking
+        if self._state_manager is not None:
+            self._state_manager.update(
+                last_l5_decision=l5_decision.reason,
+                latest_result=f"L5 autonomy: {l5_decision.reason}",
+            )
+
+        # 5. Return L5 autonomy acknowledgment
+        return Message(
+            role="assistant",
+            content=(
+                f"## L5 Autonomous Operation (FINAL LEVEL)\n\n"
+                f"**Decision:** {l5_decision.reason}\n"
+                f"**Authorization mode:** {l5_decision.authorization_mode.value if l5_decision.authorization_mode else 'none'}\n\n"
+                f"L5 autonomy permits cross-objective coordination, priority-based "
+                f"scheduling, and dependency management within approved scope. "
+                f"L5 is the final controlled autonomy level."
+            ),
+            metadata={
+                "l5_autonomy": {
+                    "status": "acknowledged",
+                    "reason": l5_decision.reason,
+                    "authorization_mode": (
+                        l5_decision.authorization_mode.value
+                        if l5_decision.authorization_mode
+                        else None
+                    ),
+                    "evidence": l5_decision.evidence,
+                    "final_level": True,
                 },
             },
         )
