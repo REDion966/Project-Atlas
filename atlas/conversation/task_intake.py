@@ -127,6 +127,22 @@ _INVESTIGATION_CUES: frozenset[str] = frozenset(
     }
 )
 
+#: Imperative investigation cues that can lead a compound request. Noun
+#: forms ("investigation", "diagnosis", "analysis") are excluded: they
+#: refer to a prior investigation artifact ("convert this investigation")
+#: rather than requesting the investigation stage.
+_INVESTIGATION_LEAD_CUES: frozenset[str] = frozenset(
+    {
+        "investigate",
+        "diagnose",
+        "inspect",
+        "examine",
+        "analyze",
+        "trace",
+        "debug",
+    }
+)
+
 #: Explicit planning phrases that indicate the user wants to convert an
 #: investigation proposal into a development proposal.
 #: NOTE: Phrases containing "approval" are excluded because they conflict
@@ -513,8 +529,54 @@ def _is_negated(text: str, cue: str) -> bool:
     idx = lowered.find(cue)
     if idx <= 0:
         return False
+    return _occurrence_is_negated(lowered, idx)
+
+
+def _occurrence_is_negated(lowered: str, idx: int) -> bool:
+    """Return True when the cue occurrence at ``idx`` is immediately
+    preceded by a negation prefix."""
+    if idx <= 0:
+        return False
     prefix = lowered[:idx].rstrip()
     return any(prefix.endswith(neg) for neg in _NEGATION_PREFIXES)
+
+
+def _first_cue_index(lowered: str, cues: frozenset[str]) -> int | None:
+    """Return the earliest index of any cue, or None when absent."""
+    best: int | None = None
+    for cue in cues:
+        idx = lowered.find(cue)
+        if idx >= 0 and (best is None or idx < best):
+            best = idx
+    return best
+
+
+def _investigation_leads_compound(normalized: str) -> bool:
+    """Return True when a compound request asks for investigation FIRST.
+
+    A compound development request ("Investigate X, create a development
+    proposal, and present it for my approval") names investigation as its
+    first stage; its forward-looking planning/approval language must not
+    hijack classification into APPROVAL/PLANNING_REQUEST. The request is
+    compound only when a planning cue is also present, and investigation
+    leads only when a non-negated imperative investigation cue occurs
+    BEFORE that planning cue. Noun forms ("investigation", "diagnosis",
+    "analysis") refer to a prior artifact and never lead a compound
+    request, so single-intent planning requests such as "convert this
+    investigation" remain PLANNING_REQUEST.
+    """
+    lowered = normalized.lower()
+    planning_index = _first_cue_index(lowered, _PLANNING_CUES)
+    if planning_index is None:
+        return False
+    for cue in _INVESTIGATION_LEAD_CUES:
+        match = re.search(rf"\b{re.escape(cue)}\b", lowered)
+        if match is None:
+            continue
+        idx = match.start()
+        if idx < planning_index and not _occurrence_is_negated(lowered, idx):
+            return True
+    return False
 
 
 def _is_explicit_approval(text: str) -> bool:
@@ -804,8 +866,14 @@ class TaskIntake:
             return TaskType.EXECUTION_REQUEST
 
         # Explicit approval is checked next. It requires unambiguous approval
-        # language and cannot be ambiguous conversational responses.
-        if _is_explicit_approval(normalized):
+        # language and cannot be ambiguous conversational responses. An
+        # investigation-first compound request ("Investigate X, create a
+        # development proposal, and present it for my approval") names
+        # investigation as its first stage, so its forward-looking approval
+        # language must not hijack the classification.
+        if _is_explicit_approval(normalized) and not _investigation_leads_compound(
+            normalized
+        ):
             return TaskType.APPROVAL
 
         # Explicit rejection is checked next, symmetric with approval.
@@ -870,8 +938,10 @@ class TaskIntake:
         # wants to convert an investigation proposal into a development
         # proposal. Checked before investigation because some planning phrases
         # contain investigation-related words (e.g., "convert this investigation").
+        # An investigation-first compound request skips planning so that its
+        # forward-looking proposal language classifies as investigation.
         planning = _first_hit(lowered, _PLANNING_CUES)
-        if planning:
+        if planning and not _investigation_leads_compound(normalized):
             return TaskType.PLANNING_REQUEST
 
         # Investigation cues are checked next and take precedence.

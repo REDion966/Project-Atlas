@@ -909,6 +909,169 @@ class TestPlanningClassification:
         assert spec.task_type is TaskType.APPROVAL
 
 
+class TestCompoundInvestigationClassification:
+    """Phase C Evolution #2 — an investigation-first compound request must
+    classify as INVESTIGATION_REQUEST instead of being hijacked by its
+    forward-looking planning/approval language."""
+
+    @pytest.mark.parametrize("text", [
+        "Investigate the repository test architecture and report on the five "
+        "areas with strongest test coverage.",
+        "Investigate the repository's test architecture and identify one small "
+        "non-production test-quality improvement fully contained within the "
+        "tests directory. Create a development proposal for that improvement "
+        "and present it for my approval. Do not execute anything yet.",
+        "Investigate the repository and create a development proposal for the "
+        "improvement you find.",
+    ])
+    def test_compound_request_is_investigation(self, text):
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST
+
+    def test_negated_execution_stays_investigation(self):
+        spec = TaskIntake().intake(
+            "Investigate the repository and do not execute anything yet."
+        )
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST
+
+
+class TestCompoundClassificationBoundaries:
+    """Phase C Evolution #2 — the compound carve-out must not change the
+    classification of existing single-intent requests."""
+
+    @pytest.mark.parametrize("text", [
+        "Approve this development proposal.",
+        "Authorize the proposed change.",
+        "Examine the proposal and approve it.",
+        "Approve the proposal that came from the investigation.",
+    ])
+    def test_approval_without_proposal_language_stays_approval(self, text):
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.APPROVAL
+
+    def test_explicit_execution_stays_execution(self):
+        spec = TaskIntake().intake("Implement the approved development proposal.")
+        assert spec.task_type is TaskType.EXECUTION_REQUEST
+
+    def test_pure_planning_stays_planning(self):
+        spec = TaskIntake().intake("Create a development proposal.")
+        assert spec.task_type is TaskType.PLANNING_REQUEST
+
+    def test_negated_investigation_does_not_shadow_planning(self):
+        spec = TaskIntake().intake(
+            "Don't investigate; create a development proposal."
+        )
+        assert spec.task_type is TaskType.PLANNING_REQUEST
+
+    def test_planning_leading_compound_stays_planning(self):
+        spec = TaskIntake().intake(
+            "Plan this improvement: investigate the memory architecture first."
+        )
+        assert spec.task_type is TaskType.PLANNING_REQUEST
+
+
+class TestCompoundRequestConversationalRouting:
+    """Phase C Evolution #2 — the observed compound request must reach the
+    read-only investigation handler (not the approval handler), with
+    governance remaining staged: no automatic planning, approval, or
+    execution."""
+
+    COMPOUND_REQUEST = (
+        "Investigate the repository's test architecture and identify one small "
+        "non-production test-quality improvement fully contained within the "
+        "tests directory. Create a development proposal for that improvement "
+        "and present it for my approval. Do not execute anything yet."
+    )
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    @staticmethod
+    def _guard_bridge(session_context, proposal, request):
+        raise AssertionError("Execution must never be reached from these requests.")
+
+    @pytest.fixture
+    def service(self, failing_ai):
+        return ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+            development_execution_bridge=self._guard_bridge,
+        )
+
+    def _owner_session(self):
+        from atlas.authority.service import AuthorityService
+        from atlas.session.context import SessionContext
+        from atlas.session.manager import SessionManager
+
+        authority = AuthorityService("Owner")
+        manager = SessionManager(authority)
+        return SessionContext.from_session(manager.create_session("owner"))
+
+    def test_compound_request_reaches_investigation(self, service):
+        """The compound request routes to investigation, not approval."""
+        session = self._owner_session()
+        response = service.send(self.COMPOUND_REQUEST, session_context=session)
+
+        state = service.state_manager.state
+        assert "investigation" in response.metadata
+        assert "approval" not in response.metadata
+        assert "Investigation:" in response.content
+
+        # Governance remains staged: nothing was planned, approved, or
+        # executed. A proposal is only PRESENTED when the existing heuristic
+        # finds a meaningful improvement; it is never auto-converted,
+        # auto-approved, or auto-executed.
+        assert state.evolution_proposal_id is None
+        assert state.pending_approval_id is None
+        if state.active_proposal_id is not None:
+            assert (
+                response.metadata["proposal"]["proposal_id"]
+                == state.active_proposal_id
+            )
+        else:
+            assert "No actionable development proposal" in response.content
+
+    def test_stream_compound_request_parity(self, service):
+        """stream() routes the compound request to investigation like send()."""
+        session = self._owner_session()
+        chunks = list(
+            service.stream(self.COMPOUND_REQUEST, session_context=session)
+        )
+        assert "Investigation:" in "".join(chunks)
+
+    def test_explicit_approval_still_gated(self, service):
+        """Explicit approval without a proposal still refuses cleanly."""
+        session = self._owner_session()
+        response = service.send(
+            "Approve this development proposal.", session_context=session
+        )
+        assert response.metadata["approval"]["status"] == "no_active_proposal"
+        assert service.state_manager.state.evolution_proposal_id is None
+
+    def test_explicit_execution_still_gated(self, service):
+        """Explicit execution without an approved proposal still refuses."""
+        session = self._owner_session()
+        response = service.send(
+            "Implement the approved development proposal.", session_context=session
+        )
+        assert response.metadata["execution"]["status"] == "no_active_proposal"
+        assert service.state_manager.state.evolution_proposal_id is None
+
+
 class TestRegressions:
     """P17 — Regression tests for existing behavior."""
 
