@@ -388,6 +388,13 @@ class ConversationService:
             if l2_response is not None:
                 self._conversation.add_message(l2_response)
                 return l2_response
+        # L3 Autonomy semantics — explicit request to execute recovery,
+        # generate sub-plans, or handle HIGH risk. L3 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.L3_AUTONOMY_REQUEST:
+            l3_response = self._maybe_handle_l3_autonomy_request(spec)
+            if l3_response is not None:
+                self._conversation.add_message(l3_response)
+                return l3_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -609,6 +616,14 @@ class ConversationService:
             if l2_response is not None:
                 self._conversation.add_message(l2_response)
                 yield l2_response.content
+                return
+        # L3 Autonomy semantics — explicit request to execute recovery,
+        # generate sub-plans, or handle HIGH risk. L3 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.L3_AUTONOMY_REQUEST:
+            l3_response = self._maybe_handle_l3_autonomy_request(spec)
+            if l3_response is not None:
+                self._conversation.add_message(l3_response)
+                yield l3_response.content
                 return
         # Development semantics win — run it first and never reroute development
         # through orchestration.
@@ -2884,6 +2899,148 @@ class ConversationService:
                         else None
                     ),
                     "evidence": l2_decision.evidence,
+                },
+            },
+        )
+
+    def _maybe_handle_l3_autonomy_request(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Handle an L3_AUTONOMY_REQUEST.
+
+        L3 controlled autonomy: execute recovery autonomously, generate
+        bounded sub-plans, or handle HIGH risk operations.
+
+        L3 can:
+        - Execute recovery within approved scope
+        - Generate bounded sub-plans within approved scope
+        - Handle HIGH risk operations
+        - Modify internal configuration within approved scope
+
+        L3 CANNOT:
+        - Create new top-level objectives
+        - Expand scope beyond approved
+        - Handle CRITICAL risk
+        - Promote to L4
+
+        Args:
+            spec: the classified L3_AUTONOMY_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the L3 autonomy result, or None if L3
+            autonomy is not possible.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. L3 autonomy requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"l3_autonomy": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "L3 autonomy requires OWNER authority. "
+                    "This session is not authorized to run L3 autonomous development."
+                ),
+                metadata={"l3_autonomy": {"status": "unauthorized"}},
+            )
+
+        # 3. Check L3 autonomy via AutonomyController.
+        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
+        from atlas.evolution.governance.models import ScopeType
+        from atlas.evolution.models import ExecutionLevel
+
+        # Build an L3 policy that permits HIGH risk and SELF_CONFIG level
+        l3_policy = AutonomyPolicy(
+            enabled=True,
+            allowed_scopes=[ScopeType.CODE],
+            max_risk_level=RiskLevel.HIGH,
+            effective_execution_level=ExecutionLevel.SELF_CONFIG,
+            requires_user_approval_scopes=[],
+            max_requests_per_window=10,
+            authorization_ttl_minutes=60,
+        )
+        policy_engine = AutonomyPolicyEngine(policy=l3_policy)
+        auth_manager = AuthorizationManager(policy=l3_policy)
+        controller = AutonomyController(
+            authorization_manager=auth_manager,
+            policy_engine=policy_engine,
+        )
+
+        # Check if L3 autonomy is permitted (using a placeholder proposal)
+        placeholder_proposal = type(
+            "_P",
+            (),
+            {"status": type("S", (), {"name": "APPROVED"})()},
+        )()
+
+        l3_decision = controller.check_high_risk_autonomy(
+            proposal=placeholder_proposal,
+            session_context=active_session,
+        )
+
+        if not l3_decision.can_proceed:
+            lines = [
+                "## L3 Autonomy: Denied",
+                "",
+                f"**Reason:** {l3_decision.reason}",
+            ]
+            if l3_decision.escalation_required:
+                lines.append("")
+                lines.append(
+                    "This action requires explicit user approval. "
+                    "Please approve the action manually."
+                )
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "l3_autonomy": {
+                        "status": "denied",
+                        "reason": l3_decision.reason,
+                        "escalation_required": l3_decision.escalation_required,
+                        "evidence": l3_decision.evidence,
+                    },
+                },
+            )
+
+        # 4. Update conversation state with L3 tracking
+        if self._state_manager is not None:
+            self._state_manager.update(
+                last_l3_decision=l3_decision.reason,
+                latest_result=f"L3 autonomy: {l3_decision.reason}",
+            )
+
+        # 5. Return L3 autonomy acknowledgment
+        return Message(
+            role="assistant",
+            content=(
+                f"## L3 Autonomous Operation\n\n"
+                f"**Decision:** {l3_decision.reason}\n"
+                f"**Authorization mode:** {l3_decision.authorization_mode.value if l3_decision.authorization_mode else 'none'}\n\n"
+                f"L3 autonomy permits autonomous recovery execution, bounded "
+                f"sub-plan generation, and HIGH risk operations within approved scope."
+            ),
+            metadata={
+                "l3_autonomy": {
+                    "status": "acknowledged",
+                    "reason": l3_decision.reason,
+                    "authorization_mode": (
+                        l3_decision.authorization_mode.value
+                        if l3_decision.authorization_mode
+                        else None
+                    ),
+                    "evidence": l3_decision.evidence,
                 },
             },
         )

@@ -1,7 +1,7 @@
 """
-Atlas Evolution Autonomy — L1/L2 Controlled Autonomy Controller — Phase P18.
+Atlas Evolution Autonomy — L1/L2/L3 Controlled Autonomy Controller — Phase P18.
 
-Pure-logic decision engine for L1 and L2 controlled autonomy.
+Pure-logic decision engine for L1, L2, and L3 controlled autonomy.
 
 L1 PHILOSOPHY
 -------------
@@ -20,11 +20,21 @@ L2 extends L1 with:
 * Cross-workflow failure diagnosis
 * MEDIUM risk operations (vs L1's LOW only)
 
+L3 PHILOSOPHY
+-------------
+L3 = Autonomous recovery execution with bounded sub-plan generation.
+
+L3 extends L2 with:
+* Autonomous recovery execution (vs L2's decision-only)
+* Bounded sub-plan generation within approved scope
+* HIGH risk operations (vs L2's MEDIUM only)
+* SELF_CONFIG execution level (vs L2's CODE_ARTIFACT)
+
 Responsibilities
 ----------------
-* Decide whether an action can be performed autonomously under L1 or L2.
+* Decide whether an action can be performed autonomously under L1, L2, or L3.
 * Verify all evidence requirements before granting autonomy.
-* Determine escalation paths when L1/L2 boundary is reached.
+* Determine escalation paths when L1/L2/L3 boundary is reached.
 * Compose existing P17 components (diagnose → recover → verify).
 
 This component is pure logic:
@@ -664,5 +674,336 @@ class AutonomyController:
                 "authority": session_context.authority.value,
                 "risk_level": "MEDIUM",
                 "execution_level": "CODE_ARTIFACT",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L3 — Autonomous recovery execution
+    # ------------------------------------------------------------------
+
+    def check_recovery_execution_autonomy(
+        self,
+        recovery_decision: Any,
+        proposal: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L3 can execute recovery autonomously.
+
+        L3 can execute recovery only if:
+        1. Recovery decision is REVISE_AND_RETRY (recoverable)
+        2. Proposal is APPROVED
+        3. Session has OWNER authority
+        4. AutonomyPolicy is enabled
+        5. Risk level is HIGH or below
+        6. Recovery stays within approved scope
+
+        Args:
+            recovery_decision: The RecoveryDecision from recovery analysis.
+            proposal: The EvolutionProposal to recover.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether recovery execution is permitted.
+        """
+        # 1. Recovery must be recoverable with REVISE_AND_RETRY strategy
+        if not recovery_decision.recoverable:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Recovery is not recoverable",
+                evidence={"recoverable": False},
+                escalation_required=True,
+            )
+
+        if recovery_decision.strategy.value != "revise_and_retry":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Recovery strategy is {recovery_decision.strategy.value}, not REVISE_AND_RETRY",
+                evidence={"strategy": recovery_decision.strategy.value},
+                escalation_required=True,
+            )
+
+        # 2. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 3. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 recovery execution requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 4. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 5. Risk must be HIGH or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.HIGH):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 recovery execution requires HIGH risk tolerance",
+                evidence={"max_risk": "HIGH"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L3 autonomous recovery execution permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "strategy": "revise_and_retry",
+                "risk_level": "HIGH",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L3 — Bounded sub-plan generation
+    # ------------------------------------------------------------------
+
+    def check_sub_plan_generation_autonomy(
+        self,
+        parent_plan: Any,
+        sub_plan: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L3 can generate a bounded sub-plan.
+
+        L3 can generate sub-plans only if:
+        1. Session has OWNER authority
+        2. AutonomyPolicy is enabled
+        3. Sub-plan preserves the parent objective
+        4. Sub-plan does not expand scope beyond parent
+        5. Sub-plan is within approved components
+
+        Args:
+            parent_plan: The parent approved plan.
+            sub_plan: The proposed sub-plan.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether sub-plan generation is permitted.
+        """
+        # 1. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 sub-plan generation requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 2. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 3. Objective must be preserved
+        parent_objective = getattr(parent_plan, "summary", "") or ""
+        sub_objective = getattr(sub_plan, "summary", "") or ""
+
+        if parent_objective != sub_objective:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 sub-plan must preserve the parent objective",
+                evidence={
+                    "parent_objective": parent_objective,
+                    "sub_objective": sub_objective,
+                },
+                escalation_required=True,
+            )
+
+        # 4. Scope must not expand beyond parent
+        parent_components = set(getattr(parent_plan, "target_components", []) or [])
+        sub_components = set(getattr(sub_plan, "target_components", []) or [])
+
+        if not sub_components.issubset(parent_components):
+            new_components = sub_components - parent_components
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 sub-plan cannot expand scope beyond parent",
+                evidence={
+                    "parent_components": list(parent_components),
+                    "new_components": list(new_components),
+                },
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L3 autonomous sub-plan generation permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "parent_components": list(parent_components),
+                "sub_components": list(sub_components),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L3 — HIGH risk operations
+    # ------------------------------------------------------------------
+
+    def check_high_risk_autonomy(
+        self,
+        proposal: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L3 can handle HIGH risk operations.
+
+        L3 can handle HIGH risk only if:
+        1. Proposal is APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Risk level is HIGH or below
+        5. Execution level allows SELF_CONFIG
+
+        Args:
+            proposal: The EvolutionProposal to execute.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether HIGH risk execution is permitted.
+        """
+        # 1. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 HIGH risk execution requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Risk must be HIGH or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.HIGH):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 HIGH risk execution requires HIGH risk tolerance",
+                evidence={"max_risk": "HIGH"},
+                escalation_required=True,
+            )
+
+        # 5. Execution level must allow SELF_CONFIG
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.SELF_CONFIG):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 HIGH risk execution requires SELF_CONFIG execution level",
+                evidence={"required_level": "SELF_CONFIG"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L3 autonomous HIGH risk execution permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "risk_level": "HIGH",
+                "execution_level": "SELF_CONFIG",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L3 — SELF_CONFIG operations
+    # ------------------------------------------------------------------
+
+    def check_self_config_autonomy(
+        self,
+        proposal: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L3 can modify internal configuration.
+
+        L3 can modify configuration only if:
+        1. Proposal is APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Execution level allows SELF_CONFIG
+        5. Scope is within approved configuration scope
+
+        Args:
+            proposal: The EvolutionProposal for configuration change.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether SELF_CONFIG is permitted.
+        """
+        # 1. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 SELF_CONFIG requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Execution level must allow SELF_CONFIG
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.SELF_CONFIG):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L3 SELF_CONFIG requires SELF_CONFIG execution level",
+                evidence={"required_level": "SELF_CONFIG"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L3 autonomous SELF_CONFIG permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "execution_level": "SELF_CONFIG",
             },
         )

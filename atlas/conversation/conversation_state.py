@@ -81,6 +81,15 @@ class ConversationState:
     # L2 autonomy tracking: summary of last L2-specific decision.
     last_l2_decision: Optional[str] = None
 
+    # L3 autonomy tracking: number of autonomous recoveries executed.
+    autonomous_recoveries: int = 0
+
+    # L3 autonomy tracking: number of sub-plans generated.
+    sub_plans_generated: int = 0
+
+    # L3 autonomy tracking: summary of last L3-specific decision.
+    last_l3_decision: Optional[str] = None
+
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
 
@@ -115,6 +124,9 @@ class ConversationState:
             "last_autonomy_decision": self.last_autonomy_decision,
             "chained_workflows": list(self.chained_workflows),
             "last_l2_decision": self.last_l2_decision,
+            "autonomous_recoveries": self.autonomous_recoveries,
+            "sub_plans_generated": self.sub_plans_generated,
+            "last_l3_decision": self.last_l3_decision,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

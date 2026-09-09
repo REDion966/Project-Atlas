@@ -97,6 +97,11 @@ class DevelopmentLifecycleReport:
     chained_workflows: int = 0
     last_l2_decision: str | None = None
 
+    # L3 autonomy tracking
+    autonomous_recoveries: int = 0
+    sub_plans_generated: int = 0
+    last_l3_decision: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Report builder
@@ -207,7 +212,7 @@ class DevelopmentReportBuilder:
             has_recovery=recovery_proposal is not None,
         )
 
-        # Extract L1/L2 autonomy tracking from conversation state
+        # Extract L1/L2/L3 autonomy tracking from conversation state
         autonomous_steps = getattr(state, "autonomous_steps_executed", 0) or 0
         last_autonomy_decision = getattr(state, "last_autonomy_decision", None)
 
@@ -215,6 +220,11 @@ class DevelopmentReportBuilder:
         chained_workflows_list = getattr(state, "chained_workflows", ()) or ()
         chained_workflows = len(chained_workflows_list)
         last_l2_decision = getattr(state, "last_l2_decision", None)
+
+        # Extract L3-specific tracking
+        autonomous_recoveries = getattr(state, "autonomous_recoveries", 0) or 0
+        sub_plans_generated = getattr(state, "sub_plans_generated", 0) or 0
+        last_l3_decision = getattr(state, "last_l3_decision", None)
 
         return DevelopmentLifecycleReport(
             final_conclusion=final_conclusion,
@@ -233,6 +243,9 @@ class DevelopmentReportBuilder:
             last_autonomy_decision=last_autonomy_decision,
             chained_workflows=chained_workflows,
             last_l2_decision=last_l2_decision,
+            autonomous_recoveries=autonomous_recoveries,
+            sub_plans_generated=sub_plans_generated,
+            last_l3_decision=last_l3_decision,
         )
 
     @staticmethod

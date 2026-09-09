@@ -69,6 +69,7 @@ class TaskType(Enum):
     REPORT_REQUEST = "report_request"
     AUTONOMY_REQUEST = "autonomy_request"
     L2_AUTONOMY_REQUEST = "l2_autonomy_request"
+    L3_AUTONOMY_REQUEST = "l3_autonomy_request"
     UNKNOWN = "unknown"
 
 
@@ -272,6 +273,21 @@ _L2_AUTONOMY_CUES: frozenset[str] = frozenset(
         "optimize the plan",
         "reorder the steps",
         "skip redundant steps",
+    }
+)
+
+#: Explicit L3 autonomy phrases that indicate the user wants Atlas to
+#: execute recovery autonomously, generate sub-plans, or handle HIGH risk.
+_L3_AUTONOMY_CUES: frozenset[str] = frozenset(
+    {
+        "execute recovery",
+        "autonomous recovery",
+        "recover autonomously",
+        "generate sub plan",
+        "create sub plan",
+        "handle high risk",
+        "modify configuration",
+        "adjust configuration",
     }
 )
 
@@ -799,6 +815,12 @@ class TaskIntake:
         l2_autonomy = _first_hit(lowered, _L2_AUTONOMY_CUES)
         if l2_autonomy:
             return TaskType.L2_AUTONOMY_REQUEST
+
+        # Explicit L3 autonomy phrases are checked next. They indicate the user
+        # wants Atlas to execute recovery, generate sub-plans, or handle HIGH risk.
+        l3_autonomy = _first_hit(lowered, _L3_AUTONOMY_CUES)
+        if l3_autonomy:
+            return TaskType.L3_AUTONOMY_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development
