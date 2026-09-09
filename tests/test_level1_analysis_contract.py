@@ -24,6 +24,8 @@ import pytest
 
 from atlas.conversation.investigation import (
     InvestigationFinding,
+    InvestigationProposalConverter,
+    InvestigationProposalGenerator,
     InvestigationReport,
     InvestigationService,
 )
@@ -65,14 +67,28 @@ class TestNoExecutableProposal:
         assert "EvolutionProposal" not in source
 
     def test_investigation_does_not_call_change_supplier(self):
-        """Investigation must not invoke the change supplier."""
+        """The investigation path must not invoke the change supplier.
+
+        Phase C Evolution #4 narrowed this guard: bounded change authoring
+        now lives in InvestigationProposalConverter (proposal preparation,
+        BEFORE approval) behind an INJECTED, default-None supplier. The
+        investigation path itself (InvestigationService.investigate and
+        InvestigationProposalGenerator.generate_proposal) must remain
+        author-free, and the converter must carry no built-in supplier.
+        """
         service = InvestigationService()
 
-        # Verify investigation service has no access to change supplier
-        import atlas.conversation.investigation as inv_module
-        source = inspect.getsource(inv_module)
-        assert "ChangeSupplier" not in source
-        assert "change_supplier" not in source
+        investigate_source = inspect.getsource(service.investigate)
+        generator_source = inspect.getsource(
+            InvestigationProposalGenerator
+        )
+        for source in (investigate_source, generator_source):
+            assert "ChangeSupplier" not in source
+            assert "change_supplier" not in source
+            assert "supply_changes" not in source
+
+        # Converter authoring is injection-only and disabled by default.
+        assert InvestigationProposalConverter()._change_supplier is None
 
 
 class TestNoWriteAuthority:

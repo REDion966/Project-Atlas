@@ -714,10 +714,32 @@ class InvestigationProposalConverter:
 
     The converted proposal always starts as ProposalStatus.DRAFT and requires
     explicit human approval before any further action.
+
+    An optional F9 ``ChangeSupplier`` may be injected. When configured, the
+    supplier is consulted DURING conversion — i.e., BEFORE approval — and any
+    bounded ``SuppliedChanges`` payload it returns is stamped into the
+    proposal metadata using the existing F9 convention
+    (``code_changes`` / ``test_files`` / ``development_cycle`` provenance), so
+    the human approves a proposal that already carries the exact executable
+    workload. When no supplier is configured, or the supplier returns
+    ``None``, conversion is byte-identical to the evidence-only contract.
+    Invalid payloads fail closed (raise) and never fabricate a workload.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, change_supplier: Any | None = None) -> None:
+        """Initialise the converter.
+
+        Args:
+            change_supplier: Optional object implementing the existing F9
+                ``ChangeSupplier`` protocol
+                (``supply_changes(need) -> SuppliedChanges | None``). The
+                supplier receives a read-only ``DevelopmentNeed`` view of the
+                investigation evidence and returns data only; it can never
+                mutate the investigation proposal, the repository, approvals,
+                or execution state. Defaults to ``None`` (no authoring).
+        """
         self._conversion_counter = 0
+        self._change_supplier = change_supplier
 
     def convert(self, proposal: InvestigationProposal) -> EvolutionProposal:
         """Convert an InvestigationProposal to a DRAFT EvolutionProposal.
@@ -760,6 +782,28 @@ class InvestigationProposalConverter:
             "recommended_next_step": proposal.recommended_next_step,
         }
 
+        # Optional pre-approval authoring through the existing F9 seam. The
+        # supplier returns data only; an absent supplier or a ``None`` result
+        # preserves the evidence-only conversion contract exactly. Invalid
+        # payloads raise (fail closed) — no workload is ever fabricated.
+        supplied = self._author_workload(proposal)
+        if supplied is not None:
+            code_changes, test_files = self._bounded_payload(supplied)
+            metadata["code_changes"] = [
+                {"path": path, "content": content}
+                for path, content in code_changes
+            ]
+            metadata["test_files"] = {
+                path: content for path, content in test_files
+            }
+            metadata["development_cycle"] = {
+                "change_origin": supplied.origin,
+                "content_status": "unverified-draft",
+                "supplier_confidence": float(supplied.confidence),
+                "supplier_notes": (supplied.notes or "")[:500],
+                "generated_by": "p17-conversational-authoring",
+            }
+
         ev_proposal = EvolutionProposal(
             proposal_id=evolution_proposal_id,
             title=proposal.title,
@@ -768,7 +812,9 @@ class InvestigationProposalConverter:
             expected_benefit=self._derive_expected_benefit(proposal),
             risks=self._derive_risks(),
             impact_analysis=self._derive_impact_analysis(proposal),
-            implementation_approach=self._derive_implementation_approach(proposal),
+            implementation_approach=self._implementation_approach_for(
+                proposal, supplied
+            ),
             plan=plan,
             status=ProposalStatus.DRAFT,
             created_at=proposal.created_at,
@@ -778,6 +824,122 @@ class InvestigationProposalConverter:
         # Compute and set the fingerprint for strict approval binding
         ev_proposal.proposal_fingerprint = ev_proposal.compute_fingerprint()
         return ev_proposal
+
+    def _author_workload(self, proposal: InvestigationProposal):
+        """Consult the optional F9 change supplier (data only, read-only input).
+
+        Builds a bounded ``DevelopmentNeed`` view of the investigation
+        evidence; the supplier can never mutate the investigation proposal,
+        the repository, approvals, or execution state. Returns the supplier's
+        ``SuppliedChanges``, or ``None`` when no supplier is configured or the
+        supplier declines to author. A non-``SuppliedChanges`` result raises
+        (fail closed).
+        """
+        if self._change_supplier is None:
+            return None
+
+        from atlas.evolution.development_cycle import (
+            DevelopmentNeed,
+            SuppliedChanges,
+        )
+
+        need = DevelopmentNeed(
+            title=proposal.title,
+            summary=proposal.summary,
+            rationale=proposal.evidence_summary or proposal.summary,
+            expected_benefit=proposal.recommended_next_step,
+            target_components=tuple(proposal.components),
+            candidate_id=proposal.proposal_id,
+            metadata={
+                "investigation_target": proposal.investigation_target,
+                "findings": [
+                    {
+                        "category": finding.category,
+                        "description": finding.description,
+                        "evidence": finding.evidence,
+                        "location": finding.location,
+                    }
+                    for finding in proposal.findings
+                ],
+                "affected_files": list(proposal.affected_files),
+                "tests_inspected": list(proposal.tests_inspected),
+            },
+        )
+
+        supplied = self._change_supplier.supply_changes(need)
+        if supplied is None:
+            return None
+        if not isinstance(supplied, SuppliedChanges):
+            raise ValueError(
+                "change supplier returned an unsupported payload type"
+            )
+        return supplied
+
+    def _bounded_payload(self, supplied: Any) -> tuple[tuple, tuple]:
+        """Bound and path-check an authored payload using the EXISTING F9/E2
+        validation machinery (``DevelopmentCyclePolicy`` bounds plus
+        ``CodeChangeSet`` path validation), mirroring
+        ``DevelopmentCycleController._bound_payload``. Never a weaker
+        duplicate validator.
+        """
+        from atlas.evolution.autonomy.code_sandbox import CodeChangeSet
+        from atlas.evolution.development_cycle import DevelopmentCyclePolicy
+
+        policy = DevelopmentCyclePolicy()
+
+        changes: list[tuple[str, str]] = []
+        for path, content in tuple(supplied.code_changes)[
+            : policy.max_code_changes
+        ]:
+            if not path.strip():
+                raise ValueError("empty change path")
+            if len(path) > policy.max_path_chars:
+                raise ValueError("change path exceeds bound")
+            if len(content) > policy.max_content_chars:
+                raise ValueError("change content exceeds bound")
+            CodeChangeSet.validate_path(path)
+            changes.append((path, content))
+
+        tests: list[tuple[str, str]] = []
+        for path, content in tuple(supplied.test_files)[
+            : policy.max_test_files
+        ]:
+            if not path.strip():
+                raise ValueError("empty test path")
+            if len(path) > policy.max_path_chars:
+                raise ValueError("test path exceeds bound")
+            if len(content) > policy.max_content_chars:
+                raise ValueError("test content exceeds bound")
+            CodeChangeSet.validate_path(path)
+            tests.append((path, content))
+
+        if not changes:
+            raise ValueError("no bounded code changes after validation")
+        return tuple(changes), tuple(tests)
+
+    def _implementation_approach_for(
+        self,
+        proposal: InvestigationProposal,
+        supplied: Any,
+    ) -> str:
+        """Render the fingerprint-visible implementation approach.
+
+        When a workload was authored, the approach declares its presence,
+        size, and provenance so the approval-facing proposal state discloses
+        that an executable sandbox payload exists. With no authoring, the
+        output is byte-identical to the evidence-only contract.
+        """
+        approach = self._derive_implementation_approach(proposal)
+        if supplied is None:
+            return approach
+        declared = (
+            f"{approach} Authored sandbox workload: "
+            f"{len(supplied.code_changes)} code change(s) and "
+            f"{len(supplied.test_files)} test file(s), provenance "
+            f"'{supplied.origin}', content_status 'unverified-draft'; "
+            "requires OWNER approval; sandbox-only execution."
+        )
+        return declared[:4000]
 
     def _build_improvement_plan(
         self, proposal: InvestigationProposal, timestamp: str

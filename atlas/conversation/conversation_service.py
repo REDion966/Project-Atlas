@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from atlas.ai.routing.models import RoutingRequest
 from atlas.cognition.api import CognitionAPI
@@ -132,6 +132,7 @@ class ConversationService:
         execution_service: Level3ExecutionService | None = None,
         approval_manager: ApprovalManager | None = None,
         development_execution_bridge: Callable[..., Any] | None = None,
+        proposal_change_supplier: Any | None = None,
     ):
         """
         Initialize the conversation service.
@@ -180,6 +181,15 @@ class ConversationService:
                     (session_context, proposal, request) -> Message
 
                 When ``None``, execution requests cannot be carried out.
+
+            proposal_change_supplier:
+                Optional F9 ``ChangeSupplier`` consulted during planning-proposal
+                conversion (BEFORE approval) so the conversational proposal can
+                carry an exact, bounded sandbox workload under the existing F9
+                metadata convention. When ``None`` (the default), planning
+                remains evidence-only and execution fails closed with
+                ``INVALID_OBJECTIVE`` exactly as before. The supplier receives
+                data only and can never mutate proposals, approvals, or state.
         """
 
         self._history = History()
@@ -202,7 +212,9 @@ class ConversationService:
         self._state_manager = state_manager or ConversationStateManager()
         self._investigation_service = investigation_service
         self._proposal_generator = InvestigationProposalGenerator()
-        self._proposal_converter = InvestigationProposalConverter()
+        self._proposal_converter = InvestigationProposalConverter(
+            change_supplier=proposal_change_supplier
+        )
         self._execution_service = execution_service
         self._approval_manager = approval_manager
         self._development_execution_bridge = development_execution_bridge
@@ -1286,6 +1298,40 @@ class ConversationService:
                 ),
             )
 
+        # Approval-facing disclosure: when a bounded workload was authored
+        # pre-approval, disclose its presence, size, and provenance so the
+        # approver knows an executable sandbox payload exists.
+        authored_changes = ev_proposal.metadata.get("code_changes") or []
+        authored_tests = ev_proposal.metadata.get("test_files") or {}
+        authored_cycle = ev_proposal.metadata.get("development_cycle") or {}
+        workload_summary = ""
+        if authored_changes:
+            workload_summary = (
+                f"**Authored workload:** {len(authored_changes)} code "
+                f"change(s), {len(authored_tests)} test file(s) "
+                f"(origin '{authored_cycle.get('change_origin', 'unknown')}', "
+                f"content_status "
+                f"'{authored_cycle.get('content_status', 'unknown')}'; "
+                f"sandbox-only execution).\n\n"
+            )
+        planning_metadata: dict[str, Any] = {
+            "status": "prepared",
+            "investigation_proposal_id": inv_proposal.proposal_id,
+            "evolution_proposal_id": ev_proposal.proposal_id,
+            "approval_request_id": approval_request.request_id,
+            "proposal_status": ev_proposal.status.name,
+            "approval_status": approval_request.decision.name,
+        }
+        if authored_changes:
+            planning_metadata["authored_workload"] = {
+                "code_changes": len(authored_changes),
+                "test_files": len(authored_tests),
+                "change_origin": authored_cycle.get("change_origin", "unknown"),
+                "content_status": authored_cycle.get(
+                    "content_status", "unknown"
+                ),
+            }
+
         return Message(
             role="assistant",
             content=(
@@ -1298,19 +1344,11 @@ class ConversationService:
                 f"'{inv_proposal.investigation_target}'.\n\n"
                 f"**Components:** {', '.join(ev_proposal.plan.target_components[:5])}\n"
                 f"**Affected files:** {', '.join(ev_proposal.metadata.get('affected_files', [])[:5])}\n\n"
+                f"{workload_summary}"
                 f"No changes have been made. This proposal requires your "
                 f"explicit approval before any work begins."
             ),
-            metadata={
-                "planning": {
-                    "status": "prepared",
-                    "investigation_proposal_id": inv_proposal.proposal_id,
-                    "evolution_proposal_id": ev_proposal.proposal_id,
-                    "approval_request_id": approval_request.request_id,
-                    "proposal_status": ev_proposal.status.name,
-                    "approval_status": approval_request.decision.name,
-                },
-            },
+            metadata={"planning": planning_metadata},
         )
 
     def _maybe_handle_approval(self, spec: TaskSpec) -> Message | None:

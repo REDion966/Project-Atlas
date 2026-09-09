@@ -1844,6 +1844,491 @@ class TestKernelDevelopmentExecutionBridge:
             atlas.shutdown()
 
 
+# ---------------------------------------------------------------------------
+# Phase C Evolution #4 — bounded conversational change authoring
+# ---------------------------------------------------------------------------
+
+
+class _BoundedTestQualityAuthor:
+    """Synthetic bounded author implementing the F9 ChangeSupplier protocol.
+
+    Produces a self-contained sandbox workload (module + verifying test) so
+    the real conversational/kernel/approval/execution wiring can be proven
+    end-to-end without model assistance. Data only; never mutates inputs.
+    """
+
+    def __init__(
+        self,
+        changes=(("mod.py", "VALUE = 41\n"),),
+        tests=(
+            (
+                "test_mod.py",
+                "def test_value():\n"
+                "    from mod import VALUE\n"
+                "    assert VALUE == 41\n",
+            ),
+        ),
+        *,
+        origin="deterministic-test-quality",
+        return_none=False,
+        raise_error=False,
+        confidence=0.9,
+    ):
+        self._changes = tuple(changes)
+        self._tests = tuple(tests)
+        self._origin = origin
+        self._return_none = return_none
+        self._raise_error = raise_error
+        self._confidence = confidence
+        self.received_needs = []
+
+    def supply_changes(self, need):
+        self.received_needs.append(need)
+        if self._raise_error:
+            raise RuntimeError("authoring failed")
+        if self._return_none:
+            return None
+        from atlas.evolution.development_cycle import SuppliedChanges
+
+        return SuppliedChanges(
+            code_changes=self._changes,
+            test_files=self._tests,
+            origin=self._origin,
+            confidence=self._confidence,
+            notes="synthetic bounded author",
+        )
+
+
+def _investigation_proposal_for_authoring():
+    return InvestigationProposal(
+        proposal_id="INV-PROP-AUTHOR-0001",
+        investigation_target="test architecture",
+        title="Improve: test architecture",
+        summary="Identified 1 relevant component(s).",
+        components=("atlas.conversation.development_intake",),
+        findings=(
+            InvestigationFinding(
+                category="test",
+                description=(
+                    "Found 1 test file(s) referencing 'development_intake'"
+                ),
+                evidence="tests/test_conversation_development_intake.py",
+                location="tests/",
+            ),
+        ),
+        affected_files=("tests/test_conversation_development_intake.py",),
+        tests_inspected=("tests/test_conversation_development_intake.py",),
+        recommended_next_step="Review the identified components.",
+        evidence_summary="Found 1 test across 1 component(s).",
+    )
+
+
+class TestConverterAuthoringSeam:
+    """Evolution #4 — optional F9 change-supplier seam on the converter."""
+
+    def test_no_supplier_preserves_evidence_only_contract(self):
+        converter = InvestigationProposalConverter()
+        ev = converter.convert(_investigation_proposal_for_authoring())
+        assert "code_changes" not in ev.metadata
+        assert "test_files" not in ev.metadata
+        assert "development_cycle" not in ev.metadata
+        assert "Authored sandbox workload" not in ev.implementation_approach
+
+    def test_supplier_none_result_preserves_evidence_only_contract(self):
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor(return_none=True)
+        )
+        ev = converter.convert(_investigation_proposal_for_authoring())
+        assert "code_changes" not in ev.metadata
+        assert "test_files" not in ev.metadata
+        assert "development_cycle" not in ev.metadata
+        assert "Authored sandbox workload" not in ev.implementation_approach
+
+    def test_authored_code_changes_populated(self):
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor()
+        )
+        ev = converter.convert(_investigation_proposal_for_authoring())
+        assert ev.metadata["code_changes"] == [
+            {"path": "mod.py", "content": "VALUE = 41\n"}
+        ]
+        assert "Authored sandbox workload" in ev.implementation_approach
+
+    def test_authored_test_files_populated(self):
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor()
+        )
+        ev = converter.convert(_investigation_proposal_for_authoring())
+        assert ev.metadata["test_files"] == {
+            "test_mod.py": (
+                "def test_value():\n"
+                "    from mod import VALUE\n"
+                "    assert VALUE == 41\n"
+            )
+        }
+
+    def test_provenance_stamped_with_existing_conventions(self):
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor()
+        )
+        ev = converter.convert(_investigation_proposal_for_authoring())
+        cycle = ev.metadata["development_cycle"]
+        assert cycle["change_origin"] == "deterministic-test-quality"
+        assert cycle["content_status"] == "unverified-draft"
+        assert cycle["supplier_confidence"] == 0.9
+        assert cycle["generated_by"] == "p17-conversational-authoring"
+
+    def test_oversize_content_fails_closed(self):
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor(
+                changes=(("mod.py", "x" * 40_000),)
+            )
+        )
+        with pytest.raises(ValueError):
+            converter.convert(_investigation_proposal_for_authoring())
+
+    def test_change_count_bounded_by_existing_policy(self):
+        changes = tuple(
+            (f"mod_{i}.py", "VALUE = 1\n") for i in range(7)
+        )
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor(changes=changes)
+        )
+        ev = converter.convert(_investigation_proposal_for_authoring())
+        assert len(ev.metadata["code_changes"]) == 5
+
+    def test_unsafe_paths_fail_closed(self):
+        for bad_path in ("../escape.py", "C:\\evil.py", "/abs/evil.py"):
+            converter = InvestigationProposalConverter(
+                change_supplier=_BoundedTestQualityAuthor(
+                    changes=((bad_path, "x\n"),)
+                )
+            )
+            with pytest.raises(ValueError):
+                converter.convert(_investigation_proposal_for_authoring())
+
+    def test_investigation_proposal_remains_immutable(self):
+        import dataclasses
+
+        proposal = _investigation_proposal_for_authoring()
+        before = (
+            proposal.proposal_id,
+            proposal.findings,
+            proposal.affected_files,
+            proposal.components,
+        )
+        converter = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor()
+        )
+        converter.convert(proposal)
+        assert (
+            proposal.proposal_id,
+            proposal.findings,
+            proposal.affected_files,
+            proposal.components,
+        ) == before
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            proposal.title = "mutated"
+
+    def test_fingerprint_contract_unchanged(self):
+        import hashlib
+
+        evidence_only = InvestigationProposalConverter().convert(
+            _investigation_proposal_for_authoring()
+        )
+        expected = hashlib.sha256(
+            "|".join(
+                [
+                    evidence_only.title,
+                    evidence_only.summary,
+                    evidence_only.rationale,
+                    evidence_only.expected_benefit,
+                    evidence_only.risks,
+                    evidence_only.impact_analysis,
+                    evidence_only.implementation_approach,
+                ]
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        assert evidence_only.proposal_fingerprint == expected
+
+        authored = InvestigationProposalConverter(
+            change_supplier=_BoundedTestQualityAuthor()
+        ).convert(_investigation_proposal_for_authoring())
+        assert authored.proposal_fingerprint != evidence_only.proposal_fingerprint
+
+
+class TestAuthoringWiring:
+    """Evolution #4 — supplier threading and disabled-by-default wiring."""
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    def test_conversation_service_accepts_supplier(self, failing_ai):
+        author = _BoundedTestQualityAuthor()
+        service = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            proposal_change_supplier=author,
+        )
+        assert service._proposal_converter._change_supplier is author
+
+    def test_default_wiring_keeps_authoring_disabled(self, failing_ai):
+        service = ConversationService(
+            ai_service=failing_ai, task_intake=TaskIntake()
+        )
+        assert service._proposal_converter._change_supplier is None
+
+    def _make_atlas(self, tmp_path, monkeypatch):
+        import atlas.kernel.atlas as kernel_mod
+        from tests.test_durable_guided_improvement import _storage_class
+
+        monkeypatch.setattr(
+            "atlas.kernel.atlas.SQLiteEvolutionStorage",
+            _storage_class(tmp_path),
+        )
+        atlas = kernel_mod.Atlas()
+        atlas.start()
+        return atlas
+
+    def test_kernel_wiring_has_no_change_supplier(self, tmp_path, monkeypatch):
+        """No bounded deterministic author exists yet; the kernel must wire
+        authoring disabled (None) until one is justified."""
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            assert (
+                atlas._conversation._proposal_converter._change_supplier
+                is None
+            )
+        finally:
+            atlas.shutdown()
+
+    def test_model_assisted_authoring_remains_disabled(
+        self, tmp_path, monkeypatch
+    ):
+        from atlas.evolution.development_cycle import DevelopmentNeed
+        from atlas.evolution.model_assisted_supplier import (
+            ModelAssistedChangeSupplier,
+        )
+
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            assert (
+                atlas._config.get(
+                    "development", "model_assisted_authoring", default=False
+                )
+                is False
+            )
+            need = DevelopmentNeed(title="Author something")
+            assert ModelAssistedChangeSupplier().supply_changes(need) is None
+        finally:
+            atlas.shutdown()
+
+
+class TestConversationalAuthoringJoin:
+    """Evolution #4 — the real conversational join: natural request through
+    authoring, approval, kernel bridge, sandbox implementation, pytest, and
+    outcome — with a controlled bounded author and otherwise-real wiring."""
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    def _make_atlas(self, tmp_path, monkeypatch):
+        import atlas.kernel.atlas as kernel_mod
+        from tests.test_durable_guided_improvement import _storage_class
+
+        monkeypatch.setattr(
+            "atlas.kernel.atlas.SQLiteEvolutionStorage",
+            _storage_class(tmp_path),
+        )
+        atlas = kernel_mod.Atlas()
+        atlas.start()
+        return atlas
+
+    def _make_service(self, atlas, failing_ai, author=None):
+        from atlas.conversation.investigation import InvestigationService
+        from atlas.conversation.task_intake import TaskIntake
+
+        service = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=atlas._approval_manager,
+            development_execution_bridge=(
+                atlas._development_execution_bridge
+            ),
+            proposal_change_supplier=author,
+            session_context=atlas.session_context,
+        )
+        atlas._conversation = service
+        return service
+
+    def _last_assistant(self, service):
+        return service._conversation.messages[-1]
+
+    def test_full_join_reaches_sandbox_pytest(
+        self, tmp_path, monkeypatch, failing_ai
+    ):
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            service = self._make_service(
+                atlas, failing_ai, author=_BoundedTestQualityAuthor()
+            )
+
+            list(atlas.stream("Investigate the memory architecture"))
+            state = service.state_manager.state
+            assert state.active_proposal_id is not None
+
+            list(atlas.stream("Plan this improvement"))
+            planned = self._last_assistant(service)
+            assert planned.metadata["planning"]["status"] == "prepared"
+            assert planned.metadata["planning"]["authored_workload"] == {
+                "code_changes": 1,
+                "test_files": 1,
+                "change_origin": "deterministic-test-quality",
+                "content_status": "unverified-draft",
+            }
+            state = service.state_manager.state
+            ev_proposal = service._resolve_evolution_proposal(
+                state.evolution_proposal_id
+            )
+            # Authoring happened BEFORE approval: the payload exists while
+            # the proposal is merely PENDING_APPROVAL (not yet approved).
+            assert ev_proposal.metadata["code_changes"]
+            assert ev_proposal.status.name == "PENDING_APPROVAL"
+            assert ev_proposal.approved_at is None
+
+            list(atlas.stream("Approve this proposal"))
+            approved = self._last_assistant(service)
+            assert approved.metadata["approval"]["status"] == "approved"
+
+            list(atlas.stream("Execute the approved proposal"))
+            executed = self._last_assistant(service)
+            assert executed.metadata["execution"]["status"] == "succeeded"
+            assert "SUCCESS" in executed.content
+
+            # Audit trail: proposal + decided request persisted and bound.
+            persisted = atlas._evolution_memory.get_proposal(
+                state.evolution_proposal_id
+            )
+            assert persisted is not None
+            persisted_requests = [
+                r
+                for r in atlas._evolution_memory.get_all_approval_requests()
+                if r.proposal_id == state.evolution_proposal_id
+            ]
+            assert persisted_requests
+            assert persisted_requests[0].decision.name == "APPROVED"
+        finally:
+            atlas.shutdown()
+
+    def test_execution_without_author_fails_closed(
+        self, tmp_path, monkeypatch, failing_ai
+    ):
+        """Evolution #3 parity: with authoring disabled the join still fails
+        closed with INVALID_OBJECTIVE — never fabricated execution."""
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            service = self._make_service(atlas, failing_ai, author=None)
+
+            list(atlas.stream("Investigate the memory architecture"))
+            list(atlas.stream("Plan this improvement"))
+            list(atlas.stream("Approve this proposal"))
+            list(atlas.stream("Execute the approved proposal"))
+            executed = self._last_assistant(service)
+            assert "INVALID_OBJECTIVE" in executed.content
+        finally:
+            atlas.shutdown()
+
+    def test_authoring_failure_fails_cleanly(
+        self, tmp_path, monkeypatch, failing_ai
+    ):
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            service = self._make_service(
+                atlas,
+                failing_ai,
+                author=_BoundedTestQualityAuthor(raise_error=True),
+            )
+
+            list(atlas.stream("Investigate the memory architecture"))
+            list(atlas.stream("Plan this improvement"))
+            planned = self._last_assistant(service)
+            assert planned.metadata["planning"]["status"] == "conversion_failed"
+            state = service.state_manager.state
+            assert state.evolution_proposal_id is None
+            assert state.pending_approval_id is None
+
+            list(atlas.stream("Approve this proposal"))
+            refused = self._last_assistant(service)
+            assert "no development proposal" in refused.content.lower()
+        finally:
+            atlas.shutdown()
+
+    def test_unsafe_authored_path_fails_cleanly(
+        self, tmp_path, monkeypatch, failing_ai
+    ):
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            service = self._make_service(
+                atlas,
+                failing_ai,
+                author=_BoundedTestQualityAuthor(
+                    changes=(("../escape.py", "x\n"),)
+                ),
+            )
+
+            list(atlas.stream("Investigate the memory architecture"))
+            list(atlas.stream("Plan this improvement"))
+            planned = self._last_assistant(service)
+            assert planned.metadata["planning"]["status"] == "conversion_failed"
+            state = service.state_manager.state
+            assert state.evolution_proposal_id is None
+        finally:
+            atlas.shutdown()
+
+    def test_execution_without_approval_refused_even_with_author(
+        self, tmp_path, monkeypatch, failing_ai
+    ):
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            service = self._make_service(
+                atlas, failing_ai, author=_BoundedTestQualityAuthor()
+            )
+
+            list(atlas.stream("Execute the approved proposal."))
+            refused = self._last_assistant(service)
+            assert (
+                refused.metadata["execution"]["status"]
+                == "no_active_proposal"
+            )
+        finally:
+            atlas.shutdown()
+
+
 class TestDevelopmentDiagnostic:
     """P17 — DevelopmentDiagnostic: read-only, evidence-based, fail-closed."""
 
