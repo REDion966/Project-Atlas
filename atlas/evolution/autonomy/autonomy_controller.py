@@ -1,7 +1,7 @@
 """
-Atlas Evolution Autonomy — L1/L2/L3 Controlled Autonomy Controller — Phase P18.
+Atlas Evolution Autonomy — L1/L2/L3/L4 Controlled Autonomy Controller — Phase P18.
 
-Pure-logic decision engine for L1, L2, and L3 controlled autonomy.
+Pure-logic decision engine for L1, L2, L3, and L4 controlled autonomy.
 
 L1 PHILOSOPHY
 -------------
@@ -30,11 +30,21 @@ L3 extends L2 with:
 * HIGH risk operations (vs L2's MEDIUM only)
 * SELF_CONFIG execution level (vs L2's CODE_ARTIFACT)
 
+L4 PHILOSOPHY
+-------------
+L4 = Bounded capability acquisition with INFORMATION level access.
+
+L4 extends L3 with:
+* Capability acquisition within approved scope (vs L3's execution-only)
+* INFORMATION execution level (vs L3's SELF_CONFIG)
+* CRITICAL risk operations (vs L3's HIGH)
+* Memory/knowledge modification within approved scope
+
 Responsibilities
 ----------------
-* Decide whether an action can be performed autonomously under L1, L2, or L3.
+* Decide whether an action can be performed autonomously under L1, L2, L3, or L4.
 * Verify all evidence requirements before granting autonomy.
-* Determine escalation paths when L1/L2/L3 boundary is reached.
+* Determine escalation paths when L1/L2/L3/L4 boundary is reached.
 * Compose existing P17 components (diagnose → recover → verify).
 
 This component is pure logic:
@@ -1005,5 +1015,245 @@ class AutonomyController:
                 "proposal_status": status_name,
                 "authority": session_context.authority.value,
                 "execution_level": "SELF_CONFIG",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L4 — Capability acquisition
+    # ------------------------------------------------------------------
+
+    def check_capability_acquisition_autonomy(
+        self,
+        proposal: Any,
+        capability: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L4 can acquire a new capability.
+
+        L4 can acquire capabilities only if:
+        1. Proposal is APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Capability is within approved scope
+        5. Risk level is CRITICAL or below
+        6. Execution level allows INFORMATION
+
+        Args:
+            proposal: The EvolutionProposal requiring the capability.
+            capability: The capability to acquire.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether capability acquisition is permitted.
+        """
+        # 1. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 capability acquisition requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Risk must be CRITICAL or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.CRITICAL):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 capability acquisition requires CRITICAL risk tolerance",
+                evidence={"max_risk": "CRITICAL"},
+                escalation_required=True,
+            )
+
+        # 5. Execution level must allow INFORMATION
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.INFORMATION):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 capability acquisition requires INFORMATION execution level",
+                evidence={"required_level": "INFORMATION"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L4 autonomous capability acquisition permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "capability": str(capability),
+                "risk_level": "CRITICAL",
+                "execution_level": "INFORMATION",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L4 — INFORMATION level operations
+    # ------------------------------------------------------------------
+
+    def check_information_level_autonomy(
+        self,
+        proposal: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L4 can modify memory/knowledge.
+
+        L4 can modify information only if:
+        1. Proposal is APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Execution level allows INFORMATION
+        5. Scope is within approved information scope
+
+        Args:
+            proposal: The EvolutionProposal for information modification.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether INFORMATION level is permitted.
+        """
+        # 1. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 INFORMATION level requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Execution level must allow INFORMATION
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.INFORMATION):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 INFORMATION level requires INFORMATION execution level",
+                evidence={"required_level": "INFORMATION"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L4 autonomous INFORMATION level permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "execution_level": "INFORMATION",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L4 — CRITICAL risk operations
+    # ------------------------------------------------------------------
+
+    def check_critical_risk_autonomy(
+        self,
+        proposal: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L4 can handle CRITICAL risk operations.
+
+        L4 can handle CRITICAL risk only if:
+        1. Proposal is APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Risk level is CRITICAL or below
+        5. Execution level allows INFORMATION
+
+        Args:
+            proposal: The EvolutionProposal to execute.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether CRITICAL risk execution is permitted.
+        """
+        # 1. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 CRITICAL risk execution requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Risk must be CRITICAL or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.CRITICAL):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 CRITICAL risk execution requires CRITICAL risk tolerance",
+                evidence={"max_risk": "CRITICAL"},
+                escalation_required=True,
+            )
+
+        # 5. Execution level must allow INFORMATION
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.INFORMATION):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L4 CRITICAL risk execution requires INFORMATION execution level",
+                evidence={"required_level": "INFORMATION"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L4 autonomous CRITICAL risk execution permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "risk_level": "CRITICAL",
+                "execution_level": "INFORMATION",
             },
         )

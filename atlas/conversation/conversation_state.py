@@ -90,6 +90,12 @@ class ConversationState:
     # L3 autonomy tracking: summary of last L3-specific decision.
     last_l3_decision: Optional[str] = None
 
+    # L4 autonomy tracking: number of capabilities acquired.
+    capabilities_acquired: int = 0
+
+    # L4 autonomy tracking: summary of last L4-specific decision.
+    last_l4_decision: Optional[str] = None
+
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
 
@@ -127,6 +133,8 @@ class ConversationState:
             "autonomous_recoveries": self.autonomous_recoveries,
             "sub_plans_generated": self.sub_plans_generated,
             "last_l3_decision": self.last_l3_decision,
+            "capabilities_acquired": self.capabilities_acquired,
+            "last_l4_decision": self.last_l4_decision,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

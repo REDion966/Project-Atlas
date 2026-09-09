@@ -125,6 +125,7 @@ class DevelopmentPlan:
     adjusted: bool = False  # L2: Whether this plan was autonomously adjusted
     adjustment_reason: str = ""  # L2: Reason for adjustment
     parent_plan_id: str | None = None  # L3: Parent plan ID for sub-plans
+    capabilities_required: tuple[str, ...] = ()  # L4: Capabilities required for this plan
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,7 @@ class DevelopmentOutcome:
     effectiveness_proxy: float = 0.0
     recorded_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    autonomous: bool = False  # Whether this outcome was produced autonomously (L1/L2/L3)
+    autonomous: bool = False  # Whether this outcome was produced autonomously (L1/L2/L3/L4)
     chained_from: str | None = None  # L2: ID of previous workflow if chained
     recovery_executed: bool = False  # L3: Whether recovery was executed autonomously
+    capability_acquired: str | None = None  # L4: Capability acquired during execution

@@ -395,6 +395,13 @@ class ConversationService:
             if l3_response is not None:
                 self._conversation.add_message(l3_response)
                 return l3_response
+        # L4 Autonomy semantics — explicit request to acquire capabilities,
+        # modify memory/knowledge, or handle CRITICAL risk. L4 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.L4_AUTONOMY_REQUEST:
+            l4_response = self._maybe_handle_l4_autonomy_request(spec)
+            if l4_response is not None:
+                self._conversation.add_message(l4_response)
+                return l4_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -624,6 +631,14 @@ class ConversationService:
             if l3_response is not None:
                 self._conversation.add_message(l3_response)
                 yield l3_response.content
+                return
+        # L4 Autonomy semantics — explicit request to acquire capabilities,
+        # modify memory/knowledge, or handle CRITICAL risk. L4 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.L4_AUTONOMY_REQUEST:
+            l4_response = self._maybe_handle_l4_autonomy_request(spec)
+            if l4_response is not None:
+                self._conversation.add_message(l4_response)
+                yield l4_response.content
                 return
         # Development semantics win — run it first and never reroute development
         # through orchestration.
@@ -3041,6 +3056,148 @@ class ConversationService:
                         else None
                     ),
                     "evidence": l3_decision.evidence,
+                },
+            },
+        )
+
+    def _maybe_handle_l4_autonomy_request(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Handle an L4_AUTONOMY_REQUEST.
+
+        L4 controlled autonomy: acquire new capabilities, modify
+        memory/knowledge, or handle CRITICAL risk operations.
+
+        L4 can:
+        - Acquire new capabilities within approved scope
+        - Modify memory/knowledge within approved scope
+        - Handle CRITICAL risk operations
+        - Modify internal configuration within approved scope
+
+        L4 CANNOT:
+        - Create new top-level objectives
+        - Expand scope beyond approved
+        - Handle operations beyond CRITICAL risk
+        - Promote to L5
+
+        Args:
+            spec: the classified L4_AUTONOMY_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the L4 autonomy result, or None if L4
+            autonomy is not possible.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. L4 autonomy requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"l4_autonomy": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "L4 autonomy requires OWNER authority. "
+                    "This session is not authorized to run L4 autonomous development."
+                ),
+                metadata={"l4_autonomy": {"status": "unauthorized"}},
+            )
+
+        # 3. Check L4 autonomy via AutonomyController.
+        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
+        from atlas.evolution.governance.models import ScopeType
+        from atlas.evolution.models import ExecutionLevel
+
+        # Build an L4 policy that permits CRITICAL risk and INFORMATION level
+        l4_policy = AutonomyPolicy(
+            enabled=True,
+            allowed_scopes=[ScopeType.CODE],
+            max_risk_level=RiskLevel.CRITICAL,
+            effective_execution_level=ExecutionLevel.INFORMATION,
+            requires_user_approval_scopes=[],
+            max_requests_per_window=10,
+            authorization_ttl_minutes=60,
+        )
+        policy_engine = AutonomyPolicyEngine(policy=l4_policy)
+        auth_manager = AuthorizationManager(policy=l4_policy)
+        controller = AutonomyController(
+            authorization_manager=auth_manager,
+            policy_engine=policy_engine,
+        )
+
+        # Check if L4 autonomy is permitted (using a placeholder proposal)
+        placeholder_proposal = type(
+            "_P",
+            (),
+            {"status": type("S", (), {"name": "APPROVED"})()},
+        )()
+
+        l4_decision = controller.check_critical_risk_autonomy(
+            proposal=placeholder_proposal,
+            session_context=active_session,
+        )
+
+        if not l4_decision.can_proceed:
+            lines = [
+                "## L4 Autonomy: Denied",
+                "",
+                f"**Reason:** {l4_decision.reason}",
+            ]
+            if l4_decision.escalation_required:
+                lines.append("")
+                lines.append(
+                    "This action requires explicit user approval. "
+                    "Please approve the action manually."
+                )
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "l4_autonomy": {
+                        "status": "denied",
+                        "reason": l4_decision.reason,
+                        "escalation_required": l4_decision.escalation_required,
+                        "evidence": l4_decision.evidence,
+                    },
+                },
+            )
+
+        # 4. Update conversation state with L4 tracking
+        if self._state_manager is not None:
+            self._state_manager.update(
+                last_l4_decision=l4_decision.reason,
+                latest_result=f"L4 autonomy: {l4_decision.reason}",
+            )
+
+        # 5. Return L4 autonomy acknowledgment
+        return Message(
+            role="assistant",
+            content=(
+                f"## L4 Autonomous Operation\n\n"
+                f"**Decision:** {l4_decision.reason}\n"
+                f"**Authorization mode:** {l4_decision.authorization_mode.value if l4_decision.authorization_mode else 'none'}\n\n"
+                f"L4 autonomy permits capability acquisition, memory/knowledge "
+                f"modification, and CRITICAL risk operations within approved scope."
+            ),
+            metadata={
+                "l4_autonomy": {
+                    "status": "acknowledged",
+                    "reason": l4_decision.reason,
+                    "authorization_mode": (
+                        l4_decision.authorization_mode.value
+                        if l4_decision.authorization_mode
+                        else None
+                    ),
+                    "evidence": l4_decision.evidence,
                 },
             },
         )

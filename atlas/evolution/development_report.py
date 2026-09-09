@@ -102,6 +102,10 @@ class DevelopmentLifecycleReport:
     sub_plans_generated: int = 0
     last_l3_decision: str | None = None
 
+    # L4 autonomy tracking
+    capabilities_acquired: int = 0
+    last_l4_decision: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Report builder
@@ -226,6 +230,10 @@ class DevelopmentReportBuilder:
         sub_plans_generated = getattr(state, "sub_plans_generated", 0) or 0
         last_l3_decision = getattr(state, "last_l3_decision", None)
 
+        # Extract L4-specific tracking
+        capabilities_acquired = getattr(state, "capabilities_acquired", 0) or 0
+        last_l4_decision = getattr(state, "last_l4_decision", None)
+
         return DevelopmentLifecycleReport(
             final_conclusion=final_conclusion,
             evidence=evidence,
@@ -246,6 +254,8 @@ class DevelopmentReportBuilder:
             autonomous_recoveries=autonomous_recoveries,
             sub_plans_generated=sub_plans_generated,
             last_l3_decision=last_l3_decision,
+            capabilities_acquired=capabilities_acquired,
+            last_l4_decision=last_l4_decision,
         )
 
     @staticmethod

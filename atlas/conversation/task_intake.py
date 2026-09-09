@@ -70,6 +70,7 @@ class TaskType(Enum):
     AUTONOMY_REQUEST = "autonomy_request"
     L2_AUTONOMY_REQUEST = "l2_autonomy_request"
     L3_AUTONOMY_REQUEST = "l3_autonomy_request"
+    L4_AUTONOMY_REQUEST = "l4_autonomy_request"
     UNKNOWN = "unknown"
 
 
@@ -288,6 +289,21 @@ _L3_AUTONOMY_CUES: frozenset[str] = frozenset(
         "handle high risk",
         "modify configuration",
         "adjust configuration",
+    }
+)
+
+#: Explicit L4 autonomy phrases that indicate the user wants Atlas to
+#: acquire new capabilities, modify memory/knowledge, or handle CRITICAL risk.
+_L4_AUTONOMY_CUES: frozenset[str] = frozenset(
+    {
+        "acquire capability",
+        "acquire new capability",
+        "modify memory",
+        "modify knowledge",
+        "handle critical risk",
+        "critical risk operation",
+        "information level operation",
+        "capability acquisition",
     }
 )
 
@@ -821,6 +837,12 @@ class TaskIntake:
         l3_autonomy = _first_hit(lowered, _L3_AUTONOMY_CUES)
         if l3_autonomy:
             return TaskType.L3_AUTONOMY_REQUEST
+
+        # Explicit L4 autonomy phrases are checked next. They indicate the user
+        # wants Atlas to acquire capabilities, modify memory/knowledge, or handle CRITICAL risk.
+        l4_autonomy = _first_hit(lowered, _L4_AUTONOMY_CUES)
+        if l4_autonomy:
+            return TaskType.L4_AUTONOMY_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development
