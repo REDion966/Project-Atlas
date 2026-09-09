@@ -69,11 +69,17 @@ class ConversationState:
     # the original development approval.
     recovery_approval_id: Optional[str] = None
 
-    # L1 autonomy tracking: number of steps executed autonomously.
+    # L1/L2 autonomy tracking: number of steps executed autonomously.
     autonomous_steps_executed: int = 0
 
-    # L1 autonomy tracking: summary of last autonomous decision.
+    # L1/L2 autonomy tracking: summary of last autonomous decision.
     last_autonomy_decision: Optional[str] = None
+
+    # L2 autonomy tracking: IDs of chained workflows.
+    chained_workflows: tuple[str, ...] = ()
+
+    # L2 autonomy tracking: summary of last L2-specific decision.
+    last_l2_decision: Optional[str] = None
 
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
@@ -107,6 +113,8 @@ class ConversationState:
             "recovery_approval_id": self.recovery_approval_id,
             "autonomous_steps_executed": self.autonomous_steps_executed,
             "last_autonomy_decision": self.last_autonomy_decision,
+            "chained_workflows": list(self.chained_workflows),
+            "last_l2_decision": self.last_l2_decision,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

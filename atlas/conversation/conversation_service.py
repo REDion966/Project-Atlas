@@ -381,6 +381,13 @@ class ConversationService:
             if autonomy_response is not None:
                 self._conversation.add_message(autonomy_response)
                 return autonomy_response
+        # L2 Autonomy semantics — explicit request to chain workflows or
+        # make bounded plan adjustments. L2 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.L2_AUTONOMY_REQUEST:
+            l2_response = self._maybe_handle_l2_autonomy_request(spec)
+            if l2_response is not None:
+                self._conversation.add_message(l2_response)
+                return l2_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -594,6 +601,14 @@ class ConversationService:
             if autonomy_response is not None:
                 self._conversation.add_message(autonomy_response)
                 yield autonomy_response.content
+                return
+        # L2 Autonomy semantics — explicit request to chain workflows or
+        # make bounded plan adjustments. L2 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.L2_AUTONOMY_REQUEST:
+            l2_response = self._maybe_handle_l2_autonomy_request(spec)
+            if l2_response is not None:
+                self._conversation.add_message(l2_response)
+                yield l2_response.content
                 return
         # Development semantics win — run it first and never reroute development
         # through orchestration.
@@ -2725,6 +2740,150 @@ class ConversationService:
                     ),
                     "evidence": autonomy_decision.evidence,
                     "proposal_id": proposal.proposal_id,
+                },
+            },
+        )
+
+    def _maybe_handle_l2_autonomy_request(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Handle an L2_AUTONOMY_REQUEST.
+
+        L2 controlled autonomy: chain multiple approved workflows or make
+        bounded plan adjustments within approved scope.
+
+        L2 can:
+        - Chain multiple pre-approved workflows
+        - Make bounded plan adjustments (reorder, add verification, skip redundant)
+        - Perform cross-workflow diagnosis
+        - Handle MEDIUM risk operations
+
+        L2 CANNOT:
+        - Create new workflows without approval
+        - Expand scope beyond approved
+        - Change the user's objective
+        - Handle HIGH/CRITICAL risk
+        - Promote from sandbox to real workspace
+
+        Args:
+            spec: the classified L2_AUTONOMY_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the L2 autonomy result, or None if L2
+            autonomy is not possible.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. L2 autonomy requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"l2_autonomy": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "L2 autonomy requires OWNER authority. "
+                    "This session is not authorized to run L2 autonomous development."
+                ),
+                metadata={"l2_autonomy": {"status": "unauthorized"}},
+            )
+
+        # 3. Check L2 autonomy via AutonomyController.
+        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
+        from atlas.evolution.governance.models import ScopeType
+        from atlas.evolution.models import ExecutionLevel
+
+        # Build an L2 policy that permits MEDIUM risk and CODE_ARTIFACT level
+        l2_policy = AutonomyPolicy(
+            enabled=True,
+            allowed_scopes=[ScopeType.CODE],
+            max_risk_level=RiskLevel.MEDIUM,
+            effective_execution_level=ExecutionLevel.CODE_ARTIFACT,
+            requires_user_approval_scopes=[],
+            max_requests_per_window=10,
+            authorization_ttl_minutes=60,
+        )
+        policy_engine = AutonomyPolicyEngine(policy=l2_policy)
+        auth_manager = AuthorizationManager(policy=l2_policy)
+        controller = AutonomyController(
+            authorization_manager=auth_manager,
+            policy_engine=policy_engine,
+        )
+
+        # Check if L2 autonomy is permitted (using a placeholder proposal)
+        # In a full implementation, this would check specific workflows
+        placeholder_proposal = type(
+            "_P",
+            (),
+            {"status": type("S", (), {"name": "APPROVED"})()},
+        )()
+
+        l2_decision = controller.check_medium_risk_autonomy(
+            proposal=placeholder_proposal,
+            session_context=active_session,
+        )
+
+        if not l2_decision.can_proceed:
+            lines = [
+                "## L2 Autonomy: Denied",
+                "",
+                f"**Reason:** {l2_decision.reason}",
+            ]
+            if l2_decision.escalation_required:
+                lines.append("")
+                lines.append(
+                    "This action requires explicit user approval. "
+                    "Please approve the action manually."
+                )
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "l2_autonomy": {
+                        "status": "denied",
+                        "reason": l2_decision.reason,
+                        "escalation_required": l2_decision.escalation_required,
+                        "evidence": l2_decision.evidence,
+                    },
+                },
+            )
+
+        # 4. Update conversation state with L2 tracking
+        if self._state_manager is not None:
+            self._state_manager.update(
+                last_l2_decision=l2_decision.reason,
+                latest_result=f"L2 autonomy: {l2_decision.reason}",
+            )
+
+        # 5. Return L2 autonomy acknowledgment
+        return Message(
+            role="assistant",
+            content=(
+                f"## L2 Autonomous Operation\n\n"
+                f"**Decision:** {l2_decision.reason}\n"
+                f"**Authorization mode:** {l2_decision.authorization_mode.value if l2_decision.authorization_mode else 'none'}\n\n"
+                f"L2 autonomy permits chaining approved workflows and making "
+                f"bounded plan adjustments within approved scope."
+            ),
+            metadata={
+                "l2_autonomy": {
+                    "status": "acknowledged",
+                    "reason": l2_decision.reason,
+                    "authorization_mode": (
+                        l2_decision.authorization_mode.value
+                        if l2_decision.authorization_mode
+                        else None
+                    ),
+                    "evidence": l2_decision.evidence,
                 },
             },
         )

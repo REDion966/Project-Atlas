@@ -68,6 +68,7 @@ class TaskType(Enum):
     VERIFICATION_REQUEST = "verification_request"
     REPORT_REQUEST = "report_request"
     AUTONOMY_REQUEST = "autonomy_request"
+    L2_AUTONOMY_REQUEST = "l2_autonomy_request"
     UNKNOWN = "unknown"
 
 
@@ -243,7 +244,7 @@ _REPORT_CUES: frozenset[str] = frozenset(
     }
 )
 
-#: Explicit autonomy phrases that indicate the user wants Atlas to proceed
+#: Explicit L1 autonomy phrases that indicate the user wants Atlas to proceed
 #: autonomously with an already-approved development plan. Checked after
 #: report so that "report" autonomy language does not collide.
 _AUTONOMY_CUES: frozenset[str] = frozenset(
@@ -256,6 +257,21 @@ _AUTONOMY_CUES: frozenset[str] = frozenset(
         "proceed with the approved",
         "continue the development",
         "run autonomously",
+    }
+)
+
+#: Explicit L2 autonomy phrases that indicate the user wants Atlas to chain
+#: multiple approved workflows or make bounded plan adjustments.
+_L2_AUTONOMY_CUES: frozenset[str] = frozenset(
+    {
+        "chain the workflows",
+        "chain approved workflows",
+        "continue to next workflow",
+        "proceed to next workflow",
+        "adjust the plan",
+        "optimize the plan",
+        "reorder the steps",
+        "skip redundant steps",
     }
 )
 
@@ -771,12 +787,18 @@ class TaskIntake:
         if report:
             return TaskType.REPORT_REQUEST
 
-        # Explicit autonomy phrases are checked next. They indicate the user
+        # Explicit L1 autonomy phrases are checked next. They indicate the user
         # wants Atlas to proceed autonomously with an already-approved plan.
         # Checked before planning so that "proceed" is not misclassified.
         autonomy = _first_hit(lowered, _AUTONOMY_CUES)
         if autonomy:
             return TaskType.AUTONOMY_REQUEST
+
+        # Explicit L2 autonomy phrases are checked next. They indicate the user
+        # wants Atlas to chain workflows or make bounded plan adjustments.
+        l2_autonomy = _first_hit(lowered, _L2_AUTONOMY_CUES)
+        if l2_autonomy:
+            return TaskType.L2_AUTONOMY_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development

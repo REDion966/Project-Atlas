@@ -89,9 +89,13 @@ class DevelopmentLifecycleReport:
 
     verification: Any = None
 
-    # L1 autonomy tracking
+    # L1/L2 autonomy tracking
     autonomous_steps: int = 0
     last_autonomy_decision: str | None = None
+
+    # L2 autonomy tracking
+    chained_workflows: int = 0
+    last_l2_decision: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +207,14 @@ class DevelopmentReportBuilder:
             has_recovery=recovery_proposal is not None,
         )
 
-        # Extract L1 autonomy tracking from conversation state
+        # Extract L1/L2 autonomy tracking from conversation state
         autonomous_steps = getattr(state, "autonomous_steps_executed", 0) or 0
         last_autonomy_decision = getattr(state, "last_autonomy_decision", None)
+
+        # Extract L2-specific tracking
+        chained_workflows_list = getattr(state, "chained_workflows", ()) or ()
+        chained_workflows = len(chained_workflows_list)
+        last_l2_decision = getattr(state, "last_l2_decision", None)
 
         return DevelopmentLifecycleReport(
             final_conclusion=final_conclusion,
@@ -222,6 +231,8 @@ class DevelopmentReportBuilder:
             verification=verification,
             autonomous_steps=autonomous_steps,
             last_autonomy_decision=last_autonomy_decision,
+            chained_workflows=chained_workflows,
+            last_l2_decision=last_l2_decision,
         )
 
     @staticmethod

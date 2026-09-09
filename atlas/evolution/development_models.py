@@ -122,6 +122,8 @@ class DevelopmentPlan:
     affected_files: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
+    adjusted: bool = False  # L2: Whether this plan was autonomously adjusted
+    adjustment_reason: str = ""  # L2: Reason for adjustment
 
 
 # ---------------------------------------------------------------------------
@@ -201,4 +203,5 @@ class DevelopmentOutcome:
     effectiveness_proxy: float = 0.0
     recorded_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    autonomous: bool = False  # Whether this outcome was produced autonomously (L1)
+    autonomous: bool = False  # Whether this outcome was produced autonomously (L1/L2)
+    chained_from: str | None = None  # L2: ID of previous workflow if chained

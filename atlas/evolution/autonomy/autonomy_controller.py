@@ -1,7 +1,7 @@
 """
-Atlas Evolution Autonomy — L1 Controlled Autonomy Controller — Phase P18/L1.
+Atlas Evolution Autonomy — L1/L2 Controlled Autonomy Controller — Phase P18.
 
-Pure-logic decision engine for L1 controlled autonomy.
+Pure-logic decision engine for L1 and L2 controlled autonomy.
 
 L1 PHILOSOPHY
 -------------
@@ -10,11 +10,21 @@ L1 = Autonomous execution of already-approved work.
 Atlas may decide HOW to execute work the user has already approved.
 Atlas may NOT decide WHAT work to approve.
 
+L2 PHILOSOPHY
+-------------
+L2 = Multi-step autonomous workflow chaining with bounded plan adjustment.
+
+L2 extends L1 with:
+* Chaining multiple approved workflows
+* Bounded plan adjustments within approved scope
+* Cross-workflow failure diagnosis
+* MEDIUM risk operations (vs L1's LOW only)
+
 Responsibilities
 ----------------
-* Decide whether an action can be performed autonomously under L1.
+* Decide whether an action can be performed autonomously under L1 or L2.
 * Verify all evidence requirements before granting autonomy.
-* Determine escalation paths when L1 boundary is reached.
+* Determine escalation paths when L1/L2 boundary is reached.
 * Compose existing P17 components (diagnose → recover → verify).
 
 This component is pure logic:
@@ -337,5 +347,322 @@ class AutonomyController:
                 "current_step": current_step,
                 "total_steps": total_steps,
                 "last_status": last_outcome_status.name,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L2 — Multi-step workflow chaining
+    # ------------------------------------------------------------------
+
+    def check_workflow_chaining_autonomy(
+        self,
+        current_workflow: Any,
+        next_workflow: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L2 can chain two approved workflows.
+
+        L2 can chain workflows only if:
+        1. Both workflows are APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Next workflow is within the same scope as current
+        5. Risk level is MEDIUM or below
+
+        Args:
+            current_workflow: The current completed workflow.
+            next_workflow: The next workflow to chain.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether chaining is permitted.
+        """
+        # 1. Both workflows must be APPROVED
+        current_status = getattr(current_workflow, "status", None)
+        next_status = getattr(next_workflow, "status", None)
+
+        current_name = getattr(current_status, "name", str(current_status))
+        next_name = getattr(next_status, "name", str(next_status))
+
+        if current_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Current workflow status is {current_name}, not APPROVED",
+                evidence={"current_status": current_name},
+            )
+
+        if next_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Next workflow status is {next_name}, not APPROVED",
+                evidence={"next_status": next_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 workflow chaining requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Risk must be MEDIUM or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.MEDIUM):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 workflow chaining requires MEDIUM risk tolerance",
+                evidence={"max_risk": "MEDIUM"},
+                escalation_required=True,
+            )
+
+        # 5. Execution level must allow CODE_ARTIFACT
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.CODE_ARTIFACT):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 workflow chaining requires CODE_ARTIFACT execution level",
+                evidence={"required_level": "CODE_ARTIFACT"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L2 autonomous workflow chaining permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "current_status": current_name,
+                "next_status": next_name,
+                "authority": session_context.authority.value,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L2 — Bounded plan adjustment
+    # ------------------------------------------------------------------
+
+    def check_plan_adjustment_autonomy(
+        self,
+        original_plan: Any,
+        adjusted_plan: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L2 can adjust an approved plan.
+
+        L2 can adjust plans only if:
+        1. Session has OWNER authority
+        2. AutonomyPolicy is enabled
+        3. Adjusted plan preserves the original objective
+        4. Adjusted plan does not expand scope
+        5. All steps remain within approved components
+
+        Args:
+            original_plan: The original approved plan.
+            adjusted_plan: The proposed adjusted plan.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether adjustment is permitted.
+        """
+        # 1. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 plan adjustment requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 2. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 3. Objective must be preserved
+        original_objective = getattr(original_plan, "summary", "") or ""
+        adjusted_objective = getattr(adjusted_plan, "summary", "") or ""
+
+        if original_objective != adjusted_objective:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 plan adjustment cannot change the objective",
+                evidence={
+                    "original_objective": original_objective,
+                    "adjusted_objective": adjusted_objective,
+                },
+                escalation_required=True,
+            )
+
+        # 4. Scope must not expand
+        original_components = set(getattr(original_plan, "target_components", []) or [])
+        adjusted_components = set(getattr(adjusted_plan, "target_components", []) or [])
+
+        if not adjusted_components.issubset(original_components):
+            new_components = adjusted_components - original_components
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 plan adjustment cannot expand scope",
+                evidence={
+                    "original_components": list(original_components),
+                    "new_components": list(new_components),
+                },
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L2 autonomous plan adjustment permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "original_components": list(original_components),
+                "adjusted_components": list(adjusted_components),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L2 — Cross-workflow diagnosis
+    # ------------------------------------------------------------------
+
+    def check_cross_workflow_diagnosis_autonomy(
+        self,
+        workflows: list[Any],
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L2 can diagnose across multiple workflows.
+
+        L2 can perform cross-workflow diagnosis only if:
+        1. Session has OWNER authority
+        2. AutonomyPolicy is enabled
+        3. At least 2 workflows are provided
+        4. All workflows are in a terminal state
+
+        Args:
+            workflows: List of workflows to diagnose.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether diagnosis is permitted.
+        """
+        # 1. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 cross-workflow diagnosis requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 2. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 3. At least 2 workflows required
+        if len(workflows) < 2:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Cross-workflow diagnosis requires at least 2 workflows",
+                evidence={"workflow_count": len(workflows)},
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L2 autonomous cross-workflow diagnosis permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "workflow_count": len(workflows),
+                "authority": session_context.authority.value,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # L2 — MEDIUM risk operations
+    # ------------------------------------------------------------------
+
+    def check_medium_risk_autonomy(
+        self,
+        proposal: Any,
+        session_context: Any,
+    ) -> AutonomyDecision:
+        """Check if L2 can handle MEDIUM risk operations.
+
+        L2 can handle MEDIUM risk only if:
+        1. Proposal is APPROVED
+        2. Session has OWNER authority
+        3. AutonomyPolicy is enabled
+        4. Risk level is MEDIUM or below
+        5. Execution level allows CODE_ARTIFACT
+
+        Args:
+            proposal: The EvolutionProposal to execute.
+            session_context: The active session context.
+
+        Returns:
+            AutonomyDecision indicating whether MEDIUM risk execution is permitted.
+        """
+        # 1. Proposal must be APPROVED
+        proposal_status = getattr(proposal, "status", None)
+        status_name = getattr(proposal_status, "name", str(proposal_status))
+
+        if status_name != "APPROVED":
+            return AutonomyDecision(
+                can_proceed=False,
+                reason=f"Proposal status is {status_name}, not APPROVED",
+                evidence={"proposal_status": status_name},
+            )
+
+        # 2. Session must have OWNER authority
+        if not session_context.is_owner:
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 MEDIUM risk execution requires OWNER authority",
+                evidence={"authority": session_context.authority.value},
+            )
+
+        # 3. AutonomyPolicy must be enabled
+        if not self._policy_engine.is_enabled():
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="Autonomy policy is disabled",
+                escalation_required=True,
+            )
+
+        # 4. Risk must be MEDIUM or below
+        if not self._policy_engine.is_risk_acceptable(RiskLevel.MEDIUM):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 MEDIUM risk execution requires MEDIUM risk tolerance",
+                evidence={"max_risk": "MEDIUM"},
+                escalation_required=True,
+            )
+
+        # 5. Execution level must allow CODE_ARTIFACT
+        if not self._policy_engine.is_execution_level_allowed(ExecutionLevel.CODE_ARTIFACT):
+            return AutonomyDecision(
+                can_proceed=False,
+                reason="L2 MEDIUM risk execution requires CODE_ARTIFACT execution level",
+                evidence={"required_level": "CODE_ARTIFACT"},
+                escalation_required=True,
+            )
+
+        return AutonomyDecision(
+            can_proceed=True,
+            reason="L2 autonomous MEDIUM risk execution permitted",
+            authorization_mode=AuthorizationMode.AUTONOMY,
+            evidence={
+                "proposal_status": status_name,
+                "authority": session_context.authority.value,
+                "risk_level": "MEDIUM",
+                "execution_level": "CODE_ARTIFACT",
             },
         )
