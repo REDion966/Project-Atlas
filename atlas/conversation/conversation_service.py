@@ -34,6 +34,11 @@ from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
 from atlas.evolution.approval_manager import ApprovalManager
+from atlas.evolution.autonomy.autonomy_policy import AutonomyPolicyEngine
+from atlas.evolution.autonomy.authorization_manager import AuthorizationManager
+from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
+from atlas.evolution.governance.models import ScopeType
+from atlas.evolution.models import ExecutionLevel
 from atlas.memory.context.context_engine import ContextEngine
 from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
@@ -369,6 +374,13 @@ class ConversationService:
             if report_response is not None:
                 self._conversation.add_message(report_response)
                 return report_response
+        # Autonomy semantics — explicit request to proceed autonomously
+        # with an already-approved development plan. L1 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.AUTONOMY_REQUEST:
+            autonomy_response = self._maybe_handle_autonomy_request(spec)
+            if autonomy_response is not None:
+                self._conversation.add_message(autonomy_response)
+                return autonomy_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -574,6 +586,14 @@ class ConversationService:
             if report_response is not None:
                 self._conversation.add_message(report_response)
                 yield report_response.content
+                return
+        # Autonomy semantics — explicit request to proceed autonomously
+        # with an already-approved development plan. L1 controlled autonomy.
+        if spec is not None and spec.task_type is TaskType.AUTONOMY_REQUEST:
+            autonomy_response = self._maybe_handle_autonomy_request(spec)
+            if autonomy_response is not None:
+                self._conversation.add_message(autonomy_response)
+                yield autonomy_response.content
                 return
         # Development semantics win — run it first and never reroute development
         # through orchestration.
@@ -2479,6 +2499,232 @@ class ConversationService:
                         if report.verification is not None
                         else None
                     ),
+                },
+            },
+        )
+
+    def _maybe_handle_autonomy_request(
+        self,
+        spec: TaskSpec,
+    ) -> Message | None:
+        """Handle an AUTONOMY_REQUEST.
+
+        Executes an already-approved development plan autonomously under L1
+        controlled autonomy. All steps (IMPLEMENT → VERIFY → ACCEPT) run
+        without per-step user approval. Failure handling (diagnose → recover →
+        verify) is also autonomous within L1 boundaries.
+
+        L1 autonomy CANNOT:
+        - Bypass user approval for new proposals
+        - Exceed approved scope
+        - Expand its own capabilities
+        - Approve its own restricted actions
+        - Mutate outside approved boundary
+        - Promote from sandbox to real workspace
+
+        Args:
+            spec: the classified AUTONOMY_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the autonomy result, or None if autonomy
+            is not possible.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. Autonomy requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"autonomy": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "Autonomy requires OWNER authority. "
+                    "This session is not authorized to run autonomous development."
+                ),
+                metadata={"autonomy": {"status": "unauthorized"}},
+            )
+
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.evolution_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no approved development proposal to execute "
+                    "autonomously. Please investigate an issue, plan it, and "
+                    "approve it first."
+                ),
+                metadata={"autonomy": {"status": "no_proposal"}},
+            )
+
+        # 3. Resolve the approved proposal from the live registry.
+        proposal = self._resolve_evolution_proposal(state.evolution_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approved proposal could not be resolved. "
+                    "Please plan the proposal again."
+                ),
+                metadata={"autonomy": {"status": "proposal_not_found"}},
+            )
+
+        # 4. Resolve the approved approval request.
+        request = self._resolve_approved_request(state.evolution_proposal_id)
+        if request is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approved request could not be resolved. "
+                    "Please approve the proposal again."
+                ),
+                metadata={"autonomy": {"status": "request_not_found"}},
+            )
+
+        # 5. Cross-validate identity + fingerprint BEFORE autonomy.
+        from atlas.evolution.models import ApprovalDecision, ProposalStatus
+
+        if proposal.status != ProposalStatus.APPROVED:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Proposal '{proposal.proposal_id}' is "
+                    f"'{proposal.status.name}', not APPROVED. "
+                    "Only approved proposals can be executed autonomously."
+                ),
+                metadata={"autonomy": {"status": "not_approved"}},
+            )
+        if request.decision != ApprovalDecision.APPROVED:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request has not been approved. "
+                    "Please approve the proposal before autonomous execution."
+                ),
+                metadata={"autonomy": {"status": "not_approved"}},
+            )
+        if request.proposal_id != proposal.proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request does not match the active proposal. "
+                    "Autonomous execution refused."
+                ),
+                metadata={"autonomy": {"status": "identity_mismatch"}},
+            )
+        if not request.is_valid_for(proposal):
+            return Message(
+                role="assistant",
+                content=(
+                    "The proposal has changed since the approval request was "
+                    "created. Autonomous execution refused. Please approve again."
+                ),
+                metadata={"autonomy": {"status": "fingerprint_mismatch"}},
+            )
+
+        # 6. Check L1 autonomy via AutonomyController.
+        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+
+        # Build a minimal policy engine for L1 check
+        # In production, this would be injected; here we construct a default
+        # L1 policy that permits sandboxed CODE execution with LOW risk.
+        l1_policy = AutonomyPolicy(
+            enabled=True,
+            allowed_scopes=[ScopeType.CODE],
+            max_risk_level=RiskLevel.LOW,
+            effective_execution_level=ExecutionLevel.SANDBOXED,
+            requires_user_approval_scopes=[],
+            max_requests_per_window=10,
+            authorization_ttl_minutes=60,
+        )
+        policy_engine = AutonomyPolicyEngine(policy=l1_policy)
+        auth_manager = AuthorizationManager(policy=l1_policy)
+        controller = AutonomyController(
+            authorization_manager=auth_manager,
+            policy_engine=policy_engine,
+        )
+
+        autonomy_decision = controller.check_execution_autonomy(
+            proposal=proposal,
+            session_context=active_session,
+        )
+
+        if not autonomy_decision.can_proceed:
+            lines = [
+                "## L1 Autonomy: Denied",
+                "",
+                f"**Reason:** {autonomy_decision.reason}",
+            ]
+            if autonomy_decision.escalation_required:
+                lines.append("")
+                lines.append(
+                    "This action requires explicit user approval. "
+                    "Please approve the action manually."
+                )
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "autonomy": {
+                        "status": "denied",
+                        "reason": autonomy_decision.reason,
+                        "escalation_required": autonomy_decision.escalation_required,
+                        "evidence": autonomy_decision.evidence,
+                    },
+                },
+            )
+
+        # 7. Delegate to the existing governed development-execution bridge.
+        try:
+            message = self._development_execution_bridge(
+                active_session, proposal, request
+            )
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Autonomous execution could not proceed: {exc}. "
+                    "No changes were made."
+                ),
+                metadata={"autonomy": {"status": "execution_failed", "error": str(exc)}},
+            )
+
+        # 8. Update conversation state with L1 autonomy tracking.
+        if self._state_manager is not None:
+            current_steps = state.autonomous_steps_executed or 0
+            self._state_manager.update(
+                autonomous_steps_executed=current_steps + 1,
+                last_autonomy_decision=autonomy_decision.reason,
+                latest_result=f"Autonomous execution: {autonomy_decision.reason}",
+            )
+
+        # 9. Return the result with autonomy metadata.
+        return Message(
+            role="assistant",
+            content=(
+                f"## L1 Autonomous Execution\n\n"
+                f"{message.content}\n\n"
+                f"**Autonomy decision:** {autonomy_decision.reason}\n"
+                f"**Authorization mode:** {autonomy_decision.authorization_mode.value if autonomy_decision.authorization_mode else 'none'}"
+            ),
+            metadata={
+                "autonomy": {
+                    "status": "executed",
+                    "reason": autonomy_decision.reason,
+                    "authorization_mode": (
+                        autonomy_decision.authorization_mode.value
+                        if autonomy_decision.authorization_mode
+                        else None
+                    ),
+                    "evidence": autonomy_decision.evidence,
+                    "proposal_id": proposal.proposal_id,
                 },
             },
         )

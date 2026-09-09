@@ -67,6 +67,7 @@ class TaskType(Enum):
     RECOVERY_REQUEST = "recovery_request"
     VERIFICATION_REQUEST = "verification_request"
     REPORT_REQUEST = "report_request"
+    AUTONOMY_REQUEST = "autonomy_request"
     UNKNOWN = "unknown"
 
 
@@ -239,6 +240,22 @@ _REPORT_CUES: frozenset[str] = frozenset(
         "what happened with the development",
         "final development report",
         "development lifecycle report",
+    }
+)
+
+#: Explicit autonomy phrases that indicate the user wants Atlas to proceed
+#: autonomously with an already-approved development plan. Checked after
+#: report so that "report" autonomy language does not collide.
+_AUTONOMY_CUES: frozenset[str] = frozenset(
+    {
+        "proceed autonomously",
+        "continue autonomously",
+        "execute autonomously",
+        "run the approved plan",
+        "continue with the development",
+        "proceed with the approved",
+        "continue the development",
+        "run autonomously",
     }
 )
 
@@ -753,6 +770,13 @@ class TaskIntake:
         report = _first_hit(lowered, _REPORT_CUES)
         if report:
             return TaskType.REPORT_REQUEST
+
+        # Explicit autonomy phrases are checked next. They indicate the user
+        # wants Atlas to proceed autonomously with an already-approved plan.
+        # Checked before planning so that "proceed" is not misclassified.
+        autonomy = _first_hit(lowered, _AUTONOMY_CUES)
+        if autonomy:
+            return TaskType.AUTONOMY_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development

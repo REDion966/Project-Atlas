@@ -201,3 +201,4 @@ class DevelopmentOutcome:
     effectiveness_proxy: float = 0.0
     recorded_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
+    autonomous: bool = False  # Whether this outcome was produced autonomously (L1)

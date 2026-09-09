@@ -89,6 +89,10 @@ class DevelopmentLifecycleReport:
 
     verification: Any = None
 
+    # L1 autonomy tracking
+    autonomous_steps: int = 0
+    last_autonomy_decision: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Report builder
@@ -199,6 +203,10 @@ class DevelopmentReportBuilder:
             has_recovery=recovery_proposal is not None,
         )
 
+        # Extract L1 autonomy tracking from conversation state
+        autonomous_steps = getattr(state, "autonomous_steps_executed", 0) or 0
+        last_autonomy_decision = getattr(state, "last_autonomy_decision", None)
+
         return DevelopmentLifecycleReport(
             final_conclusion=final_conclusion,
             evidence=evidence,
@@ -212,6 +220,8 @@ class DevelopmentReportBuilder:
             recovery_approval_id=recovery_approval_id,
             recovery_execution_status=recovery_execution_status,
             verification=verification,
+            autonomous_steps=autonomous_steps,
+            last_autonomy_decision=last_autonomy_decision,
         )
 
     @staticmethod

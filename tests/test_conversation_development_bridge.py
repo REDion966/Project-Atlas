@@ -170,6 +170,11 @@ class TestArchitectureGuards:
             "atlas.evolution.development_recovery",
             "atlas.evolution.development_verification",
             "atlas.evolution.development_report",
+            "atlas.evolution.autonomy.autonomy_policy",
+            "atlas.evolution.autonomy.authorization_manager",
+            "atlas.evolution.autonomy.autonomy_controller",
+            "atlas.evolution.autonomy.models",
+            "atlas.evolution.governance.models",
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
