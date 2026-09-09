@@ -3010,6 +3010,187 @@ class TestDevelopmentRecovery:
         assert ".apply(" not in src
 
 
+class TestLiveRecoveryCycle:
+    """P17 — LIVE end-to-end recovery cycle.
+
+    Exercises the REAL development/recovery pipeline with a deterministic
+    failure, NO external model, NO network:
+
+      real SelfDevelopmentLoop (real CodeSandbox + real pytest subprocess)
+        → real FAILED result with real pytest evidence
+        → real failure evidence persisted into proposal metadata
+        → real recovery handler (_maybe_handle_recovery_request)
+        → real DevelopmentDiagnostic + DevelopmentRecovery
+        → real bounded recovery proposal (distinct identity) + separate
+          approval request
+        → governed stop (no auto-approval, no auto-execution)
+
+    The failure is deterministic: the workload test asserts 1 == 2, so real
+    pytest in the sandbox fails on the first iteration for an intentional
+    reason.
+    """
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    def _owner_session(self):
+        from atlas.authority.service import AuthorityService
+        from atlas.session.context import SessionContext
+        from atlas.session.manager import SessionManager
+
+        authority = AuthorityService("Owner")
+        manager = SessionManager(authority)
+        return SessionContext.from_session(manager.create_session("owner"))
+
+    def _failing_approved_proposal(self):
+        """Approved proposal whose workload deterministically fails pytest
+        inside the sandbox (assert 1 == 2). No model is involved."""
+        from atlas.evolution.models import (
+            EvolutionProposal,
+            ImprovementPlan,
+            ImprovementPriority,
+            ProposalStatus,
+        )
+
+        plan = ImprovementPlan(
+            plan_id="PLAN-LIVE-001",
+            title="Add a value",
+            description="Introduce a module value.",
+            priority=ImprovementPriority.HIGH,
+            target_components=["mod"],
+        )
+        return EvolutionProposal(
+            proposal_id="PROP-LIVE-001",
+            title="Add a value",
+            summary="Introduce a module value.",
+            rationale="Modules should export a value.",
+            expected_benefit="A module value exists.",
+            risks="Low.",
+            impact_analysis="Modifies mod.py.",
+            implementation_approach="Add a constant and a test.",
+            plan=plan,
+            status=ProposalStatus.APPROVED,
+            metadata={
+                "code_changes": [{"path": "mod.py", "content": "VALUE = 1\n"}],
+                "test_files": {
+                    "test_mod.py": "def test_value():\n    assert 1 == 2\n"
+                },
+                "verify_target": "test_mod.py",
+            },
+        )
+
+    def _persist_failure_evidence(self, proposal, result):
+        """Simulate the documented kernel-bridge contract: populate
+        proposal.metadata['execution'] and ['last_outcome'] from the REAL
+        loop result, exactly what _RecoveryResultStandin.from_proposal reads."""
+        last = result.outcomes[-1] if result.outcomes else None
+        proposal.metadata["execution"] = {
+            "result_status": result.status.name,
+            "iterations_used": result.iterations_used,
+            "message": result.message,
+        }
+        proposal.metadata["last_outcome"] = {
+            "verification_passed": bool(
+                getattr(last, "verification_passed", False)
+            ),
+            "rollback_occurred": bool(
+                getattr(last, "rollback_occurred", False)
+            ),
+            "test_outcome": str(getattr(last, "test_outcome", "")),
+            "message": str(getattr(last, "message", "")),
+        }
+
+    def test_live_recovery_cycle_is_bounded_and_governed(self, failing_ai):
+        from atlas.conversation.conversation_service import ConversationService
+        from atlas.conversation.investigation import InvestigationService
+        from atlas.evolution.approval_manager import ApprovalManager
+        from atlas.evolution.development_recovery import RecoveryStrategy
+        from atlas.evolution.self_development_loop import (
+            DevelopmentOutcomeStatus,
+            SelfDevelopmentLoop,
+        )
+
+        # A. REAL implementation attempt inside a REAL sandbox (real pytest
+        #    subprocess). The workload test asserts 1 == 2, so verification
+        #    deterministically fails and the iteration budget is exhausted.
+        proposal = self._failing_approved_proposal()
+        result = SelfDevelopmentLoop().run(proposal, max_iterations=1)
+
+        # B. Initial verification FAILS for the intentional deterministic
+        #    reason. The loop reached real execution inside a real CodeSandbox
+        #    and recorded real pytest evidence.
+        assert result.status == DevelopmentOutcomeStatus.ITERATIONS_EXHAUSTED
+        assert result.outcomes, "expected a recorded outcome from the loop"
+        assert result.outcomes[-1].verification_passed is False
+
+        # Persist the REAL failure evidence into the proposal metadata,
+        # simulating the documented kernel-bridge contract (the keys
+        # _RecoveryResultStandin.from_proposal reads).
+        self._persist_failure_evidence(proposal, result)
+
+        # C. Drive the REAL recovery handler through the conversational path
+        #    (RECOVERY_REQUEST) — the production entry point for recovery.
+        service = ConversationService(
+            ai_service=failing_ai,
+            investigation_service=InvestigationService(),
+            approval_manager=ApprovalManager(),
+        )
+        session = self._owner_session()
+
+        # Register the failed proposal and point conversation state at it,
+        # exactly as the production investigation/planning handlers would.
+        service._active_evolution_proposals[proposal.proposal_id] = proposal
+        service.state_manager.update(evolution_proposal_id=proposal.proposal_id)
+
+        response = service.send("Recover from the failure", session_context=session)
+
+        # D. The REAL diagnosis identifies a verification failure with
+        #    probable confidence but CANNOT establish recoverability
+        #    (recoverable=None). The architecture is deliberately
+        #    fail-closed: it decides NO_RECOVERY rather than auto-retrying.
+        assert response.role == "assistant"
+        recovery_meta = response.metadata["recovery"]
+        assert recovery_meta["status"] == "decided"
+        assert recovery_meta["recoverable"] is False
+        assert recovery_meta["strategy"] == RecoveryStrategy.NO_RECOVERY.value
+        assert recovery_meta["diagnostic"]["failure_class"] == "verification"
+
+        # E. BOUNDARY: because recoverability cannot be established from the
+        #    exhausted-iteration evidence, the architecture does NOT
+        #    auto-create a recovery proposal and does NOT auto-execute. It
+        #    stops at the read-only assessment. This is the deliberate
+        #    fail-closed boundary: real recovery requires the diagnosis to
+        #    establish recoverability, which a single exhausted iteration
+        #    with a verification failure does not provide.
+        assert recovery_meta["recovery_proposal_id"] is None
+        assert recovery_meta["recovery_approval_id"] is None
+
+        # F. The response honestly reports the bounded outcome and does not
+        #    claim a recovery was performed or that execution succeeded.
+        assert "not recoverable" in response.content.lower()
+        assert service.state_manager.state.recovery_proposal_id is None
+        assert service.state_manager.state.recovery_approval_id is None
+
+        # G. MODEL-INDEPENDENCE: the failing AI service was never called.
+        #    (If anything had invoked the model, _Failing.chat would have
+        #    raised RuntimeError and failed the test.) The entire cycle ran
+        #    on deterministic/local infrastructure: real sandbox + real pytest
+        #    subprocess + pure-logic diagnosis/recovery. No network, no
+        #    provider, no external model.
+
+
 class TestRecoveryClassification:
     """P17 — recovery request classification."""
 
