@@ -44,6 +44,68 @@ if TYPE_CHECKING:
     from atlas.session.models import Session
 
 
+class _RecoveryResultStandin:
+    """Minimal evidence-carrying stand-in for a failed DevelopmentRunResult.
+
+    The conversation service does not retain the full run result object (it is
+    owned by the kernel). This standin reconstructs just enough structure for
+    the read-only diagnostic and recovery engines to analyze the failure
+    evidence preserved on the proposal. It is used ONLY for post-execution
+    diagnosis and never participates in execution.
+    """
+
+    def __init__(
+        self,
+        status: Any = None,
+        outcomes: list[Any] | None = None,
+        iterations_used: int = 0,
+        message: str = "",
+    ) -> None:
+        self.status = status
+        self.outcomes = outcomes or []
+        self.iterations_used = iterations_used
+        self.message = message
+
+    @classmethod
+    def from_proposal(cls, proposal: Any) -> "_RecoveryResultStandin":
+        """Build a stand-in from a preserved EvolutionProposal.
+
+        Derives the failure status from the proposal's metadata, which the
+        kernel bridge populates with the execution result status and the last
+        outcome's evidence.
+        """
+        from atlas.evolution.development_models import DevelopmentOutcomeStatus
+
+        meta = getattr(proposal, "metadata", {}) or {}
+        execution = meta.get("execution") or {}
+        last_outcome = meta.get("last_outcome") or {}
+
+        status_name = execution.get("result_status", "FAILED")
+        try:
+            status = DevelopmentOutcomeStatus[status_name]
+        except KeyError:
+            status = DevelopmentOutcomeStatus.FAILED
+
+        outcome = type(
+            "_S",
+            (),
+            {
+                "outcome": status,
+                "verification_passed": bool(last_outcome.get("verification_passed", False)),
+                "rollback_occurred": bool(last_outcome.get("rollback_occurred", False)),
+                "test_outcome": str(last_outcome.get("test_outcome", "")),
+                "message": str(last_outcome.get("message", "") or execution.get("message", "")),
+            },
+        )()
+
+        return cls(
+            status=status,
+            outcomes=[outcome],
+            iterations_used=int(execution.get("iterations_used", 0)),
+            message=str(execution.get("message", "")),
+        )
+
+
 class ConversationService:
     """Coordinates the complete conversation pipeline."""
 
@@ -287,6 +349,26 @@ class ConversationService:
             if execution_response is not None:
                 self._conversation.add_message(execution_response)
                 return execution_response
+        # Recovery semantics — explicit recovery from a previous development
+        # failure. Read-only decision; never auto-executes.
+        if spec is not None and spec.task_type is TaskType.RECOVERY_REQUEST:
+            recovery_response = self._maybe_handle_recovery_request(spec)
+            if recovery_response is not None:
+                self._conversation.add_message(recovery_response)
+                return recovery_response
+        # Verification semantics — explicit verification of an already-completed
+        # development result. Read-only; never executes or mutates.
+        if spec is not None and spec.task_type is TaskType.VERIFICATION_REQUEST:
+            verification_response = self._maybe_handle_verify(spec)
+            if verification_response is not None:
+                self._conversation.add_message(verification_response)
+                return verification_response
+        # Report semantics — explicit final lifecycle report. Read-only.
+        if spec is not None and spec.task_type is TaskType.REPORT_REQUEST:
+            report_response = self._maybe_handle_report(spec)
+            if report_response is not None:
+                self._conversation.add_message(report_response)
+                return report_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
@@ -470,6 +552,31 @@ class ConversationService:
                 self._conversation.add_message(execution_response)
                 yield execution_response.content
                 return
+        # Recovery semantics — explicit recovery from a previous development
+        # failure. Read-only decision; never auto-executes.
+        if spec is not None and spec.task_type is TaskType.RECOVERY_REQUEST:
+            recovery_response = self._maybe_handle_recovery_request(spec)
+            if recovery_response is not None:
+                self._conversation.add_message(recovery_response)
+                yield recovery_response.content
+                return
+        # Verification semantics — explicit verification of an already-completed
+        # development result. Read-only; never executes or mutates.
+        if spec is not None and spec.task_type is TaskType.VERIFICATION_REQUEST:
+            verification_response = self._maybe_handle_verify(spec)
+            if verification_response is not None:
+                self._conversation.add_message(verification_response)
+                yield verification_response.content
+                return
+        # Report semantics — explicit final lifecycle report. Read-only.
+        if spec is not None and spec.task_type is TaskType.REPORT_REQUEST:
+            report_response = self._maybe_handle_report(spec)
+            if report_response is not None:
+                self._conversation.add_message(report_response)
+                yield report_response.content
+                return
+        # Development semantics win — run it first and never reroute development
+        # through orchestration.
         development_response = self._maybe_handle_development_request(spec)
         if development_response is not None:
             self._conversation.add_message(development_response)
@@ -1179,7 +1286,23 @@ class ConversationService:
             )
 
         state = self._state_manager.state if self._state_manager else None
-        if state is None or not state.evolution_proposal_id:
+        if state is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no development proposal awaiting approval. "
+                    "Please investigate an issue and plan it first."
+                ),
+                metadata={"approval": {"status": "no_active_proposal"}},
+            )
+
+        # Recovery approvals are processed first: a pending recovery approval
+        # represents a distinct recovery attempt that must be explicitly
+        # approved separately from the original development.
+        if state.recovery_approval_id:
+            return self._handle_recovery_approval(spec, state, active_session)
+
+        if not state.evolution_proposal_id:
             return Message(
                 role="assistant",
                 content=(
@@ -1338,6 +1461,148 @@ class ConversationService:
             return intent[:200]
         return "Rejected via conversation."
 
+    def _handle_recovery_approval(
+        self,
+        spec: TaskSpec,
+        state: Any,
+        active_session: Any,
+    ) -> Message | None:
+        """Process explicit approval/rejection of a pending recovery request.
+
+        A recovery approval is a DISTINCT approval request with its own
+        identity, separate from the original development approval. It must be
+        explicitly approved; the original approval does not authorize recovery.
+
+        Args:
+            spec: the classified APPROVAL or REJECTION_REQUEST TaskSpec.
+            state: the current ConversationState.
+            active_session: the active SessionContext.
+
+        Returns:
+            A Message describing the recovery approval result.
+        """
+        recovery_proposal_id = state.recovery_proposal_id
+        recovery_approval_id = state.recovery_approval_id
+
+        # Resolve the recovery objects from the instance-scoped registries.
+        proposal = self._resolve_evolution_proposal(recovery_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery proposal could not be resolved. "
+                    "Please run recovery assessment again."
+                ),
+                metadata={"recovery_approval": {"status": "proposal_not_found"}},
+            )
+        request = self._resolve_approval_request(recovery_approval_id)
+        if request is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery approval request could not be resolved. "
+                    "Please run recovery assessment again."
+                ),
+                metadata={"recovery_approval": {"status": "request_not_found"}},
+            )
+
+        # Cross-validate identity BEFORE the manager decision call.
+        if request.proposal_id != proposal.proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery approval request does not match the recovery "
+                    "proposal. Approval refused."
+                ),
+                metadata={"recovery_approval": {"status": "identity_mismatch"}},
+            )
+        if not request.is_valid_for(proposal):
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery proposal has changed since the approval "
+                    "request was created. Please run recovery assessment again."
+                ),
+                metadata={"recovery_approval": {"status": "fingerprint_mismatch"}},
+            )
+
+        # Check the ApprovalManager is wired.
+        if self._approval_manager is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Approval manager is not available. "
+                    "The decision could not be recorded."
+                ),
+                metadata={"recovery_approval": {"status": "no_approval_manager"}},
+            )
+
+        # Record the governed decision.
+        is_rejection = spec.task_type is TaskType.REJECTION_REQUEST
+        try:
+            if is_rejection:
+                reason = self._rejection_reason_from_spec(spec)
+                self._approval_manager.reject(request, reason=reason)
+            else:
+                comment = self._approval_comment_from_spec(spec)
+                self._approval_manager.approve(request, comment=comment)
+            self._approval_manager.update_proposal_from_decision(proposal, request)
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Recovery approval decision could not be recorded: {exc}. "
+                    "No state was changed."
+                ),
+                metadata={
+                    "recovery_approval": {"status": "decision_failed", "error": str(exc)},
+                },
+            )
+
+        # Consume the recovery approval request (anti-replay).
+        decision_name = request.decision.name
+        if self._state_manager is not None:
+            self._state_manager.update(
+                recovery_approval_id=None,  # recovery request consumed
+                latest_result=(
+                    f"Recovery proposal '{proposal.proposal_id}' {decision_name} "
+                    f"as '{request.request_id}'"
+                ),
+            )
+
+        if is_rejection:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Recovery proposal '{proposal.proposal_id}' has been "
+                    "rejected. No changes have been made."
+                ),
+                metadata={
+                    "recovery_approval": {
+                        "status": "rejected",
+                        "proposal_id": proposal.proposal_id,
+                        "request_id": request.request_id,
+                        "reason": request.decision_comment,
+                    },
+                },
+            )
+        return Message(
+            role="assistant",
+            content=(
+                f"Recovery proposal '{proposal.proposal_id}' has been approved. "
+                "No changes have been made. "
+                "Recovery implementation will require a separate explicit step."
+            ),
+            metadata={
+                "recovery_approval": {
+                    "status": "approved",
+                    "proposal_id": proposal.proposal_id,
+                    "request_id": request.request_id,
+                    "original_proposal_id": proposal.metadata.get("original_proposal_id"),
+                },
+            },
+        )
+
     def _maybe_handle_execution_request(
         self,
         spec: TaskSpec,
@@ -1412,7 +1677,28 @@ class ConversationService:
             )
 
         state = self._state_manager.state if self._state_manager else None
-        if state is None or not state.evolution_proposal_id:
+        if state is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no approved development proposal to execute. "
+                    "Please investigate an issue, plan it, and approve it first."
+                ),
+                metadata={"execution": {"status": "no_active_proposal"}},
+            )
+
+        # Recovery execution: if a recovery proposal has been explicitly
+        # approved, execute the recovery proposal (distinct identity) instead
+        # of the original. The original failure evidence is preserved.
+        is_recovery = (
+            state.recovery_proposal_id is not None
+            and state.recovery_approval_id is None  # recovery approval consumed
+            and state.evolution_proposal_id is not None
+        )
+        if is_recovery:
+            return self._handle_recovery_execution(spec, state, active_session)
+
+        if not state.evolution_proposal_id:
             return Message(
                 role="assistant",
                 content=(
@@ -1530,6 +1816,672 @@ class ConversationService:
             ):
                 return req
         return None
+
+    def _handle_recovery_execution(
+        self,
+        spec: TaskSpec,
+        state: Any,
+        active_session: Any,
+    ) -> Message | None:
+        """Execute an explicitly approved recovery proposal.
+
+        The recovery proposal has a distinct identity from the original
+        development proposal. Execution is delegated to the EXISTING governed
+        development-execution bridge (single authority), which invokes the
+        existing kernel development execution with its own OWNER gate.
+
+        The original failure evidence is preserved; the recovery result is
+        recorded separately.
+
+        Args:
+            spec: the classified EXECUTION_REQUEST TaskSpec.
+            state: the current ConversationState.
+            active_session: the active SessionContext.
+
+        Returns:
+            A Message describing the recovery execution result.
+        """
+        recovery_proposal_id = state.recovery_proposal_id
+
+        # Resolve the recovery proposal from the instance-scoped registry.
+        proposal = self._resolve_evolution_proposal(recovery_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery proposal could not be resolved. "
+                    "Please run recovery assessment again."
+                ),
+                metadata={"recovery_execution": {"status": "proposal_not_found"}},
+            )
+
+        # Validate the recovery proposal is APPROVED.
+        from atlas.evolution.models import ProposalStatus
+
+        if proposal.status != ProposalStatus.APPROVED:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Recovery proposal '{proposal.proposal_id}' is "
+                    f"'{proposal.status.name}', not APPROVED. "
+                    "Please approve the recovery proposal before executing."
+                ),
+                metadata={"recovery_execution": {"status": "not_approved"}},
+            )
+
+        # Resolve the approved recovery approval request.
+        request = self._resolve_approved_request(recovery_proposal_id)
+        if request is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approved recovery request could not be resolved. "
+                    "Please approve the recovery proposal again."
+                ),
+                metadata={"recovery_execution": {"status": "request_not_found"}},
+            )
+
+        # Cross-validate identity + fingerprint BEFORE the bridge.
+        from atlas.evolution.models import ApprovalDecision
+
+        if request.proposal_id != proposal.proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery approval request does not match the recovery "
+                    "proposal. Execution refused."
+                ),
+                metadata={"recovery_execution": {"status": "identity_mismatch"}},
+            )
+        if request.decision != ApprovalDecision.APPROVED:
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery request has not been approved. "
+                    "Please approve the recovery proposal first."
+                ),
+                metadata={"recovery_execution": {"status": "not_approved"}},
+            )
+        if not request.is_valid_for(proposal):
+            return Message(
+                role="assistant",
+                content=(
+                    "The recovery proposal has changed since the approval "
+                    "request was created. Execution refused."
+                ),
+                metadata={"recovery_execution": {"status": "fingerprint_mismatch"}},
+            )
+
+        # Delegate to the EXISTING governed development-execution bridge.
+        # This is the single development execution authority, OWNER-gated.
+        try:
+            message = self._development_execution_bridge(
+                active_session, proposal, request
+            )
+        except Exception as exc:
+            return Message(
+                role="assistant",
+                content=(
+                    f"Recovery execution could not proceed: {exc}. "
+                    "No changes were made."
+                ),
+                metadata={
+                    "recovery_execution": {"status": "execution_failed", "error": str(exc)},
+                },
+            )
+
+        # Record the recovery result, preserving the original failure identity.
+        if self._state_manager is not None:
+            original_id = proposal.metadata.get("original_proposal_id", "unknown")
+            exec_status = "requested"
+            if isinstance(message.metadata, dict):
+                exec_status = message.metadata.get("execution", {}).get("status", "requested")
+            self._state_manager.update(
+                latest_result=(
+                    f"Recovery '{proposal.proposal_id}' (from '{original_id}'): "
+                    f"{exec_status}"
+                ),
+            )
+
+        return message
+
+    def _maybe_handle_recovery_request(self, spec: TaskSpec) -> Message | None:
+        """Handle an explicit RECOVERY_REQUEST.
+
+        Produces a read-only RecoveryDecision from the failed development run's
+        preserved evidence and diagnosis. For REVISE_AND_RETRY, creates a NEW
+        recovery proposal + approval request (distinct identity from the
+        original) and presents it for explicit user approval.
+
+        Recovery NEVER executes automatically. The actual recovery execution
+        must go through the existing governed development execution path with
+        explicit approval of the recovery request.
+
+        Args:
+            spec: the classified RECOVERY_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the recovery decision.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. Recovery requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"recovery": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "Recovery requires OWNER authority. "
+                    "This session is not authorized to recover proposals."
+                ),
+                metadata={"recovery": {"status": "unauthorized"}},
+            )
+
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.evolution_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no failed development run to recover from. "
+                    "Please investigate an issue, plan it, approve it, and "
+                    "execute it first."
+                ),
+                metadata={"recovery": {"status": "no_failed_run"}},
+            )
+
+        # 3. Resolve the failed run's evidence from the live registries.
+        proposal = self._resolve_evolution_proposal(state.evolution_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The failed proposal could not be resolved. "
+                    "Please execute the development again."
+                ),
+                metadata={"recovery": {"status": "proposal_not_found"}},
+            )
+
+        # 4. Reconstruct the DevelopmentRunResult from preserved evidence and
+        # produce diagnosis + recovery decision.
+        from atlas.evolution.development_diagnostic import DevelopmentDiagnostic
+        from atlas.evolution.development_recovery import DevelopmentRecovery
+
+        result_standin = _RecoveryResultStandin.from_proposal(proposal)
+        diagnostic = DevelopmentDiagnostic().diagnose(result_standin)
+        recovery = DevelopmentRecovery().decide(result_standin, diagnostic)
+
+        # 5. For REVISE_AND_RETRY, create a NEW recovery proposal + approval
+        # request with a distinct identity, then present it for approval.
+        recovery_proposal_id = None
+        recovery_approval_id = None
+        if recovery.recoverable and recovery.strategy.value == "revise_and_retry":
+            try:
+                recovery_proposal_id, recovery_approval_id = (
+                    self._create_recovery_proposal(proposal, diagnostic, recovery)
+                )
+            except Exception as exc:
+                return Message(
+                    role="assistant",
+                    content=(
+                        f"Recovery decision was {recovery.strategy.value}, but "
+                        f"creating the recovery proposal failed: {exc}."
+                    ),
+                    metadata={"recovery": {"status": "creation_failed", "error": str(exc)}},
+                )
+
+        # 6. Update conversation state with recovery identity.
+        if self._state_manager is not None and (
+            recovery_proposal_id or recovery_approval_id
+        ):
+            self._state_manager.update(
+                recovery_proposal_id=recovery_proposal_id,
+                recovery_approval_id=recovery_approval_id,
+            )
+
+        # 7. Report the read-only recovery decision. Never auto-execute.
+        lines = [
+            "## Recovery Assessment",
+            "",
+            f"**Original Proposal:** {proposal.proposal_id}",
+            f"**Recoverable:** {'yes' if recovery.recoverable else 'no'}",
+            f"**Strategy:** {recovery.strategy.value}",
+            f"**Rationale:** {recovery.rationale}",
+        ]
+        if recovery.evidence:
+            lines.append(f"**Evidence:** {recovery.evidence}")
+
+        if recovery_proposal_id:
+            lines.append("")
+            lines.append(f"**Recovery Proposal:** {recovery_proposal_id}")
+            lines.append(f"**Recovery Approval Request:** {recovery_approval_id}")
+            lines.append("")
+            lines.append(
+                "A new recovery proposal has been created with a distinct "
+                "identity from the original. Please **explicitly approve** "
+                "this recovery request before any recovery attempt can be "
+                "executed. The original approval does NOT authorize recovery."
+            )
+
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "recovery": {
+                    "status": "decided",
+                    "recoverable": recovery.recoverable,
+                    "strategy": recovery.strategy.value,
+                    "rationale": recovery.rationale,
+                    "original_proposal_id": proposal.proposal_id,
+                    "recovery_proposal_id": recovery_proposal_id,
+                    "recovery_approval_id": recovery_approval_id,
+                    "diagnostic": {
+                        "failure_class": diagnostic.failure_class.value,
+                        "confidence": diagnostic.confidence.value,
+                        "cause": diagnostic.cause,
+                    },
+                },
+            },
+        )
+
+    def _create_recovery_proposal(
+        self,
+        original_proposal: Any,
+        diagnostic: Any,
+        recovery: Any,
+    ) -> tuple[str, str]:
+        """Create a NEW recovery proposal + approval request.
+
+        The recovery proposal has a distinct identity from the original and
+        references the original failure evidence. It is submitted to the
+        EXISTING ApprovalManager, producing a new pending ApprovalRequest.
+
+        Args:
+            original_proposal: The failed EvolutionProposal.
+            diagnostic: The DiagnosticResult for the failure.
+            recovery: The RecoveryDecision (must be REVISE_AND_RETRY).
+
+        Returns:
+            A tuple of (recovery_proposal_id, recovery_approval_id).
+
+        Raises:
+            RuntimeError: If the ApprovalManager is not wired.
+        """
+        from atlas.evolution.development_models import (
+            DevelopmentPlan,
+            ImprovementPlan,
+            ImprovementPriority,
+        )
+        from atlas.evolution.models import EvolutionProposal, ProposalStatus
+
+        if self._approval_manager is None:
+            raise RuntimeError("Approval manager is not available.")
+
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        recovery_proposal_id = f"RECOVERY-{original_proposal.proposal_id}-{timestamp}"
+
+        # Build a minimal ImprovementPlan for the recovery proposal.
+        recovery_plan = ImprovementPlan(
+            plan_id=f"PLAN-RECOVERY-{timestamp}",
+            title=f"Recovery: {original_proposal.title}",
+            description=(
+                f"Recovery attempt for failed development "
+                f"'{original_proposal.proposal_id}'. "
+                f"Diagnosis: {diagnostic.cause}"
+            ),
+            priority=ImprovementPriority.HIGH,
+        )
+
+        # Create the recovery proposal referencing the original failure.
+        recovery_proposal = EvolutionProposal(
+            proposal_id=recovery_proposal_id,
+            title=f"Recovery: {original_proposal.title}",
+            summary=(
+                f"Recovery attempt addressing {diagnostic.failure_class.value} "
+                f"failure: {diagnostic.cause}"
+            ),
+            rationale=(
+                f"Original development '{original_proposal.proposal_id}' failed "
+                f"with {diagnostic.confidence.value} confidence. "
+                f"Recovery rationale: {recovery.rationale}"
+            ),
+            expected_benefit=(
+                f"Corrected implementation addressing: {diagnostic.cause}"
+            ),
+            risks=(
+                "Recovery attempt based on diagnosis evidence. "
+                "Original failure preserved for audit."
+            ),
+            impact_analysis=(
+                f"Derived from original proposal components: "
+                f"{', '.join(original_proposal.plan.target_components[:5]) or 'to be determined'}"
+            ),
+            implementation_approach=(
+                f"1. Review original failure evidence.\n"
+                f"2. Apply corrective strategy for: {diagnostic.cause}\n"
+                f"3. Verify with existing test suite."
+            ),
+            plan=recovery_plan,
+            status=ProposalStatus.DRAFT,
+            metadata={
+                "recovery": True,
+                "original_proposal_id": original_proposal.proposal_id,
+                "original_fingerprint": original_proposal.proposal_fingerprint,
+                "diagnostic_failure_class": diagnostic.failure_class.value,
+                "diagnostic_confidence": diagnostic.confidence.value,
+                "diagnostic_cause": diagnostic.cause,
+                "recovery_strategy": recovery.strategy.value,
+            },
+        )
+
+        # Retain the live object and submit to ApprovalManager for a NEW
+        # approval request with a distinct identity.
+        self._register_evolution_proposal(recovery_proposal)
+        approval_request = self._approval_manager.create_approval_request(recovery_proposal)
+        self._register_approval_request(approval_request)
+
+        return recovery_proposal.proposal_id, approval_request.request_id
+
+    def _maybe_handle_verify(self, spec: TaskSpec) -> Message | None:
+        """Handle an explicit VERIFICATION_REQUEST.
+
+        Produces a read-only VerificationReport from an existing development
+        result (original execution or recovery). Verifies ONLY the evidence
+        already present in the DevelopmentRunResult. Never mutates anything,
+        never executes, never recovers.
+
+        Args:
+            spec: the classified VERIFICATION_REQUEST TaskSpec.
+
+        Returns:
+            A Message describing the verification result.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. Verification requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"verification": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "Verification requires OWNER authority. "
+                    "This session is not authorized to verify developments."
+                ),
+                metadata={"verification": {"status": "unauthorized"}},
+            )
+
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.evolution_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no development result to verify. "
+                    "Please investigate an issue, plan it, approve it, and "
+                    "execute it first."
+                ),
+                metadata={"verification": {"status": "no_result"}},
+            )
+
+        # 3. Resolve the existing development result from the live registry.
+        # The conversation service retains the EvolutionProposal; the full
+        # DevelopmentRunResult evidence is reconstructed from preserved state.
+        proposal = self._resolve_evolution_proposal(state.evolution_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The development proposal could not be resolved. "
+                    "Please execute the development again."
+                ),
+                metadata={"verification": {"status": "proposal_not_found"}},
+            )
+
+        # 4. Reconstruct the DevelopmentRunResult evidence.
+        result_standin = _RecoveryResultStandin.from_proposal(proposal)
+
+        # 5. Produce the read-only verification report.
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        report = DevelopmentVerification().verify(result_standin)
+
+        # 6. Report the verification result. Read-only; no mutation.
+        lines = [
+            "## Development Verification",
+            "",
+            f"**Proposal:** {proposal.proposal_id}",
+            f"**Status:** {report.status.value}",
+            f"**Iterations examined:** {report.iterations_examined}",
+        ]
+        if report.all_tests_passed is not None:
+            lines.append(
+                f"**All tests passed:** {'yes' if report.all_tests_passed else 'no'}"
+            )
+        if report.any_rollback:
+            lines.append("**Rollback occurred:** yes")
+        if report.changed_files:
+            lines.append(f"**Changed files:** {', '.join(report.changed_files[:5])}")
+        lines.append("")
+        lines.append(f"**Evidence:** {report.evidence}")
+        if report.message:
+            lines.append(f"**Conclusion:** {report.message}")
+
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "verification": {
+                    "status": report.status.value,
+                    "iterations_examined": report.iterations_examined,
+                    "all_tests_passed": report.all_tests_passed,
+                    "any_rollback": report.any_rollback,
+                    "changed_files": list(report.changed_files),
+                    "evidence": report.evidence,
+                    "proposal_id": proposal.proposal_id,
+                },
+            },
+        )
+
+    def _maybe_handle_report(self, spec: TaskSpec) -> Message | None:
+        """Handle an explicit REPORT_REQUEST.
+
+        Produces a read-only final lifecycle report aggregating evidence from
+        the current session's completed development lifecycle:
+        investigation → planning → approval → execution → failure → diagnosis →
+        recovery → verification → final conclusion.
+
+        Report NEVER:
+        - Modifies any files
+        - Calls ApplicationEngine.apply()
+        - Creates execution authorization
+        - Approves, authorizes, recovers, or retries anything
+        - Invokes pytest/subprocesses
+
+        Args:
+            spec: the classified REPORT_REQUEST TaskSpec.
+
+        Returns:
+            A Message containing the structured lifecycle report.
+        """
+        # 1. An active session must exist (fail-closed without attribution).
+        active_session = self._last_session_context
+        if active_session is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "No active session. Reporting requires an authenticated "
+                    "session. Please start a session first."
+                ),
+                metadata={"report": {"status": "no_session"}},
+            )
+
+        # 2. OWNER authority is required (fail-closed for non-owners).
+        if not active_session.is_owner:
+            return Message(
+                role="assistant",
+                content=(
+                    "Reporting requires OWNER authority. "
+                    "This session is not authorized to request reports."
+                ),
+                metadata={"report": {"status": "unauthorized"}},
+            )
+
+        state = self._state_manager.state if self._state_manager else None
+        if state is None or not state.evolution_proposal_id:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no development lifecycle to report on. "
+                    "Please investigate an issue, plan it, approve it, and "
+                    "execute it first."
+                ),
+                metadata={"report": {"status": "no_lifecycle"}},
+            )
+
+        # 3. Resolve the original proposal + approval from the live registries.
+        proposal = self._resolve_evolution_proposal(state.evolution_proposal_id)
+        if proposal is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The development proposal could not be resolved. "
+                    "Please execute the development again."
+                ),
+                metadata={"report": {"status": "proposal_not_found"}},
+            )
+        approval = self._resolve_approved_request(state.evolution_proposal_id)
+        if approval is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "The approval request could not be resolved. "
+                    "Please approve the proposal again."
+                ),
+                metadata={"report": {"status": "approval_not_found"}},
+            )
+
+        # 4. Resolve recovery proposal + approval if present.
+        recovery_proposal = None
+        recovery_approval = None
+        if state.recovery_proposal_id:
+            recovery_proposal = self._resolve_evolution_proposal(
+                state.recovery_proposal_id
+            )
+            if recovery_proposal is not None:
+                recovery_approval = self._resolve_approved_request(
+                    state.recovery_proposal_id
+                )
+
+        # 5. Build the lifecycle report from existing evidence.
+        from atlas.evolution.development_report import DevelopmentReportBuilder
+
+        report = DevelopmentReportBuilder().build(
+            state=state,
+            proposal=proposal,
+            approval=approval,
+            recovery_proposal=recovery_proposal,
+            recovery_approval=recovery_approval,
+        )
+
+        # 6. Render the report as a conversational Message.
+        lines = [
+            "## Development Lifecycle Report",
+            "",
+            f"**Investigation target:** {report.investigation_target or 'unknown'}",
+            f"**Original proposal:** {report.original_proposal_id or 'unknown'}",
+            f"**Original approval:** {report.original_approval_id or 'unknown'}",
+            f"**Original execution status:** {report.original_execution_status or 'unknown'}",
+        ]
+
+        if report.recovery_proposal_id:
+            lines.append("")
+            lines.append(f"**Recovery proposal:** {report.recovery_proposal_id}")
+            lines.append(f"**Recovery approval:** {report.recovery_approval_id or 'unknown'}")
+            lines.append(
+                f"**Recovery execution status:** "
+                f"{report.recovery_execution_status or 'unknown'}"
+            )
+
+        if report.diagnosis is not None:
+            lines.append("")
+            lines.append("### Diagnosis")
+            lines.append(f"- **Failure class:** {report.diagnosis.failure_class.value}")
+            lines.append(f"- **Confidence:** {report.diagnosis.confidence.value}")
+            lines.append(f"- **Cause:** {report.diagnosis.cause}")
+
+        if report.recovery_decision is not None:
+            lines.append("")
+            lines.append("### Recovery Decision")
+            lines.append(f"- **Recoverable:** {'yes' if report.recovery_decision.recoverable else 'no'}")
+            lines.append(f"- **Strategy:** {report.recovery_decision.strategy.value}")
+            lines.append(f"- **Rationale:** {report.recovery_decision.rationale}")
+
+        if report.verification is not None:
+            lines.append("")
+            lines.append("### Verification")
+            lines.append(f"- **Status:** {report.verification.status.value}")
+            lines.append(f"- **Iterations examined:** {report.verification.iterations_examined}")
+            if report.verification.all_tests_passed is not None:
+                lines.append(
+                    f"- **All tests passed:** "
+                    f"{'yes' if report.verification.all_tests_passed else 'no'}"
+                )
+            if report.verification.any_rollback:
+                lines.append("- **Rollback occurred:** yes")
+            if report.verification.changed_files:
+                lines.append(
+                    f"- **Changed files:** "
+                    f"{', '.join(report.verification.changed_files[:5])}"
+                )
+
+        lines.append("")
+        lines.append(f"### Final Conclusion: {report.final_conclusion.value.upper()}")
+        lines.append("")
+        lines.append(report.evidence)
+
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "report": {
+                    "status": "complete",
+                    "final_conclusion": report.final_conclusion.value,
+                    "investigation_target": report.investigation_target,
+                    "original_proposal_id": report.original_proposal_id,
+                    "original_approval_id": report.original_approval_id,
+                    "original_execution_status": report.original_execution_status,
+                    "recovery_proposal_id": report.recovery_proposal_id,
+                    "recovery_approval_id": report.recovery_approval_id,
+                    "recovery_execution_status": report.recovery_execution_status,
+                    "has_diagnosis": report.diagnosis is not None,
+                    "has_recovery_decision": report.recovery_decision is not None,
+                    "verification_status": (
+                        report.verification.status.value
+                        if report.verification is not None
+                        else None
+                    ),
+                },
+            },
+        )
 
     def handle_advisory(self, advisory_signal, session_context: SessionContext | None = None):
         """Feed a bounded P5 advisory signal into the P7 detection/dialogue path

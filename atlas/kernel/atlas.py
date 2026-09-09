@@ -1165,7 +1165,17 @@ class Atlas:
 
     @staticmethod
     def _development_execution_message(result: Any) -> Message:
-        """Convert a DevelopmentRunResult into a conversational Message."""
+        """Convert a DevelopmentRunResult into a conversational Message.
+
+        On failure, attaches a structured DiagnosticResult produced by the
+        read-only DevelopmentDiagnostic and a RecoveryDecision produced by the
+        read-only DevelopmentRecovery, so the conversation layer can surface
+        WHY the development failed and whether recovery is appropriate —
+        without inventing a root cause or a recovery strategy.
+        """
+        from atlas.evolution.development_diagnostic import DevelopmentDiagnostic
+        from atlas.evolution.development_recovery import DevelopmentRecovery
+
         status = getattr(result, "status", None)
         status_name = getattr(status, "name", str(status)) if status is not None else "unknown"
         iterations = getattr(result, "iterations_used", 0)
@@ -1182,6 +1192,40 @@ class Atlas:
 
         exec_status = "succeeded" if status_name == "SUCCESS" else status_name.lower()
 
+        # On failure, attach a structured, evidence-backed diagnosis and a
+        # recovery decision. Both are read-only and fail-closed.
+        diagnostic_meta: dict | None = None
+        recovery_meta: dict | None = None
+        if status_name != "SUCCESS":
+            diagnostic = DevelopmentDiagnostic().diagnose(result)
+            recovery = DevelopmentRecovery().decide(result, diagnostic)
+
+            lines.append("")
+            lines.append(f"**Diagnosis:** {diagnostic.failure_class.value}")
+            lines.append(f"**Confidence:** {diagnostic.confidence.value}")
+            lines.append(f"**Cause:** {diagnostic.cause}")
+            if diagnostic.evidence:
+                lines.append(f"**Evidence:** {diagnostic.evidence}")
+
+            lines.append("")
+            lines.append(f"**Recoverable:** {'yes' if recovery.recoverable else 'no'}")
+            lines.append(f"**Recovery strategy:** {recovery.strategy.value}")
+            lines.append(f"**Rationale:** {recovery.rationale}")
+
+            diagnostic_meta = {
+                "failure_class": diagnostic.failure_class.value,
+                "confidence": diagnostic.confidence.value,
+                "cause": diagnostic.cause,
+                "evidence": diagnostic.evidence,
+                "recoverable": diagnostic.recoverable,
+            }
+            recovery_meta = {
+                "recoverable": recovery.recoverable,
+                "strategy": recovery.strategy.value,
+                "rationale": recovery.rationale,
+                "evidence": recovery.evidence,
+            }
+
         return Message(
             role="assistant",
             content="\n".join(lines),
@@ -1192,6 +1236,7 @@ class Atlas:
                     "iterations_used": iterations,
                     "outcomes_count": len(outcomes),
                 },
+                "diagnostic": diagnostic_meta,
             },
         )
 

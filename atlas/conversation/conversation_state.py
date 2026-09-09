@@ -61,6 +61,14 @@ class ConversationState:
     # an investigation.
     evolution_proposal_id: Optional[str] = None
 
+    # Stable reference of a recovery EvolutionProposal created after a
+    # REVISE_AND_RETRY recovery decision. Distinct from the original proposal.
+    recovery_proposal_id: Optional[str] = None
+
+    # Stable reference of the pending recovery approval request. Distinct from
+    # the original development approval.
+    recovery_approval_id: Optional[str] = None
+
     # Current development-related intent description, when one exists.
     development_intent: Optional[str] = None
 
@@ -89,6 +97,8 @@ class ConversationState:
             "active_proposal_fingerprint": self.active_proposal_fingerprint,
             "pending_approval_id": self.pending_approval_id,
             "evolution_proposal_id": self.evolution_proposal_id,
+            "recovery_proposal_id": self.recovery_proposal_id,
+            "recovery_approval_id": self.recovery_approval_id,
             "development_intent": self.development_intent,
             "pending_question": self.pending_question,
             "pending_confirmation": self.pending_confirmation,

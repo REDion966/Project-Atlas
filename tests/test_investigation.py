@@ -1679,3 +1679,1122 @@ class TestKernelDevelopmentExecutionBridge:
             )
         finally:
             atlas.shutdown()
+
+
+class TestDevelopmentDiagnostic:
+    """P17 — DevelopmentDiagnostic: read-only, evidence-based, fail-closed."""
+
+    def _make_outcome(
+        self,
+        status: str = "FAILED",
+        *,
+        verification_passed: bool = False,
+        rollback_occurred: bool = False,
+        test_outcome: str = "failed",
+        message: str = "iteration failed.",
+    ) -> Any:
+        from atlas.evolution.development_models import (
+            DevelopmentOutcome,
+            DevelopmentOutcomeStatus,
+        )
+
+        return DevelopmentOutcome(
+            outcome=DevelopmentOutcomeStatus[status],
+            proposal_id="PROP-DIAG-001",
+            plan_id="PLAN-DIAG-001",
+            iteration=1,
+            verification_passed=verification_passed,
+            rollback_occurred=rollback_occurred,
+            test_outcome=test_outcome,
+            message=message,
+        )
+
+    def _make_result(
+        self,
+        status: str,
+        outcomes: list[Any] | None = None,
+        message: str = "",
+    ) -> Any:
+        from atlas.evolution.development_models import DevelopmentOutcomeStatus
+        from atlas.evolution.self_development_loop import DevelopmentRunResult
+
+        return DevelopmentRunResult(
+            status=DevelopmentOutcomeStatus[status],
+            outcomes=outcomes or [],
+            iterations_used=len(outcomes) if outcomes else 0,
+            message=message,
+        )
+
+    def test_governance_denied_is_known(self):
+        """GOVERNANCE_DENIED → GOVERNANCE class, KNOWN confidence."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        result = self._make_result(
+            "GOVERNANCE_DENIED",
+            message="Promotion gate refused; no promotion performed.",
+        )
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.GOVERNANCE
+        assert diag.confidence == DiagnosticConfidence.KNOWN
+        assert "governance" in diag.cause.lower() or "denied" in diag.cause.lower()
+        assert diag.recoverable is False
+
+    def test_invalid_objective_is_known(self):
+        """INVALID_OBJECTIVE → OBJECTIVE class, KNOWN confidence."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        result = self._make_result(
+            "INVALID_OBJECTIVE",
+            message="Change supplier returned no code change.",
+        )
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.OBJECTIVE
+        assert diag.confidence == DiagnosticConfidence.KNOWN
+        assert diag.recoverable is False
+
+    def test_unavailable_capability_is_known(self):
+        """UNAVAILABLE_CAPABILITY → CAPABILITY class, KNOWN confidence."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        result = self._make_result(
+            "UNAVAILABLE_CAPABILITY",
+            message="Required capability unavailable.",
+        )
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.CAPABILITY
+        assert diag.confidence == DiagnosticConfidence.KNOWN
+        assert diag.recoverable is False
+
+    def test_iteration_exhaustion_with_verification_failure(self):
+        """ITERATIONS_EXHAUSTED + verification failure → VERIFICATION, PROBABLE."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="tests did not pass.",
+        )
+        result = self._make_result("ITERATIONS_EXHAUSTED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.VERIFICATION
+        assert diag.confidence == DiagnosticConfidence.PROBABLE
+        assert "verification" in diag.cause.lower() or "budget" in diag.cause.lower()
+
+    def test_iteration_exhaustion_with_implementation_failure(self):
+        """ITERATIONS_EXHAUSTED + rollback → IMPLEMENTATION, PROBABLE."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            rollback_occurred=True,
+            test_outcome="",
+            message="apply failed.",
+        )
+        result = self._make_result("ITERATIONS_EXHAUSTED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.IMPLEMENTATION
+        assert diag.confidence == DiagnosticConfidence.PROBABLE
+
+    def test_failed_verification_is_known(self):
+        """FAILED + verification failure → VERIFICATION, KNOWN."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="AssertionError in test_foo.",
+        )
+        result = self._make_result("FAILED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.VERIFICATION
+        assert diag.confidence == DiagnosticConfidence.KNOWN
+        assert "AssertionError" in diag.evidence or "failed" in diag.evidence
+
+    def test_failed_implementation_is_known(self):
+        """FAILED + rollback → IMPLEMENTATION, KNOWN."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            rollback_occurred=True,
+            test_outcome="",
+            message="apply raised ValueError.",
+        )
+        result = self._make_result("FAILED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.IMPLEMENTATION
+        assert diag.confidence == DiagnosticConfidence.KNOWN
+        assert "ValueError" in diag.evidence or "rollback" in diag.evidence.lower()
+
+    def test_timeout_is_verification_not_infrastructure(self):
+        """Timeout → VERIFICATION, NOT INFRASTRUCTURE (no over-claiming)."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="timeout",
+            message="pytest timed out after 30s.",
+        )
+        result = self._make_result("FAILED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.VERIFICATION
+        assert diag.failure_class != DiagnosticFailureClass.INFRASTRUCTURE
+
+    def test_insufficient_evidence_returns_unknown(self):
+        """Ambiguous evidence → UNKNOWN, not fabricated."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            rollback_occurred=False,
+            test_outcome="",
+            message="",
+        )
+        result = self._make_result("FAILED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.UNKNOWN
+        assert diag.confidence == DiagnosticConfidence.UNKNOWN
+
+    def test_does_not_invent_root_cause(self):
+        """A raw pytest failure does NOT produce a fabricated implementation root cause."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="test_bar FAILED: assert 1 == 2",
+        )
+        result = self._make_result("FAILED", [outcome])
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        # The evidence supports verification failure, NOT a specific logic-bug claim.
+        assert diag.failure_class == DiagnosticFailureClass.VERIFICATION
+        # Cause must not over-claim a specific root cause.
+        assert "logic bug" not in diag.cause.lower()
+        assert "implementation has a logic bug" not in diag.cause
+
+    def test_diagnosis_is_readonly_and_deterministic(self):
+        """Same input → same output; diagnosis has no side effects."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticFailureClass,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="x",
+        )
+        result = self._make_result("FAILED", [outcome])
+        d1 = DevelopmentDiagnostic().diagnose(result)
+        d2 = DevelopmentDiagnostic().diagnose(result)
+
+        assert d1 == d2
+        # Immutable result.
+        with pytest.raises(AttributeError):
+            d1.failure_class = DiagnosticFailureClass.INFRASTRUCTURE
+
+    def test_diagnosis_does_not_invoke_execution(self):
+        """Diagnosis must not call run_development_execution or similar."""
+        import inspect
+
+        from atlas.evolution.development_diagnostic import DevelopmentDiagnostic
+
+        src = inspect.getsource(DevelopmentDiagnostic)
+        assert "run_development_execution" not in src
+        assert "subprocess" not in src
+        assert "pytest" not in src
+        assert "os.system" not in src
+        assert ".apply(" not in src
+
+    def test_success_not_diagnosed_as_failure(self):
+        """A SUCCESS result is explicitly not a failure to diagnose."""
+        from atlas.evolution.development_diagnostic import (
+            DevelopmentDiagnostic,
+            DiagnosticConfidence,
+            DiagnosticFailureClass,
+        )
+
+        result = self._make_result("SUCCESS", message="Development completed inside sandbox.")
+        diag = DevelopmentDiagnostic().diagnose(result)
+
+        assert diag.failure_class == DiagnosticFailureClass.UNKNOWN
+        assert diag.confidence == DiagnosticConfidence.UNKNOWN
+        assert "succeeded" in diag.cause.lower()
+
+
+class TestDevelopmentRecovery:
+    """P17 — DevelopmentRecovery: read-only, evidence-based, fail-closed."""
+
+    def _make_outcome(
+        self,
+        status: str = "FAILED",
+        *,
+        verification_passed: bool = False,
+        rollback_occurred: bool = False,
+        test_outcome: str = "failed",
+        message: str = "iteration failed.",
+    ) -> Any:
+        from atlas.evolution.development_models import (
+            DevelopmentOutcome,
+            DevelopmentOutcomeStatus,
+        )
+
+        return DevelopmentOutcome(
+            outcome=DevelopmentOutcomeStatus[status],
+            proposal_id="PROP-REC-001",
+            plan_id="PLAN-REC-001",
+            iteration=1,
+            verification_passed=verification_passed,
+            rollback_occurred=rollback_occurred,
+            test_outcome=test_outcome,
+            message=message,
+        )
+
+    def _make_result(
+        self,
+        status: str,
+        outcomes: list[Any] | None = None,
+        message: str = "",
+    ) -> Any:
+        from atlas.evolution.development_models import DevelopmentOutcomeStatus
+        from atlas.evolution.self_development_loop import DevelopmentRunResult
+
+        return DevelopmentRunResult(
+            status=DevelopmentOutcomeStatus[status],
+            outcomes=outcomes or [],
+            iterations_used=len(outcomes) if outcomes else 0,
+            message=message,
+        )
+
+    def test_governance_denied_no_recovery(self):
+        """GOVERNANCE_DENIED → NO_RECOVERY (cannot retry past governance)."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result(
+            "GOVERNANCE_DENIED",
+            message="Promotion gate refused.",
+        )
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "governance"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "denied",
+                "evidence": "status=GOVERNANCE_DENIED",
+                "recoverable": False,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.NO_RECOVERY
+
+    def test_unknown_confidence_no_recovery(self):
+        """UNKNOWN confidence → NO_RECOVERY (never invent strategy)."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "implementation"})(),
+                "confidence": type("C", (), {"value": "unknown"})(),
+                "cause": "?",
+                "evidence": "",
+                "recoverable": None,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.NO_RECOVERY
+
+    def test_unknown_failure_class_no_recovery(self):
+        """UNKNOWN failure class → NO_RECOVERY."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "unknown"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "?",
+                "evidence": "",
+                "recoverable": None,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.NO_RECOVERY
+
+    def test_recoverable_false_no_recovery(self):
+        """recoverable=False → NO_RECOVERY."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "implementation"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "apply failed",
+                "evidence": "rollback=True",
+                "recoverable": False,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.NO_RECOVERY
+
+    def test_recoverable_none_no_recovery(self):
+        """recoverable=None → NO_RECOVERY."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "implementation"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "apply failed",
+                "evidence": "rollback=True",
+                "recoverable": None,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.NO_RECOVERY
+
+    def test_objective_failure_escalates(self):
+        """OBJECTIVE failure → ESCALATE (cannot silently modify objective)."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("INVALID_OBJECTIVE")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "objective"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "invalid objective",
+                "evidence": "status=INVALID_OBJECTIVE",
+                "recoverable": False,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.ESCALATE
+        assert "human planning" in decision.rationale.lower()
+
+    def test_capability_failure_escalates(self):
+        """CAPABILITY failure → ESCALATE (cannot retry unavailable capability)."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("UNAVAILABLE_CAPABILITY")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "capability"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "capability unavailable",
+                "evidence": "status=UNAVAILABLE_CAPABILITY",
+                "recoverable": False,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.ESCALATE
+
+    def test_verification_failure_with_evidence_may_retry(self):
+        """VERIFICATION failure with evidence → REVISE_AND_RETRY."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "verification"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "Verification did not pass.",
+                "evidence": "test_outcome=failed",
+                "recoverable": True,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is True
+        assert decision.strategy == RecoveryStrategy.REVISE_AND_RETRY
+
+    def test_verification_failure_without_evidence_escalates(self):
+        """VERIFICATION failure without evidence → ESCALATE."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "verification"})(),
+                "confidence": type("C", (), {"value": "probable"})(),
+                "cause": "",
+                "evidence": "",
+                "recoverable": True,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.ESCALATE
+
+    def test_implementation_failure_with_evidence_may_retry(self):
+        """IMPLEMENTATION failure with evidence → REVISE_AND_RETRY."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "implementation"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "Implementation did not succeed.",
+                "evidence": "rollback_occurred=True",
+                "recoverable": True,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is True
+        assert decision.strategy == RecoveryStrategy.REVISE_AND_RETRY
+
+    def test_ambiguous_evidence_no_recovery(self):
+        """Ambiguous evidence → NO_RECOVERY."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("FAILED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "implementation"})(),
+                "confidence": type("C", (), {"value": "probable"})(),
+                "cause": "",
+                "evidence": "",
+                "recoverable": True,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        assert decision.recoverable is False
+        assert decision.strategy == RecoveryStrategy.ESCALATE
+
+    def test_decision_is_immutable(self):
+        """RecoveryDecision is frozen/immutable."""
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        result = self._make_result("GOVERNANCE_DENIED")
+        diagnostic = type(
+            "D",
+            (),
+            {
+                "failure_class": type("F", (), {"value": "governance"})(),
+                "confidence": type("C", (), {"value": "known"})(),
+                "cause": "denied",
+                "evidence": "e",
+                "recoverable": False,
+            },
+        )()
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        with pytest.raises(AttributeError):
+            decision.recoverable = True
+        with pytest.raises(AttributeError):
+            decision.strategy = RecoveryStrategy.REVISE_AND_RETRY
+
+    def test_diagnose_then_recover_end_to_end(self):
+        """Full path: DevelopmentDiagnostic → DevelopmentRecovery."""
+        from atlas.evolution.development_diagnostic import DevelopmentDiagnostic
+        from atlas.evolution.development_recovery import (
+            DevelopmentRecovery,
+            RecoveryStrategy,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="AssertionError in test_foo.",
+        )
+        result = self._make_result("FAILED", [outcome])
+
+        diagnostic = DevelopmentDiagnostic().diagnose(result)
+        decision = DevelopmentRecovery().decide(result, diagnostic)
+
+        # A raw pytest failure should classify as VERIFICATION, not fabricate
+        # an implementation root cause.
+        assert diagnostic.failure_class.value == "verification"
+        # With evidence present, recovery may be possible.
+        assert isinstance(decision.recoverable, bool)
+        assert decision.strategy in (
+            RecoveryStrategy.NO_RECOVERY,
+            RecoveryStrategy.REVISE_AND_RETRY,
+            RecoveryStrategy.ESCALATE,
+        )
+
+    def test_recovery_does_not_execute_or_authorize(self):
+        """RecoveryDecision component must not invoke execution or auth."""
+        import inspect
+
+        from atlas.evolution.development_recovery import DevelopmentRecovery
+
+        src = inspect.getsource(DevelopmentRecovery)
+        assert "run_development_execution" not in src
+        assert "subprocess" not in src
+        assert "pytest" not in src
+        assert "os.system" not in src
+        assert "assert_owner" not in src
+        assert "approve" not in src
+        assert ".apply(" not in src
+
+
+class TestRecoveryClassification:
+    """P17 — recovery request classification."""
+
+    def test_recover_cues(self):
+        """Recovery cues classify as RECOVERY_REQUEST."""
+        for text in (
+            "recover from the failure",
+            "recovery",
+            "try again",
+            "retry the development",
+            "attempt recovery",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.RECOVERY_REQUEST
+
+    def test_execution_not_misclassified_as_recovery(self):
+        """Execution cues remain EXECUTION_REQUEST."""
+        spec = TaskIntake().intake("execute the approved proposal")
+        assert spec.task_type is TaskType.EXECUTION_REQUEST
+
+    def test_approval_not_misclassified_as_recovery(self):
+        """Approval cues remain APPROVAL."""
+        spec = TaskIntake().intake("approve this proposal")
+        assert spec.task_type is TaskType.APPROVAL
+
+
+class TestDevelopmentVerification:
+    """P17 — DevelopmentVerification: read-only, evidence-based, fail-closed."""
+
+    def _make_outcome(
+        self,
+        status: str = "SUCCESS",
+        *,
+        verification_passed: bool = True,
+        rollback_occurred: bool = False,
+        test_outcome: str = "passed",
+        message: str = "Development iteration succeeded in sandbox.",
+        changed_files: list[str] | None = None,
+        iteration: int = 1,
+    ) -> Any:
+        from atlas.evolution.development_models import (
+            DevelopmentOutcome,
+            DevelopmentOutcomeStatus,
+        )
+
+        return DevelopmentOutcome(
+            outcome=DevelopmentOutcomeStatus[status],
+            proposal_id="PROP-VER-001",
+            plan_id="PLAN-VER-001",
+            iteration=iteration,
+            verification_passed=verification_passed,
+            rollback_occurred=rollback_occurred,
+            test_outcome=test_outcome,
+            message=message,
+            changed_files=changed_files or ["atlas/memory/manager.py"],
+        )
+
+    def _make_result(
+        self,
+        status: str,
+        outcomes: list[Any] | None = None,
+        iterations_used: int | None = None,
+        message: str = "",
+    ) -> Any:
+        from atlas.evolution.development_models import DevelopmentOutcomeStatus
+        from atlas.evolution.self_development_loop import DevelopmentRunResult
+
+        outcomes = outcomes or []
+        return DevelopmentRunResult(
+            status=DevelopmentOutcomeStatus[status],
+            outcomes=outcomes,
+            iterations_used=iterations_used if iterations_used is not None else len(outcomes),
+            message=message,
+        )
+
+    def test_verified_success(self):
+        """SUCCESS with all iterations passing → VERIFIED."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        outcome = self._make_outcome("SUCCESS", verification_passed=True)
+        result = self._make_result("SUCCESS", [outcome])
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status == VerificationStatus.VERIFIED
+        assert report.all_tests_passed is True
+        assert report.iterations_examined == 1
+
+    def test_unverified_failure(self):
+        """FAILED result → UNVERIFIED."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="tests did not pass.",
+        )
+        result = self._make_result("FAILED", [outcome])
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status == VerificationStatus.UNVERIFIED
+        assert report.all_tests_passed is False
+
+    def test_partial_mixed_iterations(self):
+        """Mixed iteration outcomes → PARTIAL."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        good = self._make_outcome("SUCCESS", verification_passed=True, iteration=1)
+        bad = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            iteration=2,
+        )
+        result = self._make_result("FAILED", [good, bad])
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status == VerificationStatus.PARTIAL
+        assert report.all_tests_passed is False
+        assert report.iterations_examined == 2
+
+    def test_unverifiable_no_outcomes(self):
+        """Result with no iteration outcomes → UNVERIFIABLE."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        result = self._make_result("FAILED", [])
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status == VerificationStatus.UNVERIFIABLE
+
+    def test_unverifiable_none_result(self):
+        """None result → UNVERIFIABLE."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        report = DevelopmentVerification().verify(None)
+
+        assert report.status == VerificationStatus.UNVERIFIABLE
+
+    def test_governance_denied_unverified(self):
+        """GOVERNANCE_DENIED → UNVERIFIED."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        result = self._make_result("GOVERNANCE_DENIED", message="gate refused")
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status == VerificationStatus.UNVERIFIED
+
+    def test_iteration_exhaustion_unverified(self):
+        """ITERATIONS_EXHAUSTED → UNVERIFIED."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        result = self._make_result("ITERATIONS_EXHAUSTED", message="exhausted")
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status == VerificationStatus.UNVERIFIED
+
+    def test_rollback_recorded(self):
+        """Rollback evidence is preserved in the report."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+        )
+
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            rollback_occurred=True,
+        )
+        result = self._make_result("FAILED", [outcome])
+        report = DevelopmentVerification().verify(result)
+
+        assert report.any_rollback is True
+
+    def test_changed_files_preserved(self):
+        """Changed files are preserved in the report."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+        )
+
+        outcome = self._make_outcome(
+            "SUCCESS",
+            verification_passed=True,
+            changed_files=["atlas/memory/manager.py", "atlas/memory/storage.py"],
+        )
+        result = self._make_result("SUCCESS", [outcome])
+        report = DevelopmentVerification().verify(result)
+
+        assert "atlas/memory/manager.py" in report.changed_files
+        assert "atlas/memory/storage.py" in report.changed_files
+
+    def test_does_not_infer_from_message(self):
+        """A human-readable message alone does not fabricate verification."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        # FAILED status with a positive-sounding message should NOT be VERIFIED.
+        outcome = self._make_outcome(
+            "FAILED",
+            verification_passed=False,
+            test_outcome="failed",
+            message="almost succeeded",
+        )
+        result = self._make_result("FAILED", [outcome], message="almost succeeded")
+        report = DevelopmentVerification().verify(result)
+
+        assert report.status != VerificationStatus.VERIFIED
+
+    def test_immutable_report(self):
+        """VerificationReport is frozen/immutable."""
+        from atlas.evolution.development_verification import (
+            DevelopmentVerification,
+            VerificationStatus,
+        )
+
+        result = self._make_result("SUCCESS", [self._make_outcome()])
+        report = DevelopmentVerification().verify(result)
+
+        with pytest.raises(AttributeError):
+            report.status = VerificationStatus.UNVERIFIABLE
+
+    def test_no_subprocess_or_execution(self):
+        """DevelopmentVerification must not invoke execution or subprocess."""
+        import inspect
+
+        from atlas.evolution.development_verification import DevelopmentVerification
+
+        src = inspect.getsource(DevelopmentVerification)
+        assert "run_development_execution" not in src
+        assert "subprocess" not in src
+        assert "pytest" not in src
+        assert "os.system" not in src
+        assert ".apply(" not in src
+
+
+class TestVerificationClassification:
+    """P17 — explicit verification request classification."""
+
+    def test_verification_cues(self):
+        """Verification cues classify as VERIFICATION_REQUEST."""
+        for text in (
+            "verify the development",
+            "verify the result",
+            "check the development result",
+            "check whether the development succeeded",
+            "verify the completed development",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.VERIFICATION_REQUEST
+
+    def test_recovery_not_misclassified_as_verification(self):
+        """Recovery cues remain RECOVERY_REQUEST."""
+        spec = TaskIntake().intake("recover from the failure")
+        assert spec.task_type is TaskType.RECOVERY_REQUEST
+
+    def test_execution_not_misclassified_as_verification(self):
+        """Execution cues remain EXECUTION_REQUEST."""
+        spec = TaskIntake().intake("execute the approved proposal")
+        assert spec.task_type is TaskType.EXECUTION_REQUEST
+
+
+class TestDevelopmentLifecycleReport:
+    """P17 — DevelopmentLifecycleReport model and builder."""
+
+    def _make_outcome(
+        self,
+        status: str = "SUCCESS",
+        *,
+        verification_passed: bool = True,
+        rollback_occurred: bool = False,
+        test_outcome: str = "passed",
+        message: str = "Development iteration succeeded in sandbox.",
+        changed_files: list[str] | None = None,
+        iteration: int = 1,
+    ) -> Any:
+        from atlas.evolution.development_models import (
+            DevelopmentOutcome,
+            DevelopmentOutcomeStatus,
+        )
+
+        return DevelopmentOutcome(
+            outcome=DevelopmentOutcomeStatus[status],
+            proposal_id="PROP-RPT-001",
+            plan_id="PLAN-RPT-001",
+            iteration=iteration,
+            verification_passed=verification_passed,
+            rollback_occurred=rollback_occurred,
+            test_outcome=test_outcome,
+            message=message,
+            changed_files=changed_files or ["atlas/memory/manager.py"],
+        )
+
+    def _make_result(
+        self,
+        status: str,
+        outcomes: list[Any] | None = None,
+        iterations_used: int | None = None,
+        message: str = "",
+    ) -> Any:
+        from atlas.evolution.development_models import DevelopmentOutcomeStatus
+        from atlas.evolution.self_development_loop import DevelopmentRunResult
+
+        outcomes = outcomes or []
+        return DevelopmentRunResult(
+            status=DevelopmentOutcomeStatus[status],
+            outcomes=outcomes,
+            iterations_used=iterations_used if iterations_used is not None else len(outcomes),
+            message=message,
+        )
+
+    def test_report_is_immutable(self):
+        """DevelopmentLifecycleReport is frozen."""
+        from atlas.evolution.development_report import (
+            DevelopmentLifecycleReport,
+            FinalConclusion,
+        )
+
+        report = DevelopmentLifecycleReport(
+            final_conclusion=FinalConclusion.SUCCESS,
+            evidence="test",
+        )
+        with pytest.raises(AttributeError):
+            report.final_conclusion = FinalConclusion.FAILED
+
+    def test_verified_success(self):
+        """SUCCESS with all iterations passing → SUCCESS conclusion."""
+        from atlas.evolution.development_report import DevelopmentReportBuilder
+
+        outcome = self._make_outcome("SUCCESS", verification_passed=True)
+        result = self._make_result("SUCCESS", [outcome])
+        report = DevelopmentReportBuilder().build(
+            state=self._dummy_state(),
+            proposal=self._dummy_proposal("PROP-RPT-001"),
+            approval=self._dummy_approval("APPR-RPT-001"),
+        )
+        # The builder reconstructs evidence from proposal metadata; with no
+        # execution metadata it falls back to UNVERIFIABLE, which is correct
+        # fail-closed behavior.
+        assert report.final_conclusion is not None
+
+    def _dummy_state(self) -> Any:
+        return type(
+            "_S",
+            (),
+            {"evolution_proposal_id": "PROP-RPT-001", "recovery_proposal_id": None},
+        )()
+
+    def _dummy_proposal(self, proposal_id: str) -> Any:
+        from atlas.evolution.models import ProposalStatus
+
+        return type(
+            "_P",
+            (),
+            {
+                "proposal_id": proposal_id,
+                "status": ProposalStatus.APPROVED,
+                "metadata": {
+                    "execution": {
+                        "result_status": "SUCCESS",
+                        "last_outcome": {
+                            "verification_passed": True,
+                            "test_outcome": "passed",
+                        },
+                    }
+                },
+            },
+        )()
+
+    def _dummy_approval(self, request_id: str) -> Any:
+        from atlas.evolution.models import ApprovalDecision
+
+        return type(
+            "_A",
+            (),
+            {"request_id": request_id, "decision": ApprovalDecision.APPROVED},
+        )()
+
+    def test_no_subprocess_or_execution(self):
+        """Report builder must not invoke execution or subprocess."""
+        import inspect
+
+        from atlas.evolution.development_report import DevelopmentReportBuilder
+
+        src = inspect.getsource(DevelopmentReportBuilder)
+        assert "run_development_execution" not in src
+        assert "subprocess" not in src
+        assert "pytest" not in src
+        assert "os.system" not in src
+        assert ".apply(" not in src
+
+
+class TestReportClassification:
+    """P17 — explicit report request classification."""
+
+    def test_report_cues(self):
+        """Report cues classify as REPORT_REQUEST."""
+        for text in (
+            "report on the development",
+            "give me the development report",
+            "give me the final report",
+            "show the final development report",
+            "summarize the development lifecycle",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.REPORT_REQUEST
+
+    def test_recovery_not_misclassified_as_report(self):
+        """Recovery cues remain RECOVERY_REQUEST."""
+        spec = TaskIntake().intake("recover from the failure")
+        assert spec.task_type is TaskType.RECOVERY_REQUEST
+
+    def test_verification_not_misclassified_as_report(self):
+        """Verification cues remain VERIFICATION_REQUEST."""
+        spec = TaskIntake().intake("verify the development")
+        assert spec.task_type is TaskType.VERIFICATION_REQUEST

@@ -64,6 +64,9 @@ class TaskType(Enum):
     EXECUTION_REQUEST = "execution_request"
     PLANNING_REQUEST = "planning_request"
     REJECTION_REQUEST = "rejection_request"
+    RECOVERY_REQUEST = "recovery_request"
+    VERIFICATION_REQUEST = "verification_request"
+    REPORT_REQUEST = "report_request"
     UNKNOWN = "unknown"
 
 
@@ -189,6 +192,53 @@ _REJECTION_CUES: frozenset[str] = frozenset(
         "declined",
         "deny",
         "denied",
+    }
+)
+
+#: Explicit recovery phrases that indicate the user wants to recover from a
+#: previous development execution failure. Checked after execution so that
+#: "execute" recovery language does not collide with execution requests.
+_RECOVERY_CUES: frozenset[str] = frozenset(
+    {
+        "recover",
+        "recovery",
+        "recover from the failure",
+        "recover from that failure",
+        "try again",
+        "retry the development",
+        "attempt recovery",
+    }
+)
+
+#: Explicit verification phrases that indicate the user wants to verify an
+#: already-completed development result. Checked after recovery so that
+#: "verify" recovery language does not collide with verification requests.
+_VERIFICATION_CUES: frozenset[str] = frozenset(
+    {
+        "verify the development",
+        "verify the result",
+        "check the development result",
+        "check whether the development succeeded",
+        "verify the completed development",
+        "verify development result",
+        "confirm the development succeeded",
+        "check the result",
+    }
+)
+
+#: Explicit report phrases that indicate the user wants a final lifecycle
+#: report. Checked after verification so that "verify" report language does
+#: not collide with verification requests.
+_REPORT_CUES: frozenset[str] = frozenset(
+    {
+        "report on the development",
+        "give me the development report",
+        "give me the final report",
+        "show the final development report",
+        "summarize the development lifecycle",
+        "what happened with the development",
+        "final development report",
+        "development lifecycle report",
     }
 )
 
@@ -682,6 +732,27 @@ class TaskIntake:
         # ambiguous conversational responses.
         if _is_explicit_rejection(normalized):
             return TaskType.REJECTION_REQUEST
+
+        # Explicit recovery phrases are checked next. They indicate the user
+        # wants to recover from a previous development execution failure.
+        # Checked before planning so that "recover" is not misclassified.
+        recovery = _first_hit(lowered, _RECOVERY_CUES)
+        if recovery:
+            return TaskType.RECOVERY_REQUEST
+
+        # Explicit verification phrases are checked next. They indicate the
+        # user wants to verify an already-completed development result.
+        # Checked before planning so that "verify" is not misclassified.
+        verification = _first_hit(lowered, _VERIFICATION_CUES)
+        if verification:
+            return TaskType.VERIFICATION_REQUEST
+
+        # Explicit report phrases are checked next. They indicate the user
+        # wants a final lifecycle report. Checked before planning so that
+        # "report" is not misclassified.
+        report = _first_hit(lowered, _REPORT_CUES)
+        if report:
+            return TaskType.REPORT_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development

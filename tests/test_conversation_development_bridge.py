@@ -156,14 +156,20 @@ class TestArchitectureGuards:
             .read_text(encoding="utf-8")
         )
         tree = ast.parse(source)
-        # P17 approved the governed conversational approval + execution paths,
-        # which intentionally bind the conversation layer to the EXISTING
-        # ApprovalManager and the EXISTING proposal/request status enums.
-        # Every other atlas.evolution import remains forbidden (execution
-        # engine, autonomy, planner, ...).
+        # P17 approved the governed conversational approval + execution +
+        # recovery paths, which intentionally bind the conversation layer to
+        # the EXISTING ApprovalManager, the EXISTING proposal/request status
+        # enums, and the EXISTING development outcome enums (for read-only
+        # recovery analysis). Every other atlas.evolution import remains
+        # forbidden (execution engine, autonomy, planner, ...).
         allowed_modules = {
             "atlas.evolution.approval_manager",
             "atlas.evolution.models",
+            "atlas.evolution.development_models",
+            "atlas.evolution.development_diagnostic",
+            "atlas.evolution.development_recovery",
+            "atlas.evolution.development_verification",
+            "atlas.evolution.development_report",
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
