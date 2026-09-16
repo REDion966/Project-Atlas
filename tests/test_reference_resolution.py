@@ -17,6 +17,7 @@ from atlas.conversation.reference_resolution import (
     ConversationReferenceResolver,
     ReferenceResolutionStatus,
     ReferenceResolutionResult,
+    has_bounded_reference,
 )
 
 
@@ -289,3 +290,97 @@ class TestAdversarialWording:
         result = resolver.resolve("continue", state)
         assert result.status == ReferenceResolutionStatus.AMBIGUOUS
         assert len(result.candidates) >= 2
+
+
+# ---------------------------------------------------------------------------
+# C7 GAP-C31-02 — word-boundary matching (substring false positives removed)
+# ---------------------------------------------------------------------------
+
+
+class TestWordBoundaryMatching:
+    """Triggers must match as whole words, never as ordinary-word substrings."""
+
+    _STATE = ConversationState(
+        current_subject="auth",
+        current_task="task-1",
+        current_investigation="inv-1",
+        relevant_prior_action="action-a",
+        latest_result="result-1",
+    )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "What is the priority of the release?",      # "priority" contains "it"
+            "Is the architecture documented?",           # "architecture" contains "it"
+            "How is the quality of the output?",         # "quality" contains "it"
+            "Please summarise the repository structure.",  # "repository" contains "it"
+            "We voted against the rule.",                # "against" contains "again"
+        ],
+    )
+    def test_substring_false_positives_eliminated(self, resolver, text):
+        result = resolver.resolve(text, self._STATE)
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    @pytest.mark.parametrize(
+        "text,field,value",
+        [
+            ("that investigation", "current_investigation", "inv-1"),
+            ("the investigation", "current_investigation", "inv-1"),
+            ("that result", "latest_result", "result-1"),
+            ("the result", "latest_result", "result-1"),
+            ("the findings", "latest_result", "result-1"),
+        ],
+    )
+    def test_bounded_multi_word_references_still_resolve(
+        self, resolver, text, field, value
+    ):
+        result = resolver.resolve(text, self._STATE)
+        assert result.status == ReferenceResolutionStatus.RESOLVED
+        assert result.resolved_field == field
+        assert result.resolved_value == value
+
+    def test_ambiguous_reference_unchanged(self, resolver):
+        result = resolver.resolve("what did you find?", self._STATE)
+        assert result.status == ReferenceResolutionStatus.AMBIGUOUS
+
+    def test_repeated_matching_is_deterministic(self, resolver):
+        a = resolver.resolve("that investigation", self._STATE)
+        b = resolver.resolve("that investigation", self._STATE)
+        assert (a.status, a.resolved_field, a.resolved_value) == (
+            b.status, b.resolved_field, b.resolved_value
+        )
+
+
+class TestBoundedReferenceGuard:
+    """`has_bounded_reference` gates production invocation to multi-word forms."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Based on that investigation, what should I do next?",
+            "what did you find?",
+            "Continue with that task.",
+            "run it again",
+        ],
+    )
+    def test_multi_word_phrases_detected(self, text):
+        assert has_bounded_reference(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "What is the priority of the release?",
+            "Is the architecture documented?",
+            "How is the quality?",
+            "Please summarise the repository structure.",
+            "We voted against the rule.",
+            "Can you explain it?",
+            "Is this correct?",
+            "Which of those components depend on it?",
+            "",
+            "   ",
+        ],
+    )
+    def test_single_word_and_false_positives_not_detected(self, text):
+        assert has_bounded_reference(text) is False

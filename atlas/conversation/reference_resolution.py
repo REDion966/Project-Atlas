@@ -22,11 +22,51 @@ execution-independent. It produces only structured information.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
 from atlas.conversation.conversation_state import ConversationState
+
+
+#: Precompiled word-boundary patterns per reference phrase. Matching is
+#: WORD-BOUNDARY based (not substring), so triggers such as ``it`` can never
+#: match inside ordinary words (``priority``, ``architecture``, ``quality``,
+#: ``repository``) and ``again`` can never match inside ``against``.
+_PHRASE_PATTERN_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _phrase_pattern(phrase: str) -> re.Pattern[str]:
+    """Return the deterministic word-boundary pattern for one phrase."""
+    pattern = _PHRASE_PATTERN_CACHE.get(phrase)
+    if pattern is None:
+        pattern = re.compile(rf"\b{re.escape(phrase)}\b")
+        _PHRASE_PATTERN_CACHE[phrase] = pattern
+    return pattern
+
+
+def has_bounded_reference(text: str) -> bool:
+    """True when ``text`` contains a recognized MULTI-WORD reference phrase.
+
+    Bounded detection guard for the production turn flow: only multi-word
+    phrases (e.g. ``"that investigation"``, ``"what did you find"``) qualify,
+    so bare single-word triggers (``it``/``that``/``this``/``again``/
+    ``continue``) can never cause unsafe universal invocation on ordinary
+    turns. Deterministic; no NLP; no inference.
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    for phrases, _fields, _category in _REFERENCE_PATTERNS:
+        for phrase in phrases:
+            if " " not in phrase:
+                continue
+            if _phrase_pattern(phrase).search(normalized):
+                return True
+    return False
 
 
 class ReferenceResolutionStatus(str, Enum):
@@ -175,7 +215,7 @@ class ConversationReferenceResolver:
         matched_fields: Optional[tuple[str, ...]] = None
         category: str = "unknown"
         for phrases, fields, cat in _REFERENCE_PATTERNS:
-            if any(phrase in normalized for phrase in phrases):
+            if any(_phrase_pattern(phrase).search(normalized) for phrase in phrases):
                 matched_fields = fields
                 category = cat
                 break

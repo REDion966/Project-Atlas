@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from atlas.ai.routing.models import RoutingRequest
 from atlas.cognition.api import CognitionAPI
@@ -383,6 +383,16 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # C7 GAP-C31-02 — bounded deterministic reference/context exposure.
+        # Applied only to recognized multi-word reference phrases, before the
+        # single existing routing cascade. AMBIGUOUS reuses the existing
+        # clarification mechanism; UNRESOLVED and non-reference turns are
+        # byte-for-byte unchanged.
+        if spec is not None:
+            spec, reference_response = self._apply_reference_resolution(spec, text)
+            if reference_response is not None:
+                self._conversation.add_message(reference_response)
+                return reference_response
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -883,6 +893,62 @@ class ConversationService:
         from dataclasses import replace as _replace
 
         return _replace(spec, context=enriched)
+
+    def _apply_reference_resolution(
+        self,
+        spec: TaskSpec,
+        text: str,
+    ) -> tuple[TaskSpec, Message | None]:
+        """Bounded deterministic reference/context exposure (C7 GAP-C31-02).
+
+        Read-only interpretation of a bounded, recognized multi-word reference
+        phrase against the current :class:`ConversationState`:
+
+          * RESOLVED  -> the referent is attached to the existing structured
+            ``TaskSpec.context`` and routing continues unchanged (single pass).
+          * AMBIGUOUS -> the existing clarification mechanism is reused; never
+            guesses.
+          * UNRESOLVED / no bounded reference -> the spec is returned unchanged
+            (fail closed; byte-for-byte current behavior).
+
+        It never authorizes, mutates, rewrites the user's message, invokes a
+        handler directly, or runs a second routing pass.
+        """
+        from atlas.conversation.reference_resolution import (
+            ReferenceResolutionStatus,
+            has_bounded_reference,
+        )
+
+        if not has_bounded_reference(text):
+            return spec, None
+
+        result = self._reference_resolver.resolve(text, self._state_manager.state)
+
+        if result.status is ReferenceResolutionStatus.AMBIGUOUS:
+            from dataclasses import replace as _replace
+
+            clarified = _replace(
+                spec,
+                needs_clarification=True,
+                ambiguity=_replace(
+                    spec.ambiguity,
+                    clarification_questions=(result.reason,),
+                ),
+            )
+            return spec, self._orchestration_clarification_message(clarified)
+
+        if result.status is ReferenceResolutionStatus.RESOLVED:
+            from dataclasses import replace as _replace
+
+            enriched = dict(spec.context) if isinstance(spec.context, dict) else {}
+            enriched["resolved_reference"] = {
+                "field": result.resolved_field,
+                "value": result.resolved_value,
+            }
+            return _replace(spec, context=enriched), None
+
+        # UNRESOLVED -> fail closed; current routing is unchanged.
+        return spec, None
 
     def set_experience_capture(self, accumulator) -> None:
         """Inject the ExperienceAccumulator used for orchestration capture."""
@@ -2570,6 +2636,14 @@ class ConversationService:
 
         state = self._state_manager.state if self._state_manager else None
         if state is None or not state.evolution_proposal_id:
+            # C3.3 — Investigation-level reporting. When no development
+            # lifecycle exists, report on the most recent read-only
+            # investigation synthesis instead of refusing. Deterministic and
+            # read-only; the development-lifecycle path below is unchanged.
+            if self._last_investigation_report is not None:
+                return self._handle_investigation_report(
+                    self._last_investigation_report
+                )
             return Message(
                 role="assistant",
                 content=(
@@ -2793,14 +2867,6 @@ class ConversationService:
 
         state = self._state_manager.state if self._state_manager else None
         if state is None or not state.evolution_proposal_id:
-            # C3.3 — Investigation-level reporting. When no development
-            # lifecycle exists, report on the most recent read-only
-            # investigation synthesis instead of refusing. Deterministic and
-            # read-only; the development-lifecycle path below is unchanged.
-            if self._last_investigation_report is not None:
-                return self._handle_investigation_report(
-                    self._last_investigation_report
-                )
             return Message(
                 role="assistant",
                 content=(
