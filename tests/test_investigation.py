@@ -2329,6 +2329,136 @@ class TestConversationalAuthoringJoin:
             atlas.shutdown()
 
 
+class TestConversationalFailureRecoveryJoin:
+    """C2.5 — the real conversational failure/recovery join.
+
+    Drives the production conversational path (investigate -> plan -> approve ->
+    execute) with a deterministic sandbox verification failure, then exercises
+    the governed recovery/verification surfaces. Locks in that:
+
+      * the failure is truthfully reported and never becomes a success;
+      * the kernel bridge preserves the real execution evidence on the proposal;
+      * the recovery surface classifies the REAL failure (verification) rather
+        than an unknown default stand-in;
+      * recovery stays fail-closed (no auto-approval, no auto-execution).
+    """
+
+    @pytest.fixture
+    def failing_ai(self):
+        class _Failing:
+            def chat(self, prompt, routing_context=None):
+                raise RuntimeError("No AI")
+
+            def stream_chat(self, prompt, routing_context=None):
+                def _g():
+                    raise RuntimeError("No AI")
+                    yield ""  # pragma: no cover
+
+                return _g()
+
+        return _Failing()
+
+    def _make_atlas(self, tmp_path, monkeypatch):
+        import atlas.kernel.atlas as kernel_mod
+        from tests.test_durable_guided_improvement import _storage_class
+
+        monkeypatch.setattr(
+            "atlas.kernel.atlas.SQLiteEvolutionStorage",
+            _storage_class(tmp_path),
+        )
+        atlas = kernel_mod.Atlas()
+        atlas.start()
+        return atlas
+
+    def _make_service(self, atlas, failing_ai, author):
+        from atlas.conversation.investigation import InvestigationService
+        from atlas.conversation.task_intake import TaskIntake
+
+        service = ConversationService(
+            ai_service=failing_ai,
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService(),
+            approval_manager=atlas._approval_manager,
+            development_execution_bridge=atlas._development_execution_bridge,
+            proposal_change_supplier=author,
+            session_context=atlas.session_context,
+        )
+        atlas._conversation = service
+        return service
+
+    def _failing_author(self):
+        """Implementation disagrees with the verifying test: deterministic fail."""
+        return _BoundedTestQualityAuthor(
+            changes=(("mod.py", "VALUE = 41\n"),),
+            tests=(
+                (
+                    "test_mod.py",
+                    "def test_value():\n"
+                    "    from mod import VALUE\n"
+                    "    assert VALUE == 42\n",
+                ),
+            ),
+        )
+
+    def test_conversational_failure_is_truthful_and_recovery_classified(
+        self, tmp_path, monkeypatch, failing_ai
+    ):
+        atlas = self._make_atlas(tmp_path, monkeypatch)
+        try:
+            service = self._make_service(atlas, failing_ai, self._failing_author())
+
+            list(atlas.stream("Investigate the memory architecture"))
+            list(atlas.stream("Plan this improvement"))
+            list(atlas.stream("Approve this proposal"))
+
+            state = service.state_manager.state
+            ev_proposal = service._resolve_evolution_proposal(
+                state.evolution_proposal_id
+            )
+            assert "execution" not in ev_proposal.metadata
+            assert "last_outcome" not in ev_proposal.metadata
+
+            list(atlas.stream("Execute the approved proposal"))
+            executed = service._conversation.messages[-1]
+
+            # Truthful failure: never reported as a success.
+            assert executed.metadata["execution"]["status"] != "succeeded"
+            assert (
+                executed.metadata["execution"]["result_status"]
+                == "ITERATIONS_EXHAUSTED"
+            )
+            assert "SUCCESS" not in executed.content
+
+            # The kernel bridge preserved the REAL evidence on the proposal.
+            assert (
+                ev_proposal.metadata["execution"]["result_status"]
+                == "ITERATIONS_EXHAUSTED"
+            )
+            assert ev_proposal.metadata["execution"]["last_outcome"]
+            assert (
+                ev_proposal.metadata["last_outcome"]["verification_passed"] is False
+            )
+            assert ev_proposal.metadata["last_outcome"]["test_outcome"] == "failed"
+
+            # The recovery surface classifies the REAL failure, not "unknown".
+            list(atlas.stream("Recover from the failure"))
+            recovered = service._conversation.messages[-1]
+            recovery = recovered.metadata["recovery"]
+            assert recovery["status"] == "decided"
+            assert recovery["diagnostic"]["failure_class"] == "verification"
+
+            # Fail-closed: no auto-created recovery proposal, no execution.
+            assert recovery["recovery_proposal_id"] is None
+            assert service.state_manager.state.recovery_proposal_id is None
+
+            # Verification surface reflects the failed run (unverified).
+            list(atlas.stream("Verify the development"))
+            verified = service._conversation.messages[-1]
+            assert verified.metadata["verification"]["status"] == "unverified"
+        finally:
+            atlas.shutdown()
+
+
 class TestDevelopmentDiagnostic:
     """P17 — DevelopmentDiagnostic: read-only, evidence-based, fail-closed."""
 

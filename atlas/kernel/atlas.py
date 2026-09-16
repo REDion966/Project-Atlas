@@ -1172,7 +1172,60 @@ class Atlas:
         # re-runs the OWNER authority gate and requires APPROVED status.
         result = self.run_development_execution(session_context, proposal.proposal_id)
 
+        # Preserve the execution evidence on the proposal so the read-only
+        # conversational surfaces (recovery, verification, lifecycle report)
+        # reconstruct WHAT actually happened instead of a default FAILED
+        # stand-in. Metadata is excluded from the proposal fingerprint, so this
+        # changes no status, scope, or approval binding.
+        self._persist_development_evidence(proposal, result)
+        memory.store_proposal(proposal)
+
         return self._development_execution_message(result)
+
+    @staticmethod
+    def _persist_development_evidence(proposal: Any, result: Any) -> None:
+        """Record bounded execution evidence on the proposal metadata.
+
+        Fulfills the documented kernel-bridge contract consumed by
+        ``ConversationService._RecoveryResultStandin`` and the lifecycle report
+        builder: after a governed run the proposal carries the terminal result
+        status and the last outcome's evidence, so recovery/verification can
+        classify the real failure rather than reconstructing a default FAILED
+        stand-in. Evidence only — never mutates the repository, status, scope,
+        or approval, and metadata is excluded from the proposal fingerprint.
+        """
+        metadata = getattr(proposal, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+
+        status = getattr(result, "status", None)
+        status_name = (
+            getattr(status, "name", str(status)) if status is not None else "FAILED"
+        )
+        outcomes = list(getattr(result, "outcomes", None) or [])
+        last = outcomes[-1] if outcomes else None
+
+        last_outcome = {
+            "verification_passed": bool(
+                getattr(last, "verification_passed", False)
+            ),
+            "rollback_occurred": bool(getattr(last, "rollback_occurred", False)),
+            "test_outcome": str(getattr(last, "test_outcome", "") or ""),
+            "message": str(getattr(last, "message", "") or "")[:500],
+        }
+        metadata["execution"] = {
+            "status": (
+                "succeeded" if status_name == "SUCCESS" else status_name.lower()
+            ),
+            "result_status": status_name,
+            "iterations_used": int(getattr(result, "iterations_used", 0) or 0),
+            "outcomes_count": len(outcomes),
+            "message": str(getattr(result, "message", "") or "")[:500],
+            # Nested copy for the lifecycle-report reader; the recovery reader
+            # (``_RecoveryResultStandin``) reads the top-level key below.
+            "last_outcome": dict(last_outcome),
+        }
+        metadata["last_outcome"] = dict(last_outcome)
 
     @staticmethod
     def _development_execution_message(result: Any) -> Message:
