@@ -224,10 +224,14 @@ from atlas.storage.advanced_reasoning_storage import AdvancedReasoningSQLiteStor
 
 # --- Phase 16: Autonomy persistence wiring ---
 from atlas.evolution.autonomy.authorization_manager import AuthorizationManager
+from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+from atlas.evolution.autonomy.autonomy_policy import AutonomyPolicyEngine
 from atlas.evolution.autonomy.autonomy_request_adapter import (
     AutonomyRequestAdapter,
 )
-from atlas.evolution.autonomy.models import AutonomyPolicy
+from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
+from atlas.evolution.governance.models import ScopeType
+from atlas.evolution.models import ExecutionLevel
 from atlas.kernel.autonomy_wiring import (
     init_autonomy_application_engine,
     init_autonomy_dispatcher,
@@ -1246,6 +1250,99 @@ class Atlas:
                 "diagnostic": diagnostic_meta,
             },
         )
+
+    # ------------------------------------------------------------------
+    # Conversational autonomy boundary (conversation -> kernel -> evolution)
+    # ------------------------------------------------------------------
+
+    # Level -> (max risk, execution level). Identical to the parameters the
+    # conversation handlers previously built inline.
+    _AUTONOMY_POLICY_BY_LEVEL: dict[int, tuple[Any, Any]] = {
+        1: (RiskLevel.LOW, ExecutionLevel.SANDBOXED),
+        2: (RiskLevel.MEDIUM, ExecutionLevel.CODE_ARTIFACT),
+        3: (RiskLevel.HIGH, ExecutionLevel.SELF_CONFIG),
+        4: (RiskLevel.CRITICAL, ExecutionLevel.INFORMATION),
+        5: (RiskLevel.CRITICAL, ExecutionLevel.AUTONOMOUS),
+    }
+
+    @staticmethod
+    def _approved_placeholder() -> Any:
+        """Build the placeholder object the L2-L5 autonomy checks require.
+
+        Mirrors the inline placeholder the conversation handlers previously
+        constructed: an object whose ``status.name`` is ``APPROVED``.
+        """
+        return type("_P", (), {"status": type("S", (), {"name": "APPROVED"})()})()
+
+    def _autonomy_check(
+        self,
+        proposal: Any,
+        session_context: Any,
+        *,
+        level: int,
+    ) -> Any:
+        """Perform an L1-L5 autonomy check on behalf of the conversation layer.
+
+        This is the kernel-owned boundary. The conversation layer never
+        constructs evolution autonomy machinery directly; it asks the kernel
+        for a decision, preserving the dependency direction:
+
+            conversation -> injected boundary -> kernel -> evolution
+
+        Policy parameters per level are identical to those the conversation
+        handlers previously constructed inline (L1 LOW/SANDBOXED,
+        L2 MEDIUM/CODE_ARTIFACT, L3 HIGH/SELF_CONFIG, L4 CRITICAL/INFORMATION,
+        L5 CRITICAL/AUTONOMOUS). For L1 the real ``proposal`` is checked;
+        L2-L5 reproduce the handlers' placeholder inputs exactly.
+        """
+        try:
+            risk_level, execution_level = self._AUTONOMY_POLICY_BY_LEVEL[level]
+        except KeyError:
+            raise ValueError(f"Unknown autonomy level: {level}")
+
+        policy = AutonomyPolicy(
+            enabled=True,
+            allowed_scopes=[ScopeType.CODE],
+            max_risk_level=risk_level,
+            effective_execution_level=execution_level,
+            requires_user_approval_scopes=[],
+            max_requests_per_window=10,
+            authorization_ttl_minutes=60,
+        )
+        policy_engine = AutonomyPolicyEngine(policy=policy)
+        auth_manager = AuthorizationManager(policy=policy)
+        controller = AutonomyController(
+            authorization_manager=auth_manager,
+            policy_engine=policy_engine,
+        )
+
+        if level == 1:
+            return controller.check_execution_autonomy(
+                proposal=proposal,
+                session_context=session_context,
+            )
+        if level == 2:
+            return controller.check_medium_risk_autonomy(
+                proposal=self._approved_placeholder(),
+                session_context=session_context,
+            )
+        if level == 3:
+            return controller.check_high_risk_autonomy(
+                proposal=self._approved_placeholder(),
+                session_context=session_context,
+            )
+        if level == 4:
+            return controller.check_critical_risk_autonomy(
+                proposal=self._approved_placeholder(),
+                session_context=session_context,
+            )
+        if level == 5:
+            objectives = [self._approved_placeholder() for _ in range(2)]
+            return controller.check_cross_objective_coordination_autonomy(
+                objectives=objectives,
+                session_context=session_context,
+            )
+        raise ValueError(f"Unknown autonomy level: {level}")
 
     # ------------------------------------------------------------------
     # Phase F11: Long-Term Self-Management Review (manually invoked)
@@ -3169,6 +3266,7 @@ class Atlas:
             approval_manager=self._approval_manager,
             development_execution_bridge=self._development_execution_bridge,
             proposal_change_supplier=self._proposal_change_supplier,
+            autonomy_check=self._autonomy_check,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).

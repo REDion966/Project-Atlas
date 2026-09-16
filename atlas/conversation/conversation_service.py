@@ -33,12 +33,6 @@ from atlas.conversation.history import History
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
-from atlas.evolution.approval_manager import ApprovalManager
-from atlas.evolution.autonomy.autonomy_policy import AutonomyPolicyEngine
-from atlas.evolution.autonomy.authorization_manager import AuthorizationManager
-from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
-from atlas.evolution.governance.models import ScopeType
-from atlas.evolution.models import ExecutionLevel
 from atlas.memory.context.context_engine import ContextEngine
 from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
@@ -47,6 +41,45 @@ if TYPE_CHECKING:
     from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
     from atlas.session.context import SessionContext
     from atlas.session.models import Session
+
+
+class ApprovalManagerProtocol(Protocol):
+    """Interface for the approval manager injected by the kernel.
+
+    The conversation layer depends on this protocol, not on the concrete
+    evolution.approval_manager.ApprovalManager, preserving the dependency
+    direction: conversation -> injected boundary -> kernel -> evolution.
+    """
+
+    def create_approval_request(self, proposal: Any) -> Any:
+        """Create an approval request for a proposal."""
+        ...
+
+    def approve(self, request: Any, comment: str) -> None:
+        """Approve a pending request."""
+        ...
+
+    def reject(self, request: Any, reason: str) -> None:
+        """Reject a pending request."""
+        ...
+
+    def update_proposal_from_decision(self, proposal: Any, request: Any) -> None:
+        """Update a proposal's status based on the approval decision."""
+        ...
+
+
+class AutonomyDecisionProtocol(Protocol):
+    """Interface for an autonomy decision returned by the injected boundary.
+
+    The conversation layer consumes these attributes without constructing
+    evolution autonomy machinery directly.
+    """
+
+    can_proceed: bool
+    reason: str
+    escalation_required: bool
+    authorization_mode: Any
+    evidence: dict[str, Any]
 
 
 class _RecoveryResultStandin:
@@ -130,9 +163,10 @@ class ConversationService:
         reference_resolver: ConversationReferenceResolver | None = None,
         investigation_service: InvestigationService | None = None,
         execution_service: Level3ExecutionService | None = None,
-        approval_manager: ApprovalManager | None = None,
+        approval_manager: ApprovalManagerProtocol | None = None,
         development_execution_bridge: Callable[..., Any] | None = None,
         proposal_change_supplier: Any | None = None,
+        autonomy_check: Callable[..., AutonomyDecisionProtocol] | None = None,
     ):
         """
         Initialize the conversation service.
@@ -170,8 +204,9 @@ class ConversationService:
                 degraded operation.
 
             approval_manager:
-                Optional ApprovalManager for creating real approval requests.
-                When ``None``, planning requests cannot create approval requests.
+                Optional approval manager (injected by the kernel) for creating
+                real approval requests. When ``None``, planning requests cannot
+                create approval requests.
 
             development_execution_bridge:
                 Optional duck-typed callable that bridges an already-approved
@@ -190,6 +225,15 @@ class ConversationService:
                 remains evidence-only and execution fails closed with
                 ``INVALID_OBJECTIVE`` exactly as before. The supplier receives
                 data only and can never mutate proposals, approvals, or state.
+
+            autonomy_check:
+                Optional callable injected by the kernel that performs an
+                autonomy check for a given proposal, session, and level,
+                returning an :class:`AutonomyDecisionProtocol`. The conversation
+                layer never constructs evolution autonomy machinery directly;
+                this boundary keeps the dependency direction correct
+                (conversation -> kernel -> evolution). When ``None``, autonomy
+                requests fail closed and are denied.
         """
 
         self._history = History()
@@ -218,6 +262,7 @@ class ConversationService:
         self._execution_service = execution_service
         self._approval_manager = approval_manager
         self._development_execution_bridge = development_execution_bridge
+        self._autonomy_check = autonomy_check
         self._reference_resolver = reference_resolver or ConversationReferenceResolver()
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
@@ -2727,31 +2772,22 @@ class ConversationService:
                 metadata={"autonomy": {"status": "fingerprint_mismatch"}},
             )
 
-        # 6. Check L1 autonomy via AutonomyController.
-        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
+        # 6. Check L1 autonomy via the injected kernel boundary.
+        # The conversation layer never constructs evolution autonomy machinery
+        # directly; the kernel composition root owns that and injects it here.
+        if self._autonomy_check is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Autonomy check is not available. "
+                    "L1 autonomous execution cannot proceed without the "
+                    "kernel autonomy boundary."
+                ),
+                metadata={"autonomy": {"status": "not_available"}},
+            )
 
-        # Build a minimal policy engine for L1 check
-        # In production, this would be injected; here we construct a default
-        # L1 policy that permits sandboxed CODE execution with LOW risk.
-        l1_policy = AutonomyPolicy(
-            enabled=True,
-            allowed_scopes=[ScopeType.CODE],
-            max_risk_level=RiskLevel.LOW,
-            effective_execution_level=ExecutionLevel.SANDBOXED,
-            requires_user_approval_scopes=[],
-            max_requests_per_window=10,
-            authorization_ttl_minutes=60,
-        )
-        policy_engine = AutonomyPolicyEngine(policy=l1_policy)
-        auth_manager = AuthorizationManager(policy=l1_policy)
-        controller = AutonomyController(
-            authorization_manager=auth_manager,
-            policy_engine=policy_engine,
-        )
-
-        autonomy_decision = controller.check_execution_autonomy(
-            proposal=proposal,
-            session_context=active_session,
+        autonomy_decision = self._autonomy_check(
+            proposal, active_session, level=1,
         )
 
         if not autonomy_decision.can_proceed:
@@ -2879,40 +2915,22 @@ class ConversationService:
                 metadata={"l2_autonomy": {"status": "unauthorized"}},
             )
 
-        # 3. Check L2 autonomy via AutonomyController.
-        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
-        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
-        from atlas.evolution.governance.models import ScopeType
-        from atlas.evolution.models import ExecutionLevel
+        # 3. Check L2 autonomy via the injected kernel boundary.
+        # The conversation layer never constructs evolution autonomy machinery
+        # directly; the kernel composition root owns that and injects it here.
+        if self._autonomy_check is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Autonomy check is not available. "
+                    "L2 autonomous operation cannot proceed without the "
+                    "kernel autonomy boundary."
+                ),
+                metadata={"l2_autonomy": {"status": "not_available"}},
+            )
 
-        # Build an L2 policy that permits MEDIUM risk and CODE_ARTIFACT level
-        l2_policy = AutonomyPolicy(
-            enabled=True,
-            allowed_scopes=[ScopeType.CODE],
-            max_risk_level=RiskLevel.MEDIUM,
-            effective_execution_level=ExecutionLevel.CODE_ARTIFACT,
-            requires_user_approval_scopes=[],
-            max_requests_per_window=10,
-            authorization_ttl_minutes=60,
-        )
-        policy_engine = AutonomyPolicyEngine(policy=l2_policy)
-        auth_manager = AuthorizationManager(policy=l2_policy)
-        controller = AutonomyController(
-            authorization_manager=auth_manager,
-            policy_engine=policy_engine,
-        )
-
-        # Check if L2 autonomy is permitted (using a placeholder proposal)
-        # In a full implementation, this would check specific workflows
-        placeholder_proposal = type(
-            "_P",
-            (),
-            {"status": type("S", (), {"name": "APPROVED"})()},
-        )()
-
-        l2_decision = controller.check_medium_risk_autonomy(
-            proposal=placeholder_proposal,
-            session_context=active_session,
+        l2_decision = self._autonomy_check(
+            None, active_session, level=2,
         )
 
         if not l2_decision.can_proceed:
@@ -3022,39 +3040,22 @@ class ConversationService:
                 metadata={"l3_autonomy": {"status": "unauthorized"}},
             )
 
-        # 3. Check L3 autonomy via AutonomyController.
-        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
-        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
-        from atlas.evolution.governance.models import ScopeType
-        from atlas.evolution.models import ExecutionLevel
+        # 3. Check L3 autonomy via the injected kernel boundary.
+        # The conversation layer never constructs evolution autonomy machinery
+        # directly; the kernel composition root owns that and injects it here.
+        if self._autonomy_check is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Autonomy check is not available. "
+                    "L3 autonomous operation cannot proceed without the "
+                    "kernel autonomy boundary."
+                ),
+                metadata={"l3_autonomy": {"status": "not_available"}},
+            )
 
-        # Build an L3 policy that permits HIGH risk and SELF_CONFIG level
-        l3_policy = AutonomyPolicy(
-            enabled=True,
-            allowed_scopes=[ScopeType.CODE],
-            max_risk_level=RiskLevel.HIGH,
-            effective_execution_level=ExecutionLevel.SELF_CONFIG,
-            requires_user_approval_scopes=[],
-            max_requests_per_window=10,
-            authorization_ttl_minutes=60,
-        )
-        policy_engine = AutonomyPolicyEngine(policy=l3_policy)
-        auth_manager = AuthorizationManager(policy=l3_policy)
-        controller = AutonomyController(
-            authorization_manager=auth_manager,
-            policy_engine=policy_engine,
-        )
-
-        # Check if L3 autonomy is permitted (using a placeholder proposal)
-        placeholder_proposal = type(
-            "_P",
-            (),
-            {"status": type("S", (), {"name": "APPROVED"})()},
-        )()
-
-        l3_decision = controller.check_high_risk_autonomy(
-            proposal=placeholder_proposal,
-            session_context=active_session,
+        l3_decision = self._autonomy_check(
+            None, active_session, level=3,
         )
 
         if not l3_decision.can_proceed:
@@ -3164,39 +3165,22 @@ class ConversationService:
                 metadata={"l4_autonomy": {"status": "unauthorized"}},
             )
 
-        # 3. Check L4 autonomy via AutonomyController.
-        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
-        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
-        from atlas.evolution.governance.models import ScopeType
-        from atlas.evolution.models import ExecutionLevel
+        # 3. Check L4 autonomy via the injected kernel boundary.
+        # The conversation layer never constructs evolution autonomy machinery
+        # directly; the kernel composition root owns that and injects it here.
+        if self._autonomy_check is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Autonomy check is not available. "
+                    "L4 autonomous operation cannot proceed without the "
+                    "kernel autonomy boundary."
+                ),
+                metadata={"l4_autonomy": {"status": "not_available"}},
+            )
 
-        # Build an L4 policy that permits CRITICAL risk and INFORMATION level
-        l4_policy = AutonomyPolicy(
-            enabled=True,
-            allowed_scopes=[ScopeType.CODE],
-            max_risk_level=RiskLevel.CRITICAL,
-            effective_execution_level=ExecutionLevel.INFORMATION,
-            requires_user_approval_scopes=[],
-            max_requests_per_window=10,
-            authorization_ttl_minutes=60,
-        )
-        policy_engine = AutonomyPolicyEngine(policy=l4_policy)
-        auth_manager = AuthorizationManager(policy=l4_policy)
-        controller = AutonomyController(
-            authorization_manager=auth_manager,
-            policy_engine=policy_engine,
-        )
-
-        # Check if L4 autonomy is permitted (using a placeholder proposal)
-        placeholder_proposal = type(
-            "_P",
-            (),
-            {"status": type("S", (), {"name": "APPROVED"})()},
-        )()
-
-        l4_decision = controller.check_critical_risk_autonomy(
-            proposal=placeholder_proposal,
-            session_context=active_session,
+        l4_decision = self._autonomy_check(
+            None, active_session, level=4,
         )
 
         if not l4_decision.can_proceed:
@@ -3308,38 +3292,22 @@ class ConversationService:
                 metadata={"l5_autonomy": {"status": "unauthorized"}},
             )
 
-        # 3. Check L5 autonomy via AutonomyController.
-        from atlas.evolution.autonomy.autonomy_controller import AutonomyController
-        from atlas.evolution.autonomy.models import AutonomyPolicy, RiskLevel
-        from atlas.evolution.governance.models import ScopeType
-        from atlas.evolution.models import ExecutionLevel
+        # 3. Check L5 autonomy via the injected kernel boundary.
+        # The conversation layer never constructs evolution autonomy machinery
+        # directly; the kernel composition root owns that and injects it here.
+        if self._autonomy_check is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "Autonomy check is not available. "
+                    "L5 autonomous operation cannot proceed without the "
+                    "kernel autonomy boundary."
+                ),
+                metadata={"l5_autonomy": {"status": "not_available"}},
+            )
 
-        # Build an L5 policy that permits CRITICAL risk and AUTONOMOUS level
-        l5_policy = AutonomyPolicy(
-            enabled=True,
-            allowed_scopes=[ScopeType.CODE],
-            max_risk_level=RiskLevel.CRITICAL,
-            effective_execution_level=ExecutionLevel.AUTONOMOUS,
-            requires_user_approval_scopes=[],
-            max_requests_per_window=10,
-            authorization_ttl_minutes=60,
-        )
-        policy_engine = AutonomyPolicyEngine(policy=l5_policy)
-        auth_manager = AuthorizationManager(policy=l5_policy)
-        controller = AutonomyController(
-            authorization_manager=auth_manager,
-            policy_engine=policy_engine,
-        )
-
-        # Check if L5 autonomy is permitted (using placeholder objectives)
-        placeholder_objectives = [
-            type("_O", (), {"status": type("S", (), {"name": "APPROVED"})()})()
-            for _ in range(2)
-        ]
-
-        l5_decision = controller.check_cross_objective_coordination_autonomy(
-            objectives=placeholder_objectives,
-            session_context=active_session,
+        l5_decision = self._autonomy_check(
+            None, active_session, level=5,
         )
 
         if not l5_decision.can_proceed:

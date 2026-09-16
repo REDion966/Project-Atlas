@@ -586,6 +586,9 @@ def _is_explicit_approval(text: str) -> bool:
     "accept", "authorize"). Ambiguous responses like "okay", "sounds good",
     "go ahead" are NOT treated as approval.
 
+    Word-boundary matching prevents false positives such as "unauthorized"
+    matching "authorized".
+
     Args:
         text: the normalized request text.
 
@@ -593,13 +596,15 @@ def _is_explicit_approval(text: str) -> bool:
         True if the text contains explicit approval language.
     """
     lowered = text.lower()
-    # Must contain an explicit approval cue
-    has_approval_cue = any(cue in lowered for cue in _APPROVAL_CUES)
+    # Must contain an explicit approval cue (word-boundary match)
+    has_approval_cue = any(
+        re.search(rf"\b{re.escape(cue)}\b", lowered) for cue in _APPROVAL_CUES
+    )
     if not has_approval_cue:
         return False
     # Must NOT be negated (e.g. "don't approve")
     for cue in _APPROVAL_CUES:
-        if cue in lowered and _is_negated(lowered, cue):
+        if re.search(rf"\b{re.escape(cue)}\b", lowered) and _is_negated(lowered, cue):
             return False
     return True
 
@@ -611,6 +616,9 @@ def _is_explicit_rejection(text: str) -> bool:
     "decline", "deny"). Ambiguous responses like "okay", "sounds good"
     are NOT treated as rejection.
 
+    Word-boundary matching prevents false positives such as "unrejected"
+    matching "rejected".
+
     Args:
         text: the normalized request text.
 
@@ -618,13 +626,15 @@ def _is_explicit_rejection(text: str) -> bool:
         True if the text contains explicit rejection language.
     """
     lowered = text.lower()
-    # Must contain an explicit rejection cue
-    has_rejection_cue = any(cue in lowered for cue in _REJECTION_CUES)
+    # Must contain an explicit rejection cue (word-boundary match)
+    has_rejection_cue = any(
+        re.search(rf"\b{re.escape(cue)}\b", lowered) for cue in _REJECTION_CUES
+    )
     if not has_rejection_cue:
         return False
     # Must NOT be negated (e.g. "don't reject")
     for cue in _REJECTION_CUES:
-        if cue in lowered and _is_negated(lowered, cue):
+        if re.search(rf"\b{re.escape(cue)}\b", lowered) and _is_negated(lowered, cue):
             return False
     return True
 
@@ -636,6 +646,9 @@ def _is_explicit_execution(text: str) -> bool:
     "implement", "apply the approved proposal"). Ambiguous responses like
     "okay", "go ahead", "do it" are NOT treated as execution.
 
+    Word-boundary matching prevents false positives such as "unexecuted"
+    matching "execute".
+
     Args:
         text: the normalized request text.
 
@@ -643,13 +656,15 @@ def _is_explicit_execution(text: str) -> bool:
         True if the text contains explicit execution language.
     """
     lowered = text.lower()
-    # Must contain an explicit execution cue
-    has_execution_cue = any(cue in lowered for cue in _EXECUTION_CUES)
+    # Must contain an explicit execution cue (word-boundary match)
+    has_execution_cue = any(
+        re.search(rf"\b{re.escape(cue)}\b", lowered) for cue in _EXECUTION_CUES
+    )
     if not has_execution_cue:
         return False
     # Must NOT be negated (e.g. "don't execute")
     for cue in _EXECUTION_CUES:
-        if cue in lowered and _is_negated(lowered, cue):
+        if re.search(rf"\b{re.escape(cue)}\b", lowered) and _is_negated(lowered, cue):
             return False
     return True
 
