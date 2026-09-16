@@ -21,6 +21,7 @@ from atlas.conversation.investigation import (
     InvestigationProposal,
     InvestigationProposalConverter,
     InvestigationProposalGenerator,
+    InvestigationReport,
     InvestigationService,
 )
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
@@ -277,6 +278,12 @@ class ConversationService:
         # approval handler can resolve the exact objects bound by fingerprint.
         self._active_evolution_proposals: dict[str, Any] = {}
         self._active_approval_requests: dict[str, Any] = {}
+
+        # C3.3 — Retained evidence for the most recent read-only investigation,
+        # so the report path can synthesize it deterministically without
+        # re-gathering evidence. Conversation-scoped and never persisted;
+        # mirrors the existing transient registries above.
+        self._last_investigation_report: InvestigationReport | None = None
 
         # Create the initial conversation.
         self._conversation = self._history.create()
@@ -1112,6 +1119,10 @@ class ConversationService:
         # failures") rather than the development-oriented intent extraction.
         target = original_text or spec.goal or spec.intent or "unspecified issue"
         report = self._investigation_service.investigate(target)
+
+        # C3.3 — Retain the produced report (evidence only) so a later report
+        # request can synthesize it deterministically without re-gathering.
+        self._last_investigation_report = report
 
         # Record the investigation in conversation state
         if self._state_manager is not None:
@@ -2646,6 +2657,42 @@ class ConversationService:
             },
         )
 
+    def _handle_investigation_report(
+        self,
+        investigation_report: InvestigationReport,
+    ) -> Message:
+        """Render a deterministic synthesis of a read-only investigation.
+
+        C3.3 — consumes ONLY the retained :class:`InvestigationReport`
+        evidence. It never gathers new evidence, mutates state, calls a model,
+        authorizes, or executes anything. Strictly read-only.
+        """
+        from atlas.conversation.investigation_synthesis import (
+            InvestigationSynthesizer,
+        )
+
+        synthesis = InvestigationSynthesizer().synthesize(investigation_report)
+        return Message(
+            role="assistant",
+            content=synthesis.to_markdown(),
+            metadata={
+                "report": {
+                    "status": "investigation",
+                    "kind": "investigation",
+                    "target": synthesis.target,
+                    "finding_count": synthesis.finding_count,
+                    "component_count": synthesis.component_count,
+                    "recommended_focus": synthesis.recommended_focus,
+                    "insufficient_evidence": synthesis.insufficient_evidence,
+                    "evidence_basis": list(synthesis.evidence_basis),
+                    "ranked_components": [
+                        c.to_dict() for c in synthesis.ranked_components
+                    ],
+                    "modification_status": synthesis.modification_status,
+                },
+            },
+        )
+
     def _maybe_handle_autonomy_request(
         self,
         spec: TaskSpec,
@@ -2697,6 +2744,14 @@ class ConversationService:
 
         state = self._state_manager.state if self._state_manager else None
         if state is None or not state.evolution_proposal_id:
+            # C3.3 — Investigation-level reporting. When no development
+            # lifecycle exists, report on the most recent read-only
+            # investigation synthesis instead of refusing. Deterministic and
+            # read-only; the development-lifecycle path below is unchanged.
+            if self._last_investigation_report is not None:
+                return self._handle_investigation_report(
+                    self._last_investigation_report
+                )
             return Message(
                 role="assistant",
                 content=(
