@@ -51,12 +51,13 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
-| Current HEAD | `ce12fb8` (branch `phase5-memory-evolution`) |
-| In-development work | **Foundation Strengthening** — post-release architectural hardening (Batch 1: kernel composition-root decomposition; Batch 2: scaffold/legacy cleanup), the **Stage A1→H guided self-improvement thread** (see §27), the completed **Track C post-core follow-ups** — Persistent Learning, deterministic semantic recall, forgetting-policy operationalization (see §28–§29) — and the completed **Conversational Development Intake (B1+B2+B3)** milestone (see §30) |
+| Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) reached the established evidence boundary (see §31) |
+| Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
-| Era | **Capability Track Era** |
+| Verified test baseline | **5,945 passed, 0 failed, 0 errors, 2 skipped** (pytest exit 0) |
+| Era | **Post-Roadmap Operational Era** (supersedes the Capability Track Era) |
 
 **CURRENT IMPLEMENTATION:** Atlas v0.20.0 is released at tag `v0.20.0`
 (`b92c5d9`). Foundation Strengthening Batch 1 (kernel composition-root
@@ -1111,6 +1112,98 @@ RuntimeCoordinator 15-stage order and all locked packages remain untouched.
   currently defined; any future work requires an explicitly written,
   owner-approved scope before implementation begins.
 
+---
+
+## 31. Phase C — Evidence-Driven Evolution (C0 → C9) — COMPLETE
+
+The frozen Phase-C roadmap reached its established evidence boundary. Each
+milestone was gated by a read-only evidence investigation (readiness/scope →
+contract → implementation → real-world validation → closure); only
+capabilities with a validated real-world Category-A gap were built. The
+evidence trail is the `C*_*.md` reports at the repository root; the governing
+roadmap is `docs/ROADMAP.md` ("Current Project State — Phase C
+Evidence-Driven Evolution").
+
+### Historical Core (COMPLETE)
+
+Phase A — Trustworthy Baseline · P14 — Regression / Contract Closure ·
+P15 — Final System Verification · P16 — First Real Atlas Mission ·
+P16.5 — Controlled Development Loop · P17 — Real Development System ·
+P18 — Controlled Autonomy.
+
+### Phase C status
+
+| Milestone | Scope | Status |
+|---|---|---|
+| **C0** | Core / Roadmap Freeze | COMPLETE |
+| **C1** | Final Readiness Verification | COMPLETE |
+| **C2** | Conversational Development Pilot | COMPLETE |
+| **C3** | Real-World Capability Evidence | COMPLETE |
+| **C4** | Evidence-Driven Capability Evolution | COMPLETE |
+| **C5** | Atlas Self-Knowledge / Capability Model | COMPLETE |
+| **C6** | Knowledge & Learning Maturity | COMPLETE |
+| **C7** | Human Understanding | COMPLETE |
+| **C8** | Controlled Autonomy Expansion | CLOSED — NO EVIDENCE-BACKED GAP |
+| **C9** | Continuous Atlas Evolution | READINESS COMPLETE — NO EVIDENCE-BACKED GAP |
+
+### Deliveries
+
+- **C1.1** — autonomy-boundary and path hardening; conversation autonomy
+  routed through the kernel boundary.
+- **C2** — conversational development recovery cycle (fail-closed, truthful
+  reporting, sandbox isolation, governed recovery).
+- **C3.3** — deterministic investigation synthesis/reporting (GAP-C31-01).
+- **C4.2** — deterministic repository impact analysis and conversational
+  exposure (`atlas/conversation/repository_impact.py`), reusing
+  `RepositoryMap.dependencies_of/dependents_of/impact_set`; full
+  investigation → proposal → approval → implementation → verification →
+  real-world-validation lifecycle.
+- **C5.1** — canonical capability model
+  (`atlas/self_knowledge/capability_model.py`): a deterministic, read-only
+  projection over the existing registries (classification, attribution,
+  health, evidence-based limitations, stable ordering), exposed via a kernel
+  accessor and the read-only `atlas capability` CLI. No competing registry.
+- **C6.1** — validated knowledge retrieval
+  (`atlas/research/validated_retrieval.py`): SUPPORTED-only persisted
+  research claims (identity, statement, validation status, confidences,
+  citations); the legacy `KnowledgeManager`/`KnowledgeBase`/`KnowledgeStore`
+  path is behaviorally untouched.
+- **C7** — bounded reference/context resolution (GAP-C31-02): word-boundary
+  resolver matching + bounded detection, exposed via the existing
+  `TaskSpec.context`; AMBIGUOUS → clarification, UNRESOLVED/no-reference
+  unchanged.
+
+### Explicit boundary records
+
+- **C5.2 — NOT AUTHORIZED.** Never scoped, approved, or implemented. It is
+  not incomplete implementation.
+- **C8 — CLOSED — NO EVIDENCE-BACKED GAP.** The controlled-autonomy pilot
+  found zero Category-A gaps; the governance chain (intake → approval →
+  OWNER execution → sandbox → verification → learning) was verified
+  end-to-end with 0 AI calls.
+- **C9 — READINESS COMPLETE — NO EVIDENCE-BACKED GAP.** The full evolution
+  loop (propose → approve → sandbox → learn) is already operating and
+  governed; no additional milestone was authorized.
+- **No C10, C9.1, or C5.2 implementation exists or is planned.**
+
+### Current state — POST-ROADMAP OPERATIONAL STATE
+
+The roadmap is complete; Atlas is not "finished forever". Operation follows
+the evidence-driven governing loop:
+
+```
+USE → OBSERVE → EVIDENCE → INVESTIGATE → PROPOSE → APPROVE → DEVELOP →
+VERIFY → LEARN → USE
+```
+
+New development originates from validated real-world capability gaps. No new
+roadmap milestone may be created without owner-approved, evidence-backed
+scope. All architectural invariants (§0 authority model, §16 invariants, §26
+model-independence directive) remain in force: deterministic-first operation,
+model independence, human approval, governed execution, authorization
+boundaries, sandbox verification, fail-closed behavior, evidence-driven
+evolution, and controlled self-evolution.
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
@@ -1123,5 +1216,8 @@ semantic recall 57f0063, forgetting-policy operationalization be2bb84; schema
 v11; no implementation NEXT currently defined). · Conversational Development
 Intake (B1+B2+B3) reconciled: 2026-08-29 (committed ce12fb8; schema v11;
 B4 remains undefined/unapproved; no implementation NEXT currently defined).
+Phase C evidence-driven evolution reconciled: 2026-09-16 (C0 → C9 reached the
+established evidence boundary; §31; full suite 5,945 passed, 0 failed,
+0 errors, 2 skipped).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

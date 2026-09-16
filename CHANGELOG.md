@@ -8,7 +8,46 @@ and this project adheres to a milestone- and track-based release model
 
 ---
 
-## [Unreleased] — Foundation Strengthening
+## [Unreleased] — Phase C Evidence-Driven Evolution
+
+### Phase C — Evidence-Driven Evolution (C0 → C9)
+
+The frozen Phase-C roadmap reached its established evidence boundary. Each
+milestone was gated by read-only evidence investigation (readiness/scope →
+contract → implementation → real-world validation → closure); only
+capabilities with a validated real-world Category-A gap were built.
+
+- **C0–C3 completion** — Core/roadmap freeze, final readiness verification,
+  conversational development pilot, and real-world capability evidence.
+- **C4 — Evidence-driven capability evolution** — deterministic repository
+  impact analysis and conversational exposure, completing the full
+  investigation → proposal → approval → implementation → verification →
+  real-world-validation lifecycle.
+- **C5.1 — Canonical capability model** — deterministic, read-only projection
+  over the existing registries (classification, attribution, health,
+  evidence-based limitations, stable ordering), exposed via a kernel
+  accessor and read-only CLI. No competing registry was created.
+- **C6 — Knowledge & learning maturity** — validated knowledge retrieval of
+  SUPPORTED persisted research claims (identity, statement, validation
+  status, confidences, citations); the legacy knowledge path is untouched.
+- **C7 — Bounded human/reference understanding** — word-boundary reference
+  resolution with bounded detection, exposed via the existing
+  `TaskSpec.context`; AMBIGUOUS routes to clarification, UNRESOLVED and
+  no-reference inputs behave exactly as before.
+- **C8 — CLOSED, no evidence-backed gap.** The controlled-autonomy pilot
+  found zero Category-A gaps; governance was verified end-to-end.
+- **C9 — READINESS COMPLETE, no evidence-backed gap.** The full evolution
+  loop (propose → approve → sandbox → learn) is already operating and
+  governed; no additional milestone was authorized.
+- **C5.2 was NOT AUTHORIZED** — never scoped, approved, or implemented.
+- **Verification baseline:** full suite 5,945 tests, 0 failures, 0 errors,
+  2 skipped (pytest exit 0).
+- Details: `docs/ROADMAP.md` ("Current Project State — Phase C
+  Evidence-Driven Evolution") and the `C*_*.md` evidence reports.
+
+Everything below this Phase-C entry is the preserved historical record.
+
+## Historical Record — Foundation Strengthening
 
 ### Guided Self-Improvement Evolution Thread (Stage A1→H)
 

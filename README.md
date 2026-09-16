@@ -19,7 +19,9 @@ human ownership and oversight.
 - **July 2026** — Core foundation and workspace architecture
 - **August 2026** — Intelligence, reasoning, self-development, and conversational architecture
 - **September 2026** — Memory evolution, capability productionization, and conversational state
-- **Next** — Reference resolution → completing the conversational state layer
+- **September 2026** — Phase C evidence-driven evolution (C0 → C9) reached the
+  established evidence boundary; reference resolution completed the
+  conversational state layer (C7)
 
 ---
 
@@ -42,11 +44,19 @@ remains locked and is not enabled; code changes may be produced as reviewable
 artifacts/patches rather than autonomously applied. **Autonomous code mutation
 remains disabled.**
 
-**Latest verified test run:** full suite **0 failed** (pytest exit 0) —
-4,291 tests collected, covering all tracks, the post-core improvements, and
-the post-core memory work (Persistent Learning, deterministic semantic
-recall, forgetting-policy operationalization, test-coverage audit).
-*Current test inventory (not a result):* 241 test modules.
+**Phase C — evidence-driven evolution (C0 → C9):** the frozen roadmap reached
+its established evidence boundary. C0–C7 are COMPLETE (notable deliveries:
+deterministic investigation synthesis; repository impact analysis with
+conversational exposure; the canonical capability model; validated knowledge
+retrieval; bounded reference/context resolution). **C8 is CLOSED — no
+evidence-backed gap. C9 readiness is COMPLETE — no evidence-backed gap.
+C5.2 was NOT AUTHORIZED** (never scoped or implemented). Future development
+is evidence-driven: new work must originate from validated real-world
+capability gaps, not speculative roadmap expansion. No C10 exists or is
+planned.
+
+**Latest verified test run:** full suite **5,945 passed, 0 failed, 0 errors,
+2 skipped** (pytest exit 0).
 
 **Current schema version:** `11`.
 

@@ -614,4 +614,92 @@ semantic recall 57f0063, forgetting-policy operationalization be2bb84; schema
 v11; no implementation NEXT currently defined). Conversational Development
 Intake (B1+B2+B3) reconciled: 2026-08-29 (committed ce12fb8; schema v11;
 B4 remains undefined/unapproved; no implementation NEXT currently defined).
-Project Atlas — docs/ROADMAP.md.*
+Project Atlas — docs/ROADMAP.md.
+Phase C evidence-driven evolution reconciled: 2026-09-16 (C0 → C9 reached the
+established evidence boundary; local commits 1f02f25 through 32ce993;
+full suite 5,945 passed, 0 failed, 0 errors, 2 skipped).*
+
+---
+
+## Current Project State — Phase C Evidence-Driven Evolution
+
+> Everything above this section is the historical record, preserved exactly
+> as written. It does not describe Phase C, and Phase C was not retroactively
+> part of it. This section is the current authoritative state.
+
+### Historical Core (COMPLETE)
+
+Phase A — Trustworthy Baseline · P14 — Regression / Contract Closure ·
+P15 — Final System Verification · P16 — First Real Atlas Mission ·
+P16.5 — Controlled Development Loop · P17 — Real Development System ·
+P18 — Controlled Autonomy.
+
+### Phase C — Evidence-Driven Evolution
+
+Each milestone below was gated by a read-only evidence investigation:
+readiness/scope → contract → implementation → real-world validation → closure.
+Only capabilities with a validated real-world Category-A gap were built.
+
+| Milestone | Scope | Status |
+|---|---|---|
+| **C0** | Core / Roadmap Freeze | COMPLETE |
+| **C1** | Final Readiness Verification | COMPLETE |
+| **C2** | Conversational Development Pilot | COMPLETE |
+| **C3** | Real-World Capability Evidence | COMPLETE |
+| **C4** | Evidence-Driven Capability Evolution | COMPLETE |
+| **C5** | Atlas Self-Knowledge / Capability Model | COMPLETE |
+| **C6** | Knowledge & Learning Maturity | COMPLETE |
+| **C7** | Human Understanding | COMPLETE |
+| **C8** | Controlled Autonomy Expansion | CLOSED — NO EVIDENCE-BACKED GAP |
+| **C9** | Continuous Atlas Evolution | READINESS COMPLETE — NO EVIDENCE-BACKED GAP |
+
+Notable deliveries (all deterministic, read-only, fail-closed, model-independent):
+
+- **C3.3** — deterministic investigation synthesis/reporting (GAP-C31-01).
+- **C4.2** — deterministic repository impact analysis and conversational
+  exposure (`atlas/conversation/repository_impact.py`), full
+  investigation → proposal → approval → implementation → verification →
+  real-world-validation lifecycle.
+- **C5.1** — canonical capability model: a read-only projection over existing
+  registries (`atlas/self_knowledge/capability_model.py`), exposed via the
+  kernel accessor and `atlas capability` CLI. No competing registry created.
+- **C6.1** — validated knowledge retrieval (`atlas/research/validated_retrieval.py`):
+  SUPPORTED-only persisted research claims with identity, statement,
+  validation status, confidences, and citations; the legacy
+  `KnowledgeManager`/`KnowledgeBase`/`KnowledgeStore` path is untouched.
+- **C7** — bounded reference/context resolution (GAP-C31-02): word-boundary
+  resolver matching + bounded detection, exposed through the existing
+  `TaskSpec.context`; AMBIGUOUS → clarification, UNRESOLVED/no-reference
+  unchanged.
+
+### Explicit boundary records
+
+- **C5.2 — NOT AUTHORIZED.** It was never scoped, approved, or implemented.
+  It must not be described as incomplete implementation.
+- **C8 — CLOSED — NO EVIDENCE-BACKED GAP.** The controlled pilot found zero
+  Category-A autonomy gaps; governance (intake → approval → OWNER execution
+  → sandbox → verification) was verified end-to-end with 0 AI calls.
+- **C9 — READINESS COMPLETE — NO EVIDENCE-BACKED GAP.** Readiness found the
+  full evolution loop (propose → approve → sandbox → learn) already operating
+  and governed; no additional milestone was authorized.
+- C8 and C9 do **not** authorize speculative milestones. No C10, C9.1, or
+  C5.2 implementation exists or is planned. Future capability evolution must
+  originate from a *validated real-world capability gap*, not roadmap
+  expansion.
+
+### Post-Roadmap Operational State
+
+The roadmap is complete; Atlas is not "finished forever". Day-to-day
+operation now follows the evidence-driven governing loop:
+
+```
+USE → OBSERVE → EVIDENCE → INVESTIGATE → PROPOSE → APPROVE → DEVELOP →
+VERIFY → LEARN → USE
+```
+
+New development originates from validated real-world capability gaps. No new
+roadmap milestone may be created without owner-approved, evidence-backed
+scope. The architectural invariants in `docs/ATLAS_STATE.md` §26 remain in
+force: deterministic-first operation, model independence, human approval,
+governed execution, authorization boundaries, sandbox verification,
+fail-closed behavior, and controlled self-evolution.

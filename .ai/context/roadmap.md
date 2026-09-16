@@ -1,31 +1,22 @@
-# Atlas Development Roadmap
+# Atlas Roadmap — Current Operational State
 
-Milestone 1
-Core Foundation
+Historical Core (COMPLETE):
+Phase A → P14 → P15 → P16 → P16.5 → P17 → P18
 
-Milestone 2
-Intelligence
+Current Phase:
+Phase C — Evidence-Driven Evolution
 
-Milestone 3
-Memory
+C0 → C1 → C2 → C3 → C4 → C5 → C6 → C7 → C8 → C9
 
-Milestone 4
-Knowledge
+State:
+C0–C7 COMPLETE. C8 CLOSED — no evidence-backed gap.
+C9 readiness complete — no evidence-backed gap.
+C5.2 was NOT AUTHORIZED.
 
-Milestone 5
-Workspace
+No C10 exists or is planned. Future development must originate from a
+validated real-world capability gap, not speculative roadmap expansion.
+No new roadmap milestone may be created without owner-approved,
+evidence-backed scope.
 
-Milestone 6
-Agents
-
-Milestone 7
-Plugins
-
-Milestone 8
-Automation
-
-Milestone 9
-Atlas Assistant
-
-Milestone 10
-Atlas v1.0
+(Historical note: an older Milestone 1–10 list previously lived in this file.
+That model is obsolete and superseded by the phase/track model above.)
