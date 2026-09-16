@@ -27,6 +27,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+from atlas.conversation.repository_impact import (
+    looks_like_repository_impact_request,
+)
+
 # ---------------------------------------------------------------------------
 # Bounds (all derived fields are hard-capped so oversized input cannot
 # produce oversized state).
@@ -67,6 +71,7 @@ class TaskType(Enum):
     RECOVERY_REQUEST = "recovery_request"
     VERIFICATION_REQUEST = "verification_request"
     REPORT_REQUEST = "report_request"
+    REPOSITORY_IMPACT_REQUEST = "repository_impact_request"
     AUTONOMY_REQUEST = "autonomy_request"
     L2_AUTONOMY_REQUEST = "l2_autonomy_request"
     L3_AUTONOMY_REQUEST = "l3_autonomy_request"
@@ -970,6 +975,14 @@ class TaskIntake:
         )
         if investigation:
             return TaskType.INVESTIGATION_REQUEST
+
+        # C4.2 — bounded repository impact-analysis exposure. Recognized only
+        # when an explicit impact cue AND a deterministically resolvable
+        # repository target token are both present; otherwise this falls
+        # through to the existing question/fallback behavior. No general
+        # natural-language understanding and no reference resolution.
+        if looks_like_repository_impact_request(normalized):
+            return TaskType.REPOSITORY_IMPACT_REQUEST
 
         # Development cues are only treated as development when NOT negated.
         # "don't modify" must not become a development request.

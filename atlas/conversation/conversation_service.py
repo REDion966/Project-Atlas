@@ -438,6 +438,15 @@ class ConversationService:
             if report_response is not None:
                 self._conversation.add_message(report_response)
                 return report_response
+        # C4.2 — bounded repository impact-analysis exposure. Read-only and
+        # deterministic; reuses the existing RepositoryMap capability.
+        if spec is not None and spec.task_type is TaskType.REPOSITORY_IMPACT_REQUEST:
+            impact_response = self._maybe_handle_repository_impact_request(
+                spec, original_text=text
+            )
+            if impact_response is not None:
+                self._conversation.add_message(impact_response)
+                return impact_response
         # Autonomy semantics — explicit request to proceed autonomously
         # with an already-approved development plan. L1 controlled autonomy.
         if spec is not None and spec.task_type is TaskType.AUTONOMY_REQUEST:
@@ -1183,6 +1192,46 @@ class ConversationService:
             role="assistant",
             content="\n".join(content_parts),
             metadata=metadata,
+        )
+
+    def _maybe_handle_repository_impact_request(
+        self,
+        spec: TaskSpec,
+        original_text: str | None = None,
+    ) -> Message | None:
+        """Handle a bounded REPOSITORY_IMPACT_REQUEST (C4.2).
+
+        Read-only, deterministic exposure of the EXISTING RepositoryMap
+        dependency/impact capability (``dependencies_of``, ``dependents_of``,
+        ``impact_set``). It never mutates the repository, never calls a model,
+        and never authorizes or executes anything. Unknown or ambiguous
+        targets fail closed; no impact information is invented.
+        """
+        from atlas.conversation.repository_impact import (
+            RepositoryImpactAnalyzer,
+        )
+
+        query = original_text or spec.goal or spec.intent or ""
+        result = RepositoryImpactAnalyzer().analyze(query)
+
+        if self._state_manager is not None:
+            self._state_manager.update(latest_result=result.message)
+
+        return Message(
+            role="assistant",
+            content=result.to_markdown(),
+            metadata={
+                "repository_impact": {
+                    "status": result.status.value,
+                    "resolved_module": result.resolved_module,
+                    "candidates": list(result.candidates),
+                    "dependents": list(result.dependents),
+                    "dependencies": list(result.dependencies),
+                    "impact": list(result.impact),
+                    "affected_files": list(result.affected_files),
+                    "modification_status": result.modification_status,
+                },
+            },
         )
 
     def _register_proposal(self, proposal: InvestigationProposal) -> None:
