@@ -3541,6 +3541,21 @@ class Atlas:
         """Return the ComponentRegistry for structural self-observation."""
         return self._component_registry
 
+    def capability_model(self):
+        """Return the canonical deterministic capability model (C5.1).
+
+        READ-ONLY projection over the existing authoritative registries
+        (ComponentRegistry, CapabilityRegistry, ToolRegistry). It never mutates
+        registries, persists nothing, performs no network I/O, and does not
+        call an external AI model.
+        """
+        from atlas.self_knowledge.capability_model import build_capability_model
+
+        return build_capability_model(
+            component_registry=self._component_registry,
+            capability_registry=self._capability_registry,
+            tool_registry=self._tool_registry,
+        )
     def _register_components(self) -> None:
         """Register all core components in the ComponentRegistry.
 

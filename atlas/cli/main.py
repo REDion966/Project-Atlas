@@ -347,6 +347,19 @@ def main() -> None:
     )
 
     # -------------------------
+    # Canonical Capability Model (C5.1, read-only)
+    # -------------------------
+
+    capabilities_parser = subparsers.add_parser(
+        "capabilities",
+        help="Canonical capability model (read-only)",
+    )
+    capabilities_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of markdown",
+    )
+    # -------------------------
     # Toolchain Commands (Phase 18.10)
     # -------------------------
 
@@ -654,6 +667,13 @@ def main() -> None:
         _run_promotion(args)
         return
 
+    # -------------------------
+    # Canonical Capability Model (C5.1, read-only)
+    # -------------------------
+
+    if args.command == "capabilities":
+        _run_capabilities(args)
+        return
     # -------------------------
     # Resource
     # -------------------------
@@ -996,6 +1016,26 @@ def _run_proposals(args: argparse.Namespace) -> None:
         atlas.shutdown()
 
 
+def _run_capabilities(args: argparse.Namespace) -> None:
+    """Render the canonical capability model (C5.1, read-only).
+
+    Presentation-only: the model is produced by the kernel accessor. This
+    surface never mutates state, persists nothing, and requires no external
+    AI model.
+    """
+    from atlas.cli.capability_commands import cmd_capabilities
+    from atlas.kernel.atlas import Atlas
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
+        return
+    try:
+        print(cmd_capabilities(atlas, args))
+    finally:
+        atlas.shutdown()
 def _run_research(args: argparse.Namespace) -> None:
     """Dispatch ``atlas research query|verify|summarize``.
 
