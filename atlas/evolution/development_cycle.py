@@ -33,6 +33,8 @@ ARCHITECTURAL BOUNDARY:
 from __future__ import annotations
 
 import hashlib
+import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -45,6 +47,10 @@ from atlas.evolution.models import (
     ImprovementPriority,
     ProposalStatus,
 )
+
+# Upper bound for a single relative change path. Kept identical to the E2
+# ``CodeChangeSet.MAX_PATH_LEN`` bound so path safety is not weakened.
+_MAX_CHANGE_PATH_CHARS: int = 256
 
 
 def utc_now() -> datetime:
@@ -61,6 +67,49 @@ def _bounded_text(exc: Exception, limit: int = 200) -> str:
     """Return a bounded, secret-free error message for a failure."""
     text = str(exc).strip() or type(exc).__name__
     return text[:limit]
+
+
+def validate_change_path(path: str) -> None:
+    """Validate a relative change path against sandbox-confinement rules.
+
+    Preserves the safety semantics of the E2 ``CodeChangeSet.validate_path``
+    check (non-empty, bounded length, no absolute path, no Windows drive
+    prefix, no parent/current/empty segments, and no normalized escape) so the
+    conversation/investigation layer can validate authored workload paths
+    without importing the ``atlas.evolution.autonomy`` sandbox module.
+
+    Args:
+        path: The relative, POSIX-style path to validate.
+
+    Raises:
+        ValueError: If the path violates any confinement rule. (The E2 check
+            raises ``SandboxPathError``, a ``ValueError`` subclass, so callers
+            catching ``ValueError`` observe identical behavior.)
+    """
+    if not isinstance(path, str) or not path:
+        raise ValueError("Path must be a non-empty string")
+    if len(path) > _MAX_CHANGE_PATH_CHARS:
+        raise ValueError(
+            f"Path exceeds {_MAX_CHANGE_PATH_CHARS} characters"
+        )
+    # Reject absolute forms first.
+    if path.startswith("/") or path.startswith("\\"):
+        raise ValueError("Absolute paths are forbidden")
+    if re.match(r"^[A-Za-z]:", path):
+        raise ValueError("Windows drive prefixes are forbidden")
+    # Normalize separators; reject any '..' or '.' segment anywhere.
+    parts = path.replace("\\", "/").split("/")
+    for part in parts:
+        if part == "..":
+            raise ValueError("Parent traversal ('..') is forbidden")
+        if part == ".":
+            raise ValueError("Current-directory ('.') segments are forbidden")
+        if part == "":
+            raise ValueError("Empty path segments are forbidden")
+    # Also reject when a resolved pure-POSIX path escapes.
+    normalized = os.path.normpath(path.replace("\\", "/"))
+    if normalized.startswith("..") or os.path.isabs(normalized):
+        raise ValueError("Path escapes the sandbox root")
 
 
 # ---------------------------------------------------------------------------

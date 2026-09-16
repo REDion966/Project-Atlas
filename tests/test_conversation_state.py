@@ -81,8 +81,11 @@ class TestSerialization:
         assert d["current_subject"] == "test"
         assert d["current_task"] is None
         assert d["turn_id"] == "fixed-id"
+        # JSON-safe contract: every value must be a JSON-serializable type.
+        # ConversationState legitimately carries integer counters (autonomy
+        # tracking) and a list (chained_workflows) in addition to str/None.
         for v in d.values():
-            assert isinstance(v, (str, type(None)))
+            assert isinstance(v, (str, int, float, bool, list, dict, type(None)))
 
 
 class TestManagerUpdate:

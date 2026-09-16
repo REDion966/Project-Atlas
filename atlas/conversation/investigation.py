@@ -876,14 +876,16 @@ class InvestigationProposalConverter:
         return supplied
 
     def _bounded_payload(self, supplied: Any) -> tuple[tuple, tuple]:
-        """Bound and path-check an authored payload using the EXISTING F9/E2
-        validation machinery (``DevelopmentCyclePolicy`` bounds plus
-        ``CodeChangeSet`` path validation), mirroring
+        """Bound and path-check an authored payload using the EXISTING F9
+        validation machinery (``DevelopmentCyclePolicy`` bounds plus the
+        ``validate_change_path`` confinement check), mirroring
         ``DevelopmentCycleController._bound_payload``. Never a weaker
         duplicate validator.
         """
-        from atlas.evolution.autonomy.code_sandbox import CodeChangeSet
-        from atlas.evolution.development_cycle import DevelopmentCyclePolicy
+        from atlas.evolution.development_cycle import (
+            DevelopmentCyclePolicy,
+            validate_change_path,
+        )
 
         policy = DevelopmentCyclePolicy()
 
@@ -897,7 +899,7 @@ class InvestigationProposalConverter:
                 raise ValueError("change path exceeds bound")
             if len(content) > policy.max_content_chars:
                 raise ValueError("change content exceeds bound")
-            CodeChangeSet.validate_path(path)
+            validate_change_path(path)
             changes.append((path, content))
 
         tests: list[tuple[str, str]] = []
@@ -910,7 +912,7 @@ class InvestigationProposalConverter:
                 raise ValueError("test path exceeds bound")
             if len(content) > policy.max_content_chars:
                 raise ValueError("test content exceeds bound")
-            CodeChangeSet.validate_path(path)
+            validate_change_path(path)
             tests.append((path, content))
 
         if not changes:
