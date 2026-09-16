@@ -359,6 +359,27 @@ def main() -> None:
         action="store_true",
         help="Emit machine-readable JSON instead of markdown",
     )
+
+    # -------------------------
+    # Validated Knowledge Retrieval (C6.1, read-only)
+    # -------------------------
+
+    validated_knowledge_parser = subparsers.add_parser(
+        "validated-knowledge",
+        help="Validated (SUPPORTED) research knowledge retrieval (read-only)",
+    )
+    validated_knowledge_parser.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Deterministic query string",
+    )
+    validated_knowledge_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of markdown",
+    )
+
     # -------------------------
     # Toolchain Commands (Phase 18.10)
     # -------------------------
@@ -674,6 +695,15 @@ def main() -> None:
     if args.command == "capabilities":
         _run_capabilities(args)
         return
+
+    # -------------------------
+    # Validated Knowledge Retrieval (C6.1, read-only)
+    # -------------------------
+
+    if args.command == "validated-knowledge":
+        _run_validated_knowledge(args)
+        return
+
     # -------------------------
     # Resource
     # -------------------------
@@ -1036,6 +1066,30 @@ def _run_capabilities(args: argparse.Namespace) -> None:
         print(cmd_capabilities(atlas, args))
     finally:
         atlas.shutdown()
+
+
+def _run_validated_knowledge(args: argparse.Namespace) -> None:
+    """Render validated knowledge retrieval (C6.1, read-only).
+
+    Presentation-only: the result is produced by the kernel accessor. This
+    surface never mutates state, persists nothing, and requires no external AI
+    model. Unavailable storage fails closed inside the accessor.
+    """
+    from atlas.cli.validated_knowledge_commands import cmd_validated_knowledge
+    from atlas.kernel.atlas import Atlas
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
+        return
+    try:
+        print(cmd_validated_knowledge(atlas, args))
+    finally:
+        atlas.shutdown()
+
+
 def _run_research(args: argparse.Namespace) -> None:
     """Dispatch ``atlas research query|verify|summarize``.
 

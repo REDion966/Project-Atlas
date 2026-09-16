@@ -3556,6 +3556,23 @@ class Atlas:
             capability_registry=self._capability_registry,
             tool_registry=self._tool_registry,
         )
+
+    def validated_knowledge(self, query: str):
+        """Return validated (SUPPORTED) persisted research knowledge (C6.1).
+
+        READ-ONLY, deterministic retrieval over the kernel-owned research
+        storage (``research_claims``/``research_verifications``/
+        ``research_citations``). It never mutates, persists nothing, performs
+        no network I/O, and does not call an external model. Unavailable or
+        errored storage fails closed and never falls back to unvalidated
+        in-memory knowledge.
+        """
+        from atlas.research.validated_retrieval import (
+            ValidatedKnowledgeRetriever,
+        )
+
+        return ValidatedKnowledgeRetriever(self._research_storage).retrieve(query)
+
     def _register_components(self) -> None:
         """Register all core components in the ComponentRegistry.
 
