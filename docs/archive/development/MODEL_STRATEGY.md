@@ -1,23 +1,12 @@
 # Atlas Model Strategy
 
 ---
-> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+> **ARCHIVED — HISTORICAL DOCUMENT**
 >
-> This document is preserved for detailed context, history, and architectural reference.
->
-> Canonical AI startup files:
->
-> 1. docs/ATLAS_CORE.md
-> 2. docs/ATLAS_STATE.md
->
-> Authority order:
->
-> - Source code = actual runtime behavior truth
-> - ATLAS_CORE.md = permanent architectural principles and rules
-> - ATLAS_STATE.md = current operational state and resume point
-> - Historical documents = supplementary context only
->
-> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+> This document is retained for historical/reference purposes only.
+> It is not a current source of architectural or project authority.
+> For the current authoritative Atlas state and architecture, see
+> `docs/ATLAS_STATE.md`.
 ---
 
 **AI provider and workflow strategy for Project Atlas.**
