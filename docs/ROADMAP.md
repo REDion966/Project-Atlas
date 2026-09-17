@@ -416,7 +416,7 @@ Non-owner boundaries enforced:
 
 **Closure record:**
 
-- Architectural analysis: `architecture_analysis.md` (M6.1)
+- Architectural analysis: `docs/architecture_analysis.md` (M6.1)
 - Architectural tests: `tests/test_execution_ownership_m6.py` (M6.4)
 - Independent verification: M6.5 (test quality + architecture audit)
 - Independent architectural audit: M6.6 (reconstructed architecture from production code)
@@ -629,7 +629,8 @@ B4 remains undefined/unapproved; no implementation NEXT currently defined).
 Project Atlas — docs/ROADMAP.md.
 Phase C evidence-driven evolution reconciled: 2026-09-16 (C0 → C9 reached the
 established evidence boundary; local commits 1f02f25 through 32ce993;
-full suite 5,945 passed, 0 failed, 0 errors, 2 skipped).*
+full suite 5,945 test items executed: 5,876 test cases passed (plus 67 subtests
+passed), 0 failed, 0 errors, 2 skipped).*
 
 ---
 

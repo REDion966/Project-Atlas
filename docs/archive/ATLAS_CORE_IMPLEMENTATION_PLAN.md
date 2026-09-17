@@ -1,5 +1,19 @@
 # ATLAS CORE IMPLEMENTATION PLAN
 
+---
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT — NOT CURRENT AUTHORITY
+>
+> This core implementation plan is preserved for historical context. It is
+> superseded — the core-building period has ended (Atlas Core is COMPLETE). It
+> is **not** a current authority and it does not define a read order or
+> document hierarchy.
+>
+> The single Project Atlas authority model is defined in `docs/ATLAS_STATE.md`
+> §0: current state is owned by `docs/ATLAS_STATE.md`; authorized future
+> direction by `docs/ROADMAP.md`; permanent architectural principles by
+> `docs/ATLAS_CORE.md`.
+---
+
 **TEMPORARY CORE IMPLEMENTATION PLAN**
 
 **Status:** ACTIVE implementation roadmap for the current core-building period ONLY.

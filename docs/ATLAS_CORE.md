@@ -629,10 +629,10 @@ For deeper context, read these preserved files after ATLAS_CORE.md and ATLAS_STA
 
 | Topic | File |
 |-------|------|
-| Full constitution | `docs/ATLAS_CONSTITUTION.md` |
+| Full constitution | `docs/archive/ATLAS_CONSTITUTION.md` |
 | Detailed architecture (historical) | `docs/archive/architecture/ARCHITECTURE_v1.md` |
 | Deep cognition architecture (historical) | `docs/archive/architecture/cognition.md` |
-| Full decision records | `docs/ARCHITECTURE_DECISIONS.md` |
+| Full decision records | `docs/archive/ARCHITECTURE_DECISIONS.md` |
 | Current state (historical) | `docs/archive/context/CURRENT_STATE.md` |
 | Roadmap | `docs/ROADMAP.md` |
 | Development history (historical) | `docs/archive/development/DEVELOPMENT_LOG.md` |

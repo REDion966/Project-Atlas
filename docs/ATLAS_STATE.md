@@ -1151,8 +1151,8 @@ The frozen Phase-C roadmap reached its established evidence boundary. Each
 milestone was gated by a read-only evidence investigation (readiness/scope →
 contract → implementation → real-world validation → closure); only
 capabilities with a validated real-world Category-A gap were built. The
-evidence trail is the `C*_*.md` reports at the repository root; the governing
-roadmap is `docs/ROADMAP.md` ("Current Project State — Phase C
+evidence trail is the `C*_*.md` reports in `docs/archive/phase-c/`; the
+governing roadmap is `docs/ROADMAP.md` ("Current Project State — Phase C
 Evidence-Driven Evolution").
 
 ### Historical Core (COMPLETE)

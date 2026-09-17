@@ -1,5 +1,15 @@
 # Atlas Engineering Guide
 
+---
+> ⚠️ HISTORICAL / ARCHIVED DOCUMENT — NOT CURRENT AUTHORITY
+>
+> Preserved for historical context only. This material is superseded and is
+> **not** current project authority; it defines no read order or document
+> hierarchy. Current state: `docs/ATLAS_STATE.md` · future direction:
+> `docs/ROADMAP.md` · permanent principles: `docs/ATLAS_CORE.md` · entry
+> point: `README.md`.
+---
+
 **Status:** Active  
 **Version:** 1.0  
 **Project:** Atlas  
