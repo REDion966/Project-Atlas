@@ -26,12 +26,16 @@ Before beginning any major phase, verify that the repository state and documenta
 
 | Check | Command | Expected |
 |-------|---------|----------|
-| Current Git branch | `git branch --show-current` | Matches the branch in `docs/ATLAS_STATE.md` §1 |
-| Current commit hash | `git rev-parse HEAD` | Recorded in `docs/ATLAS_STATE.md` §1 |
-| Current pytest total | `python -m pytest -q` | Matches the count in `docs/ATLAS_STATE.md` §6 |
+| Current Git branch | `git branch --show-current` | Git is authoritative for branch; compare against the expected working branch |
+| Current commit hash | `git rev-parse HEAD` | Git is authoritative for HEAD; compare against the expected commit |
+| Current pytest total | `python -m pytest -q` | Matches the verified test baseline in `docs/ATLAS_STATE.md` §15 |
 | Working tree status | `git status --short` | Clean (no uncommitted changes) before starting new work |
 | README project status | Check `README.md` heading | Project status reflects the current phase |
-| ATLAS_STATE.md status | Read §1 and §6 | Branch, HEAD, tag, and test count match repository reality |
+| ATLAS_STATE.md status | Read §2 and §15 | Version/tag and the verified test baseline match repository reality |
+
+**Canonical test interpretation** (from `docs/ATLAS_STATE.md` §15): 5,945 test
+items executed — 5,876 pytest test cases passed, 67 subtests passed, 2 skipped,
+0 failed, 0 errors.
 
 **If any of these disagree:**
 - Stop implementation work.

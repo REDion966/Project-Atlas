@@ -82,16 +82,20 @@ Atlas is designed for self-evolution over years, not months. Atlas is **NOT curr
 
 Atlas grows through capabilities that can be added, replaced, or upgraded without rebuilding the core.
 
-**Self-evolution stages:**
+**Self-evolution stages (conceptual maturity model):**
 
 ```
 Documented Self-Analysis  →  Guided Improvement  →  Bounded Optimisation  →  Autonomous Evolution
-        (current)              (near future)          (medium term)           (long term)
+     (foundation)              (governed today)        (future)                (long-term vision)
 ```
 
-**Current stage:** Documented Self-Analysis.
-
-**Future stages:** Guided Improvement, Bounded Optimisation, Autonomous Evolution.
+This ladder is a **conceptual maturity model**, not a literal statement of
+current implementation status. Atlas already operates a *governed*
+self-improvement loop today (observation → reflection → learning → proposal →
+human approval; see `docs/ATLAS_STATE.md` §22.4 and §31), so Guided Improvement
+is present in governed form. Bounded Optimisation and Autonomous Evolution
+remain future work, and autonomous (unsupervised) self-modification is not
+enabled.
 
 **Autonomous Evolution** is long-term. It requires future phases, explicit user approval, and adherence to Constitution constraints (especially Articles 5 and 18).
 
@@ -132,8 +136,8 @@ All future evolution components must strengthen Atlas's internal understanding r
 **Current position:**
 - **Understanding Layer** is established as an architectural concept in this document.
 - **Reasoning** and **Observation** are implemented.
-- **Learning infrastructure** exists through `LearningManager` and `KnowledgeFeedback`. This is feedback storage, not a closed-loop learning system.
-- **Phase 9.0 bridges observation and learning into a persistent self-model.** Outcome-level reflective learning and strategy adjustment remain future capabilities.
+- **Learning infrastructure** exists through `LearningManager` and `KnowledgeFeedback`, extended by the implemented governed feedback loop — `ReflectionEngine` → `LearningEngine` (strategy analysis + insight consolidation) → capability-keyed `StrategyPerformance` → later capability selection. It is deterministic, bounded, and human-gated (see `docs/ATLAS_STATE.md` §22.4 and §27).
+- **Phase 9.0 bridges observation and learning into a persistent self-model.** Outcome-level reflective learning and strategy adjustment are implemented in governed form; *autonomous* (unsupervised) self-modification or strategy change remains future work and is not enabled (CODE scope is constitutionally unreachable).
 
 ---
 
@@ -381,7 +385,7 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 
 ### 10.4 Kernel Service Keys
 
-`ServiceContainer` registers 9 public service keys:
+`ServiceContainer` registers the public shared service keys below (21 core keys; `Atlas.start()` defines the complete registration set):
 
 | Key | Instance | Status |
 |-----|----------|--------|

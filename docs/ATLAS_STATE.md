@@ -91,11 +91,12 @@ complete; the schema remains **v11** (see §28–§29).
 
 ---
 
-## 3. Current Implementation Milestone
+## 3. Final Numbered Core Milestone (Phase 22)
 
-The current milestone is **Phase 22 — Toolchain Execution & Learned-Skill
-Progression**, the FINAL numbered implementation phase for Atlas Core. Phase 22
-completed the recorded Track B NEXT items — CONDITIONAL execution, PARALLEL
+**Phase 22 — Toolchain Execution & Learned-Skill Progression** is the FINAL
+numbered core milestone for Atlas Core (the current project state is the
+post-roadmap Phase-C operational state — see §2 and §31). Phase 22 completed
+the recorded Track B NEXT items — CONDITIONAL execution, PARALLEL
 execution (deterministic sequential fan-out/fan-in; no actual concurrency), and
 learned-skill authoring/promotion (governed via GOV-009, in-memory candidates,
 fail-closed without a sink) — and closed integration & acceptance. With Phase 22
@@ -416,8 +417,9 @@ internals beyond stable public models.
   `sqlite3`
 - Implements the `AdvancedReasoningStorage` protocol (idempotent upserts for
   traces; append-only logs for steps; fail-closed when unavailable)
-- Adds `reasoning_*` tables via the shared migration framework ->
-  **schema version 10**
+- Adds `reasoning_*` tables via the shared migration framework — the Track-D
+  migration step brought the schema to **version 10** (the current schema is
+  **version 11**; see §8)
 - Opens the shared `atlas_data/atlas_experience.db`; `initialize()` applies
   additive migrations; no existing table is altered or dropped
 - `ReasoningTraceRepository` dual-writes to storage and keeps an in-memory
@@ -769,7 +771,7 @@ Full suite after cleanup: **3260 passed, 0 failed, 57 subtests, 2 warnings**
 
 ---
 
-## 25. Post-Core Adaptation Foundation (F1–F6) — working tree
+## 25. Post-Core Adaptation Foundation (F1–F6) — COMPLETE
 
 The Post-Core **Adaptation Foundation** adds a bounded, manually-triggered,
 deterministic, governance-safe adaptation pipeline on top of the frozen
