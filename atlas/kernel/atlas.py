@@ -450,6 +450,9 @@ class Atlas:
         # --- Phase 6.1: Deterministic Fallback Resolver ---
         self._deterministic_fallback: Any | None = None
 
+        # --- Phase 1: Built-In Conversational Response Service ---
+        self._builtin_response: Any | None = None
+
         self._learning_manager: LearningManager | None = None
         self._knowledge_feedback: KnowledgeFeedback | None = None
         self._started = False
@@ -1009,6 +1012,11 @@ class Atlas:
     def deterministic_fallback(self):
         """Return the kernel-owned DeterministicFallbackResolver (Phase 6.1)."""
         return self._deterministic_fallback
+
+    @property
+    def builtin_response(self):
+        """Return the kernel-owned BuiltinResponseService (Phase 1)."""
+        return self._builtin_response
 
     def run_development_cycle(
         self,
@@ -2468,7 +2476,13 @@ class Atlas:
         profile_entries = self._config.get("ai", "profiles") or []
         for profile in load_model_profiles(profile_entries, model):
             self._model_profile_registry.register(profile)
-        self._model_router = ModelRouter(self._model_profile_registry)
+        external_providers = bool(
+            self._config.get("ai", "external_providers", default=False)
+        )
+        self._model_router = ModelRouter(
+            self._model_profile_registry,
+            external_providers=external_providers,
+        )
 
         self._ai_manager = AIManager(
             model_profile_registry=self._model_profile_registry,
@@ -2476,11 +2490,15 @@ class Atlas:
 
         api_keys = self._config.get("ai", "api_keys")
         allow_fallback = bool(self._config.get("ai", "allow_fallback", default=False))
+        conversation_timeout_s = self._config.get(
+            "ai", "conversation_timeout_s", default=20.0
+        )
         self._ai_manager.initialize(
             provider, model, timeout,
             model_router=self._model_router,
             api_keys=api_keys,  # type: ignore[arg-type]
             allow_fallback=allow_fallback,
+            external_providers=external_providers,
         )
 
     # ------------------------------------------------------------------
@@ -3306,6 +3324,37 @@ class Atlas:
         except Exception:
             self._deterministic_fallback = None
 
+        # --- Phase 1 (+ Phase 3): Built-In Conversational Response Service ---
+        # Model-independent deterministic responses for casual conversational
+        # turns. Shares the kernel-owned registries/services read-only;
+        # never calls a provider and never mutates anything.
+        try:
+            from atlas.conversation.builtin_response import BuiltinResponseService
+
+            container_names: list[str] | None = None
+            try:
+                container_names = list(self._container.names())
+            except Exception:
+                container_names = None
+            self._builtin_response = BuiltinResponseService(
+                tool_registry=self._tool_registry,
+                knowledge_manager=self._knowledge_manager,
+                capability_registry=self._capability_registry,
+                memory_service=self._memory_service,
+                service_names=container_names,
+                # Built only during start(); only usable after start.
+                started=True,
+            )
+        except Exception:
+            self._builtin_response = None
+
+        try:
+            conversation_timeout_s = float(
+                self._config.get("ai", "conversation_timeout_s", default=20.0)
+            )
+        except (TypeError, ValueError):
+            conversation_timeout_s = 20.0
+
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
@@ -3314,6 +3363,8 @@ class Atlas:
             orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
             fallback_resolver=self._deterministic_fallback,
+            builtin_response=self._builtin_response,
+            provider_call_timeout_s=conversation_timeout_s,
             development_need_coordinator=DevelopmentNeedCoordinator(),
             investigation_service=InvestigationService(),
             approval_manager=self._approval_manager,
@@ -3796,6 +3847,7 @@ class Atlas:
         self._tool_selector = None
         self._tool_registry = None
         self._deterministic_fallback = None
+        self._builtin_response = None
         self._model_profile_registry = None
         self._model_router = None
 

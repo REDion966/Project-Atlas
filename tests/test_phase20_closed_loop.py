@@ -566,9 +566,14 @@ class TestModelRoutingActive(unittest.TestCase):
         context = ai.routing_contexts[0]
         self.assertIsNotNone(context)
         self.assertEqual(context.metadata["source"], "runtime_coordinator")
-        self.assertGreaterEqual(context.complexity, 0.5)
+        # Phase 4: ordinary plans start at the baseline tier (0.3), never
+        # at a floor that selects an external provider.
+        self.assertGreaterEqual(context.complexity, 0.3)
+        self.assertLess(context.complexity, 0.5)
 
     def test_routing_selects_ollama_with_kernel_profiles(self):
+        # Phase 4: external selection requires the explicit opt-in, which
+        # this advanced routing case carries.
         from atlas.ai.routing.models import ModelProfile, RoutingRequest
         from atlas.ai.routing.registry import ModelProfileRegistry
         from atlas.ai.routing.router import ModelRouter
@@ -582,7 +587,7 @@ class TestModelRoutingActive(unittest.TestCase):
             provider_name="Ollama", model_name="qwen3:8b",
             complexity_score=0.8, priority=20,
         ))
-        router = ModelRouter(registry)
+        router = ModelRouter(registry, external_providers=True)
 
         decision = router.route(RoutingRequest(complexity=0.5))
 
@@ -780,10 +785,13 @@ class TestCombinedClosedLoop(KernelTestCase):
         ]
         self.assertTrue(track_results)
 
-        # AI-response path received a non-None RoutingRequest.
+        # AI-response path received a non-None RoutingRequest. Phase 4:
+        # a 2-step plan escalates modestly above baseline but stays below
+        # the external-provider tier.
         self.assertEqual(len(ai.routing_contexts), 1)
         self.assertIsNotNone(ai.routing_contexts[0])
-        self.assertGreaterEqual(ai.routing_contexts[0].complexity, 0.5)
+        self.assertGreaterEqual(ai.routing_contexts[0].complexity, 0.3)
+        self.assertLess(ai.routing_contexts[0].complexity, 0.5)
 
 
 if __name__ == "__main__":

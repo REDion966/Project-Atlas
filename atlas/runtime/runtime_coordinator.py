@@ -1100,11 +1100,11 @@ class RuntimeCoordinator:
         into the existing RoutingRequest schema.
 
         Complexity derives from how much work the plan implies: a 1-step
-        respond/query plan maps to the low end; deeper plans and tool use
-        escalate. A floor of 0.5 keeps ordinary requests on the configured
-        Ollama profile rather than the 0.3-complexity Mock stub. Returns
-        None when no planning ran, preserving the pre-routing behavior of a
-        request that bypasses the ModelRouter.
+        respond/query plan maps to the baseline tier (served by the
+        built-in deterministic engine by default, never an external
+        provider); deeper plans and tool use escalate. Returns None when
+        no planning ran, preserving the pre-routing behavior of a request
+        that bypasses the ModelRouter.
         """
         planning = state.planning_result or {}
         steps = planning.get("steps") or []
@@ -1119,7 +1119,7 @@ class RuntimeCoordinator:
             r.get("tool_name") or r.get("capability", "").startswith("toolchain.")
             for r in results
         ) else 0
-        complexity = min(1.0, 0.5 + (step_weight - 1) * 0.1 + tool_weight * 0.1)
+        complexity = min(1.0, 0.3 + (step_weight - 1) * 0.1 + tool_weight * 0.1)
 
         latency_requirement = "fast" if step_weight <= 2 else "medium"
         task_type = planning.get("goal", "respond") or "respond"

@@ -50,8 +50,13 @@ class AIRouter:
         self,
         messages,
         routing_decision: RoutingDecision | None = None,
+        timeout: float | None = None,
     ):
-        """Route chat requests."""
+        """Route chat requests.
+
+        ``timeout`` is an optional per-call bound forwarded to the selected
+        provider; None keeps the provider's configured default.
+        """
 
         provider = self._resolve_provider(routing_decision)
 
@@ -63,14 +68,20 @@ class AIRouter:
         return provider.chat(
             messages,
             model=self._resolve_model(routing_decision),
+            timeout=timeout,
         )
 
     def stream_chat(
         self,
         messages,
         routing_decision: RoutingDecision | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
-        """Route streaming chat requests."""
+        """Route streaming chat requests.
+
+        ``timeout`` is an optional per-call bound forwarded to the selected
+        provider; None keeps the provider's configured default.
+        """
 
         provider = self._resolve_provider(routing_decision)
 
@@ -82,6 +93,7 @@ class AIRouter:
         return provider.stream_chat(
             messages,
             model=self._resolve_model(routing_decision),
+            timeout=timeout,
         )
 
     def complete(self, prompt):

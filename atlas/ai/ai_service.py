@@ -40,6 +40,10 @@ class AIService(Service):
         """Stop the AI service."""
         super().stop()
 
+    #: RoutingRequest metadata key carrying a per-call conversational
+    #: timeout bound (seconds) for an opted-in external provider.
+    CONVERSATION_TIMEOUT_KEY = "conversation_timeout_s"
+
     def chat(
         self,
         messages,
@@ -53,6 +57,10 @@ class AIService(Service):
         the chat attempt runs through the policy-controlled fallback
         executor; otherwise the behavior is identical to invoking the active
         provider directly (no fallback).
+
+        A ``conversation_timeout_s`` entry in the routing metadata bounds a
+        single provider call so ordinary conversation can never hang for
+        the full configured provider timeout.
         """
 
         routing_decision = None
@@ -66,6 +74,7 @@ class AIService(Service):
             routing_context is not None
             and (routing_context.allow_fallback or self._allow_fallback_default)
         )
+        call_timeout = self._conversation_timeout(routing_context)
 
         if (
             routing_decision is not None
@@ -83,13 +92,33 @@ class AIService(Service):
                         provider_name,
                         model_name,
                     ),
+                    timeout=call_timeout,
                 ),
             ).response
 
         return self._router.chat(
             messages,
             routing_decision=routing_decision,
+            timeout=call_timeout,
         )
+
+    @classmethod
+    def _conversation_timeout(
+        cls,
+        routing_context: RoutingRequest | None,
+    ) -> float | None:
+        """Return the per-call conversational bound, or None for default."""
+        if routing_context is None:
+            return None
+        metadata = getattr(routing_context, "metadata", None) or {}
+        value = metadata.get(cls.CONVERSATION_TIMEOUT_KEY)
+        if value is None:
+            return None
+        try:
+            bound = float(value)
+        except (TypeError, ValueError):
+            return None
+        return bound if bound > 0 else None
 
     def stream_chat(
         self,
@@ -117,6 +146,7 @@ class AIService(Service):
             and (routing_context.allow_fallback or self._allow_fallback_default)
         )
 
+        call_timeout = self._conversation_timeout(routing_context)
         if (
             routing_decision is not None
             and routing_context is not None
@@ -133,12 +163,14 @@ class AIService(Service):
                         provider_name,
                         model_name,
                     ),
+                    timeout=call_timeout,
                 ),
             )
 
         return self._router.stream_chat(
             messages,
             routing_decision=routing_decision,
+            timeout=call_timeout,
         )
 
     def complete(self, prompt):

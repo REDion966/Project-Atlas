@@ -58,6 +58,25 @@ class RoutingRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+#: Providers that perform network I/O to an external model service.
+#: Selection of any of these requires the explicit external-providers
+#: opt-in; when the opt-in is off, the model router resolves only the
+#: local no-network tier. Unknown provider names are treated as external
+#: (deny-by-default).
+EXTERNAL_PROVIDER_NAMES: frozenset[str] = frozenset(
+    {"Ollama", "OpenAI", "LM Studio", "Anthropic", "OpenRouter"}
+)
+
+#: Provider names explicitly recognized as local no-network tiers. When
+#: the external-providers opt-in is off, ONLY these profiles are eligible
+#: for selection; every other name — known external or unknown — is
+#: excluded. This is the allowlist that makes the opt-out policy
+#: genuinely deny-by-default.
+LOCAL_PROVIDER_NAMES: frozenset[str] = frozenset(
+    {"Mock Provider"}
+)
+
+
 @dataclass
 class RoutingDecision:
     """

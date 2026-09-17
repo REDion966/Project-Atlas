@@ -41,6 +41,10 @@ class OpenAIProvider(AIProvider):
         """Return the per-call model override, or the configured default."""
         return model or self._model
 
+    def _effective_timeout(self, timeout: float | None) -> float | int:
+        """Return the per-call timeout, falling back to the configured one."""
+        return self._timeout if timeout is None else timeout
+
     def name(self) -> str:
         """Return provider name."""
         return "OpenAI"
@@ -51,7 +55,12 @@ class OpenAIProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
-    def chat(self, messages, model: str | None = None):
+    def chat(
+        self,
+        messages,
+        model: str | None = None,
+        timeout: float | None = None,
+    ):
         """Generate a complete chat response."""
 
         self._require_api_key()
@@ -66,7 +75,7 @@ class OpenAIProvider(AIProvider):
             f"{self.BASE_URL}/chat/completions",
             headers=self._headers(),
             json=payload,
-            timeout=self._timeout,
+            timeout=self._effective_timeout(timeout),
         )
 
         response.raise_for_status()
@@ -91,6 +100,7 @@ class OpenAIProvider(AIProvider):
         self,
         messages,
         model: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
         """Stream chat response from OpenAI."""
 
@@ -107,7 +117,7 @@ class OpenAIProvider(AIProvider):
             headers=self._headers(),
             json=payload,
             stream=True,
-            timeout=self._timeout,
+            timeout=self._effective_timeout(timeout),
         )
 
         response.raise_for_status()

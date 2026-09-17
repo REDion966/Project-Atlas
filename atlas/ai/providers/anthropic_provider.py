@@ -42,6 +42,10 @@ class AnthropicProvider(AIProvider):
         """Return the per-call model override, or the configured default."""
         return model or self._model
 
+    def _effective_timeout(self, timeout: float | None) -> float | int:
+        """Return the per-call timeout, falling back to the configured one."""
+        return self._timeout if timeout is None else timeout
+
     def name(self) -> str:
         """Return provider name."""
         return "Anthropic"
@@ -53,7 +57,12 @@ class AnthropicProvider(AIProvider):
             "Content-Type": "application/json",
         }
 
-    def chat(self, messages, model: str | None = None):
+    def chat(
+        self,
+        messages,
+        model: str | None = None,
+        timeout: float | None = None,
+    ):
         """Generate a complete chat response.
 
         Anthropic uses a /v1/messages endpoint with a 'content'
@@ -73,7 +82,7 @@ class AnthropicProvider(AIProvider):
             f"{self.BASE_URL}/messages",
             headers=self._headers(),
             json=payload,
-            timeout=self._timeout,
+            timeout=self._effective_timeout(timeout),
         )
 
         response.raise_for_status()
@@ -105,6 +114,7 @@ class AnthropicProvider(AIProvider):
         self,
         messages,
         model: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
         """Stream chat response from Anthropic.
 
@@ -127,7 +137,7 @@ class AnthropicProvider(AIProvider):
             headers=self._headers(),
             json=payload,
             stream=True,
-            timeout=self._timeout,
+            timeout=self._effective_timeout(timeout),
         )
 
         response.raise_for_status()

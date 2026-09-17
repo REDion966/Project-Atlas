@@ -51,6 +51,12 @@ class Configuration:
                 allow_fallback=bool(
                     data.get("ai", {}).get("allow_fallback", False)
                 ),
+                external_providers=bool(
+                    data.get("ai", {}).get("external_providers", False)
+                ),
+                conversation_timeout_s=float(
+                    data.get("ai", {}).get("conversation_timeout_s", 20.0)
+                ),
             ),
             conversation=ConversationSettings(
                 history_limit=data["conversation"]["history_limit"],

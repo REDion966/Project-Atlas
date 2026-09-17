@@ -1135,6 +1135,63 @@ RuntimeCoordinator 15-stage order and all locked packages remain untouched.
 - Tests: `tests/test_conversation_development_intake.py`,
   `tests/test_conversation_development_bridge.py`.
 
+### Built-in deterministic response path (Phase 1 — non-model boundary)
+
+- `atlas/conversation/builtin_response.py` — pure, deterministic
+  `BuiltinResponseService` answering a bounded conversational intent set
+  (greeting, help, identity, capabilities, status, unsupported) with no
+  external AI provider call. Capabilities/status answers are grounded in the
+  injected `ToolRegistry` / `KnowledgeManager` (read-only); nothing is
+  invented, mutated, authorized, or executed.
+- `ConversationService` consults it after every governed lifecycle handler
+  and before orchestration/cognition/AI, in both `send()` and `stream()`.
+  It only answers casual turns (`CONVERSATION` / `UNKNOWN` / `QUESTION`,
+  never `needs_clarification`); governed turns always return `None` and
+  continue through the existing pipeline unchanged. Kernel wires the
+  kernel-owned instance (`Atlas.builtin_response`); provider interfaces are
+  preserved for optional future augmentation but are not used by this path.
+- Tests: `tests/test_builtin_response.py`.
+- Phase 2 — built-in by default: normal CLI conversation
+  (`ConversationService.send()`/`stream()`, i.e. `Atlas.chat()`/`stream()`)
+  is answered by the built-in engine; casual turns never reach a provider,
+  so no HTTP request to `localhost:11434` (or any provider) is made for
+  greeting/help/identity/status/unsupported turns. The deliberate
+  complexity floor that routed ordinary conversation to the configured
+  Ollama profile is removed: casual turns (`conversation`/`unknown`/
+  `question`) carry baseline 0.3 complexity and ordinary 1-step pipeline
+  plans likewise start at 0.3, selecting the no-network tier; deeper plans
+  and tool use still escalate. Provider abstraction code is unchanged —
+  external providers remain optional integrations for AI-path turns only.
+  `config.toml` `[ai]` defaults are intentionally untouched.
+- Tests: `tests/test_builtin_default_routing.py` (HTTP-blocked regression +
+  no-provider startup + baseline-tier routing).
+- Phase 3 — Atlas-owned state answers: the intent set is extended to
+  capability listing (tools + reasoning capabilities), named
+  capability/tool explanation (registered entries only, otherwise the honest
+  unsupported response), status grounded in container/memory/knowledge
+  snapshots, deterministic memory/knowledge recall (verbatim keyword lookup;
+  honest miss/unwired), and supported commands with safe next steps. New
+  collaborators are optional and injected (`CapabilityRegistry`,
+  `MemoryManagerService`, service-name snapshot, lifecycle flag); every
+  answer distinguishes confirmed state from unavailable/unknown state.
+- Tests: `tests/test_builtin_state_answers.py` (realistic fixtures +
+  kernel-wiring integration).
+- Phase 4 — external providers are explicit opt-in augmentations:
+  `config.toml [ai] external_providers` (default `false`) gates all
+  external HTTP provider selection. `ModelRouter` excludes external
+  profiles without the opt-in, and `AIManager` activates the local
+  no-network tier as the active provider — so no `RoutingDecision` can
+  silently resolve to an external provider, including on the direct
+  (unrouted) provider path. Provider support is intact for explicit
+  advanced/augmentation use: with the opt-in on, routing, fallback
+  chains, and per-provider calls behave exactly as before. Residual AI-path
+  calls carry `conversation_timeout_s` (default 20s) so an opted-in
+  provider can never stall ordinary conversation for the full configured
+  timeout; any provider failure/timeout/unavailability falls back to the
+  built-in engine first (marked `fallback_after_provider_failure`), then
+  the legacy deterministic fallback.
+- Tests: `tests/test_builtin_optin_providers.py`.
+
 ### Status
 
 - **COMPLETE** — committed at `ce12fb8` (10 files, +1898/−24).

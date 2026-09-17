@@ -25,7 +25,16 @@ class APIKeySettings:
 
 @dataclass(slots=True)
 class AISettings:
-    """AI configuration."""
+    """AI configuration.
+
+    External providers are explicit opt-in augmentations, never the default
+    conversational path. ``external_providers`` (default False) gates all
+    external HTTP provider selection: when False, the model router resolves
+    only the local no-network tier and every provider call stays in-process.
+    ``conversation_timeout_s`` bounds a single opted-in external provider
+    call during ordinary conversation so a hung provider can never stall
+    the conversational path for the full provider timeout.
+    """
 
     provider: str
     model: str
@@ -39,6 +48,14 @@ class AISettings:
     # chat.  Safe default False; explicit opt-in only.  Per-request
     # RoutingRequest.allow_fallback can still enable fallback individually.
     allow_fallback: bool = False
+    # Explicit opt-in for external (HTTP) AI providers. Safe default False:
+    # ordinary conversation is served by the built-in deterministic engine
+    # and any residual provider routing resolves locally.
+    external_providers: bool = False
+    # Per-call bound (seconds) for an opted-in external provider during
+    # ordinary conversation. Must be positive; the provider timeout is used
+    # when this is unset.
+    conversation_timeout_s: float = 20.0
 
 
 @dataclass(slots=True)

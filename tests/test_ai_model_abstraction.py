@@ -134,7 +134,7 @@ class TestAIRouterModelForwarding:
         with patch.object(provider, "chat", wraps=provider.chat) as spy:
             response = router.chat(MESSAGES, routing_decision=decision)
 
-        spy.assert_called_once_with(MESSAGES, model="routed-model")
+        spy.assert_called_once_with(MESSAGES, model="routed-model", timeout=None)
         assert response.model == "routed-model"
 
     def test_no_decision_uses_default_model(self):
@@ -143,7 +143,7 @@ class TestAIRouterModelForwarding:
         with patch.object(provider, "chat", wraps=provider.chat) as spy:
             router.chat(MESSAGES)
 
-        spy.assert_called_once_with(MESSAGES, model=None)
+        spy.assert_called_once_with(MESSAGES, model=None, timeout=None)
 
     def test_stream_decision_model_reaches_provider(self):
         router, provider = self._router_with_spy()
@@ -157,7 +157,7 @@ class TestAIRouterModelForwarding:
         ) as spy:
             chunks = list(router.stream_chat(MESSAGES, routing_decision=decision))
 
-        spy.assert_called_once_with(MESSAGES, model="routed-model")
+        spy.assert_called_once_with(MESSAGES, model="routed-model", timeout=None)
         assert len(chunks) > 0
 
     def test_unregistered_model_raises_with_profile_registry(self):

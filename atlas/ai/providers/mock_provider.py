@@ -14,8 +14,13 @@ class MockProvider(AIProvider):
     def name(self) -> str:
         return "Mock Provider"
 
-    def chat(self, messages, model: str | None = None):
-        """Return a complete response."""
+    def chat(
+        self,
+        messages,
+        model: str | None = None,
+        timeout: float | None = None,
+    ):
+        """Return a complete response (timeout accepted and ignored: local)."""
 
         return AIResponse(
             text="Hello! I am Atlas's first AI provider.",
@@ -23,8 +28,13 @@ class MockProvider(AIProvider):
             model=model or "atlas-mock-v1",
         )
 
-    def stream_chat(self, messages, model: str | None = None):
-        """Stream a response one word at a time."""
+    def stream_chat(
+        self,
+        messages,
+        model: str | None = None,
+        timeout: float | None = None,
+    ):
+        """Stream a response one word at a time (timeout ignored: local)."""
 
         text = "Hello! I am Atlas's first AI provider."
 

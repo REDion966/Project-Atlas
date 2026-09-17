@@ -39,6 +39,7 @@ from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
 
 if TYPE_CHECKING:
+    from atlas.conversation.builtin_response import BuiltinResponseService
     from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
     from atlas.session.context import SessionContext
     from atlas.session.models import Session
@@ -158,6 +159,8 @@ class ConversationService:
         session_context: SessionContext | None = None,
         orchestration_resolver: Callable[[TaskSpec, SessionContext | None], object | None] | None = None,
         fallback_resolver: DeterministicFallbackResolver | None = None,
+        builtin_response: BuiltinResponseService | None = None,
+        provider_call_timeout_s: float | None = None,
         development_need_coordinator: DevelopmentNeedCoordinator | None = None,
         outcome_reporter: DevelopmentOutcomeReporter | None = None,
         state_manager: ConversationStateManager | None = None,
@@ -203,6 +206,23 @@ class ConversationService:
             fallback_resolver:
                 Optional DeterministicFallbackResolver for model-unavailable
                 degraded operation.
+
+            builtin_response:
+                Optional BuiltinResponseService for the model-independent
+                conversational path. When set, casual conversational turns
+                (CONVERSATION / UNKNOWN / QUESTION, never needs-clarification)
+                are answered deterministically without calling any AI
+                provider. Governed lifecycle turns always return ``None`` from
+                the builtin service and continue through the existing
+                pipeline unchanged. Provider interfaces are preserved for
+                optional future augmentation but are not used by this path.
+
+            provider_call_timeout_s:
+                Optional per-call bound (seconds) for an opted-in external
+                provider reached through the residual AI path. Carried in
+                the routing metadata so the provider call can never hang
+                for the full configured provider timeout during ordinary
+                conversation. None (default) keeps provider defaults.
 
             approval_manager:
                 Optional approval manager (injected by the kernel) for creating
@@ -252,6 +272,12 @@ class ConversationService:
         self._development_bridge = development_bridge
         self._orchestration_resolver = orchestration_resolver
         self._fallback_resolver = fallback_resolver
+        self._builtin_response = builtin_response
+        self._provider_call_timeout_s = (
+            float(provider_call_timeout_s)
+            if provider_call_timeout_s is not None
+            else None
+        )
         self._development_need_coordinator = development_need_coordinator
         self._outcome_reporter = outcome_reporter
         self._state_manager = state_manager or ConversationStateManager()
@@ -319,6 +345,66 @@ class ConversationService:
 
     def set_fallback_resolver(self, resolver: DeterministicFallbackResolver | None) -> None:
         self._fallback_resolver = resolver
+
+    @property
+    def builtin_response(self) -> BuiltinResponseService | None:
+        return self._builtin_response
+
+    def set_builtin_response(self, service: BuiltinResponseService | None) -> None:
+        self._builtin_response = service
+
+    def _maybe_handle_builtin_response(
+        self,
+        spec: TaskSpec | None,
+        text: str,
+    ) -> Message | None:
+        """Answer a casual conversational turn without any AI provider.
+
+        Runs after every governed lifecycle handler and before
+        orchestration/cognition/AI. Returns ``None`` (fall through) unless
+        the builtin service is wired and claims the turn. Governed,
+        clarification-pending, legacy (spec-less), and non-casual turns are
+        never claimed.
+        """
+        if self._builtin_response is None or spec is None:
+            return None
+        return self._builtin_response.respond(
+            text,
+            spec=spec,
+            message_count=len(self._conversation.messages),
+        )
+
+    def _builtin_after_failure(
+        self,
+        text: str,
+        spec: TaskSpec | None,
+    ) -> Message | None:
+        """Serve a built-in response after a provider failure.
+
+        Same claim rules as the pre-AI builtin path (casual turns only,
+        never needs-clarification). Legacy intake-less turns (spec None)
+        are classified text-only: the AI has already failed, so any
+        confident builtin answer beats propagating the error. The
+        resulting message carries ``fallback_after_provider_failure``
+        metadata so callers can tell a post-failure builtin answer apart
+        from a direct one.
+        """
+        if self._builtin_response is None:
+            return None
+        if spec is None:
+            # Legacy intake-less turn: the AI already failed, so classify
+            # text-only rather than propagating the error.
+            message = self._builtin_response.respond(
+                text,
+                spec=None,
+                message_count=len(self._conversation.messages),
+            )
+        else:
+            message = self._maybe_handle_builtin_response(spec, text)
+        if message is None:
+            return None
+        message.metadata["fallback_after_provider_failure"] = True
+        return message
 
     @property
     def session_context(self) -> SessionContext | None:
@@ -506,6 +592,14 @@ class ConversationService:
             self._conversation.add_message(coordinated)
             return coordinated
 
+        # Model-independent conversational path (Phase 1): casual turns are
+        # answered deterministically without any AI provider. Governed turns
+        # fall through to the existing pipeline unchanged.
+        builtin_response = self._maybe_handle_builtin_response(spec, text)
+        if builtin_response is not None:
+            self._conversation.add_message(builtin_response)
+            return builtin_response
+
         orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
         if orchestration_response is not None:
             # The orchestration bridge is fail-closed against missing
@@ -573,15 +667,19 @@ class ConversationService:
                 content=response.text,
             )
         except Exception as exc:
-            # External AI unavailable, unreachable, or failed -> deterministic fallback
-            if self._fallback_resolver is not None:
+            # Phase 4 — an opted-in external provider failed (or the AI path
+            # was reached without opt-in): serve the built-in deterministic
+            # response first so ordinary conversation stays useful, then the
+            # legacy deterministic fallback, then the bounded notice.
+            assistant_message = self._builtin_after_failure(text, spec)
+            if assistant_message is None and self._fallback_resolver is not None:
                 assistant_message = self._fallback_resolver.resolve(
                     text=text,
                     spec=spec,
                     session_context=active_session,
                     error_context=str(exc),
                 )
-            else:
+            if assistant_message is None:
                 assistant_message = Message(
                     role="assistant",
                     content=(
@@ -746,6 +844,14 @@ class ConversationService:
             yield development_response.content
             return
 
+        # Model-independent conversational path (Phase 1): same placement as
+        # send() — after every governed handler, before orchestration/AI.
+        builtin_response = self._maybe_handle_builtin_response(spec, text)
+        if builtin_response is not None:
+            self._conversation.add_message(builtin_response)
+            yield builtin_response.content
+            return
+
         orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
         if orchestration_response is not None:
             self._conversation.add_message(orchestration_response)
@@ -809,8 +915,14 @@ class ConversationService:
                 yield chunk
         except Exception as exc:
             if not assistant_text:
-                # Stream failed before/at token generation -> deterministic fallback stream
-                if self._fallback_resolver is not None:
+                # Phase 4 — pre-token stream failure: built-in response
+                # first, then the deterministic fallback stream, then the
+                # bounded notice.
+                builtin_message = self._builtin_after_failure(text, spec)
+                if builtin_message is not None:
+                    assistant_text = builtin_message.content
+                    yield builtin_message.content
+                elif self._fallback_resolver is not None:
                     for chunk in self._fallback_resolver.resolve_stream(
                         text=text,
                         spec=spec,
@@ -840,6 +952,13 @@ class ConversationService:
             assistant_message
         )
 
+    #: Casual conversational task types are served by the built-in
+    #: deterministic engine by default; they must not carry a complexity
+    #: floor that selects an external provider.
+    _BUILTIN_FIRST_TASK_TYPES: frozenset[str] = frozenset(
+        {"conversation", "unknown", "question"}
+    )
+
     def _build_routing_request(
         self,
         text: str,
@@ -849,33 +968,45 @@ class ConversationService:
 
         Phase 20 Batch 6 — the direct conversation path (send/stream) can
         bypass the RuntimeCoordinator, so the existing ModelRouter would
-        otherwise stay dormant for CLI chat. Complexity here is a
-        deterministic function of input length so ordinary messages route
-        to the configured Ollama profile (complexity >= 0.5) and longer,
-        more involved requests escalate.
+        otherwise stay dormant for CLI chat.
+
+        Phase 2 — casual conversational turns (conversation / unknown /
+        question) are served by the built-in deterministic engine by
+        default, so they carry the baseline 0.3 complexity (the Mock /
+        no-network tier) instead of a floor that selects an external
+        provider. Only non-casual turns escalate with input length.
 
         B2 — when a TaskSpec is available, its deterministic task type is
         reflected in the routing request (no behavioral change to the
         model router; the spec only supplies the existing task_type field).
         """
+        task_type = "conversation"
+        if spec is not None:
+            task_type = spec.task_type.value
+
         length = max(1, len(text.strip()))
-        if length <= 40:
+        if task_type in self._BUILTIN_FIRST_TASK_TYPES:
+            complexity = 0.3
+        elif length <= 40:
             complexity = 0.5
         elif length <= 120:
             complexity = 0.6
         else:
             complexity = 0.7
 
-        task_type = "conversation"
-        if spec is not None:
-            task_type = spec.task_type.value
+        metadata: dict[str, object] = {"source": "conversation_service"}
+        if (
+            self._provider_call_timeout_s is not None
+            and self._provider_call_timeout_s > 0
+        ):
+            metadata["conversation_timeout_s"] = self._provider_call_timeout_s
 
         return RoutingRequest(
             complexity=complexity,
             latency_requirement="fast",
             task_type=task_type,
             context_size=length,
-            metadata={"source": "conversation_service"},
+            metadata=metadata,
         )
 
     def _intake(self, text: str, history_length: int = 0) -> TaskSpec | None:

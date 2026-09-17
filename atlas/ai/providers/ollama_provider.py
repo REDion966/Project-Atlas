@@ -34,7 +34,16 @@ class OllamaProvider(AIProvider):
         """Return the per-call model override, or the configured default."""
         return model or self._model
 
-    def chat(self, messages, model: str | None = None):
+    def _effective_timeout(self, timeout: float | None) -> float | int:
+        """Return the per-call timeout, falling back to the configured one."""
+        return self._timeout if timeout is None else timeout
+
+    def chat(
+        self,
+        messages,
+        model: str | None = None,
+        timeout: float | None = None,
+    ):
         """Generate a complete chat response."""
 
         payload = {
@@ -46,7 +55,7 @@ class OllamaProvider(AIProvider):
         response = requests.post(
             f"{self.BASE_URL}/api/chat",
             json=payload,
-            timeout=self._timeout,
+            timeout=self._effective_timeout(timeout),
         )
 
         response.raise_for_status()
@@ -63,6 +72,7 @@ class OllamaProvider(AIProvider):
         self,
         messages,
         model: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
         """Stream chat response from Ollama."""
 
@@ -76,7 +86,7 @@ class OllamaProvider(AIProvider):
             f"{self.BASE_URL}/api/chat",
             json=payload,
             stream=True,
-            timeout=self._timeout,
+            timeout=self._effective_timeout(timeout),
         )
 
         response.raise_for_status()

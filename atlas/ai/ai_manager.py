@@ -41,6 +41,11 @@ class AIManager:
         self._service: AIService | None = None
         self._model_router: "ModelRouter | None" = None
 
+    #: Local no-network provider, always registered and always available.
+    #: Used as the active provider whenever external providers are not
+    #: explicitly opted in.
+    LOCAL_PROVIDER_NAME = "Mock Provider"
+
     def initialize(
         self,
         provider: str,
@@ -49,6 +54,7 @@ class AIManager:
         model_router: "ModelRouter | None" = None,
         api_keys: "APIKeySettings | None" = None,
         allow_fallback: bool = False,
+        external_providers: bool = False,
     ):
         """Initialize Atlas AI.
 
@@ -58,7 +64,14 @@ class AIManager:
         ``allow_fallback`` is the operator-level default for routed chat;
         per-request ``RoutingRequest.allow_fallback`` can still opt in on an
         individual request even while the default is False.
+
+        ``external_providers`` is the explicit opt-in for external (HTTP)
+        providers. When False (default), the configured provider name is
+        still recorded for optional future augmentation, but the ACTIVE
+        provider is the local no-network tier — so even the direct
+        (unrouted) provider path can never make an external call.
         """
+        self._external_providers = bool(external_providers)
 
         self._model_router = model_router
 
@@ -114,8 +127,16 @@ class AIManager:
             )
         )
 
-        # Activate the configured provider
-        self._router.use(provider)
+        # Activate the configured provider — or the local no-network tier
+        # when external providers are not explicitly opted in. The
+        # configured name is preserved on the router for optional future
+        # augmentation, but the ACTIVE provider never performs network I/O
+        # unless the operator opted in.
+        self._configured_provider = provider
+        if self._external_providers:
+            self._router.use(provider)
+        else:
+            self._router.use(self.LOCAL_PROVIDER_NAME)
 
         # Wire the policy-controlled fallback executor.  The profile registry
         # backs the capability guard; the provider registry backs real
@@ -150,3 +171,13 @@ class AIManager:
     def provider(self):
         """Return the active AI provider."""
         return self._router.provider()
+
+    @property
+    def configured_provider(self) -> str | None:
+        """Return the configured provider name (may differ from active)."""
+        return getattr(self, "_configured_provider", None)
+
+    @property
+    def external_providers(self) -> bool:
+        """Return whether external providers are explicitly opted in."""
+        return bool(getattr(self, "_external_providers", False))

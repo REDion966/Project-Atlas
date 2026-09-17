@@ -109,8 +109,10 @@ class TestRuntimeCoordinatorRouting:
         assert len(ai.routing_contexts) == 1
         context = ai.routing_contexts[0]
         assert isinstance(context, RoutingRequest)
-        # Planning ran (1 step) → complexity floored at >= 0.5.
-        assert context.complexity >= 0.5
+        # Planning ran (1 step) → baseline-tier complexity: ordinary plans
+        # must not carry a floor that selects an external provider.
+        assert context.complexity >= 0.3
+        assert context.complexity < 0.5
         assert context.complexity <= 1.0
         assert context.task_type
         assert context.metadata["source"] == "runtime_coordinator"
@@ -147,8 +149,9 @@ class TestModelRouterInvoked:
     def test_router_routes_ordinary_requests_to_ollama(self):
         """Kernel profile set: Mock(0.3, p10) + Ollama(0.8, p20).
 
-        A request with complexity 0.5 must select Ollama (the only profile
-        whose complexity_score >= 0.5), not the Mock stub.
+        Phase 4: external selection requires the explicit opt-in. With the
+        opt-in on, a request with complexity 0.5 selects Ollama (the only
+        profile whose complexity_score >= 0.5), not the Mock stub.
         """
         registry = ModelProfileRegistry()
         registry.register(ModelProfile(
@@ -163,7 +166,7 @@ class TestModelRouterInvoked:
             complexity_score=0.8,
             priority=20,
         ))
-        router = ModelRouter(registry)
+        router = ModelRouter(registry, external_providers=True)
 
         decision = router.route(RoutingRequest(complexity=0.5))
 
@@ -177,7 +180,7 @@ class TestRoutingDecisionReachesProvider:
     def test_aiservice_propagates_routing_decision_to_provider_router(self):
         inner = MagicMock()
         inner.chat.side_effect = (
-            lambda messages, routing_decision=None: MagicMock(
+            lambda messages, routing_decision=None, timeout=None: MagicMock(
                 text=(
                     "provider=None"
                     if routing_decision is None
@@ -194,12 +197,13 @@ class TestRoutingDecisionReachesProvider:
             routing_context=RoutingRequest(complexity=0.5),
         )
 
-        inner.chat.assert_called_once_with(["hi"], routing_decision=None)
+        inner.chat.assert_called_once_with(["hi"], routing_decision=None, timeout=None)
         assert response.text == "provider=None"
 
     def test_aiservice_routes_via_model_router(self):
         """With a model_router injected, the RoutingRequest is routed and the
-        decision reaches the provider router."""
+        decision reaches the provider router. Phase 4: the router carries
+        the explicit external-providers opt-in for this advanced use case."""
         inner = MagicMock()
         provider_response = MagicMock(text="ollama reply")
         inner.chat.return_value = provider_response
@@ -211,7 +215,7 @@ class TestRoutingDecisionReachesProvider:
             complexity_score=0.8,
             priority=20,
         ))
-        model_router = ModelRouter(registry)
+        model_router = ModelRouter(registry, external_providers=True)
 
         service = AIService(router=inner, model_router=model_router)
         response = service.chat(
@@ -251,7 +255,7 @@ class TestFallbackBehavior:
         )
 
         assert response.text == "default"
-        inner.chat.assert_called_once_with(["hi"], routing_decision=None)
+        inner.chat.assert_called_once_with(["hi"], routing_decision=None, timeout=None)
 
 
 class TestConversationServiceRouting:
@@ -282,17 +286,28 @@ class TestConversationServiceRouting:
         assert len(ai.routing_contexts) == 1
         assert isinstance(ai.routing_contexts[0], RoutingRequest)
 
-    def test_short_message_uses_minimum_complexity(self):
+    def test_short_message_uses_baseline_complexity(self):
+        # Phase 2: casual conversation carries no provider-selecting floor.
         ai = RecordingAIService()
         service = self._service(ai)
         service.send("hi")
 
-        assert ai.routing_contexts[0].complexity == 0.5
+        assert ai.routing_contexts[0].complexity == 0.3
 
-    def test_long_message_escalates_complexity(self):
+    def test_long_casual_message_stays_baseline(self):
+        # Phase 2: input length no longer escalates casual conversation
+        # into external-provider complexity.
         ai = RecordingAIService()
         service = self._service(ai)
         long_text = "word " * 200
         service.send(long_text)
+
+        assert ai.routing_contexts[0].complexity == 0.3
+
+    def test_non_casual_message_still_escalates(self):
+        # Governed/non-casual turns keep length-based escalation.
+        ai = RecordingAIService()
+        service = self._service(ai)
+        service.send("Generate a response " * 20)
 
         assert ai.routing_contexts[0].complexity == 0.7

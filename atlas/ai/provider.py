@@ -23,13 +23,20 @@ class AIProvider(ABC):
         pass
 
     @abstractmethod
-    def chat(self, messages, model: str | None = None) -> "AIResponse":
+    def chat(
+        self,
+        messages,
+        model: str | None = None,
+        timeout: float | None = None,
+    ) -> "AIResponse":
         """Generate a complete chat response.
 
         Args:
             messages: Conversation messages.
             model: Optional per-call model override. When None, the
                 provider's configured default model is used.
+            timeout: Optional per-call timeout in seconds. When None, the
+                provider's configured default timeout is used.
         """
         pass
 
@@ -38,6 +45,7 @@ class AIProvider(ABC):
         self,
         messages,
         model: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[str]:
         """Stream chat response chunks.
 
@@ -45,6 +53,8 @@ class AIProvider(ABC):
             messages: Conversation messages.
             model: Optional per-call model override. When None, the
                 provider's configured default model is used.
+            timeout: Optional per-call timeout in seconds. When None, the
+                provider's configured default timeout is used.
         """
         pass
 

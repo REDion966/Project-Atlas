@@ -58,6 +58,7 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
             model_router=None,
             api_keys=None,
             allow_fallback: bool = False,
+            external_providers: bool = False,
         ):
             original_initialize(
                 manager,
@@ -67,6 +68,7 @@ class TestCognitionRuntimeIntegration(unittest.TestCase):
                 model_router=model_router,
                 api_keys=api_keys,
                 allow_fallback=allow_fallback,
+                external_providers=external_providers,
             )
 
         with patch.object(AIManager, "initialize", initialize_with_mock):

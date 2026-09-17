@@ -15,6 +15,18 @@ timeout = 300
 # RoutingRequest.allow_fallback can still enable fallback individually.
 allow_fallback = false
 
+# Explicit opt-in for external (HTTP) AI providers.  Safe default: false.
+# Ordinary conversation is served by the built-in deterministic engine and
+# any residual provider routing resolves to the local no-network tier.
+# Set to true only to allow opted-in external augmentation.
+external_providers = false
+
+# Per-call bound (seconds) for an opted-in external provider during
+# ordinary conversation.  A hung provider falls back to the built-in
+# engine after this bound instead of blocking for the full provider
+# timeout.
+conversation_timeout_s = 20.0
+
 # Optional model routing profiles. When absent, safe defaults are used
 # (Mock Provider @0.3 + Ollama @0.8 with the configured model).
 # Each entry: provider_name, model_name, complexity_score, latency_class,
