@@ -1,17 +1,23 @@
 # ATLAS VISION — Permanent North Star
 
-**Read `ATLAS_CONSTITUTION.md` first, then this document, then `ATLAS_CORE.md`, then `ATLAS_STATE.md`.**
+**Level 4 — identity and purpose.** The single Project Atlas authority model is
+defined in `docs/ATLAS_STATE.md` §0: repository state → `ATLAS_STATE.md`
+(current state) → `ROADMAP.md` (future direction) → `ATLAS_CORE.md` (permanent
+principles) → `ATLAS_VISION.md` (this document: identity and purpose) →
+specifications → `README.md` (entry point) → historical record.
 
 ---
 
 ## 0. Document Authority
 
-Priority order when interpreting Atlas:
+This document owns Atlas's **identity, purpose, and long-term conceptual
+direction**. It does not own current state (that is `docs/ATLAS_STATE.md`) or
+authorized future direction (that is `docs/ROADMAP.md`), and it defines no
+competing hierarchy.
 
-1. **`ATLAS_CONSTITUTION.md`** — immutable engineering laws and rules.
-2. **`ATLAS_VISION.md`** — defines *why* Atlas exists and its long-term direction.
-3. **`ATLAS_CORE.md`** — defines *how* Atlas is architected.
-4. **`ATLAS_STATE.md`** — defines *where* Atlas currently is.
+`ATLAS_CONSTITUTION.md` is **historical context** — it is no longer current
+authority and imposes no read-order obligation. Its principles are preserved in
+this document and in `docs/ATLAS_CORE.md` §7.
 
 This document is NOT a roadmap, NOT an implementation plan, NOT a changelog, and NOT a phase tracker. It defines the permanent North Star of Project Atlas. Every future decision shall be evaluated against this vision.
 

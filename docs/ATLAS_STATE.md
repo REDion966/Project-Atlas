@@ -10,23 +10,42 @@ ATLAS_STATE.md and only the files directly related to the task."*
 
 ## 0. Source of Truth & Document Authority
 
-Priority order when interpreting Atlas:
+This section defines the **single documentation authority model** for Project
+Atlas. No other document may define a competing hierarchy.
 
-1. **Source code** — actual runtime behavior truth
-2. **Git history** — completed milestones, releases, and implementation record
-3. **`ATLAS_STATE.md`** *(this file)* — current authoritative state
-4. **`ROADMAP.md`** — authoritative forward direction
-5. **Historical / archived documents** (`docs/archive/`) — reference only; NEVER
-   treated as current architecture
+| Level | Owner | Scope |
+|---|---|---|
+| **0** | Repository state — source code, tests, Git history, executable behavior | Actual runtime truth |
+| **1** | `docs/ATLAS_STATE.md` *(this file)* | Authoritative current state |
+| **2** | `docs/ROADMAP.md` | Authoritative future direction |
+| **3** | `docs/ATLAS_CORE.md` | Permanent architectural principles |
+| **4** | `docs/ATLAS_VISION.md` | Identity and purpose |
+| **5** | Development workflow / specifications / ADRs | Procedural guidance and decision records |
+| **6** | `README.md` | Public entry point — orientation only; never a second source of truth |
+| **7** | `CHANGELOG.md`, `docs/archive/`, evidence reports | Historical record — never current operational authority |
 
-If source code and this document conflict, source code wins. Report the
-conflict and preserve backward compatibility; never silently choose one over
-the other.
+Rules:
 
-> **Rule for future AI agents:** archived documents (`docs/archive/`) describe
-> how Atlas looked at earlier points in time. They are historical context, not
-> current architecture. Do not reintroduce archived designs without an explicit
-> new decision.
+- **Level 0 wins.** If source code and any document conflict, source code wins.
+  Report the conflict and preserve backward compatibility; never silently choose
+  one over the other.
+- **This file (Level 1) is the authoritative documentation of current state** —
+  current architecture, invariants, governance, verified test baseline,
+  completed milestones, and the current evidence boundary.
+- **`ROADMAP.md` (Level 2)** is authoritative for authorized future direction
+  only; it does not restate current architecture.
+- **`ATLAS_CORE.md` (Level 3)** owns permanent principles only; it defers
+  current-state facts to this file and future direction to `ROADMAP.md`.
+- **`ATLAS_VISION.md` (Level 4)** owns identity and purpose only.
+- **`README.md` (Level 6)** is an entry point. It must not outrank this file and
+  must not become a second source of truth.
+- A document may preserve historical claims without those claims becoming
+  current guidance.
+
+> **Rule for future AI agents:** archived documents (`docs/archive/`) and the
+> Phase-C evidence reports describe how Atlas looked at earlier points in time.
+> They are historical context, not current architecture. Do not reintroduce
+> archived designs without an explicit new decision.
 
 ---
 
@@ -56,7 +75,7 @@ mechanism by which Atlas may change its own operational state.
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
-| Verified test baseline | **5,945 passed, 0 failed, 0 errors, 2 skipped** (pytest exit 0) |
+| Verified test baseline | **5,945 test items executed: 5,876 test cases passed (plus 67 subtests passed), 0 failed, 0 errors, 2 skipped** (pytest exit 0) |
 | Era | **Post-Roadmap Operational Era** (supersedes the Capability Track Era) |
 
 **CURRENT IMPLEMENTATION:** Atlas v0.20.0 is released at tag `v0.20.0`
@@ -429,12 +448,22 @@ Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
 ## 15. Current Test / Verification State
 
 > **Precision rule:** Only an actually-executed number may be stated as a test
-> result. The figure above is the verified execution for Track D Batch 2. Any
-> snapshot from the Phase 1 repository inventory is a **"current test
-> inventory"**, not a result — do not call an inventory count a passing test
-> count.
+> result. A collected/inventory count is not a passing test count.
 
-**Verified Track D Batch 2 execution** (decision-gate result, ~9 minutes):
+**CURRENT VERIFIED BASELINE — the only current test result:**
+
+```
+5,945 test items executed: 5,876 test cases passed (plus 67 subtests passed)
+0 failed
+0 errors
+2 skipped
+```
+
+This is the authoritative current baseline (pytest exit 0). Every other number
+in this section is a **historical** execution record for the milestone named
+beside it; none of them is the current baseline.
+
+**Historical — Track D Batch 2 execution** (decision-gate result, ~9 minutes):
 
 ```
 2973 passed
@@ -443,7 +472,7 @@ Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
 0 errors
 ```
 
-**Verified post-core release gate (HEAD `b2b4674`, v0.20.0 preparation):**
+**Historical — post-core release gate (HEAD `b2b4674`, v0.20.0 preparation):**
 
 ```
 3260 passed
@@ -452,15 +481,17 @@ Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
 2 warnings (non-blocking asyncio.iscoroutinefunction deprecations)
 ```
 
-**Current test inventory (not a result):** 178 test files, 766 test classes,
-2958 test methods (+ parameterized subtests).
+**Historical — Phase 1 repository inventory (not a result):** 178 test files,
+766 test classes, 2958 test methods (+ parameterized subtests). Superseded — the
+current suite contains 300 test files; this inventory is not the current
+baseline.
 
 Track D test coverage includes: storage, CLI, capability handlers, service,
 trace recorder, repositories, causal/hypotheses/verify/meta engines, models,
 protocols, wiring, evolution integration, import-boundary scans, and
 kernel integration.
 
-**Verified Track C post-core follow-up executions:** deterministic semantic
+**Historical — Track C post-core follow-up executions:** deterministic semantic
 recall batch (`57f0063`) — full suite 4,285 tests, 0 failed (pytest exit 0);
 forgetting-policy batch (`be2bb84`) — full suite 4,296 tests, 0 failed
 (pytest exit 0).
@@ -1217,7 +1248,8 @@ v11; no implementation NEXT currently defined). · Conversational Development
 Intake (B1+B2+B3) reconciled: 2026-08-29 (committed ce12fb8; schema v11;
 B4 remains undefined/unapproved; no implementation NEXT currently defined).
 Phase C evidence-driven evolution reconciled: 2026-09-16 (C0 → C9 reached the
-established evidence boundary; §31; full suite 5,945 passed, 0 failed,
-0 errors, 2 skipped).
+established evidence boundary; §31; full suite 5,945 test items executed:
+5,876 test cases passed (plus 67 subtests passed), 0 failed, 0 errors, 2
+skipped).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

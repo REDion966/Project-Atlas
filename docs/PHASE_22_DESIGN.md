@@ -1,8 +1,14 @@
 # Phase 22 — Toolchain Execution & Learned-Skill Progression
 
-**Status:** SPECIFIED — approved for validation, not yet implemented.
+**Status:** COMPLETE — design specification; implementation is complete in the
+current repository (see `docs/ATLAS_STATE.md` §22).
 **Applies to:** `atlas/toolchain/` (Track B)
 **Depends on:** Phase 20 (invariant) + Phase 21 (accepted, unreleased locally)
+
+> **Status distinction:** this document preserves the Phase 22 *design* as
+> approved. Phase 22 *implementation* is COMPLETE in the current repository;
+> `docs/ATLAS_STATE.md` §22 is authoritative for the delivered state. The design
+> text below is unchanged and is not pending work.
 
 ## 1. Objective and scope
 

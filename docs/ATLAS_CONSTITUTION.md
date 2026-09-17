@@ -1,23 +1,20 @@
 # Atlas Constitution & Engineering Manifesto
 
 ---
-> ⚠️ HISTORICAL / REFERENCE DOCUMENT
+> ⚠️ HISTORICAL / REFERENCE DOCUMENT — NOT CURRENT AUTHORITY
 >
-> This document is preserved for detailed context, history, and architectural reference.
+> This constitution is preserved for historical and architectural context. Its
+> substance is unchanged. It is **not** a current authority and it does not
+> define a read order or document hierarchy.
 >
-> Canonical AI startup files:
+> The single Project Atlas authority model is defined in `docs/ATLAS_STATE.md`
+> §0: current state is owned by `docs/ATLAS_STATE.md`; authorized future
+> direction by `docs/ROADMAP.md`; permanent architectural principles by
+> `docs/ATLAS_CORE.md`; identity and purpose by `docs/ATLAS_VISION.md`.
 >
-> 1. docs/ATLAS_CORE.md
-> 2. docs/ATLAS_STATE.md
->
-> Authority order:
->
-> - Source code = actual runtime behavior truth
-> - ATLAS_CORE.md = permanent architectural principles and rules
-> - ATLAS_STATE.md = current operational state and resume point
-> - Historical documents = supplementary context only
->
-> Historical documents must not override ATLAS_CORE.md or ATLAS_STATE.md.
+> Historical documents must never override current verified repository state or
+> the documents above. The constitution principles are preserved in
+> `docs/ATLAS_CORE.md` §7 and `docs/ATLAS_VISION.md`.
 ---
 
 Version: 0.1

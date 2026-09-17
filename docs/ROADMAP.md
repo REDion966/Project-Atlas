@@ -1,6 +1,9 @@
 # ATLAS ROADMAP — Authoritative Future Direction
 
-**Current reference for where Atlas is going next.**
+**Level 2 — authoritative future direction.** This document owns authorized
+forward direction only. Current state is owned by `docs/ATLAS_STATE.md`;
+permanent architectural principles by `docs/ATLAS_CORE.md`. The single Project
+Atlas authority model is defined in `docs/ATLAS_STATE.md` §0.
 
 This is the authoritative forward-planning document. Status categories are used
 strictly:
@@ -199,10 +202,10 @@ Full suite verified at each batch: **4,285 tests** (semantic recall) and
 
 ---
 
-## CURRENT — Foundation Strengthening
+## HISTORICAL — Foundation Strengthening (COMPLETE)
 
 **Atlas Core is COMPLETE.** v0.20.0 is released at tag `v0.20.0` (`b92c5d9`).
-Development has transitioned from numbered phases to continuous
+Development transitioned from numbered phases to continuous
 foundation-strengthening tracks.
 
 **Foundation Strengthening — completed batches:**
@@ -225,11 +228,14 @@ There is **NO Phase 23 for Atlas Core**. The next development model is
 
 ---
 
-## Post-Core Development
+## Post-Core Development (HISTORICAL — COMPLETE)
 
-Atlas Core is complete (Phase 22, v0.20.0). Development now follows the
-post-core milestone sequence below. Each milestone is locked until the
-preceding milestone is accepted. M2–M7 scope is defined by acceptance
+> **Historical record.** The M0–M7 post-core sequence below is
+> COMPLETE/CLOSED. It is not current next work and must not be resumed.
+
+Atlas Core is complete (Phase 22, v0.20.0). Development followed the
+post-core milestone sequence below. Each milestone was locked until the
+preceding milestone was accepted. M2–M7 scope was defined by acceptance
 contract, not by premature implementation.
 
 ### M0 — GitHub Synchronization
@@ -461,10 +467,16 @@ The following are deferred and must not silently become M2–M6 scope:
 
 ## NEXT
 
-The next milestone is **M2 — Execution Integrity** (see Post-Core Development
-above). The recorded Track C follow-ups (Persistent Learning, deterministic
-semantic recall, forgetting-policy tuning) are COMPLETE. No further task carries
-an approved design beyond the locked post-core sequence.
+> **Historical note — superseded.** Everything above this point in the file,
+> including the M0–M7 post-core sequence (all COMPLETE/CLOSED), is the
+> preserved historical record. Those milestones are **not** current next work.
+
+There is currently **no approved implementation NEXT**. The recorded Track C
+follow-ups (Persistent Learning, deterministic semantic recall,
+forgetting-policy tuning) are COMPLETE, and no task carries an approved design
+beyond the completed post-core sequence. New work may only originate from a
+validated real-world capability gap under the post-roadmap operating rule (see
+"Current Project State — Phase C Evidence-Driven Evolution" below).
 
 Deferred / owner-gated items (unchanged):
 

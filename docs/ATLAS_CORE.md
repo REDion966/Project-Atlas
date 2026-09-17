@@ -1,19 +1,23 @@
-# ATLAS CORE — Permanent Operational Memory
+# ATLAS CORE — Permanent Architectural Principles
 
-**Supporting document.** The canonical entry points are `README.md`, then
-`docs/ATLAS_STATE.md`, then `docs/ROADMAP.md`; read this file only when deeper
-architectural principles are needed.
+**Level 3 — permanent architectural principles.** This document owns Atlas's
+durable invariants, stable design boundaries, and enduring engineering rules.
+It does not define current state (owned by `docs/ATLAS_STATE.md`) and does not
+define future direction (owned by `docs/ROADMAP.md`). The single Project Atlas
+authority model is defined in `docs/ATLAS_STATE.md` §0.
 
 ---
 
 ## 0. Document Authority
 
-Priority order when interpreting Atlas:
+The single Project Atlas authority model is defined in `docs/ATLAS_STATE.md` §0.
+This document does not define a competing hierarchy.
 
-1. **Source code** — actual runtime behavior truth.
-2. **`ATLAS_CORE.md`** — permanent architectural principles and rules.
-3. **`ATLAS_STATE.md`** — current operational state and resume point.
-4. **Historical documents** — supplementary reference only; never override CORE or STATE.
+- **Current state** — owned by `docs/ATLAS_STATE.md`.
+- **Future direction** — owned by `docs/ROADMAP.md`.
+- **Permanent architectural principles (this document)** — Level 3; durable
+  invariants and stable boundaries only. This document defers current-state
+  facts to `docs/ATLAS_STATE.md`.
 
 If source code and these documents conflict:
 - Do not silently choose one over the other.
@@ -494,7 +498,7 @@ The complete development workflow is documented in `docs/DEVELOPMENT_WORKFLOW.md
 1. Read README.md (public entry point)
 2. Read ATLAS_STATE.md (authoritative current state)
 3. Read ROADMAP.md (authoritative forward direction)
-4. Read ATLAS_CORE.md (supporting/reference) when deeper principles are needed
+4. Read ATLAS_CORE.md (Level 3 — permanent architectural principles) when deeper principles are needed
 5. Understand current state and architecture
 6. Confirm the requested task
 7. Implement only approved changes
@@ -502,7 +506,7 @@ The complete development workflow is documented in `docs/DEVELOPMENT_WORKFLOW.md
 9. Record updates and report result
 ```
 
-**Entry-point note:** `README.md`, `docs/ATLAS_STATE.md`, and `docs/ROADMAP.md` are the canonical hierarchy. `ATLAS_CORE.md` is supporting/reference material and should be read after `ATLAS_STATE.md` when relevant.
+**Entry-point note:** `README.md` is the public entry point. The authoritative hierarchy is defined in `docs/ATLAS_STATE.md` §0 (repository state → `ATLAS_STATE.md` → `ROADMAP.md` → `ATLAS_CORE.md` → `ATLAS_VISION.md` → specifications → `README.md` → historical record). `ATLAS_CORE.md` is Level 3 and should be read after `ATLAS_STATE.md` when deeper principles are needed.
 
 > `ATLAS_MASTER_CONTEXT.md` is preserved as historical reference and is no longer the primary AI entry point.
 

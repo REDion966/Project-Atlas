@@ -27,9 +27,11 @@ human ownership and oversight.
 
 ## Current Status
 
-Atlas is in the **Capability Track Era — Atlas Core COMPLETE**. All four core
-capability tracks (A–D) are implemented; Track D (Advanced Reasoning) is
-**released as `v0.20`**. Track A's research coordinator (Phase 21) and Phase 22
+Atlas is in the **Post-Roadmap Operational Era — Atlas Core COMPLETE** (this
+supersedes the earlier Capability Track Era; see `docs/ATLAS_STATE.md` §2 and
+§31). All four core capability tracks (A–D) are implemented; Track D (Advanced
+Reasoning) is **released as `v0.20`**. Track A's research coordinator (Phase 21)
+and Phase 22
 (Toolchain Execution & Learned-Skill Progression: CONDITIONAL/PARALLEL
 execution + learned-skill authoring/promotion + integration) are implemented
 and bundled, and the post-core improvements (F1–F8) and two hardening fixes are
@@ -45,18 +47,14 @@ artifacts/patches rather than autonomously applied. **Autonomous code mutation
 remains disabled.**
 
 **Phase C — evidence-driven evolution (C0 → C9):** the frozen roadmap reached
-its established evidence boundary. C0–C7 are COMPLETE (notable deliveries:
-deterministic investigation synthesis; repository impact analysis with
-conversational exposure; the canonical capability model; validated knowledge
-retrieval; bounded reference/context resolution). **C8 is CLOSED — no
-evidence-backed gap. C9 readiness is COMPLETE — no evidence-backed gap.
-C5.2 was NOT AUTHORIZED** (never scoped or implemented). Future development
-is evidence-driven: new work must originate from validated real-world
-capability gaps, not speculative roadmap expansion. No C10 exists or is
-planned.
+its established evidence boundary. **C8 is CLOSED — no evidence-backed gap.
+C9 readiness is COMPLETE — no evidence-backed gap. C5.2 was NOT AUTHORIZED.**
+No C10 exists or is planned. Current status and deliveries are owned by
+`docs/ATLAS_STATE.md` §31; authorized forward direction by `docs/ROADMAP.md`.
 
-**Latest verified test run:** full suite **5,945 passed, 0 failed, 0 errors,
-2 skipped** (pytest exit 0).
+**Latest verified test run:** full suite **5,945 test items executed: 5,876 test
+cases passed (plus 67 subtests passed), 0 failed, 0 errors, 2 skipped** (pytest
+exit 0).
 
 **Current schema version:** `11`.
 
@@ -176,16 +174,23 @@ docs/                 Documentation
 
 ## Documentation Hierarchy
 
-- **`README.md`** — public entry point (this file)
-- **`docs/ATLAS_STATE.md`** — authoritative current technical state
-- **`docs/ROADMAP.md`** — authoritative forward direction
-- **`CHANGELOG.md`** — release notes (active since v0.20.0)
-- **`docs/archive/`** — historical documents (reference only)
-- **Git history** — historical chronology and implementation record
+The single authority model is defined in `docs/ATLAS_STATE.md` §0. In short:
 
-> **Rule:** Future AI agents MUST NOT treat archived documents as current
-> architecture. When a major milestone completes: update `ATLAS_STATE.md`,
-> then `ROADMAP.md`, then `README.md` if the public status changed.
+1. **`docs/ATLAS_STATE.md`** — authoritative current state
+2. **`docs/ROADMAP.md`** — authoritative future direction
+3. **`docs/ATLAS_CORE.md`** — permanent architectural principles
+4. **`docs/ATLAS_VISION.md`** — identity and purpose
+5. **`docs/DEVELOPMENT_WORKFLOW.md`** — development process
+6. **`CHANGELOG.md`**, **`docs/archive/`**, evidence reports — historical record
+   (reference only)
+
+This `README.md` is a public entry point, not an authority; it must not be read
+as a second source of truth.
+
+> **Rule:** Future AI agents MUST NOT treat archived documents or evidence
+> reports as current architecture. When a major milestone completes: update
+> `ATLAS_STATE.md`, then `ROADMAP.md`, then `README.md` if the public status
+> changed.
 
 ## Roadmap (summary)
 
@@ -196,9 +201,10 @@ docs/                 Documentation
   cleanup), the Stage A1→H guided self-improvement thread, and the Track C
   post-core follow-ups (Persistent Learning, deterministic semantic recall,
   forgetting-policy operationalization) are complete.
-- **CURRENT:** Post-core development under the governed self-improvement
-  model. `SELF_CONFIG`/`INFORMATION` are the enabled governed scopes;
-  `CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remain locked.
+- **CURRENT:** Post-roadmap operational state — governed, evidence-driven
+  self-improvement. `SELF_CONFIG`/`INFORMATION` are the enabled governed
+  scopes; `CODE_ARTIFACT`/`SANDBOXED`/`AUTONOMOUS` remain locked (see
+  `docs/ATLAS_STATE.md` §31).
 - **DEFERRED:** Episodic-context surfacing (pending a RuntimeCoordinator
   review).
 - **NEXT:** No implementation NEXT is currently defined; any future work

@@ -7,7 +7,14 @@ No commit. Sole new artifact: this file.
 
 ## 1. STATUS
 
-**C9 NOT YET JUSTIFIED — NO EVIDENCE-BACKED GAP**
+> **Historical wording — stage: C9 readiness investigation.** The verdict below
+> was correct at the readiness stage. **Current reconciled outcome
+> (chronology note, not a reinterpretation): C9 — READINESS COMPLETE —
+> NO EVIDENCE-BACKED GAP.** No additional C9 milestone was authorized and no
+> C10 exists or is planned. See `docs/ATLAS_STATE.md` §31.
+
+**C9 NOT YET JUSTIFIED — NO EVIDENCE-BACKED GAP** *(readiness-stage verdict;
+reconciled as "READINESS COMPLETE — NO EVIDENCE-BACKED GAP" above)*
 
 The strongest defensible meaning of "C9 — Continuous Atlas Evolution" is already
 implemented, wired, and verified in production as a bounded, deterministic, tick-driven,
@@ -425,6 +432,9 @@ full suite green at the reference baseline.
 ## 19. FINAL VERDICT
 
 **C9 NOT YET JUSTIFIED — NO EVIDENCE-BACKED GAP**
+*(readiness-stage verdict, preserved as recorded; current reconciled outcome:
+**C9 — READINESS COMPLETE — NO EVIDENCE-BACKED GAP** — see §1 and
+`docs/ATLAS_STATE.md` §31)*
 
 "Continuous Atlas Evolution" is not a missing capability: it is the existing
 `EvolutionScheduler`-driven loop — continuous, deterministic, evidence-gated, and

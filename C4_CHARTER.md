@@ -1,7 +1,11 @@
 # PROJECT ATLAS — C4 CHARTER (AMENDED) + C4.2 AUTHORITATIVE SCOPE
 
 Milestone: C4 — Evidence-Driven Capability Evolution (Phase C)
-Status: Charter amendment recorded; C4.2 scope defined (NOT implemented)
+Status at scope-definition time: Charter amendment recorded; C4.2 scope defined (NOT YET implemented)
+Current status: C4.2 was subsequently implemented and verified (commit `9e8f60a`,
+"C4.2: add deterministic repository impact analysis"); C4.2 is COMPLETE. The
+scope-definition-time status above records the historical position when this
+charter was written and is not the current status.
 Provenance: derived from C4.1 evidence in `C4_1_CAPABILITY_GAP_EVIDENCE.md`
 
 > This artifact records the narrowly-justified C4 scope amendment and the

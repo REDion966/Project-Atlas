@@ -419,13 +419,13 @@ reference only.
 
 **Status: Strategic Direction / Not an Implementation Roadmap**
 
-Authority hierarchy:
+This document is **strategic guidance**. It does not define a document
+hierarchy and does not override the Project Atlas authority model
+(`docs/ATLAS_STATE.md` §0):
 
-1. **`README.md`** — public entry point
-2. **`docs/ATLAS_STATE.md`** — authoritative current state
-3. **`docs/ROADMAP.md`** — authoritative approved forward direction
-4. **`docs/ATLAS_CORE.md`** and **this document** — supporting/reference
-   material
+- `docs/ATLAS_STATE.md` owns **current state**.
+- `docs/ROADMAP.md` owns **authorized direction**.
+- `docs/ATLAS_CORE.md` owns **permanent architectural principles**.
 
 Any future implementation must first be **validated against the actual
 repository** and then **formally approved through the roadmap**

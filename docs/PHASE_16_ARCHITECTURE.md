@@ -5,15 +5,21 @@
 
 > This document is the historical design/reference specification for the Phase 16 governed-autonomy framework. The current implementation status is the authoritative source maintained in `docs/ATLAS_STATE.md` (see §11 Governance / Evolution Framework Boundaries); this document is not a current implementation instruction.
 
-- [x] Pre-flight checks (status, HEAD, doc tree)
-- [x] Phase 3A: Archive moves (19)
-- [x] Phase 3B: Historical banners on TRACK_A/B/C/D
-- [x] Phase 3C: Current-document fixes (ATLAS_STATE, ATLAS_CORE, PHASE_16)
-- [ ] Phase 3D: Deletes (11 files)
-- [ ] Phase 3E: Empty directory cleanup
-- [ ] Phase 3F: Reference integrity search + fixes
-- [ ] Phase 3G/H: Source protection + validation
-- [ ] Phase 3I: Final report (no commit)
+> ⚠️ **NO PENDING WORK ITEMS.** The documentation-reorganization checklist that
+> previously appeared here is **closed and void**. It is summarized below for
+> historical record only. **Do not execute it.** In particular, it must not be
+> read as authorization to delete repository files.
+>
+> Historical checklist (COMPLETED / superseded — no outstanding action):
+>
+> - Pre-flight checks (status, HEAD, doc tree) — done
+> - Archive moves — done
+> - Historical banners on TRACK_A/B/C/D — done
+> - Current-document fixes (ATLAS_STATE, ATLAS_CORE, PHASE_16) — done
+> - The remaining items from that plan (file deletions, empty-directory
+>   cleanup, reference-integrity fixes, final report) are **NOT authorized by
+>   this document**. Any structural reduction is a separately authorized
+>   documentation stage and must not be inferred from this file.
 
 
 ---
