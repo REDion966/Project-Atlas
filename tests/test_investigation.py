@@ -299,6 +299,53 @@ class TestP16_5GeneralInvestigation:
         assert before == after, "Investigation mutated the filesystem"
 
 
+class TestImplementationReferenceDiscovery:
+    """Regression — investigation implementation-reference path defect.
+
+    ``_inspect_implementation`` previously prefixed the already
+    repository-relative directory with ``atlas/`` again, searching
+    ``atlas/atlas/...`` and silently returning no implementation-reference
+    evidence. The search must use the discovered repository-relative
+    directory exactly as derived from the module graph.
+    """
+
+    @staticmethod
+    def _service() -> InvestigationService:
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        return InvestigationService(str(root))
+
+    def test_reference_evidence_not_silently_empty(self):
+        service = self._service()
+        scope = service._discover_subsystem(("memory",))
+        findings, files = service._inspect_implementation(scope, ("memory",))
+        reference_findings = [f for f in findings if f.category == "reference"]
+        assert reference_findings, (
+            "Implementation-reference search returned no evidence for a real "
+            "repository-relative directory"
+        )
+        assert files, "Reference search surfaced no implementation files"
+
+    def test_reference_locations_are_repository_relative(self):
+        service = self._service()
+        report = service.investigate("Investigate the memory architecture")
+        reference_findings = [
+            f for f in report.findings if f.category == "reference"
+        ]
+        assert reference_findings, (
+            "Memory investigation produced no implementation-reference evidence"
+        )
+        for finding in reference_findings:
+            assert not finding.location.startswith("atlas/atlas/"), (
+                f"Malformed double-prefixed location: {finding.location}"
+            )
+            assert finding.location.startswith("atlas/"), (
+                f"Expected a repository-relative location: {finding.location}"
+            )
+        assert report.modification_status == "NONE"
+
+
 class TestP17_InvestigationProposalGenerator:
     """P17 — Investigation → Planning bridge tests."""
 

@@ -364,7 +364,7 @@ class InvestigationService:
                     continue
                 searched.add(key)
                 matches = self._grep(
-                    concept, directory=f"atlas/{directory}", max_results=3
+                    concept, directory=directory, max_results=3
                 )
                 if matches:
                     evidence = matches[0] if matches else ""
@@ -376,7 +376,7 @@ class InvestigationService:
                                 f"'{concept}' in {directory}/"
                             ),
                             evidence=evidence,
-                            location=f"atlas/{directory}/",
+                            location=f"{directory}/",
                         )
                     )
                     files.extend(matches[:_MAX_FILES_PER_MODULE])
