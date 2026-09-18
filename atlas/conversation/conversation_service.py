@@ -48,6 +48,9 @@ if TYPE_CHECKING:
     from atlas.session.context import SessionContext
     from atlas.session.models import Session
 
+#: Bound applied to the recorded pending clarification question (L6).
+_MAX_PENDING_QUESTION_CHARS: int = 400
+
 
 class ApprovalManagerProtocol(Protocol):
     """Interface for the approval manager injected by the kernel.
@@ -1338,20 +1341,45 @@ class ConversationService:
         # Never swallow a typed, non-clarification request silently.
         return self._orchestration_clarification_message(spec)
 
-    @staticmethod
-    def _orchestration_clarification_message(spec: TaskSpec) -> Message:
+    def _record_pending_question(self, questions: tuple[str, ...]) -> None:
+        """Record the clarification question Atlas is waiting on (L6).
+
+        A deterministic clarification is Atlas surfacing uncertainty. The
+        outstanding question is preserved in the existing
+        ``ConversationState.pending_question`` field ("Question Atlas is
+        currently waiting for an answer to") so that uncertainty does not
+        vanish with the reply. The value is bounded and derived only from the
+        questions actually asked; nothing is guessed, no answer is invented,
+        and no authority is created.
+        """
+        if self._state_manager is None:
+            return
+        text = "; ".join(
+            question.strip()
+            for question in questions
+            if isinstance(question, str) and question.strip()
+        )
+        if not text:
+            return
+        if len(text) > _MAX_PENDING_QUESTION_CHARS:
+            text = text[:_MAX_PENDING_QUESTION_CHARS].rstrip() + "..."
+        self._state_manager.update(pending_question=text)
+
+    def _orchestration_clarification_message(self, spec: TaskSpec) -> Message:
         """Bounded clarification for orchestrated ACTION/INFORMATION requests."""
         lines = [
             "I need a bit more detail before I can run this.",
         ]
         questions = getattr(spec.ambiguity, "clarification_questions", ()) or ()
-        for question in tuple(questions)[:8]:
-            lines.append(f"- {question}")
-        if len(lines) == 1:
+        asked = tuple(questions)[:8]
+        if not asked:
             # Fall back to a deterministic bounded rephrase of the ambiguous
             # slot (the intent is bounded; ambiguity is bounded; together
             # this is still deterministic).
-            lines.append("- What outcome or detail would tell me this is done?")
+            asked = ("What outcome or detail would tell me this is done?",)
+        for question in asked:
+            lines.append(f"- {question}")
+        self._record_pending_question(asked)
         return Message(role="assistant", content="\n".join(lines))
 
     def _maybe_handle_development_request(
@@ -1405,16 +1433,17 @@ class ConversationService:
                 out[key] = value
         return out
 
-    @staticmethod
-    def _clarification_message(spec: TaskSpec) -> Message:
+    def _clarification_message(self, spec: TaskSpec) -> Message:
         """Build a bounded clarification response from the TaskSpec."""
         lines = [
             "I need a bit more detail before I can prepare this as a governed "
             "development request."
         ]
         questions = getattr(spec.ambiguity, "clarification_questions", ()) or ()
-        for question in tuple(questions)[:8]:
+        asked = tuple(questions)[:8]
+        for question in asked:
             lines.append(f"- {question}")
+        self._record_pending_question(asked)
         return Message(role="assistant", content="\n".join(lines))
 
     def _maybe_handle_development_need_confirmation(
