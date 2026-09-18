@@ -30,6 +30,7 @@ from atlas.conversation.reference_resolution import (
 from atlas.conversation.repository_impact import looks_like_repository_impact_request
 from atlas.conversation.task_intake import TaskIntake
 from atlas.conversation.turn_meaning import build_turn_meaning
+from atlas.knowledge.knowledge_manager import KnowledgeManager
 from atlas.tools.models import Tool
 from atlas.tools.registry import ToolRegistry
 
@@ -50,6 +51,44 @@ def _investigation_service():
         MagicMock(),
         task_intake=TaskIntake(),
         investigation_service=InvestigationService(),
+    )
+
+
+class _UnavailableAI:
+    """Deterministic stand-in for an unavailable model provider (no network)."""
+
+    model = "unavailable"
+    provider = "none"
+
+    def chat(self, *args, **kwargs):
+        raise RuntimeError("provider unavailable")
+
+    def stream(self, *args, **kwargs):
+        raise RuntimeError("provider unavailable")
+
+
+def _knowledge_manager():
+    manager = KnowledgeManager()
+    manager.remember(
+        title="Rollout runbook",
+        content="The deployment process uses blue green rollouts.",
+        source="runbook",
+    )
+    manager.remember(
+        title="Scheduling",
+        content="Deployment scheduling is handled by the release bot.",
+        source="ops",
+    )
+    return manager
+
+
+def _fallback_service(knowledge_manager=None, tool_registry=None):
+    return ConversationService(
+        _UnavailableAI(),
+        task_intake=TaskIntake(),
+        fallback_resolver=DeterministicFallbackResolver(
+            knowledge_manager=knowledge_manager, tool_registry=tool_registry
+        ),
     )
 
 
@@ -455,6 +494,123 @@ class TestInvestigationTargetWhitespace(unittest.TestCase):
 
     def test_context_bounds_unchanged(self):
         self.assertEqual((MAX_CONTEXT_TURNS, MAX_CONTEXT_CHARS), (10, 500))
+
+
+class TestFallbackKnowledgeQueryWhitespace(unittest.TestCase):
+    """N6 — fallback knowledge-query matching is whitespace-equivalent."""
+
+    CANONICAL = "The deployment process uses blue green rollouts"
+
+    @staticmethod
+    def _variants(phrase):
+        return (
+            ("double_space", phrase.replace(" ", "  ")),
+            ("tab", phrase.replace(" ", "\t")),
+            ("newline", phrase.replace(" ", "\n")),
+            ("crlf", phrase.replace(" ", "\r\n")),
+            ("mixed", phrase.replace(" ", " \t\n ")),
+            ("nbsp", phrase.replace(" ", "\u00a0")),
+            ("em_space", phrase.replace(" ", "\u2003")),
+        )
+
+    def setUp(self):
+        self.resolver = DeterministicFallbackResolver(
+            knowledge_manager=_knowledge_manager()
+        )
+
+    def _resolve(self, text):
+        message = self.resolver.resolve(text)
+        return message.metadata["fallback_type"], message.content
+
+    def test_whitespace_variants_match_canonical_result(self):
+        expected = self._resolve(self.CANONICAL)
+        self.assertEqual(expected[0], "knowledge")
+        self.assertIn("blue green rollouts", expected[1])
+        for name, variant in self._variants(self.CANONICAL):
+            with self.subTest(variant=name):
+                self.assertEqual(self._resolve(variant), expected)
+
+    def test_leading_and_trailing_whitespace_do_not_change_result(self):
+        expected = self._resolve(self.CANONICAL)
+        for variant in (
+            f"  {self.CANONICAL}",
+            f"{self.CANONICAL}  ",
+            f"\t {self.CANONICAL}\n ",
+        ):
+            with self.subTest(variant=repr(variant)):
+                self.assertEqual(self._resolve(variant), expected)
+
+    def test_irregular_variants_return_the_single_canonical_entry(self):
+        # Before N6 the irregular form missed the whole-text strategy and fell
+        # through to the token strategies, returning an extra entry.
+        expected_content = self._resolve(self.CANONICAL)[1]
+        for name, variant in self._variants(self.CANONICAL):
+            with self.subTest(variant=name):
+                self.assertEqual(self._resolve(variant)[1], expected_content)
+
+    def test_returned_entry_content_is_unchanged(self):
+        _, content = self._resolve(self.CANONICAL)
+        self.assertIn("### Rollout runbook", content)
+        self.assertIn("The deployment process uses blue green rollouts.", content)
+        self.assertIn("- Source: runbook", content)
+
+    def test_tool_keyword_fallback_unchanged(self):
+        registry = ToolRegistry()
+        registry.register(
+            Tool(name="code_inspector", description="Inspect code files.", category="code")
+        )
+        resolver = DeterministicFallbackResolver(
+            knowledge_manager=_knowledge_manager(), tool_registry=registry
+        )
+        for text in ("what can you do", "what  can  you  do", "what\tcan\tyou\tdo"):
+            message = resolver.resolve(text)
+            self.assertEqual(message.metadata["fallback_type"], "tool_guidance", text)
+            self.assertIn("code_inspector", message.content, text)
+
+    def test_degraded_notice_unchanged(self):
+        for text in ("hello there comptroller", "hello  there  comptroller"):
+            message = self.resolver.resolve(text)
+            self.assertEqual(message.metadata["fallback_type"], "degraded_notice", text)
+            self.assertIn("deterministic-first degraded mode", message.content, text)
+
+    def test_unsupported_paraphrase_still_degrades(self):
+        for text in ("What happened yesterday?", "blorptastic quux"):
+            self.assertEqual(
+                self.resolver.resolve(text).metadata["fallback_type"],
+                "degraded_notice",
+                text,
+            )
+
+    def test_shared_rule_is_load_bearing(self):
+        """The normalization itself is what makes the two forms converge."""
+        variant = self._variants(self.CANONICAL)[0][1]
+        spec = TaskIntake().intake(variant)
+        canonical = self.resolver._search_knowledge(self.CANONICAL, spec)
+        normalized = self.resolver._search_knowledge(collapse_whitespace(variant), spec)
+        unnormalized = self.resolver._search_knowledge(variant, spec)
+
+        def titles(entries):
+            return [entry.title for entry in entries]
+
+        self.assertEqual(titles(canonical), ["Rollout runbook"])
+        self.assertEqual(titles(normalized), titles(canonical))
+        self.assertNotEqual(titles(unnormalized), titles(normalized))
+
+    def test_send_and_stream_converge_through_conversation_service(self):
+        variant = self._variants(self.CANONICAL)[0][1]
+
+        canonical_response = _fallback_service(_knowledge_manager()).send(self.CANONICAL)
+        variant_response = _fallback_service(_knowledge_manager()).send(variant)
+
+        self.assertEqual(canonical_response.metadata["fallback_type"], "knowledge")
+        self.assertEqual(
+            canonical_response.metadata["fallback_type"],
+            variant_response.metadata["fallback_type"],
+        )
+        self.assertEqual(canonical_response.content, variant_response.content)
+
+        chunks = list(_fallback_service(_knowledge_manager()).stream(variant))
+        self.assertEqual("".join(chunks), variant_response.content)
 
 
 if __name__ == "__main__":

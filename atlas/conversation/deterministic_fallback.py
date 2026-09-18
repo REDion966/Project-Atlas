@@ -118,8 +118,13 @@ class DeterministicFallbackResolver:
                 return tool_msg, "tool_guidance"
 
         # 2. Check for matching knowledge in KnowledgeManager
+        # N6 — the whole-text matching form (strategy A) is surface-normalized
+        # with the shared ``collapse_whitespace`` rule so whitespace-equivalent
+        # inputs select the same knowledge result set. ``clean_text`` itself is
+        # unchanged and still used for the guard/notice below; canonical input
+        # normalizes to itself, and entry content is never rewritten.
         if self._knowledge_manager is not None and clean_text:
-            entries = self._search_knowledge(clean_text, spec)
+            entries = self._search_knowledge(collapse_whitespace(clean_text), spec)
             if entries:
                 return self._format_knowledge_response(entries), "knowledge"
 
