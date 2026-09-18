@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from atlas.conversation.normalization import collapse_whitespace
+
 # ---------------------------------------------------------------------------
 # Bounded recognition vocabulary (deterministic, explicit).
 # ---------------------------------------------------------------------------
@@ -125,7 +127,7 @@ def looks_like_repository_impact_request(text: str) -> bool:
     """
     if not isinstance(text, str) or not text:
         return False
-    lowered = text.lower()
+    lowered = collapse_whitespace(text).lower()
     if not any(cue in lowered for cue in IMPACT_CUES):
         return False
     return bool(extract_target_candidates(text))

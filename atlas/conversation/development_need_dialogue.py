@@ -48,6 +48,7 @@ from atlas.conversation.development_need_detector import (
     DetectedDevelopmentNeed,
 )
 from atlas.conversation.message import Message
+from atlas.conversation.normalization import collapse_whitespace
 
 # ---------------------------------------------------------------------------
 # Confirmation lexicon (bounded, explicit, deterministic).
@@ -195,7 +196,7 @@ class DevelopmentNeedDialogue:
         if pending_need is None:
             return ConfirmationStatus.NO_PENDING_CONTEXT
 
-        normalized = reply.strip().lower()
+        normalized = collapse_whitespace(reply).lower()
         if not normalized:
             return ConfirmationStatus.AMBIGUOUS
 

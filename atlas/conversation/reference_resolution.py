@@ -386,7 +386,7 @@ class ConversationReferenceResolver:
                 matches = tuple(
                     subject
                     for subject in subjects
-                    if _phrase_pattern(phrase).search(subject.lower())
+                    if _phrase_pattern(phrase).search(collapse_whitespace(subject).lower())
                 )
                 return self._context_result(query, matches, f"the {phrase}")
 

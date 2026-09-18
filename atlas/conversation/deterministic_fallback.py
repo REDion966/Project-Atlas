@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from atlas.conversation.message import Message
+from atlas.conversation.normalization import collapse_whitespace
 
 if TYPE_CHECKING:
     from atlas.conversation.task_intake import TaskSpec
@@ -107,7 +108,7 @@ class DeterministicFallbackResolver:
         error_context: str | None = None,
     ) -> tuple[str, str]:
         clean_text = (text or "").strip()
-        lowered = clean_text.lower()
+        lowered = collapse_whitespace(text).lower()
 
         # 1. Check for tool/capability queries
         is_tool_query = any(keyword in lowered for keyword in _TOOL_QUERY_KEYWORDS)
