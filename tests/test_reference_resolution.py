@@ -19,6 +19,14 @@ from atlas.conversation.reference_resolution import (
     ReferenceResolutionResult,
     has_bounded_reference,
 )
+from atlas.conversation.conversation_context import (
+    MAX_CONTEXT_TURNS,
+    build_conversation_context,
+)
+from atlas.conversation.conversation_service import ConversationService
+from atlas.conversation.investigation import InvestigationService
+from atlas.conversation.message import Message
+from atlas.conversation.task_intake import TaskIntake
 
 
 @pytest.fixture
@@ -384,3 +392,248 @@ class TestBoundedReferenceGuard:
     )
     def test_single_word_and_false_positives_not_detected(self, text):
         assert has_bounded_reference(text) is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — bounded contextual reference resolution
+# ---------------------------------------------------------------------------
+
+_INVESTIGATION = "Investigate the conversation system."
+
+
+def _turn(role: str, content: str) -> Message:
+    return Message(role=role, content=content)
+
+
+def _context(*user_turns: str):
+    messages: list[Message] = []
+    for text in user_turns:
+        messages.append(_turn("user", text))
+        messages.append(_turn("assistant", "(response)"))
+    return build_conversation_context(messages)
+
+
+class _FailingAI:
+    def chat(self, prompt, routing_context=None):
+        raise RuntimeError("No AI available")
+
+    def stream_chat(self, prompt, routing_context=None):
+        def _g():
+            raise RuntimeError("No AI available")
+            yield ""  # pragma: no cover
+
+        return _g()
+
+
+class TestContextualReferenceResolution:
+    def test_explicit_phrase_unique_candidate_resolved(self, resolver):
+        context = _context(_INVESTIGATION)
+        state = ConversationState(current_investigation=_INVESTIGATION)
+        result = resolver.resolve_contextual(
+            "What about the conversation system?", context, state
+        )
+        assert result.status == ReferenceResolutionStatus.RESOLVED
+        assert result.resolved_field == "context_subject"
+        assert "conversation system" in result.resolved_value
+
+    def test_explicit_phrase_multiple_candidates_ambiguous(self, resolver):
+        context = _context(
+            _INVESTIGATION, "Investigate the conversation system cache."
+        )
+        result = resolver.resolve_contextual(
+            "Tell me about the conversation system.", context, ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.AMBIGUOUS
+        assert len(result.candidates) == 2
+
+    def test_explicit_phrase_no_candidate_unresolved(self, resolver):
+        result = resolver.resolve_contextual(
+            "Tell me about the capability handler.", _context(), ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_bare_it_unique_antecedent_resolved(self, resolver):
+        context = _context(_INVESTIGATION)
+        state = ConversationState(current_investigation=_INVESTIGATION)
+        result = resolver.resolve_contextual("Can you check it?", context, state)
+        assert result.status == ReferenceResolutionStatus.RESOLVED
+        assert "conversation system" in result.resolved_value
+
+    def test_bare_it_multiple_antecedents_ambiguous(self, resolver):
+        context = _context(_INVESTIGATION, "Investigate the capability handler.")
+        result = resolver.resolve_contextual(
+            "Can you check it?", context, ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.AMBIGUOUS
+        assert len(result.candidates) == 2
+
+    def test_bare_that_without_candidate_unresolved(self, resolver):
+        result = resolver.resolve_contextual(
+            "What about that?", _context(), ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_bare_this_without_candidate_unresolved(self, resolver):
+        result = resolver.resolve_contextual(
+            "Is this ready?", _context("hello there"), ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_bare_reference_not_resolved_from_non_subject_turn(self, resolver):
+        result = resolver.resolve_contextual(
+            "Can you check it?", _context("hello"), ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_subject_beyond_context_bound_not_used(self, resolver):
+        messages: list[Message] = [
+            _turn("user", _INVESTIGATION),
+            _turn("assistant", "ok"),
+        ]
+        messages.extend(_turn("user", f"filler {index}") for index in range(12))
+        context = build_conversation_context(messages)
+        assert len(context.recent_turns) == MAX_CONTEXT_TURNS
+        result = resolver.resolve_contextual(
+            "Look into that.", context, ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_resolver_does_not_mutate_context(self, resolver):
+        context = _context(_INVESTIGATION)
+        before = context.to_dict()
+        resolver.resolve_contextual("Look into that.", context, ConversationState())
+        assert context.to_dict() == before
+
+    def test_resolver_does_not_mutate_state_manager(self, resolver):
+        manager = ConversationStateManager()
+        manager.update(current_investigation=_INVESTIGATION)
+        state = manager.state
+        resolver.resolve_contextual("Look into that.", _context(_INVESTIGATION), state)
+        assert manager.state is state
+        assert manager.state.current_investigation == _INVESTIGATION
+
+    def test_resolver_does_not_execute_anything(self, resolver):
+        assert not hasattr(resolver, "execute")
+        result = resolver.resolve_contextual(
+            "Look into that.",
+            _context(_INVESTIGATION),
+            ConversationState(current_investigation=_INVESTIGATION),
+        )
+        assert isinstance(result, ReferenceResolutionResult)
+        assert not hasattr(result, "execute")
+
+    @pytest.mark.parametrize("text", [
+        "How is the quality of the output?",
+        "We voted against the rule.",
+        "Please summarise the repository structure.",
+    ])
+    def test_false_positives_unresolved(self, resolver, text):
+        result = resolver.resolve_contextual(
+            text, _context(text), ConversationState()
+        )
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_resolution_is_deterministic(self, resolver):
+        context = _context(_INVESTIGATION)
+        state = ConversationState(current_investigation=_INVESTIGATION)
+        first = resolver.resolve_contextual("Can you check it?", context, state)
+        second = resolver.resolve_contextual("Can you check it?", context, state)
+        assert first == second
+
+
+class TestContextualReferenceIntegration:
+    def _service(self, investigation: bool = False) -> ConversationService:
+        return ConversationService(
+            _FailingAI(),
+            task_intake=TaskIntake(),
+            investigation_service=InvestigationService() if investigation else None,
+        )
+
+    def test_scenario_a_unique_context_reference_attaches_evidence(self):
+        service = self._service()
+        service.state_manager.update(current_investigation=_INVESTIGATION)
+        spec = TaskIntake().intake("What about the conversation system?")
+        out_spec, response = service._apply_reference_resolution(
+            spec, "What about the conversation system?"
+        )
+        assert response is None
+        assert out_spec.context["resolved_reference"]["field"] == "context_subject"
+        assert "conversation system" in out_spec.context["resolved_reference"]["value"]
+
+    def test_scenario_b_ambiguous_context_reference_does_not_guess(self):
+        service = self._service()
+        service.state_manager.update(
+            current_investigation="Investigate the capability handler."
+        )
+        service._conversation.add_message(_turn("user", _INVESTIGATION))
+        service._conversation.add_message(_turn("assistant", "ok"))
+        service._conversation.add_message(
+            _turn("user", "Investigate the capability handler.")
+        )
+        service._conversation.add_message(_turn("assistant", "ok"))
+        spec = TaskIntake().intake("Look into that.")
+        out_spec, response = service._apply_reference_resolution(
+            spec, "Look into that."
+        )
+        assert out_spec is spec  # unchanged: no arbitrary choice
+        assert response is None
+
+    def test_scenario_c_no_context_is_unresolved(self):
+        service = self._service()
+        spec = TaskIntake().intake("Look into that.")
+        out_spec, response = service._apply_reference_resolution(
+            spec, "Look into that."
+        )
+        assert out_spec is spec
+        assert response is None
+
+    def test_scenario_d_governed_investigation_still_runs(self):
+        service = self._service(investigation=True)
+        response = service.send(_INVESTIGATION)
+        assert "Investigation" in response.content
+
+    def test_scenario_e_builtin_capability_unchanged(self):
+        from atlas.conversation.builtin_response import BuiltinResponseService
+
+        service = ConversationService(
+            _FailingAI(),
+            task_intake=TaskIntake(),
+            builtin_response=BuiltinResponseService(),
+        )
+        message = service.send("What can you currently do?")
+        assert message.metadata.get("builtin_intent") == "capabilities"
+
+    def test_resolution_does_not_invoke_handlers(self, monkeypatch):
+        service = self._service()
+        service.state_manager.update(current_investigation=_INVESTIGATION)
+        calls: list[int] = []
+        monkeypatch.setattr(
+            service, "_maybe_handle_investigation_request", lambda *a, **k: calls.append(1)
+        )
+        spec = TaskIntake().intake("What about the conversation system?")
+        service._apply_reference_resolution(
+            spec, "What about the conversation system?"
+        )
+        assert calls == []
+
+    def test_existing_lexicon_reference_unchanged(self):
+        service = self._service()
+        service.state_manager.update(current_investigation="memory architecture")
+        spec = TaskIntake().intake("Based on that investigation, what next?")
+        out_spec, response = service._apply_reference_resolution(
+            spec, "Based on that investigation, what next?"
+        )
+        assert response is None
+        assert out_spec.context["resolved_reference"] == {
+            "field": "current_investigation",
+            "value": "memory architecture",
+        }
+
+    def test_no_contextual_reference_spec_unchanged(self):
+        service = self._service()
+        spec = TaskIntake().intake("How is the quality of the output?")
+        out_spec, response = service._apply_reference_resolution(
+            spec, "How is the quality of the output?"
+        )
+        assert out_spec is spec
+        assert response is None

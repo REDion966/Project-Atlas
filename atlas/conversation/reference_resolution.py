@@ -25,9 +25,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from atlas.conversation.conversation_state import ConversationState
+
+if TYPE_CHECKING:
+    from atlas.conversation.conversation_context import ConversationContext
 
 
 #: Precompiled word-boundary patterns per reference phrase. Matching is
@@ -189,6 +192,91 @@ _REFERENCE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = 
 )
 
 
+# ---------------------------------------------------------------------------
+# Phase 4 — bounded contextual reference resolution.
+#
+# References resolve against the bounded ConversationContext (recent USER
+# turns) plus the structured ConversationState. Candidates are *investigation
+# subjects* only: an explicitly set ``state.current_investigation`` and recent
+# USER turns carrying an explicit investigation lead cue. Nothing else is a
+# candidate, so a bare "it"/"that"/"this" can never resolve merely because some
+# previous turn exists.
+#
+# Deterministic and fail-closed: exactly one distinct candidate -> RESOLVED;
+# more than one -> AMBIGUOUS; none -> UNRESOLVED. Never guesses.
+# ---------------------------------------------------------------------------
+
+#: Bounded lead cues that mark a prior USER turn as an investigation subject.
+_SUBJECT_LEAD_RE = re.compile(
+    r"\b(?:investigate|investigation|analyze|analyse|diagnose|inspect"
+    r"|examine|trace|debug)\b"
+)
+
+#: Bounded explicit contextual reference form: "the <phrase>" (1..6 words).
+_EXPLICIT_CONTEXT_RE = re.compile(
+    r"\bthe\s+([a-z0-9][a-z0-9_-]*(?:\s+[a-z0-9][a-z0-9_-]*){0,5})"
+)
+
+#: Bounded bare demonstrative/pronoun reference (one word, optionally followed
+#: by one generic noun). Never resolved on its own.
+_BARE_REFERENCE_RE = re.compile(
+    r"\b(?:it|that|this)"
+    r"(?:\s+(?:issue|problem|subject|topic|one|investigation|result|task|thing))?\b"
+)
+
+#: Field label reported for a context-derived referent.
+_CONTEXT_SUBJECT_FIELD = "context_subject"
+
+#: Maximum distinct contextual subject candidates considered.
+_MAX_CONTEXT_SUBJECTS = 8
+
+
+def _subject_key(text: str) -> str:
+    """Normalized comparison key (case/punctuation/whitespace insensitive)."""
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _context_subject_candidates(
+    context: Any,
+    state: ConversationState | None,
+    query: str,
+) -> tuple[str, ...]:
+    """Return distinct bounded investigation-subject candidate texts.
+
+    Sources: ``state.current_investigation`` first, then recent USER turns of
+    the bounded ``context`` that carry an investigation lead cue. The current
+    turn (whose text matches ``query``) is excluded, so a turn can never
+    resolve to itself. Deterministic order; bounded count.
+    """
+    query_key = _subject_key(query)
+    candidates: list[str] = []
+
+    def _add(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text and _subject_key(text) != query_key:
+                candidates.append(text)
+
+    if state is not None:
+        _add(getattr(state, "current_investigation", None))
+
+    for turn in getattr(context, "recent_turns", ()) or ():
+        if getattr(turn, "role", "") != "user":
+            continue
+        content = getattr(turn, "content", "")
+        if isinstance(content, str) and _SUBJECT_LEAD_RE.search(content.lower()):
+            _add(content)
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = _subject_key(candidate)
+        if key and key not in seen:
+            seen.add(key)
+            ordered.append(candidate)
+    return tuple(ordered[:_MAX_CONTEXT_SUBJECTS])
+
+
 class ConversationReferenceResolver:
     """Deterministic resolver of conversational references against state.
 
@@ -258,4 +346,85 @@ class ConversationReferenceResolver:
                 f"Multiple plausible {category} referents: "
                 f"{', '.join(candidates)}. Clarification required."
             ),
+        )
+
+    def resolve_contextual(
+        self,
+        query: str,
+        context: ConversationContext | None,
+        state: ConversationState | None = None,
+    ) -> ReferenceResolutionResult:
+        """Resolve a bounded contextual reference against recent context.
+
+        Recognizes only two bounded forms:
+
+          * explicit ``the <phrase>`` references, matched by word-boundary
+            containment against the candidate subjects;
+          * bare demonstrative/pronoun references (``it``/``that``/``this``,
+            optionally with one generic noun), matched only against the
+            candidate subjects.
+
+        Exactly one matching candidate -> RESOLVED. Multiple -> AMBIGUOUS.
+        None -> UNRESOLVED. The resolver never guesses, never mutates the
+        supplied context/state, and never executes anything.
+        """
+        normalized = (query or "").strip().lower()
+        if not normalized:
+            return ReferenceResolutionResult(
+                status=ReferenceResolutionStatus.UNRESOLVED,
+                query=query,
+                reason="Empty contextual reference query.",
+            )
+
+        subjects = _context_subject_candidates(context, state, query)
+
+        explicit = _EXPLICIT_CONTEXT_RE.search(normalized)
+        if explicit is not None:
+            phrase = explicit.group(1).strip()
+            if phrase:
+                matches = tuple(
+                    subject
+                    for subject in subjects
+                    if _phrase_pattern(phrase).search(subject.lower())
+                )
+                return self._context_result(query, matches, f"the {phrase}")
+
+        if _BARE_REFERENCE_RE.search(normalized):
+            return self._context_result(query, subjects, normalized)
+
+        return ReferenceResolutionResult(
+            status=ReferenceResolutionStatus.UNRESOLVED,
+            query=query,
+            reason=f"Unrecognized contextual reference: {query!r}.",
+        )
+
+    @staticmethod
+    def _context_result(
+        query: str,
+        matches: tuple[str, ...],
+        label: str,
+    ) -> ReferenceResolutionResult:
+        """Build a fail-closed result for a tuple of candidate matches."""
+        if len(matches) == 1:
+            return ReferenceResolutionResult(
+                status=ReferenceResolutionStatus.RESOLVED,
+                query=query,
+                resolved_field=_CONTEXT_SUBJECT_FIELD,
+                resolved_value=matches[0],
+                reason=f"Unique contextual referent resolved for {label!r}.",
+            )
+        if len(matches) > 1:
+            return ReferenceResolutionResult(
+                status=ReferenceResolutionStatus.AMBIGUOUS,
+                query=query,
+                candidates=tuple(matches),
+                reason=(
+                    f"Multiple plausible contextual referents for {label!r}: "
+                    f"{', '.join(matches)}. Clarification required."
+                ),
+            )
+        return ReferenceResolutionResult(
+            status=ReferenceResolutionStatus.UNRESOLVED,
+            query=query,
+            reason=f"No active contextual referent found for {label!r}.",
         )

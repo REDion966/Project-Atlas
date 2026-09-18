@@ -1057,6 +1057,13 @@ class ConversationService:
           * UNRESOLVED / no bounded reference -> the spec is returned unchanged
             (fail closed; byte-for-byte current behavior).
 
+        Phase 4 adds a bounded *contextual* pass over the Phase 3
+        ``ConversationContext``: when no explicit lexicon reference resolves, a
+        unique context referent (``the <phrase>`` / bare ``it``/``that``/
+        ``this``) is attached as evidence. AMBIGUOUS/UNRESOLVED contextual
+        results leave routing byte-for-byte unchanged and never generate a
+        clarification message.
+
         It never authorizes, mutates, rewrites the user's message, invokes a
         handler directly, or runs a second routing pass.
         """
@@ -1065,36 +1072,57 @@ class ConversationService:
             has_bounded_reference,
         )
 
-        if not has_bounded_reference(text):
-            return spec, None
+        if has_bounded_reference(text):
+            result = self._reference_resolver.resolve(text, self._state_manager.state)
 
-        result = self._reference_resolver.resolve(text, self._state_manager.state)
+            if result.status is ReferenceResolutionStatus.AMBIGUOUS:
+                from dataclasses import replace as _replace
 
-        if result.status is ReferenceResolutionStatus.AMBIGUOUS:
-            from dataclasses import replace as _replace
+                clarified = _replace(
+                    spec,
+                    needs_clarification=True,
+                    ambiguity=_replace(
+                        spec.ambiguity,
+                        clarification_questions=(result.reason,),
+                    ),
+                )
+                return spec, self._orchestration_clarification_message(clarified)
 
-            clarified = _replace(
-                spec,
-                needs_clarification=True,
-                ambiguity=_replace(
-                    spec.ambiguity,
-                    clarification_questions=(result.reason,),
-                ),
+            if result.status is ReferenceResolutionStatus.RESOLVED:
+                return self._attach_resolved_reference(
+                    spec, result.resolved_field, result.resolved_value
+                ), None
+
+            # UNRESOLVED -> fall through to the bounded contextual resolver.
+
+        resolve_contextual = getattr(
+            self._reference_resolver, "resolve_contextual", None
+        )
+        if resolve_contextual is not None:
+            state = self._state_manager.state if self._state_manager is not None else None
+            contextual = resolve_contextual(
+                text, self._build_conversation_context(), state
             )
-            return spec, self._orchestration_clarification_message(clarified)
-
-        if result.status is ReferenceResolutionStatus.RESOLVED:
-            from dataclasses import replace as _replace
-
-            enriched = dict(spec.context) if isinstance(spec.context, dict) else {}
-            enriched["resolved_reference"] = {
-                "field": result.resolved_field,
-                "value": result.resolved_value,
-            }
-            return _replace(spec, context=enriched), None
+            if contextual.status is ReferenceResolutionStatus.RESOLVED:
+                return self._attach_resolved_reference(
+                    spec, contextual.resolved_field, contextual.resolved_value
+                ), None
 
         # UNRESOLVED -> fail closed; current routing is unchanged.
         return spec, None
+
+    @staticmethod
+    def _attach_resolved_reference(
+        spec: TaskSpec,
+        field: str,
+        value: Any,
+    ) -> TaskSpec:
+        """Return a copy of ``spec`` carrying the resolved reference evidence."""
+        from dataclasses import replace as _replace
+
+        enriched = dict(spec.context) if isinstance(spec.context, dict) else {}
+        enriched["resolved_reference"] = {"field": field, "value": value}
+        return _replace(spec, context=enriched)
 
     def set_experience_capture(self, accumulator) -> None:
         """Inject the ExperienceAccumulator used for orchestration capture."""
