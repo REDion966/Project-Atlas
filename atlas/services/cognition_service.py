@@ -96,6 +96,7 @@ class CognitionService(Service):
         memory: Any = None,
         metadata: Any = None,
         goal: str | None = None,
+        turn_meaning: Any = None,
     ) -> CognitionDecision:
         """
         Process user input through the cognitive runtime.
@@ -109,6 +110,12 @@ class CognitionService(Service):
         existing test behavior).
 
         When neither is available, returns a minimal decision.
+
+        ``turn_meaning`` is the optional L1 typed turn-meaning contract,
+        accepted across the conversation -> cognition boundary. L1 explicitly
+        does NOT consume its semantic content (that belongs to a later stage);
+        it is accepted here so the boundary contract can be proven to cross
+        intact without changing any cognition behaviour.
         """
         if not self.running:
             raise RuntimeError("Cognition service is not running.")

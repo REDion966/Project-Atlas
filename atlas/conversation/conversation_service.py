@@ -32,6 +32,7 @@ from atlas.conversation.development_outcome_reporter import (
 )
 from atlas.conversation.history import History
 from atlas.conversation.conversation_context import build_conversation_context
+from atlas.conversation.turn_meaning import TurnMeaning, build_turn_meaning
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
@@ -388,6 +389,16 @@ class ConversationService:
         state = self._state_manager.state if self._state_manager is not None else None
         return build_conversation_context(self._conversation.messages, state)
 
+    @staticmethod
+    def _build_turn_meaning(spec: TaskSpec, text: str) -> TurnMeaning:
+        """Build the L1 typed turn-meaning contract for the cognition boundary.
+
+        Shared construction point for ``send`` and ``stream``: an immutable,
+        role-typed, JSON-safe projection of existing turn meaning. It is
+        behaviour-neutral and is not consumed semantically in L1.
+        """
+        return build_turn_meaning(spec, text)
+
     def _builtin_after_failure(
         self,
         text: str,
@@ -641,10 +652,17 @@ class ConversationService:
                 else:
                     cognition_metadata["session"] = _session_meta
                     cognition_metadata["session_context"] = _session_meta
+            # L1 — typed turn-meaning contract at the cognition boundary. It
+            # rides a dedicated parameter; the legacy metadata payload above is
+            # untouched and stays backward-compatible.
+            cognition_kwargs: dict[str, Any] = {}
+            if spec is not None:
+                cognition_kwargs["turn_meaning"] = self._build_turn_meaning(spec, text)
             decision = self._cognition_api.process(
                 user_input=text,
                 goal=spec.goal_string() if spec is not None else text,
                 metadata=cognition_metadata,
+                **cognition_kwargs,
             )
 
             context.append(
@@ -899,10 +917,17 @@ class ConversationService:
                 else:
                     cognition_metadata["session"] = _session_meta
                     cognition_metadata["session_context"] = _session_meta
+            # L1 — typed turn-meaning contract at the cognition boundary. It
+            # rides a dedicated parameter; the legacy metadata payload above is
+            # untouched and stays backward-compatible.
+            cognition_kwargs: dict[str, Any] = {}
+            if spec is not None:
+                cognition_kwargs["turn_meaning"] = self._build_turn_meaning(spec, text)
             decision = self._cognition_api.process(
                 user_input=text,
                 goal=spec.goal_string() if spec is not None else text,
                 metadata=cognition_metadata,
+                **cognition_kwargs,
             )
 
             context.append(
