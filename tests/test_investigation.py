@@ -58,6 +58,37 @@ class TestInvestigationClassification:
         assert spec.task_type is TaskType.DEVELOPMENT_REQUEST
 
 
+class TestRecallVsInvestigationClassification:
+    """Phase 1 defect fix — explicit recall phrasing must not be classified as
+    a new investigation request, while genuine imperative investigation
+    requests are preserved."""
+
+    @pytest.mark.parametrize("text", [
+        "Do you remember our investigation?",
+        "What did we discover about the investigation system?",
+        "Can you remind me what we found?",
+        "What was the issue we found earlier?",
+    ])
+    def test_recall_phrasing_is_not_investigation(self, text):
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is not TaskType.INVESTIGATION_REQUEST
+
+    def test_recall_reaches_casual_path(self):
+        spec = TaskIntake().intake("Do you remember our investigation?")
+        assert spec.task_type in (TaskType.QUESTION, TaskType.CONVERSATION)
+
+    @pytest.mark.parametrize("text", [
+        "Investigate the conversation system.",
+        "Investigate why the capability handler fails.",
+        "Please investigate this problem.",
+        "analyze the F17 failures",
+        "trace the error to its source",
+    ])
+    def test_genuine_investigation_requests_preserved(self, text):
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST
+
+
 class TestNegationHandling:
     """Negation must prevent misclassification."""
 

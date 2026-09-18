@@ -73,7 +73,7 @@ _IDENTITY_RE = re.compile(
 )
 
 _CAPABILITIES_RE = re.compile(
-    r"\bcapabilit(y|ies)\b|list tools\b|tools do you have\b"
+    r"\bcapabilit(y|ies)\b|\bcapable\b|list tools\b|tools do you have\b"
     r"|what (tools|features) (do|can) you\b|show .*tools\b"
 )
 
@@ -263,13 +263,15 @@ class BuiltinResponseService:
             return BUILTIN_INTENT_COMMANDS
         if _HELP_RE.search(lowered):
             return BUILTIN_INTENT_HELP
+        # Capability queries precede identity: the identity predicate's
+        # "what are you" must not swallow "what are you capable of".
+        if _CAPABILITIES_RE.search(lowered):
+            return BUILTIN_INTENT_CAPABILITIES
         if _IDENTITY_RE.search(lowered):
             return BUILTIN_INTENT_IDENTITY
         detail = self._match_capability_detail(lowered)
         if detail is not None:
             return (BUILTIN_INTENT_CAPABILITY_DETAIL, detail)
-        if _CAPABILITIES_RE.search(lowered):
-            return BUILTIN_INTENT_CAPABILITIES
         if _STATUS_RE.search(lowered):
             return BUILTIN_INTENT_STATUS
         recall_query = self._match_recall(lowered)

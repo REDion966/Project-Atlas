@@ -148,6 +148,16 @@ _INVESTIGATION_LEAD_CUES: frozenset[str] = frozenset(
     }
 )
 
+#: Explicit conversational-recall phrasing. A request that asks Atlas to
+#: recall/remember an existing result is not a request for a NEW
+#: investigation, even when its target mentions an "investigation",
+#: "analysis", or "diagnosis".
+_RECALL_PHRASE_RE = re.compile(
+    r"\b(?:do you\s+)?(?:remember|recall)\b"
+    r"|\bremind me\b"
+    r"|\bwhat (?:did|have) we\b"
+)
+
 #: Explicit planning phrases that indicate the user wants to convert an
 #: investigation proposal into a development proposal.
 #: NOTE: Phrases containing "approval" are excluded because they conflict
@@ -974,7 +984,15 @@ class TaskIntake:
         investigation = _first_hit(
             lowered, _INVESTIGATION_CUES, word_boundary=True
         )
-        if investigation:
+        # Only an imperative investigation cue marks the requested operation.
+        # A recall/remembrance request targets an existing conversation result,
+        # so an investigation noun in its target must not hijack it.
+        recall_phrased = bool(
+            _RECALL_PHRASE_RE.search(lowered)
+        ) and not _first_hit(
+            lowered, _INVESTIGATION_LEAD_CUES, word_boundary=True
+        )
+        if investigation and not recall_phrased:
             return TaskType.INVESTIGATION_REQUEST
 
         # C4.2 — bounded repository impact-analysis exposure. Recognized only

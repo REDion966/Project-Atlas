@@ -166,6 +166,32 @@ class TestBuiltinIntentClassification(unittest.TestCase):
         clarified = replace(spec, needs_clarification=True)
         self.assertEqual(list(self.svc.respond_stream("Hello Atlas", spec=clarified)), [])
 
+    def test_capability_question_not_hijacked_by_identity(self):
+        for text in ("What are you capable of?", "What are you capable of doing?"):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "capabilities", text)
+
+    def test_identity_questions_still_identity(self):
+        for text in ("What are you?", "Who are you?", "Tell me about yourself."):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "identity", text)
+
+    def test_existing_capability_queries_unchanged(self):
+        for text in (
+            "What capabilities do you currently have?",
+            "What capabilities and tools do you have?",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "capabilities", text)
+
+    def test_recall_phrasing_with_investigation_noun(self):
+        msg = self.svc.respond("Do you remember our investigation?")
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg.metadata["builtin_intent"], "recall")
+
 
 # ---------------------------------------------------------------------------
 # ConversationService integration
