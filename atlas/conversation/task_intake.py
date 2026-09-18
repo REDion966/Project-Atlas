@@ -27,6 +27,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+from atlas.conversation.normalization import collapse_whitespace
 from atlas.conversation.repository_impact import (
     looks_like_repository_impact_request,
 )
@@ -802,7 +803,7 @@ class TaskIntake:
         if not isinstance(text, str):
             text = ""
         raw = text
-        normalized = re.sub(r"\s+", " ", text).strip()
+        normalized = collapse_whitespace(text)
         context = self._build_context(raw, history_length)
 
         model_fields: dict[str, Any] | None = None

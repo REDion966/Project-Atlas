@@ -28,6 +28,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
 from atlas.conversation.conversation_state import ConversationState
+from atlas.conversation.normalization import collapse_whitespace
 
 if TYPE_CHECKING:
     from atlas.conversation.conversation_context import ConversationContext
@@ -60,7 +61,7 @@ def has_bounded_reference(text: str) -> bool:
     """
     if not isinstance(text, str) or not text:
         return False
-    normalized = text.strip().lower()
+    normalized = collapse_whitespace(text).lower()
     if not normalized:
         return False
     for phrases, _fields, _category in _REFERENCE_PATTERNS:
@@ -297,7 +298,7 @@ class ConversationReferenceResolver:
         Returns:
             A structured :class:`ReferenceResolutionResult`.
         """
-        normalized = query.strip().lower()
+        normalized = collapse_whitespace(query).lower()
 
         # Find the first matching reference pattern.
         matched_fields: Optional[tuple[str, ...]] = None
@@ -368,7 +369,7 @@ class ConversationReferenceResolver:
         None -> UNRESOLVED. The resolver never guesses, never mutates the
         supplied context/state, and never executes anything.
         """
-        normalized = (query or "").strip().lower()
+        normalized = collapse_whitespace(query).lower()
         if not normalized:
             return ReferenceResolutionResult(
                 status=ReferenceResolutionStatus.UNRESOLVED,
