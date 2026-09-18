@@ -751,6 +751,17 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # C7 GAP-C31-02 (+ Phase 4) — bounded reference/context exposure on the
+        # streaming path, mirroring send(): same method, same ordering, same
+        # semantics. RESOLVED attaches structured evidence and routing
+        # continues; AMBIGUOUS yields the existing bounded clarification and
+        # stops; UNRESOLVED / non-reference turns are byte-for-byte unchanged.
+        if spec is not None:
+            spec, reference_response = self._apply_reference_resolution(spec, text)
+            if reference_response is not None:
+                self._conversation.add_message(reference_response)
+                yield reference_response.content
+                return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
