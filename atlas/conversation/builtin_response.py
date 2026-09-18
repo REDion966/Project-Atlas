@@ -565,6 +565,13 @@ class BuiltinResponseService:
         for content in reversed(prior_user):
             if _CONVERSATION_SUBJECT_LEAD_RE.search(content.lower()):
                 return content
+        # L5 — bounded last-resort fallback: the subject established explicitly
+        # in an earlier turn. Investigation subjects and lead-cue turns keep
+        # precedence, so existing recall behaviour is unchanged.
+        if state is not None:
+            established = getattr(state, "current_subject", None)
+            if isinstance(established, str) and established.strip():
+                return established.strip()
         return ""
 
     @staticmethod

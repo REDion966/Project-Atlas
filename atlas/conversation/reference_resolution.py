@@ -203,6 +203,12 @@ _REFERENCE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = 
 # candidate, so a bare "it"/"that"/"this" can never resolve merely because some
 # previous turn exists.
 #
+# L5 adds one bounded, lower-precedence candidate source: the subject
+# established explicitly in an earlier turn (``current_subject``, recorded
+# deterministically by L4 entity identification). It is consulted only when no
+# investigation-derived candidate exists, so it never overrides one and a bare
+# pronoun still cannot resolve from the mere existence of a previous turn.
+#
 # Deterministic and fail-closed: exactly one distinct candidate -> RESOLVED;
 # more than one -> AMBIGUOUS; none -> UNRESOLVED. Never guesses.
 # ---------------------------------------------------------------------------
@@ -227,6 +233,9 @@ _BARE_REFERENCE_RE = re.compile(
 
 #: Field label reported for a context-derived referent.
 _CONTEXT_SUBJECT_FIELD = "context_subject"
+
+#: Field label reported for the explicitly established subject fallback.
+_ESTABLISHED_SUBJECT_FIELD = "current_subject"
 
 #: Maximum distinct contextual subject candidates considered.
 _MAX_CONTEXT_SUBJECTS = 8
@@ -276,6 +285,29 @@ def _context_subject_candidates(
             seen.add(key)
             ordered.append(candidate)
     return tuple(ordered[:_MAX_CONTEXT_SUBJECTS])
+
+
+def _established_subject(
+    state: ConversationState | None,
+    query: str,
+) -> Optional[str]:
+    """Return the explicitly established subject, or ``None`` (L5).
+
+    Last-resort bounded source: the subject recorded deterministically in an
+    earlier turn (``ConversationState.current_subject``). It is consulted only
+    when no investigation-derived candidate exists, so it can never override
+    one, and it never resolves a turn to itself. Absent, blank, non-string, or
+    self-matching subjects return ``None`` — fail closed, never guess.
+    """
+    if state is None:
+        return None
+    subject = getattr(state, "current_subject", None)
+    if not isinstance(subject, str):
+        return None
+    text = subject.strip()
+    if not text or _subject_key(text) == _subject_key(query):
+        return None
+    return text
 
 
 class ConversationReferenceResolver:
@@ -368,6 +400,14 @@ class ConversationReferenceResolver:
         Exactly one matching candidate -> RESOLVED. Multiple -> AMBIGUOUS.
         None -> UNRESOLVED. The resolver never guesses, never mutates the
         supplied context/state, and never executes anything.
+
+        L5 bounded carry-forward: when no investigation-derived candidate
+        exists, the subject established explicitly in an earlier turn
+        (``ConversationState.current_subject``) is used as a single fallback
+        candidate, so a follow-up referring to an already-established subject
+        resolves deterministically. Investigation candidates always keep
+        precedence, and a single explicit subject is still exactly one
+        candidate — the fail-closed contract is unchanged.
         """
         normalized = collapse_whitespace(query).lower()
         if not normalized:
@@ -378,6 +418,12 @@ class ConversationReferenceResolver:
             )
 
         subjects = _context_subject_candidates(context, state, query)
+        referent_field = _CONTEXT_SUBJECT_FIELD
+        if not subjects:
+            established = _established_subject(state, query)
+            if established is not None:
+                subjects = (established,)
+                referent_field = _ESTABLISHED_SUBJECT_FIELD
 
         explicit = _EXPLICIT_CONTEXT_RE.search(normalized)
         if explicit is not None:
@@ -388,10 +434,12 @@ class ConversationReferenceResolver:
                     for subject in subjects
                     if _phrase_pattern(phrase).search(collapse_whitespace(subject).lower())
                 )
-                return self._context_result(query, matches, f"the {phrase}")
+                return self._context_result(
+                    query, matches, f"the {phrase}", referent_field
+                )
 
         if _BARE_REFERENCE_RE.search(normalized):
-            return self._context_result(query, subjects, normalized)
+            return self._context_result(query, subjects, normalized, referent_field)
 
         return ReferenceResolutionResult(
             status=ReferenceResolutionStatus.UNRESOLVED,
@@ -404,13 +452,14 @@ class ConversationReferenceResolver:
         query: str,
         matches: tuple[str, ...],
         label: str,
+        field: str = _CONTEXT_SUBJECT_FIELD,
     ) -> ReferenceResolutionResult:
         """Build a fail-closed result for a tuple of candidate matches."""
         if len(matches) == 1:
             return ReferenceResolutionResult(
                 status=ReferenceResolutionStatus.RESOLVED,
                 query=query,
-                resolved_field=_CONTEXT_SUBJECT_FIELD,
+                resolved_field=field,
                 resolved_value=matches[0],
                 reason=f"Unique contextual referent resolved for {label!r}.",
             )
