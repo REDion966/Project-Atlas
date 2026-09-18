@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from atlas.conversation.message import Message
+from atlas.conversation.normalization import collapse_whitespace
 
 # ---------------------------------------------------------------------------
 # Stoplist for concept extraction. These are too generic to be useful search
@@ -225,8 +226,12 @@ class InvestigationService:
         """Remove common investigation prefixes from the target text.
 
         Accepts either the raw user request or the processed spec goal/intent.
+
+        The matching form is surface-normalized (shared ``collapse_whitespace``
+        rule) so whitespace-equivalent requests clean identically. This is a
+        transient matching value only: raw conversation text is never replaced.
         """
-        cleaned = target.strip().rstrip(".")
+        cleaned = collapse_whitespace(target).rstrip(".")
         # Remove leading "Atlas," or similar addressing
         if cleaned.lower().startswith("atlas,"):
             cleaned = cleaned[6:].strip()

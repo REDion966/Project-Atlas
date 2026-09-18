@@ -7,7 +7,11 @@ import unittest
 from unittest.mock import MagicMock
 
 from atlas.conversation.builtin_response import BuiltinResponseService
-from atlas.conversation.conversation_context import build_conversation_context
+from atlas.conversation.conversation_context import (
+    MAX_CONTEXT_CHARS,
+    MAX_CONTEXT_TURNS,
+    build_conversation_context,
+)
 from atlas.conversation.conversation_service import ConversationService
 from atlas.conversation.conversation_state import ConversationState
 from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
@@ -15,6 +19,7 @@ from atlas.conversation.development_need_dialogue import (
     ConfirmationStatus,
     DevelopmentNeedDialogue,
 )
+from atlas.conversation.investigation import InvestigationService
 from atlas.conversation.message import Message
 from atlas.conversation.normalization import collapse_whitespace
 from atlas.conversation.reference_resolution import (
@@ -38,6 +43,14 @@ def _context(current: str):
 def _intent(builtin: BuiltinResponseService, text: str):
     classified = builtin._classify(text, TaskIntake().intake(text), _context(text))
     return classified[0] if isinstance(classified, tuple) else classified
+
+
+def _investigation_service():
+    return ConversationService(
+        MagicMock(),
+        task_intake=TaskIntake(),
+        investigation_service=InvestigationService(),
+    )
 
 
 class TestSharedWhitespaceRule(unittest.TestCase):
@@ -304,6 +317,144 @@ class TestContextualCandidateWhitespace(unittest.TestCase):
             "Look into that.", context, ConversationState()
         )
         self.assertEqual(result.status, ReferenceResolutionStatus.UNRESOLVED)
+
+
+class TestInvestigationTargetWhitespace(unittest.TestCase):
+    """N5 — investigation target cleaning is whitespace-equivalent."""
+
+    SUFFIXES = (
+        "don't modify anything yet",
+        "don't modify anything",
+        "do not modify anything yet",
+        "do not modify anything",
+        "without modifying anything",
+    )
+
+    @staticmethod
+    def _cleaned(text):
+        return InvestigationService._clean_target(text)
+
+    @staticmethod
+    def _variants(phrase):
+        return (
+            phrase.replace(" ", "  "),
+            phrase.replace(" ", "\t"),
+            phrase.replace(" ", "\n"),
+            phrase.replace(" ", "\r\n"),
+            phrase.replace(" ", " \t "),
+        )
+
+    def test_boundary_suffix_equivalence(self):
+        for suffix in self.SUFFIXES:
+            canonical = f"Investigate the task intake flow, {suffix}"
+            expected = self._cleaned(canonical)
+            self.assertEqual(expected, "Investigate the task intake flow", suffix)
+            for variant in self._variants(suffix):
+                text = f"Investigate the task intake flow, {variant}"
+                self.assertEqual(self._cleaned(text), expected, text)
+            padded = f"  {canonical}  "
+            self.assertEqual(self._cleaned(padded), expected, padded)
+
+    def test_constraints_boundary_equivalence(self):
+        for boundary in (
+            " | constraints:",
+            " |  constraints:",
+            "\t|\tconstraints:",
+            "\n| constraints:",
+        ):
+            text = f"Investigate the task intake flow{boundary} keep it read-only"
+            self.assertEqual(
+                self._cleaned(text), "Investigate the task intake flow", text
+            )
+
+    def test_addressing_and_prefix_equivalence(self):
+        for text in (
+            "Atlas, investigate the task intake flow.",
+            "Atlas,  investigate  the task intake flow.",
+            "Atlas,\tinvestigate\nthe task intake flow.",
+        ):
+            self.assertEqual(
+                self._cleaned(text), "investigate the task intake flow", text
+            )
+        for text in (
+            "respond: investigate the task intake flow",
+            "respond:  investigate  the task intake flow",
+        ):
+            self.assertEqual(
+                self._cleaned(text), "investigate the task intake flow", text
+            )
+
+    def test_canonical_targets_unchanged(self):
+        for text, expected in (
+            ("Investigate the memory architecture", "Investigate the memory architecture"),
+            (
+                "Investigate the task intake flow, don't modify anything yet",
+                "Investigate the task intake flow",
+            ),
+            (
+                "Investigate the task intake flow, don't modify anything",
+                "Investigate the task intake flow",
+            ),
+            (
+                "Investigate the task intake flow, without modifying anything",
+                "Investigate the task intake flow",
+            ),
+        ):
+            self.assertEqual(self._cleaned(text), expected, text)
+
+    def test_unrelated_trailing_phrases_not_stripped(self):
+        for text, tail in (
+            ("Investigate the task intake flow, modify everything", "modify everything"),
+            ("Investigate the task intake flow, don't  touch anything", "touch anything"),
+            ("Investigate the task intake flow, without changing anything", "changing anything"),
+            ("Investigate the task intake flow, do not modify anything maybe", "maybe"),
+            ("Investigate the task intake flow, unstoppable", "unstoppable"),
+        ):
+            self.assertTrue(self._cleaned(text).endswith(tail), text)
+
+    def test_report_target_and_concepts_equivalence(self):
+        service = InvestigationService()
+        canonical = service.investigate(
+            "Investigate the task intake flow, don't modify anything yet"
+        )
+        variant = service.investigate(
+            "Investigate the task intake flow, don't  modify anything yet"
+        )
+        self.assertEqual(variant.target, canonical.target)
+        self.assertEqual(variant.target, "Investigate the task intake flow")
+        self.assertEqual(
+            service._extract_concepts(variant.target),
+            service._extract_concepts(canonical.target),
+        )
+
+    def test_raw_preservation_state_and_send_stream_parity(self):
+        raw = "Investigate the task intake flow, don't  modify anything yet"
+        expected_target = "Investigate the task intake flow"
+
+        sent_service = _investigation_service()
+        response = sent_service.send(raw)
+
+        streamed_service = _investigation_service()
+        chunks = list(streamed_service.stream(raw))
+
+        self.assertEqual(response.metadata["investigation"]["target"], expected_target)
+        self.assertTrue(chunks)
+        self.assertIn(expected_target, chunks[0])
+
+        for service in (sent_service, streamed_service):
+            self.assertEqual(service._conversation.messages[0].content, raw)
+            self.assertEqual(
+                service._state_manager.state.current_investigation, expected_target
+            )
+
+        spec = TaskIntake().intake(raw)
+        self.assertEqual(
+            spec.input_hash, hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        )
+        self.assertEqual(build_turn_meaning(spec, raw).source_text, raw)
+
+    def test_context_bounds_unchanged(self):
+        self.assertEqual((MAX_CONTEXT_TURNS, MAX_CONTEXT_CHARS), (10, 500))
 
 
 if __name__ == "__main__":
