@@ -323,6 +323,24 @@ class TestStateAnswersIntegration(unittest.TestCase):
         finally:
             atlas.shutdown()
 
+    def test_started_kernel_observes_registered_services(self):
+        """Pilot-derived (Defect 2): a fully started kernel must not report a
+        stale pre-registration container snapshot in its status answer."""
+        from atlas.kernel.atlas import Atlas
+
+        atlas = Atlas()
+        try:
+            atlas.start()
+            builtin = atlas.builtin_response
+            self.assertIsNotNone(builtin)
+            expected = atlas.container.names()
+            self.assertTrue(expected)
+            msg = builtin.respond("status")
+            self.assertIsNotNone(msg)
+            self.assertIn(f"Registered services ({len(expected)})", msg.content)
+        finally:
+            atlas.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

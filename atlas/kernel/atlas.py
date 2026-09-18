@@ -3331,17 +3331,16 @@ class Atlas:
         try:
             from atlas.conversation.builtin_response import BuiltinResponseService
 
-            container_names: list[str] | None = None
-            try:
-                container_names = list(self._container.names())
-            except Exception:
-                container_names = None
             self._builtin_response = BuiltinResponseService(
                 tool_registry=self._tool_registry,
                 knowledge_manager=self._knowledge_manager,
                 capability_registry=self._capability_registry,
                 memory_service=self._memory_service,
-                service_names=container_names,
+                # Lazy provider: the service container is populated later in
+                # this same startup sequence, so the status answer must
+                # resolve the registration snapshot on demand rather than
+                # capture it before any service is registered.
+                service_names=self._container.names,
                 # Built only during start(); only usable after start.
                 started=True,
             )

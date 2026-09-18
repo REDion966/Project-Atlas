@@ -31,7 +31,7 @@ governed pipeline. Nothing here authorizes, executes, mutates, or approves.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from atlas.conversation.message import Message
@@ -132,17 +132,37 @@ class BuiltinResponseService:
         knowledge_manager: KnowledgeManager | None = None,
         capability_registry: CapabilityRegistry | None = None,
         memory_service: MemoryManagerService | None = None,
-        service_names: list[str] | tuple[str, ...] | None = None,
+        service_names: (
+            list[str]
+            | tuple[str, ...]
+            | Callable[[], list[str] | tuple[str, ...]]
+            | None
+        ) = None,
         started: bool | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
         self._capability_registry = capability_registry
         self._memory_service = memory_service
-        self._service_names = (
-            sorted(service_names) if service_names is not None else None
-        )
+        self._service_names = service_names
         self._started = started
+
+    def _resolve_service_names(self) -> tuple[str, ...] | None:
+        """Resolve the container/service snapshot for the status answer.
+
+        A sequence is used as the eager snapshot it has always been; a lazy
+        zero-argument provider is resolved on demand, so a kernel that
+        registers services after construction is still observed accurately.
+        """
+        names = self._service_names
+        if callable(names):
+            try:
+                names = names()
+            except Exception:
+                return None
+        if names is None:
+            return None
+        return tuple(sorted(names))
 
     @property
     def tool_registry(self) -> ToolRegistry | None:
@@ -503,11 +523,12 @@ class BuiltinResponseService:
             if memory_count is not None
             else "- Stored memories: unknown (no memory service wired)."
         )
-        if self._service_names is not None:
+        service_names = self._resolve_service_names()
+        if service_names is not None:
             lines.append(
-                f"- Registered services ({len(self._service_names)}): "
-                + ", ".join(f"`{n}`" for n in self._service_names[:24])
-                + ("" if len(self._service_names) <= 24 else ", ...")
+                f"- Registered services ({len(service_names)}): "
+                + ", ".join(f"`{n}`" for n in service_names[:24])
+                + ("" if len(service_names) <= 24 else ", ...")
             )
         else:
             lines.append("- Registered services: unknown (no container snapshot).")

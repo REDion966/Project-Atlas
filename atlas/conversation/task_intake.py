@@ -156,6 +156,7 @@ _PLANNING_CUES: frozenset[str] = frozenset(
     {
         "plan this",
         "plan this improvement",
+        "prepare a proposal",
         "prepare a development proposal",
         "convert this proposal",
         "convert this investigation",

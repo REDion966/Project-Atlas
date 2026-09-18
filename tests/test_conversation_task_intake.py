@@ -204,3 +204,34 @@ class TestModelAssistedParsing:
         parser = _FakeParser(result={"intent": "model intent", "task_type": "question"})
         spec = TaskIntake(parser=parser).intake("build a report")
         assert spec.confidence <= 0.5
+
+
+class TestInvestigationFirstCompoundClassification:
+    """Pilot-derived (Defect 1): an investigation-first compound request that
+    asks for a proposal to approve must not be hijacked into APPROVAL by its
+    forward-looking proposal/approval wording."""
+
+    def test_exact_pilot_request_is_investigation(self):
+        spec = TaskIntake().intake(
+            "Investigate why the repository test suite is slow and then "
+            "prepare a proposal for me to approve."
+        )
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST
+
+    def test_natural_prepare_proposal_compound_is_investigation(self):
+        spec = TaskIntake().intake(
+            "Investigate the memory architecture and prepare a proposal for "
+            "my approval."
+        )
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST
+
+    def test_existing_development_proposal_compound_stays_investigation(self):
+        spec = TaskIntake().intake(
+            "Investigate the repository and create a development proposal for "
+            "the improvement you find."
+        )
+        assert spec.task_type is TaskType.INVESTIGATION_REQUEST
+
+    def test_approval_only_wording_stays_approval(self):
+        spec = TaskIntake().intake("approve this proposal")
+        assert spec.task_type is TaskType.APPROVAL
