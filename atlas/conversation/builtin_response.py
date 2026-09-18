@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 from atlas.conversation.message import Message
 
 if TYPE_CHECKING:
+    from atlas.conversation.conversation_context import ConversationContext
     from atlas.conversation.task_intake import TaskSpec
     from atlas.knowledge.knowledge_manager import KnowledgeManager
     from atlas.memory.service.memory_manager_service import MemoryManagerService
@@ -247,12 +248,18 @@ class BuiltinResponseService:
         spec: TaskSpec | None = None,
         session_context: SessionContext | None = None,
         message_count: int | None = None,
+        context: ConversationContext | None = None,
     ) -> Message | None:
         """Build a deterministic assistant Message, or None to continue.
 
         Returns None when the turn belongs to the governed pipeline (typed
         lifecycle request, needs-clarification spec), so ``send``/``stream``
         fall through to the existing handling unchanged.
+
+        ``context`` is the bounded, read-only :class:`ConversationContext`
+        projection of recent conversation history/state. Phase 3 only
+        *accepts* it: the deterministic responses are unchanged, and the value
+        is never mutated, executed, or used to authorize anything.
         """
         classified = self._classify(text, spec)
         if classified is None:
@@ -278,6 +285,7 @@ class BuiltinResponseService:
         spec: TaskSpec | None = None,
         session_context: SessionContext | None = None,
         message_count: int | None = None,
+        context: ConversationContext | None = None,
     ) -> Iterator[str]:
         """Yield the deterministic response content as a single chunk."""
         msg = self.respond(
@@ -285,6 +293,7 @@ class BuiltinResponseService:
             spec=spec,
             session_context=session_context,
             message_count=message_count,
+            context=context,
         )
         if msg is None:
             return

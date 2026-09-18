@@ -31,6 +31,7 @@ from atlas.conversation.development_outcome_reporter import (
     snapshot_from_result,
 )
 from atlas.conversation.history import History
+from atlas.conversation.conversation_context import build_conversation_context
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
@@ -40,6 +41,7 @@ from atlas.storage.conversation_storage import ConversationStorage
 
 if TYPE_CHECKING:
     from atlas.conversation.builtin_response import BuiltinResponseService
+    from atlas.conversation.conversation_context import ConversationContext
     from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
     from atlas.session.context import SessionContext
     from atlas.session.models import Session
@@ -372,7 +374,19 @@ class ConversationService:
             text,
             spec=spec,
             message_count=len(self._conversation.messages),
+            context=self._build_conversation_context(),
         )
+
+    def _build_conversation_context(self) -> ConversationContext:
+        """Build the bounded, read-only context projection for this turn.
+
+        Single authoritative construction point: it projects the existing
+        ``Conversation`` history and ``ConversationState`` into an immutable
+        snapshot. The builtin layer never receives the mutable sources, and the
+        projection carries no authority.
+        """
+        state = self._state_manager.state if self._state_manager is not None else None
+        return build_conversation_context(self._conversation.messages, state)
 
     def _builtin_after_failure(
         self,
@@ -398,6 +412,7 @@ class ConversationService:
                 text,
                 spec=None,
                 message_count=len(self._conversation.messages),
+                context=self._build_conversation_context(),
             )
         else:
             message = self._maybe_handle_builtin_response(spec, text)
