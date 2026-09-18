@@ -70,9 +70,15 @@ _HELP_RE = re.compile(
     r"|\bcommands\b|\busage\b|^\s*help\s*[?!.\s]*$"
 )
 
+#: Bounded identity questions. The bare "what are you" alternative is
+#: TERMINAL: an identity turn is the complete question ("what are you?",
+#: optionally with an identity qualifier), never a prefix of a predicate
+#: question. Without the anchor, "what are you good at" was claimed as
+#: identity before any capability form could be recognised.
 _IDENTITY_RE = re.compile(
     r"who are you\b|what is atlas\b|your name\b|introduce yourself\b"
-    r"|about yourself\b|tell me about yourself\b|what are you\b"
+    r"|about yourself\b|tell me about yourself\b"
+    r"|what are you(?:\s+(?:exactly|really|precisely|then))?\s*[?!.]*\s*$"
 )
 
 _CAPABILITIES_RE = re.compile(
@@ -194,6 +200,7 @@ _CAPABILITY_ALIAS_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bwhat can you help(?: me)? with\b"),
     re.compile(r"\bwhat can atlas help(?: me)? with\b"),
     re.compile(r"\bwhat are you (?:able|capable)\b"),
+    re.compile(r"\bwhat are you (?:good|best|better) at\b"),
     re.compile(
         r"\bwhat (?:are|is) your (?:current |present |existing |main )?"
         r"(?:abilities|capabilities|skills)\b"

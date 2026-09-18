@@ -267,6 +267,52 @@ class TestBuiltinIntentClassification(unittest.TestCase):
             self.assertIsNotNone(msg, text)
             self.assertEqual(msg.metadata["builtin_intent"], "unsupported", text)
 
+    # --- L3: capability vs identity discrimination -----------------------
+
+    def test_ability_predicate_questions_are_capabilities(self):
+        for text in (
+            "What are you good at?",
+            "What are you good at",
+            "What are you best at?",
+            "What are you better at?",
+            "What are you good at doing?",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "capabilities", text)
+
+    def test_identity_question_forms_remain_identity(self):
+        for text in (
+            "What are you?",
+            "What are you exactly?",
+            "What are you really?",
+            "Who are you?",
+            "Tell me about yourself.",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "identity", text)
+
+    def test_identity_predicate_does_not_swallow_predicate_questions(self):
+        # The identity predicate is a complete-question form, not a prefix: a
+        # "what are you <predicate>" turn must never be answered as an identity
+        # question just because it shares the opening words.
+        msg = self.svc.respond("What are you doing?")
+        self.assertIsNotNone(msg)
+        self.assertEqual(msg.metadata["builtin_intent"], "unsupported")
+
+    def test_ability_predicate_whitespace_variants_converge(self):
+        expected = self.svc.respond("What are you good at?").metadata["builtin_intent"]
+        self.assertEqual(expected, "capabilities")
+        for text in (
+            "What are you  good  at?",
+            "What are you\tgood\tat?",
+            "What are you\ngood\nat?",
+        ):
+            self.assertEqual(
+                self.svc.respond(text).metadata["builtin_intent"], expected, text
+            )
+
 
 # ---------------------------------------------------------------------------
 # ConversationService integration
@@ -355,6 +401,26 @@ class TestBuiltinConversationIntegration(unittest.TestCase):
         builtin = BuiltinResponseService()
         svc.set_builtin_response(builtin)
         self.assertIs(svc.builtin_response, builtin)
+
+    def test_ability_predicate_intent_through_conversation_service(self):
+        sent = _service(
+            BuiltinResponseService(tool_registry=_registry_with_tools())
+        ).send("What are you good at?")
+        self.assertEqual(sent.metadata.get("builtin_intent"), "capabilities")
+        self.assertFalse(sent.metadata.get("model_used", False))
+
+        streamed = list(
+            _service(
+                BuiltinResponseService(tool_registry=_registry_with_tools())
+            ).stream("What are you good at?")
+        )
+        self.assertEqual("".join(streamed), sent.content)
+
+        equivalent = _service(
+            BuiltinResponseService(tool_registry=_registry_with_tools())
+        ).send("What are you best at?")
+        self.assertEqual(equivalent.metadata.get("builtin_intent"), "capabilities")
+        self.assertEqual(equivalent.content, sent.content)
 
 
 if __name__ == "__main__":
