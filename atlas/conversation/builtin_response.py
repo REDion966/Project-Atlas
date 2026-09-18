@@ -54,6 +54,7 @@ BUILTIN_INTENT_CAPABILITIES = "capabilities"
 BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
 BUILTIN_INTENT_STATUS = "status"
 BUILTIN_INTENT_RECALL = "recall"
+BUILTIN_INTENT_CONVERSATION_RECALL = "conversation_recall"
 BUILTIN_INTENT_COMMANDS = "commands"
 BUILTIN_INTENT_UNSUPPORTED = "unsupported"
 
@@ -103,6 +104,62 @@ _RECALL_RE = re.compile(
     r"|search (?:your )?(?:memory|knowledge)(?: for)?\b"
     r"|look up .*?(?:in|from) (?:your )?(?:memory|knowledge)\b"
 )
+
+# ---------------------------------------------------------------------------
+# Phase 5 — bounded conversational-turn recall.
+#
+# A capability DISTINCT from the ``_RECALL_RE`` memory/knowledge-store recall
+# above. These patterns ask about the recent CONVERSATION itself; they are
+# answered only from the bounded ConversationContext plus structured state,
+# never from the memory/knowledge stores, and never by inventing content.
+# ---------------------------------------------------------------------------
+
+#: "What did I ask/say previously?" — previous user request.
+_CONVERSATION_RECALL_USER_RE = re.compile(
+    r"\bwhat did i (?:ask|ask you|say|request|mention)\b"
+    r"|\bwhat was my (?:last|previous|earlier) (?:question|request|message|ask)\b"
+    r"|\bremind me what i (?:asked|said)\b"
+)
+
+#: "What did you just tell me?" — previous Atlas response.
+_CONVERSATION_RECALL_ASSISTANT_RE = re.compile(
+    r"\bwhat did you (?:just )?(?:say|tell me)\b"
+    r"|\bwhat was your (?:last|previous|earlier) (?:response|answer|message|reply)\b"
+    r"|\bremind me what you (?:said|told me)\b"
+)
+
+#: "What were we discussing?" — recent conversation topic.
+_CONVERSATION_RECALL_TOPIC_RE = re.compile(
+    r"\bwhat (?:were|are) we (?:discussing|talking about|chatting about)\b"
+    r"|\bwhat did we discuss\b"
+    r"|\bwhat have we been (?:discussing|talking about)\b"
+    r"|\bwhat was the recent (?:topic|subject)\b"
+    r"|\bremind me what we (?:were discussing|discussed)\b"
+)
+
+#: "What did we find?" — recent governed finding/result.
+_CONVERSATION_RECALL_FINDING_RE = re.compile(
+    r"\bwhat did we (?:just )?find\b"
+    r"|\bwhat (?:issue|problem|finding) did we (?:find|discuss)\b"
+    r"|\bwhat was the (?:issue|problem) we (?:just )?discussed\b"
+)
+
+#: Bounded lead cues marking a prior user turn as a conversation subject.
+_CONVERSATION_SUBJECT_LEAD_RE = re.compile(
+    r"\b(?:investigate|investigation|analyze|analyse|diagnose|inspect"
+    r"|examine|trace|debug)\b"
+)
+
+#: Provenance label per conversational-recall source.
+_CONVERSATION_RECALL_LABELS: dict[str, str] = {
+    "user": "You asked earlier:",
+    "assistant": "I said:",
+    "topic": "We were discussing:",
+    "finding": "The most recent result:",
+}
+
+#: Bound applied to recalled turn content in the rendered answer.
+_MAX_CONVERSATION_RECALL_CHARS: int = 400
 
 #: Supported-command inquiry. Answered from the fixed, actually-existing
 #: CLI command surfaces (never invented).
@@ -261,7 +318,7 @@ class BuiltinResponseService:
         *accepts* it: the deterministic responses are unchanged, and the value
         is never mutated, executed, or used to authorize anything.
         """
-        classified = self._classify(text, spec)
+        classified = self._classify(text, spec, context)
         if classified is None:
             return None
         if isinstance(classified, tuple):
@@ -269,14 +326,17 @@ class BuiltinResponseService:
         else:
             intent, detail = classified, None
         content = self._render(intent, message_count=message_count, detail=detail)
+        metadata: dict[str, Any] = {
+            "builtin_response": True,
+            "builtin_intent": intent,
+            "model_used": False,
+        }
+        if intent == BUILTIN_INTENT_CONVERSATION_RECALL and isinstance(detail, tuple):
+            metadata["recall_source"] = detail[0]
         return Message(
             role="assistant",
             content=content,
-            metadata={
-                "builtin_response": True,
-                "builtin_intent": intent,
-                "model_used": False,
-            },
+            metadata=metadata,
         )
 
     def respond_stream(
@@ -303,14 +363,19 @@ class BuiltinResponseService:
         self,
         text: str,
         spec: TaskSpec | None,
-    ) -> str | tuple[str, str] | None:
+        context: ConversationContext | None = None,
+    ) -> str | tuple[str, object] | None:
         """Classify a turn into a builtin intent.
 
         Returns an intent name, an ``(intent, detail)`` tuple for intents
-        that carry a resolved argument (capability detail, recall query),
-        or ``None`` when the turn belongs elsewhere. Conservative by
-        design: anything that does not match a bounded trigger with a
-        resolvable argument becomes the honest unsupported response.
+        that carry a resolved argument (capability detail, store recall query,
+        conversational-turn recall), or ``None`` when the turn belongs
+        elsewhere. Conservative by design: anything that does not match a
+        bounded trigger with a resolvable argument becomes the honest
+        unsupported response.
+
+        ``context`` is the bounded, read-only :class:`ConversationContext`; it
+        is consulted only for conversational-turn recall (Phase 5).
         """
         lowered = (text or "").strip().lower()
         if not lowered:
@@ -344,6 +409,13 @@ class BuiltinResponseService:
             _STATUS_ALIAS_RES, lowered
         ):
             return BUILTIN_INTENT_STATUS
+        # Conversational-turn recall (Phase 5) precedes store recall: it claims
+        # only phrases about the recent conversation, and only when a
+        # deterministic candidate exists (otherwise it falls through to the
+        # unchanged store/memory recall path).
+        conversation_recall = self._match_conversation_recall(lowered, context)
+        if conversation_recall is not None:
+            return (BUILTIN_INTENT_CONVERSATION_RECALL, conversation_recall)
         recall_query = self._match_recall(lowered)
         if recall_query is not None:
             return (BUILTIN_INTENT_RECALL, recall_query)
@@ -402,11 +474,105 @@ class BuiltinResponseService:
             return None
         return " ".join(tokens[:8])
 
+    def _match_conversation_recall(
+        self,
+        lowered: str,
+        context: ConversationContext | None,
+    ) -> tuple[str, str, str] | None:
+        """Return ``(source, label, content)`` for a bounded turn recall.
+
+        Consumes only the immutable :class:`ConversationContext` and its
+        structured state. Returns ``None`` when the phrase is not a
+        conversational-turn recall request, or when no deterministic candidate
+        exists — fail closed; the unchanged store recall path then applies.
+        """
+        if context is None:
+            return None
+
+        state = getattr(context, "state", None)
+        prior_user = self._prior_turns(context, "user", lowered)
+        prior_assistant = self._prior_turns(context, "assistant", lowered)
+
+        if _CONVERSATION_RECALL_USER_RE.search(lowered):
+            if prior_user:
+                return ("user", _CONVERSATION_RECALL_LABELS["user"], prior_user[-1])
+            return None
+
+        if _CONVERSATION_RECALL_ASSISTANT_RE.search(lowered):
+            if prior_assistant:
+                return (
+                    "assistant",
+                    _CONVERSATION_RECALL_LABELS["assistant"],
+                    prior_assistant[-1],
+                )
+            return None
+
+        if _CONVERSATION_RECALL_TOPIC_RE.search(lowered):
+            subject = self._recent_conversation_subject(prior_user, state)
+            if subject:
+                return ("topic", _CONVERSATION_RECALL_LABELS["topic"], subject)
+            return None
+
+        if _CONVERSATION_RECALL_FINDING_RE.search(lowered):
+            if state is not None:
+                finding = getattr(state, "latest_result", None)
+                if isinstance(finding, str) and finding.strip():
+                    return (
+                        "finding",
+                        _CONVERSATION_RECALL_LABELS["finding"],
+                        finding.strip(),
+                    )
+            return None
+
+        return None
+
+    @staticmethod
+    def _prior_turns(
+        context: ConversationContext,
+        role: str,
+        lowered: str,
+    ) -> list[str]:
+        """Return bounded prior turns of ``role``, excluding the current turn."""
+        query_key = " ".join(lowered.split())
+        turns: list[str] = []
+        for turn in getattr(context, "recent_turns", ()) or ():
+            if getattr(turn, "role", "") != role:
+                continue
+            content = getattr(turn, "content", "")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            # Exclude the current turn (its text matches the live query).
+            if " ".join(content.split()).lower() == query_key:
+                continue
+            turns.append(content.strip())
+        return turns
+
+    @staticmethod
+    def _recent_conversation_subject(prior_user: list[str], state: Any) -> str:
+        """Return the deterministic recent conversation subject, or ''."""
+        if state is not None:
+            investigation = getattr(state, "current_investigation", None)
+            if isinstance(investigation, str) and investigation.strip():
+                return investigation.strip()
+        for content in reversed(prior_user):
+            if _CONVERSATION_SUBJECT_LEAD_RE.search(content.lower()):
+                return content
+        return ""
+
+    @staticmethod
+    def _render_conversation_recall(detail: tuple[str, str, str]) -> str:
+        """Render a bounded, provenance-labelled conversational recall."""
+        _source, label, content = detail
+        body = content.strip()
+        if len(body) > _MAX_CONVERSATION_RECALL_CHARS:
+            body = body[:_MAX_CONVERSATION_RECALL_CHARS].rstrip() + "..."
+        return f"{label} {body}"
+
     def _render(
         self,
         intent: str,
         message_count: int | None = None,
-        detail: str | None = None,
+        detail: object | None = None,
     ) -> str:
         if intent == BUILTIN_INTENT_GREETING:
             return self._render_greeting()
@@ -422,6 +588,8 @@ class BuiltinResponseService:
             return self._render_status(message_count=message_count)
         if intent == BUILTIN_INTENT_RECALL:
             return self._render_recall(detail or "")
+        if intent == BUILTIN_INTENT_CONVERSATION_RECALL and isinstance(detail, tuple):
+            return self._render_conversation_recall(detail)
         if intent == BUILTIN_INTENT_COMMANDS:
             return self._render_commands()
         return self._render_unsupported()
