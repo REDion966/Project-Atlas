@@ -192,6 +192,81 @@ class TestBuiltinIntentClassification(unittest.TestCase):
         self.assertIsNotNone(msg)
         self.assertEqual(msg.metadata["builtin_intent"], "recall")
 
+    # --- Phase 2: bounded intent aliases ---------------------------------
+
+    def test_capability_aliases(self):
+        for text in (
+            "What can you currently do?",
+            "What are your current abilities?",
+            "What are you able to do?",
+            "What can Atlas help me with?",
+            "What capabilities do you currently have?",
+            "Give me an overview of your abilities.",
+            "Tell me what you can actually do right now.",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "capabilities", text)
+
+    def test_capability_aliases_do_not_steal_identity(self):
+        for text in (
+            "Who are you?",
+            "What are you?",
+            "Tell me about yourself.",
+            "What exactly is Atlas?",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "identity", text)
+
+    def test_identity_aliases_do_not_steal_capability(self):
+        for text in ("What are you capable of?", "What are you able to do?"):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "capabilities", text)
+
+    def test_help_aliases_unchanged(self):
+        for text in ("help", "What can you do?", "how do I use this?"):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "help", text)
+
+    def test_status_aliases(self):
+        for text in (
+            "status",
+            "What's your current status?",
+            "Are you running normally?",
+            "How are things looking?",
+            "What's going on with your system?",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "status", text)
+
+    def test_recall_aliases(self):
+        for text in (
+            "Do you remember our investigation?",
+            "What did we discover about the investigation system?",
+            "Can you remind me what we found?",
+            "do you remember IsoDate",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "recall", text)
+
+    def test_near_miss_phrases_remain_unsupported(self):
+        for text in (
+            "What can you change?",
+            "Can you do this?",
+            "What are your options?",
+            "How are things?",
+            "What happened yesterday?",
+            "Tell me what you think.",
+        ):
+            msg = self.svc.respond(text)
+            self.assertIsNotNone(msg, text)
+            self.assertEqual(msg.metadata["builtin_intent"], "unsupported", text)
+
 
 # ---------------------------------------------------------------------------
 # ConversationService integration

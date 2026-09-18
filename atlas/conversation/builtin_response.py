@@ -97,6 +97,8 @@ _STATUS_RE = re.compile(
 #: stores. Anything genuinely ambiguous falls through to unsupported.
 _RECALL_RE = re.compile(
     r"\b(?:do you )?(?:remember|recall)\b|what do you (?:know|remember) about\b"
+    r"|\b(?:can you\s+)?remind me\b"
+    r"|\bwhat did we (?:discover|find|learn)(?: about)?\b"
     r"|search (?:your )?(?:memory|knowledge)(?: for)?\b"
     r"|look up .*?(?:in|from) (?:your )?(?:memory|knowledge)\b"
 )
@@ -115,6 +117,57 @@ _GREETING_RE = re.compile(
     r"\b(?:hello|hi|hey)\b|how are you|good morning|good afternoon"
     r"|good evening|nice to meet you"
 )
+
+# ---------------------------------------------------------------------------
+# Bounded intent aliases (Phase 2).
+#
+# Explicit, readable phrase families for EXISTING conversational intents. Each
+# alias is a bounded, word-boundary regex — never a fuzzy/substring match — so
+# unrelated sentences are not captured. Aliases only select an existing
+# intent; they never grant authority or execute anything.
+# ---------------------------------------------------------------------------
+
+#: Capability questions clearly equivalent to the canonical capability surface.
+#: The "what can you <adverb> do" family deliberately requires the adverb so the
+#: canonical "what can you do" help phrasing is left unchanged.
+_CAPABILITY_ALIAS_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bwhat can you (?:currently|actually|really|now|presently) do\b"),
+    re.compile(r"\bwhat can you help(?: me)? with\b"),
+    re.compile(r"\bwhat can atlas help(?: me)? with\b"),
+    re.compile(r"\bwhat are you (?:able|capable)\b"),
+    re.compile(
+        r"\bwhat (?:are|is) your (?:current |present |existing |main )?"
+        r"(?:abilities|capabilities|skills)\b"
+    ),
+    re.compile(
+        r"\b(?:give me )?an? overview of your (?:current )?"
+        r"(?:abilities|capabilities|skills)\b"
+    ),
+    re.compile(
+        r"\btell me what you can (?:actually |really |currently |now )?do\b"
+    ),
+)
+
+#: Narrow identity phrasings equivalent to the canonical identity surface.
+_IDENTITY_ALIAS_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bwhat (?:exactly )?is atlas\b"),
+)
+
+#: Status phrasings equivalent to the canonical status surface.
+_STATUS_ALIAS_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bhow are things (?:looking|going)\b"),
+    re.compile(
+        r"\bwhat(?:'s| is) (?:going on|happening) with (?:your|the) system\b"
+    ),
+)
+
+
+def _alias_hit(
+    patterns: tuple[re.Pattern[str], ...],
+    text: str,
+) -> bool:
+    """True when ``text`` matches one of the bounded alias patterns."""
+    return any(pattern.search(text) for pattern in patterns)
 
 _MAX_TOOLS_LISTED = 20
 
@@ -261,18 +314,26 @@ class BuiltinResponseService:
                 return None
         if _COMMANDS_RE.search(lowered):
             return BUILTIN_INTENT_COMMANDS
+        # Bounded capability aliases precede help/identity: genuinely
+        # equivalent capability questions must not be captured by the help
+        # word ("... help me with") or by the identity predicate's
+        # "what are you" ("what are you capable of").
+        if _CAPABILITIES_RE.search(lowered) or _alias_hit(
+            _CAPABILITY_ALIAS_RES, lowered
+        ):
+            return BUILTIN_INTENT_CAPABILITIES
         if _HELP_RE.search(lowered):
             return BUILTIN_INTENT_HELP
-        # Capability queries precede identity: the identity predicate's
-        # "what are you" must not swallow "what are you capable of".
-        if _CAPABILITIES_RE.search(lowered):
-            return BUILTIN_INTENT_CAPABILITIES
-        if _IDENTITY_RE.search(lowered):
+        if _IDENTITY_RE.search(lowered) or _alias_hit(
+            _IDENTITY_ALIAS_RES, lowered
+        ):
             return BUILTIN_INTENT_IDENTITY
         detail = self._match_capability_detail(lowered)
         if detail is not None:
             return (BUILTIN_INTENT_CAPABILITY_DETAIL, detail)
-        if _STATUS_RE.search(lowered):
+        if _STATUS_RE.search(lowered) or _alias_hit(
+            _STATUS_ALIAS_RES, lowered
+        ):
             return BUILTIN_INTENT_STATUS
         recall_query = self._match_recall(lowered)
         if recall_query is not None:
