@@ -3354,6 +3354,20 @@ class Atlas:
         except (TypeError, ValueError):
             conversation_timeout_s = 20.0
 
+        # L4 — bounded known-entity catalog for deterministic entity
+        # identification. Built from the registries AFTER they are populated
+        # (registration happens earlier in startup), so the names are complete;
+        # an unmatched name is simply not identified, so a stale catalog can
+        # only lose evidence, never invent any.
+        from atlas.conversation.entity_identification import EntityCatalog
+
+        entity_catalog = EntityCatalog.from_names(
+            {
+                "capability": self._capability_registry.registered_names,
+                "tool": [tool.name for tool in self._tool_registry.list()],
+            }
+        )
+
         self._conversation = ConversationService(
             self._ai_manager.service,
             context_engine=context_engine,
@@ -3370,6 +3384,7 @@ class Atlas:
             development_execution_bridge=self._development_execution_bridge,
             proposal_change_supplier=self._proposal_change_supplier,
             autonomy_check=self._autonomy_check,
+            entity_catalog=entity_catalog,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).

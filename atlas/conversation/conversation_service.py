@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from atlas.conversation.builtin_response import BuiltinResponseService
     from atlas.conversation.conversation_context import ConversationContext
     from atlas.conversation.deterministic_fallback import DeterministicFallbackResolver
+    from atlas.conversation.entity_identification import EntityCatalog
     from atlas.session.context import SessionContext
     from atlas.session.models import Session
 
@@ -168,6 +169,7 @@ class ConversationService:
         outcome_reporter: DevelopmentOutcomeReporter | None = None,
         state_manager: ConversationStateManager | None = None,
         reference_resolver: ConversationReferenceResolver | None = None,
+        entity_catalog: EntityCatalog | None = None,
         investigation_service: InvestigationService | None = None,
         execution_service: Level3ExecutionService | None = None,
         approval_manager: ApprovalManagerProtocol | None = None,
@@ -294,6 +296,7 @@ class ConversationService:
         self._development_execution_bridge = development_execution_bridge
         self._autonomy_check = autonomy_check
         self._reference_resolver = reference_resolver or ConversationReferenceResolver()
+        self._entity_catalog = entity_catalog
         self._session_context: SessionContext | None = session_context
         self._last_session_context: SessionContext | None = session_context
 
@@ -332,6 +335,11 @@ class ConversationService:
     def reference_resolver(self) -> ConversationReferenceResolver:
         """Return the conversational reference resolver."""
         return self._reference_resolver
+
+    @property
+    def entity_catalog(self) -> EntityCatalog | None:
+        """Return the bounded known-entity catalog used for L4 identification."""
+        return self._entity_catalog
 
     def resolve_reference(self, query: str) -> ReferenceResolutionResult:
         """Resolve a conversational reference against current state.
@@ -501,6 +509,11 @@ class ConversationService:
         # clarification mechanism; UNRESOLVED and non-reference turns are
         # byte-for-byte unchanged.
         if spec is not None:
+            # L4 — bounded deterministic entity identification. Known entity
+            # names the user explicitly wrote are recorded as evidence and, when
+            # exactly one is named, become the bounded conversation subject;
+            # routing is untouched and nothing is guessed.
+            spec = self._apply_entity_identification(spec, text)
             spec, reference_response = self._apply_reference_resolution(spec, text)
             if reference_response is not None:
                 self._conversation.add_message(reference_response)
@@ -775,6 +788,9 @@ class ConversationService:
         # continues; AMBIGUOUS yields the existing bounded clarification and
         # stops; UNRESOLVED / non-reference turns are byte-for-byte unchanged.
         if spec is not None:
+            # L4 — bounded deterministic entity identification, mirroring
+            # send(): same method, same ordering, same semantics.
+            spec = self._apply_entity_identification(spec, text)
             spec, reference_response = self._apply_reference_resolution(spec, text)
             if reference_response is not None:
                 self._conversation.add_message(reference_response)
@@ -1075,6 +1091,45 @@ class ConversationService:
         from dataclasses import replace as _replace
 
         return _replace(spec, context=enriched)
+
+    def _apply_entity_identification(self, spec: TaskSpec, text: str) -> TaskSpec:
+        """Bounded deterministic entity identification for the current turn (L4).
+
+        Identifies the known entity names the user explicitly wrote in this
+        turn, records them as bounded evidence on the existing
+        ``TaskSpec.context`` channel, and — only when exactly one entity is
+        named — populates the existing bounded ``current_subject`` slot so the
+        already-shipped subject references ("this topic", "that issue", "the
+        problem") become reachable.
+
+        Zero or multiple entities change nothing: nothing is guessed, no
+        reference is resolved here, and routing is untouched. Identification is
+        understanding only — it never authorizes, executes, mutates a governed
+        field, or bypasses approval. With no catalog configured this is a no-op
+        (fail closed).
+        """
+        catalog = self._entity_catalog
+        if catalog is None:
+            return spec
+
+        from atlas.conversation.entity_identification import (
+            IDENTIFIED_ENTITIES_KEY,
+            identify_entities,
+        )
+
+        identified = identify_entities(text, catalog)
+        if not identified:
+            return spec
+
+        from dataclasses import replace as _replace
+
+        enriched = dict(spec.context) if isinstance(spec.context, dict) else {}
+        enriched[IDENTIFIED_ENTITIES_KEY] = [entity.to_dict() for entity in identified]
+        spec = _replace(spec, context=enriched)
+
+        if len(identified) == 1 and self._state_manager is not None:
+            self._state_manager.update(current_subject=identified[0].name)
+        return spec
 
     def _apply_reference_resolution(
         self,
