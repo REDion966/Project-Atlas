@@ -56,6 +56,7 @@ BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
 BUILTIN_INTENT_STATUS = "status"
 BUILTIN_INTENT_RECALL = "recall"
 BUILTIN_INTENT_CONVERSATION_RECALL = "conversation_recall"
+BUILTIN_INTENT_ACKNOWLEDGEMENT = "acknowledgement"
 BUILTIN_INTENT_COMMANDS = "commands"
 BUILTIN_INTENT_UNSUPPORTED = "unsupported"
 
@@ -152,6 +153,9 @@ _CONVERSATION_RECALL_TOPIC_RE = re.compile(
     r"|\bwhat have we been (?:discussing|talking about)\b"
     r"|\bwhat was the recent (?:topic|subject)\b"
     r"|\bremind me what we (?:were discussing|discussed)\b"
+    # L10 — evidenced in L9: "Do you remember what we discussed?" is a topic
+    # recall, not a store lookup for the literal phrase "what discussed".
+    r"|\b(?:do you )?remember what we (?:were discussing|discussed)\b"
 )
 
 #: "What did we find?" — recent governed finding/result.
@@ -222,6 +226,9 @@ _CAPABILITY_ALIAS_RES: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"\btell me what you can (?:actually |really |currently |now )?do\b"
     ),
+    # L10 — evidenced in L9: "Can you tell me what you're able to do?" is the
+    # same capability question, phrased with a contraction and "able to do".
+    re.compile(r"\bwhat (?:you're|you are) able to do\b"),
 )
 
 #: Narrow identity phrasings equivalent to the canonical identity surface.
@@ -235,7 +242,28 @@ _STATUS_ALIAS_RES: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"\bwhat(?:'s| is) (?:going on|happening) with (?:your|the) system\b"
     ),
+    # L10 — evidenced in L9: "what's going on right now" is a status question.
+    re.compile(r"\bwhat(?:'s| is) going on(?: right now| right here)?\b"),
 )
+
+#: Bounded casual acknowledgement/gratitude exchanges (L10). Anchored to the
+#: WHOLE turn: a turn that carries an instruction after the acknowledgement
+#: ("ok, now investigate X") is not an acknowledgement and keeps its handling.
+_ACKNOWLEDGEMENT_RE = re.compile(
+    r"^\s*(?:"
+    r"thanks(?:\s+(?:a lot|so much|very much))?|"
+    r"thank you(?:\s+(?:very much|so much))?|many thanks|cheers|ta|"
+    r"ok|okay|got it|understood|noted|"
+    r"nice one|perfect|great|cool|awesome|brilliant|"
+    r"sorry|my mistake|no problem|no worries"
+    r")"
+    r"(?:\s*[,\-]?\s*(?:that helps|that's helpful|thanks|"
+    r"thank you(?:\s+very much)?|cheers|nice one|my mistake))?"
+    r"\s*[.!?]*\s*$"
+)
+
+#: Gratitude sub-form of an acknowledgement (selects the rendering only).
+_GRATITUDE_RE = re.compile(r"\b(?:thanks|thank you|cheers|ta)\b")
 
 
 def _alias_hit(
@@ -447,6 +475,12 @@ class BuiltinResponseService:
             return (BUILTIN_INTENT_RECALL, recall_query)
         if _GREETING_RE.search(lowered):
             return BUILTIN_INTENT_GREETING
+        # Bounded casual acknowledgement (L10). No action, no state change.
+        if _ACKNOWLEDGEMENT_RE.search(lowered):
+            return (
+                BUILTIN_INTENT_ACKNOWLEDGEMENT,
+                "thanks" if _GRATITUDE_RE.search(lowered) else "acknowledged",
+            )
         task_type = (
             getattr(spec.task_type, "value", "") if spec is not None else ""
         )
@@ -625,6 +659,8 @@ class BuiltinResponseService:
             return self._render_conversation_recall(detail)
         if intent == BUILTIN_INTENT_COMMANDS:
             return self._render_commands()
+        if intent == BUILTIN_INTENT_ACKNOWLEDGEMENT:
+            return self._render_acknowledgement(detail)
         return self._render_unsupported()
 
     @staticmethod
@@ -633,6 +669,23 @@ class BuiltinResponseService:
             "Hello. I am Atlas, a model-independent operating framework. "
             "I answer deterministically without calling an external AI model. "
             "Ask 'help' to see what I can do."
+        )
+
+    @staticmethod
+    def _render_acknowledgement(detail: object) -> str:
+        """Deterministic reply to a casual acknowledgement (L10).
+
+        States plainly that nothing was acted on, so an acknowledgement can
+        never be mistaken for an instruction or an authorization.
+        """
+        if detail == "thanks":
+            return (
+                "You're welcome. Nothing further is needed for that. "
+                "Ask 'help' to see what I can do deterministically."
+            )
+        return (
+            "Noted, and no action taken. "
+            "Ask 'help' to see what I can do deterministically."
         )
 
     @staticmethod
