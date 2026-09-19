@@ -148,6 +148,11 @@ class CognitionState:
         evolution_observations: Observations for the evolution subsystem.
         goal_intelligence_report: Latest goal intelligence report.
         metadata: Additional context data.
+        meaning: Bounded structured meaning (task type / intent / goal /
+            constraints / priorities / success criteria / ambiguity /
+            reference) projected from the L1 turn-meaning contract, consumed
+            by the REASONING and PLANNING stages. Empty when no meaning
+            crossed the boundary.
     """
 
     user_input: str = ""
@@ -171,3 +176,4 @@ class CognitionState:
     evolution_observations: list[Any] = field(default_factory=list)
     goal_intelligence_report: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    meaning: dict[str, Any] = field(default_factory=dict)

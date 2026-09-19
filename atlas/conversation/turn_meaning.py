@@ -22,10 +22,11 @@ Design contract (L1):
   * Deterministic and model-independent: no clock, no randomness, no I/O.
   * Behaviour-neutral: constructing and passing it changes no routing, no
     governed handler, no prompt, and no provider behaviour.
-  * Exactly one consumer exists: :func:`accept_turn_meaning`, the fail-closed
-    acceptance check at the cognition boundary. The contract's *semantic
-    content* is intentionally NOT consumed in L1; content consumption belongs
-    to a later stage.
+  * Two consumers exist: :func:`accept_turn_meaning`, the fail-closed shape
+    acceptance check at the cognition boundary, and
+    :meth:`TurnMeaning.to_reasoning_meaning`, the bounded projection the
+    unified runtime's REASONING and PLANNING stages consume (L7.3). Both are
+    deterministic, model-independent, and never execute or route anything.
 """
 
 from __future__ import annotations
@@ -36,6 +37,11 @@ from typing import Any
 
 #: Bound for the source-text provenance anchor.
 MAX_SOURCE_TEXT_CHARS: int = 500
+
+#: Bounds for the reasoning/planning projection: at most this many list
+#: entries are carried, each bounded to this many characters.
+MAX_REASONING_ITEMS: int = 8
+MAX_REASONING_TEXT_CHARS: int = 200
 
 #: Fields projected from the existing ``TaskSpec`` as operational intent.
 #: ``ambiguity`` and ``context`` are deliberately excluded here because they
@@ -76,11 +82,69 @@ class TurnMeaning:
             "provenance": copy.deepcopy(self.provenance),
         }
 
+    def to_reasoning_meaning(self) -> dict[str, Any]:
+        """Bounded projection of this contract for the reasoning/planning layer.
+
+        Carries only the established intent/uncertainty/reference fields that
+        the existing ``ReasoningController`` / ``PlanningEngine`` contracts act
+        on, so meaning can cross into reasoning/planning through an explicit
+        optional input rather than a hidden metadata channel. Deterministic and
+        content-bounded: no clock, no I/O, no model, and no mutation of this
+        contract (returns fresh values).
+        """
+        intent = self.intent if isinstance(self.intent, dict) else {}
+        uncertainty = self.uncertainty if isinstance(self.uncertainty, dict) else {}
+        reference = self.reference if isinstance(self.reference, dict) else {}
+
+        return {
+            "task_type": _bounded_string(intent.get("task_type")),
+            "intent": _bounded_string(intent.get("intent")),
+            "goal": _bounded_string(intent.get("goal")),
+            "constraints": _bounded_strings(intent.get("constraints")),
+            "priorities": _bounded_strings(intent.get("priorities")),
+            "success_criteria": _bounded_strings(intent.get("success_criteria")),
+            "confidence": _bounded_number(intent.get("confidence")),
+            "needs_clarification": bool(intent.get("needs_clarification", False)),
+            "ambiguity_score": _bounded_number(uncertainty.get("ambiguity_score")),
+            "ambiguities": _bounded_strings(uncertainty.get("ambiguities")),
+            "reference": {
+                "field": _bounded_string(reference.get("field")),
+                "value": _bounded_string(reference.get("value")),
+            },
+        }
+
 
 def _bounded_text(value: Any, limit: int = MAX_SOURCE_TEXT_CHARS) -> str:
     """Return bounded source text for the provenance anchor."""
     text = value if isinstance(value, str) else ""
     return text[:limit]
+
+
+def _bounded_string(value: Any, limit: int = MAX_REASONING_TEXT_CHARS) -> str:
+    """Return a bounded string, or an empty string for non-string input."""
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def _bounded_strings(value: Any) -> list[str]:
+    """Return a bounded list of bounded, non-empty strings."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    items: list[str] = []
+    for entry in value[:MAX_REASONING_ITEMS]:
+        text = _bounded_string(entry)
+        if text:
+            items.append(text)
+    return items
+
+
+def _bounded_number(value: Any) -> float:
+    """Return a finite float, or 0.0 for non-numeric/non-finite input."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    number = float(value)
+    if number != number or number in (float("inf"), float("-inf")):
+        return 0.0
+    return number
 
 
 def build_turn_meaning(spec: Any, source_text: str) -> TurnMeaning:

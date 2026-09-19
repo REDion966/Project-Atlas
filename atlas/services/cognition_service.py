@@ -112,17 +112,20 @@ class CognitionService(Service):
         When neither is available, returns a minimal decision.
 
         ``turn_meaning`` is the optional L1 typed turn-meaning contract,
-        accepted across the conversation -> cognition boundary. L1 explicitly
-        does NOT consume its semantic content (that belongs to a later stage);
-        it is accepted here so the boundary contract can be proven to cross
-        intact without changing any cognition behaviour.
+        accepted across the conversation -> cognition boundary. L7 forwards it
+        to the unified runtime, where the REASONING and PLANNING stages consume
+        the bounded structured meaning it carries (intent / goal / constraints /
+        ambiguity / reference). When it is absent, every stage behaves exactly
+        as before.
         """
         if not self.running:
             raise RuntimeError("Cognition service is not running.")
 
         # --- Phase 7.5.1: Primary path via RuntimeCoordinator ---
         if self._runtime_coordinator is not None:
-            return self._process_via_runtime_coordinator(user_input, memory, metadata, goal)
+            return self._process_via_runtime_coordinator(
+                user_input, memory, metadata, goal, turn_meaning
+            )
 
         # --- Legacy fallback: inline pipeline (backward compatible) ---
         return self._process_legacy(user_input, memory, metadata, goal)
@@ -137,6 +140,7 @@ class CognitionService(Service):
         memory: Any,
         metadata: Any,
         goal: str | None,
+        turn_meaning: Any = None,
     ) -> CognitionDecision:
         """Delegate full processing to RuntimeCoordinator, adapt result."""
         assert self._runtime_coordinator is not None
@@ -146,6 +150,7 @@ class CognitionService(Service):
             memory=memory,
             metadata=metadata or {},
             goal=goal,
+            turn_meaning=turn_meaning,
         )
 
         intermediate = result.intermediate_data

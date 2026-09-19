@@ -43,6 +43,32 @@ from atlas.cognition.models import (
 from atlas.reasoning.capabilities.models import Capability
 
 
+def _project_meaning(turn_meaning: Any) -> dict[str, Any]:
+    """Fail-closed projection of an L1 meaning contract for the pipeline.
+
+    Duck-types the optional ``to_reasoning_meaning()`` projection so the
+    REASONING and PLANNING stages can consume L0-L6 structured meaning without
+    the runtime importing (or depending on) the conversation layer. Absent,
+    malformed, or raising input degrades to ``{}`` so behaviour is byte-for-byte
+    unchanged when no meaning crosses the boundary.
+    """
+    project = getattr(turn_meaning, "to_reasoning_meaning", None)
+    if not callable(project):
+        return {}
+    try:
+        meaning = project()
+    except Exception:
+        return {}
+    if not isinstance(meaning, dict):
+        return {}
+    return dict(meaning)
+
+
+def _requires_clarification(meaning: dict[str, Any]) -> bool:
+    """Deterministic fail-closed signal carried by structured meaning."""
+    return bool(meaning.get("needs_clarification"))
+
+
 class RuntimeCoordinator:
     """
     Permanent unified cognitive runtime coordinator.
@@ -142,6 +168,7 @@ class RuntimeCoordinator:
         memory: Any = None,
         metadata: dict[str, Any] | None = None,
         goal: str | None = None,
+        turn_meaning: Any = None,
     ) -> PipelineResult:
         """
         Process user input through the full unified cognitive pipeline.
@@ -154,6 +181,10 @@ class RuntimeCoordinator:
             memory: Optional pre-retrieved memory data.
             metadata: Optional metadata context.
             goal: Optional processing goal.
+            turn_meaning: Optional L1 meaning contract carrying bounded
+                structured meaning (intent / goal / constraints / ambiguity /
+                reference) into the REASONING and PLANNING stages. When
+                absent, the pipeline behaves exactly as before.
 
         Returns:
             A PipelineResult containing all stage results, metrics,
@@ -163,6 +194,7 @@ class RuntimeCoordinator:
             user_input=user_input,
             goal=goal or "",
             metadata=metadata or {},
+            meaning=_project_meaning(turn_meaning),
         )
 
         metrics = PipelineMetrics(
@@ -515,33 +547,58 @@ class RuntimeCoordinator:
                 status=StageStatus.SKIPPED,
             )
 
+        # L7.3 — structured meaning (when it crossed the boundary) informs the
+        # reasoning decision: it supplies the reasoning goal when no explicit
+        # goal was given, and it rides in the decision so the bounded meaning
+        # reaches the plan the controller produces.
+        meaning = getattr(state, "meaning", None)
+        if not isinstance(meaning, dict):
+            meaning = {}
+        meaning_goal = (
+            meaning.get("goal") if isinstance(meaning.get("goal"), str) else ""
+        )
+
         # The explicit goal (when provided) becomes the decision's
         # reasoning, which ReasoningController.create_plan carries into
         # the plan goal ("respond: <goal>"). Without a goal the previous
         # default is preserved verbatim.
-        reasoning_text = state.goal or f"Process: {state.user_input[:100]}"
+        reasoning_text = (
+            state.goal or meaning_goal or f"Process: {state.user_input[:100]}"
+        )
+
+        decision_data: dict[str, Any] = {
+            "input": state.user_input,
+            "goal": state.goal,
+            "understanding_insights": [
+                {"summary": i.summary, "confidence": i.confidence}
+                for i in state.understanding_insights[:10]
+            ],
+        }
+        if meaning:
+            decision_data["meaning"] = dict(meaning)
 
         decision = CognitionDecision(
             action="respond",
             reasoning=reasoning_text,
-            data={
-                "input": state.user_input,
-                "goal": state.goal,
-                "understanding_insights": [
-                    {"summary": i.summary, "confidence": i.confidence}
-                    for i in state.understanding_insights[:10]
-                ],
-            },
+            data=decision_data,
         )
 
         plan = self._reasoning_controller.create_plan(decision)
-        capabilities = self._capability_analyzer.analyze(plan)
+
+        # L7 fail-closed: meaning that reports unresolved ambiguity must not
+        # yield executable capabilities, so no plan step can be dispatched.
+        requires_clarification = _requires_clarification(meaning)
+        capabilities = (
+            []
+            if requires_clarification
+            else self._capability_analyzer.analyze(plan)
+        )
 
         # Phase 20 Batch 3: capability dispatch no longer executes here.
         # Only candidate capabilities are recorded; the plan (handed to the
         # PLANNING stage via state.reasoning_plan) drives selection and
         # dispatch after PLANNING has executed.
-        reasoning_data = {
+        reasoning_data: dict[str, Any] = {
             "goal": plan.goal,
             "capabilities": [
                 {"name": c.name, "priority": c.priority, "reason": c.reason}
@@ -550,6 +607,10 @@ class RuntimeCoordinator:
             "routes": [],
             "results": [],
         }
+        if meaning:
+            reasoning_data["meaning"] = dict(meaning)
+        if requires_clarification:
+            reasoning_data["requires_clarification"] = True
 
         state.reasoning_result = reasoning_data
         state.reasoning_plan = plan
@@ -580,6 +641,33 @@ class RuntimeCoordinator:
                 stage=StageType.PLANNING,
                 status=StageStatus.SKIPPED,
                 data={"reason": "No reasoning result to plan from"},
+            )
+
+        # L7 fail-closed: meaning that reports unresolved ambiguity blocks
+        # planning — no decomposition, no capability selection, and therefore
+        # no dispatch or routing for an ambiguous instruction.
+        meaning = getattr(state, "meaning", None)
+        if not isinstance(meaning, dict):
+            meaning = {}
+        if _requires_clarification(meaning):
+            planning_data: dict[str, Any] = {
+                "goal": state.reasoning_result.get("goal", "respond"),
+                "sub_goals": [],
+                "steps": [],
+                "status": "blocked",
+                "validation_errors": [],
+                "dispatched_capabilities": [],
+                "routes": [],
+                "results": [],
+                "requires_clarification": True,
+                "meaning": dict(meaning),
+            }
+            state.planning_result = planning_data
+            return StageResult(
+                stage=StageType.PLANNING,
+                status=StageStatus.SUCCESS,
+                data=planning_data,
+                confidence=0.0,
             )
 
         from atlas.reasoning.models import ReasoningPlan
@@ -652,6 +740,12 @@ class RuntimeCoordinator:
                 for r in results
             ],
         }
+
+        # L7.3 — carry the bounded structured meaning alongside the plan so the
+        # meaning that informed reasoning is available to the planning result
+        # and anything derived from it (e.g. the routing request).
+        if meaning:
+            planning_data["meaning"] = dict(meaning)
 
         state.planning_result = planning_data
 
@@ -1122,7 +1216,14 @@ class RuntimeCoordinator:
         complexity = min(1.0, 0.3 + (step_weight - 1) * 0.1 + tool_weight * 0.1)
 
         latency_requirement = "fast" if step_weight <= 2 else "medium"
-        task_type = planning.get("goal", "respond") or "respond"
+        # L7.3 — when structured meaning crossed the boundary, its task type
+        # labels the routing request (falling back to the planning goal).
+        # ``getattr`` keeps duck-typed states (no ``meaning`` attribute) valid.
+        state_meaning = getattr(state, "meaning", None)
+        meaning_task_type = (
+            state_meaning.get("task_type") if isinstance(state_meaning, dict) else ""
+        )
+        task_type = meaning_task_type or planning.get("goal", "respond") or "respond"
         context_size = max(
             0,
             len(steps) + len(state.understanding_insights),
