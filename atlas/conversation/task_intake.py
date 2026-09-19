@@ -248,6 +248,15 @@ _RECOVERY_CUES: frozenset[str] = frozenset(
     }
 )
 
+#: Noun-form ("mention") variants of the lifecycle cues above. A bare mention
+#: of a subsystem must not reclassify an explicitly requested investigation
+#: ("Investigate the approval flow." / "Investigate the recovery flow."),
+#: whereas an explicit instruction form ("approve it", "reject the proposal",
+#: "Examine the proposal and approve it.") keeps its existing classification.
+_APPROVAL_MENTION_CUES: frozenset[str] = frozenset({"approval"})
+_REJECTION_MENTION_CUES: frozenset[str] = frozenset({"rejection"})
+_RECOVERY_MENTION_CUES: frozenset[str] = frozenset({"recovery"})
+
 #: Explicit verification phrases that indicate the user wants to verify an
 #: already-completed development result. Checked after recovery so that
 #: "verify" recovery language does not collide with verification requests.
@@ -596,6 +605,58 @@ def _investigation_leads_compound(normalized: str) -> bool:
     return False
 
 
+def _investigation_lead_present(normalized: str) -> bool:
+    """Return True when a non-negated imperative investigation lead is present.
+
+    A request that explicitly asks for an investigation must not be
+    reclassified as APPROVAL/REJECTION/RECOVERY by a bare *mention* of that
+    subsystem ("Investigate the approval flow.") or by a boundary statement
+    about it ("Investigate X. Priority: don't break the approval boundary.").
+    Only imperative lead cues count — noun forms ("investigation", "analysis")
+    refer to a prior artifact — and a negated lead ("don't investigate,
+    approve it") does not count.
+
+    This is the protection already applied to planning via
+    :func:`_investigation_leads_compound`, without additionally requiring a
+    planning cue to be present.
+    """
+    lowered = normalized.lower()
+    for cue in _INVESTIGATION_LEAD_CUES:
+        for match in re.finditer(rf"\b{re.escape(cue)}\b", lowered):
+            if not _occurrence_is_negated(lowered, match.start()):
+                return True
+    return False
+
+
+def _has_word_cue(text: str, cues: frozenset[str]) -> bool:
+    """Return True when any cue appears in ``text`` as a whole word."""
+    lowered = text.lower()
+    return any(re.search(rf"\b{re.escape(cue)}\b", lowered) for cue in cues)
+
+
+def _mention_only_hijack(
+    normalized: str,
+    lowered: str,
+    mention_cues: frozenset[str],
+    instruction_cues: frozenset[str],
+) -> bool:
+    """Return True when a bare subsystem *mention* must not override an
+    explicit investigation lead.
+
+    A subsystem counts as a mention only when its noun form is present and no
+    instruction form is: an explicit instruction ("approve it", "reject the
+    proposal", "Examine the proposal and approve it.") keeps its existing
+    classification, while a mention used as an investigation target or as a
+    constraint ("Investigate the approval flow.", "... don't break the
+    approval boundary.") must not authorize or reject anything.
+    """
+    if not _investigation_lead_present(normalized):
+        return False
+    return _has_word_cue(lowered, mention_cues) and not _has_word_cue(
+        lowered, instruction_cues
+    )
+
+
 def _is_explicit_approval(text: str) -> bool:
     """Return True when the text contains explicit approval language.
 
@@ -902,22 +963,45 @@ class TaskIntake:
         # investigation-first compound request ("Investigate X, create a
         # development proposal, and present it for my approval") names
         # investigation as its first stage, so its forward-looking approval
-        # language must not hijack the classification.
-        if _is_explicit_approval(normalized) and not _investigation_leads_compound(
-            normalized
+        # language must not hijack the classification. The same applies when
+        # the investigation is the whole request and merely names or constrains
+        # the approval subsystem ("Investigate the approval flow."), which must
+        # never authorize a pending proposal; an explicit approval instruction
+        # ("... and approve it.") keeps its existing classification.
+        if _is_explicit_approval(normalized) and not (
+            _investigation_leads_compound(normalized)
+            or _mention_only_hijack(
+                normalized,
+                lowered,
+                _APPROVAL_MENTION_CUES,
+                _APPROVAL_CUES - _APPROVAL_MENTION_CUES,
+            )
         ):
             return TaskType.APPROVAL
 
         # Explicit rejection is checked next, symmetric with approval.
         # It requires unambiguous rejection language and cannot be
-        # ambiguous conversational responses.
-        if _is_explicit_rejection(normalized):
+        # ambiguous conversational responses. A bare mention of the rejection
+        # subsystem must not reject a pending proposal by naming it.
+        if _is_explicit_rejection(normalized) and not _mention_only_hijack(
+            normalized,
+            lowered,
+            _REJECTION_MENTION_CUES,
+            _REJECTION_CUES - _REJECTION_MENTION_CUES,
+        ):
             return TaskType.REJECTION_REQUEST
 
         # Explicit recovery phrases are checked next. They indicate the user
         # wants to recover from a previous development execution failure.
-        # Checked before planning so that "recover" is not misclassified.
-        recovery = _first_hit(lowered, _RECOVERY_CUES)
+        # Checked before planning so that "recover" is not misclassified. An
+        # investigation that merely names the recovery subsystem stays an
+        # investigation.
+        recovery = _first_hit(lowered, _RECOVERY_CUES) and not _mention_only_hijack(
+            normalized,
+            lowered,
+            _RECOVERY_MENTION_CUES,
+            _RECOVERY_CUES - _RECOVERY_MENTION_CUES,
+        )
         if recovery:
             return TaskType.RECOVERY_REQUEST
 

@@ -537,6 +537,14 @@ class InvestigationService:
         """Search for a pattern in the repository (read-only).
 
         Uses ripgrep if available, falling back to a pure-Python search.
+
+        L9 — results are ordered BEFORE they are bounded. ripgrep emits
+        matches in parallel-traversal completion order, which varies between
+        runs, so bounding its raw output made the retained evidence set
+        (and therefore the investigation report and its ``affected_files``)
+        vary for identical input and identical repository state. Ordering the
+        matches deterministically makes the bounded selection a pure function
+        of the repository content.
         """
         results: list[str] = []
         try:
@@ -548,9 +556,9 @@ class InvestigationService:
                 cwd=str(self._root),
             )
             if proc.returncode == 0:
-                results = [
+                results = sorted(
                     line for line in proc.stdout.strip().split("\n") if line
-                ][:max_results]
+                )[:max_results]
         except (FileNotFoundError, subprocess.TimeoutExpired):
             # Fallback: pure-Python search
             results = self._python_grep(pattern, directory, max_results)
@@ -562,12 +570,12 @@ class InvestigationService:
         directory: str,
         max_results: int,
     ) -> list[str]:
-        """Pure-Python grep fallback (read-only)."""
+        """Pure-Python grep fallback (read-only, deterministically ordered)."""
         results: list[str] = []
         search_dir = self._root / directory
         if not search_dir.exists():
             return results
-        for path in search_dir.rglob("*.py"):
+        for path in sorted(search_dir.rglob("*.py")):
             if len(results) >= max_results:
                 break
             try:

@@ -65,6 +65,16 @@ _BUILTIN_TASK_TYPES: frozenset[str] = frozenset(
     {"conversation", "unknown", "question"}
 )
 
+#: L9 — additional task types eligible for the bounded conversational-turn
+#: recall surface only. Intake types the finding-recall phrases ("what did we
+#: find?") as a research/information request because of the research cue
+#: "find", which previously placed them outside ``_BUILTIN_TASK_TYPES`` and
+#: made the deterministic recall unreachable end to end. Nothing else about an
+#: information request changes: recall is still claimed only when a bounded
+#: phrase matches AND a deterministic candidate exists (otherwise this service
+#: declines and the existing orchestrated path applies unchanged).
+_RECALL_ELIGIBLE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
+
 _HELP_RE = re.compile(
     r"\bhelp\b|what can you do\b|how do i (use|talk to|chat with)\b"
     r"|\bcommands\b|\busage\b|^\s*help\s*[?!.\s]*$"
@@ -391,6 +401,14 @@ class BuiltinResponseService:
         if spec is not None:
             task_type = getattr(spec.task_type, "value", "") or ""
             if task_type not in _BUILTIN_TASK_TYPES:
+                # L9 — the bounded conversational-turn recall stays reachable
+                # for recall-eligible task types. Only an already-deterministic
+                # candidate is claimed; every other turn of these types is
+                # returned to its existing path unchanged (fail closed).
+                if task_type in _RECALL_ELIGIBLE_TASK_TYPES:
+                    recall = self._match_conversation_recall(lowered, context)
+                    if recall is not None:
+                        return (BUILTIN_INTENT_CONVERSATION_RECALL, recall)
                 return None
             if bool(getattr(spec, "needs_clarification", False)):
                 return None
