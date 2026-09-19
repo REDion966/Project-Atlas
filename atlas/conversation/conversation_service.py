@@ -859,6 +859,18 @@ class ConversationService:
                 self._conversation.add_message(report_response)
                 yield report_response.content
                 return
+        # C4.2 — bounded repository impact-analysis exposure. Read-only and
+        # deterministic; reuses the existing RepositoryMap capability.
+        # Mirrors send(): same handler, same arguments, same position — without
+        # it this turn falls through the whole governed cascade to the provider.
+        if spec is not None and spec.task_type is TaskType.REPOSITORY_IMPACT_REQUEST:
+            impact_response = self._maybe_handle_repository_impact_request(
+                spec, original_text=text
+            )
+            if impact_response is not None:
+                self._conversation.add_message(impact_response)
+                yield impact_response.content
+                return
         # Autonomy semantics — explicit request to proceed autonomously
         # with an already-approved development plan. L1 controlled autonomy.
         if spec is not None and spec.task_type is TaskType.AUTONOMY_REQUEST:
@@ -905,6 +917,16 @@ class ConversationService:
         if development_response is not None:
             self._conversation.add_message(development_response)
             yield development_response.content
+            return
+
+        # P7.4 — route a pending confirmation reply through the local
+        # coordinator (conversation-owned; never reaches F9 directly).
+        # Mirrors send(): without it a confirmation reply is never consumed on
+        # the user-facing path and the pending confirmation stays unresolved.
+        coordinated = self._maybe_handle_development_need_confirmation(text, active_session)
+        if coordinated is not None:
+            self._conversation.add_message(coordinated)
+            yield coordinated.content
             return
 
         # Model-independent conversational path (Phase 1): same placement as
