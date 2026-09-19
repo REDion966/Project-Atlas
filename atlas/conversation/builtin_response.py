@@ -12,6 +12,8 @@ provider:
 - status (grounded in injected collaborators + caller-supplied counts)
 - memory/knowledge recall (deterministic lookup; honest when unavailable)
 - commands (supported CLI surfaces + safe next steps)
+- resolved-reference restatement (bounded: restates evidence the deterministic
+  resolver has ALREADY bound, never re-resolves, guesses, or invents)
 - unsupported-request notice (bounded, fail-closed)
 
 Pure logic: no AI imports, no network, no storage/schema changes, no
@@ -56,6 +58,7 @@ BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
 BUILTIN_INTENT_STATUS = "status"
 BUILTIN_INTENT_RECALL = "recall"
 BUILTIN_INTENT_CONVERSATION_RECALL = "conversation_recall"
+BUILTIN_INTENT_REFERENCE = "reference"
 BUILTIN_INTENT_ACKNOWLEDGEMENT = "acknowledgement"
 BUILTIN_INTENT_COMMANDS = "commands"
 BUILTIN_INTENT_UNSUPPORTED = "unsupported"
@@ -181,6 +184,36 @@ _CONVERSATION_RECALL_LABELS: dict[str, str] = {
 
 #: Bound applied to recalled turn content in the rendered answer.
 _MAX_CONVERSATION_RECALL_CHARS: int = 400
+
+# ---------------------------------------------------------------------------
+# Stage A — consume already-bound contextual evidence.
+#
+# When the deterministic resolver ALREADY resolved a conversational reference,
+# the referent is attached to ``TaskSpec.context`` as ``resolved_reference``
+# (``{"field": ..., "value": ...}``). This layer only *restates* that bound
+# fact. It never re-resolves, never guesses, and never consults a referent the
+# resolver did not bind.
+# ---------------------------------------------------------------------------
+
+#: Restatement label per consumable referent field. Only genuine
+#: :class:`ConversationState` facts that the resolver can bind are listed, so a
+#: referent outside this bounded set declines and the unchanged unsupported
+#: behavior applies. The Phase 4 contextual label ``context_subject`` is
+#: deliberately absent: it is a derived contextual referent, not a stored state
+#: fact, and restating it would assert an identity rather than report state.
+_REFERENCE_LABELS: dict[str, str] = {
+    "latest_result": "The most recent result:",
+    "current_investigation": "The active investigation:",
+    "current_task": "The active task:",
+    "current_subject": "The current subject:",
+    "development_intent": "The current development intent:",
+    "relevant_prior_action": "The most recent action:",
+    "pending_question": "The question awaiting an answer:",
+    "pending_confirmation": "The pending confirmation:",
+}
+
+#: Bound applied to the restated referent value in the rendered answer.
+_MAX_REFERENCE_CHARS: int = 400
 
 #: Supported-command inquiry. Answered from the fixed, actually-existing
 #: CLI command surfaces (never invented).
@@ -379,6 +412,8 @@ class BuiltinResponseService:
         }
         if intent == BUILTIN_INTENT_CONVERSATION_RECALL and isinstance(detail, tuple):
             metadata["recall_source"] = detail[0]
+        if intent == BUILTIN_INTENT_REFERENCE and isinstance(detail, tuple):
+            metadata["reference_field"] = detail[0]
         return Message(
             role="assistant",
             content=content,
@@ -481,6 +516,12 @@ class BuiltinResponseService:
                 BUILTIN_INTENT_ACKNOWLEDGEMENT,
                 "thanks" if _GRATITUDE_RE.search(lowered) else "acknowledged",
             )
+        # Stage A — restate an ALREADY-resolved reference last: every existing
+        # intent above keeps precedence, and only evidence the deterministic
+        # resolver actually bound is consumed. Weakest match, fail closed.
+        resolved_reference = self._match_resolved_reference(spec)
+        if resolved_reference is not None:
+            return (BUILTIN_INTENT_REFERENCE, resolved_reference)
         task_type = (
             getattr(spec.task_type, "value", "") if spec is not None else ""
         )
@@ -587,6 +628,38 @@ class BuiltinResponseService:
         return None
 
     @staticmethod
+    def _match_resolved_reference(
+        spec: TaskSpec | None,
+    ) -> tuple[str, str, str] | None:
+        """Return ``(field, label, value)`` for an already-resolved reference.
+
+        Stage A consumption: reads ONLY the deterministic evidence the resolver
+        already attached to ``TaskSpec.context`` (``resolved_reference``). The
+        referent must be a consumable :class:`ConversationState` field and its
+        bound value a non-empty string; anything else declines, so turns with
+        no applicable evidence keep the unchanged unsupported behavior.
+
+        Nothing is re-resolved, guessed, executed, or authorized here, and the
+        bound value is restated verbatim (never interpreted).
+        """
+        if spec is None:
+            return None
+        context = getattr(spec, "context", None)
+        if not isinstance(context, dict):
+            return None
+        payload = context.get("resolved_reference")
+        if not isinstance(payload, dict):
+            return None
+        field = payload.get("field")
+        value = payload.get("value")
+        if not isinstance(field, str) or not isinstance(value, str):
+            return None
+        label = _REFERENCE_LABELS.get(field)
+        if label is None or not value.strip():
+            return None
+        return (field, label, value.strip())
+
+    @staticmethod
     def _prior_turns(
         context: ConversationContext,
         role: str,
@@ -635,6 +708,15 @@ class BuiltinResponseService:
             body = body[:_MAX_CONVERSATION_RECALL_CHARS].rstrip() + "..."
         return f"{label} {body}"
 
+    @staticmethod
+    def _render_reference(detail: tuple[str, str, str]) -> str:
+        """Restate a bounded referent the deterministic resolver already bound."""
+        _field, label, value = detail
+        body = value.strip()
+        if len(body) > _MAX_REFERENCE_CHARS:
+            body = body[:_MAX_REFERENCE_CHARS].rstrip() + "..."
+        return f"{label} {body}"
+
     def _render(
         self,
         intent: str,
@@ -657,6 +739,8 @@ class BuiltinResponseService:
             return self._render_recall(detail or "")
         if intent == BUILTIN_INTENT_CONVERSATION_RECALL and isinstance(detail, tuple):
             return self._render_conversation_recall(detail)
+        if intent == BUILTIN_INTENT_REFERENCE and isinstance(detail, tuple):
+            return self._render_reference(detail)
         if intent == BUILTIN_INTENT_COMMANDS:
             return self._render_commands()
         if intent == BUILTIN_INTENT_ACKNOWLEDGEMENT:
