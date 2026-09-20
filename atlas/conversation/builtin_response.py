@@ -37,7 +37,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from atlas.conversation.message import Message
-from atlas.conversation.normalization import collapse_whitespace
+from atlas.conversation.normalization import canonicalize_surface
 
 if TYPE_CHECKING:
     from atlas.conversation.conversation_context import ConversationContext
@@ -458,7 +458,7 @@ class BuiltinResponseService:
         ``context`` is the bounded, read-only :class:`ConversationContext`; it
         is consulted only for conversational-turn recall (Phase 5).
         """
-        lowered = collapse_whitespace(text).lower()
+        lowered = canonicalize_surface(text).lower()
         if not lowered:
             return BUILTIN_INTENT_UNSUPPORTED
         if spec is not None:

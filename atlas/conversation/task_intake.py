@@ -27,7 +27,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-from atlas.conversation.normalization import collapse_whitespace
+from atlas.conversation.normalization import (
+    canonicalize_surface,
+    collapse_whitespace,
+)
 from atlas.conversation.repository_impact import (
     looks_like_repository_impact_request,
 )
@@ -1149,7 +1152,7 @@ class TaskIntake:
     ) -> TaskSpec:
         # Deterministic fields (always computed, even when model assist is on,
         # so there is always a safe fallback).
-        deterministic_type = self._classify(normalized)
+        deterministic_type = self._classify(canonicalize_surface(normalized))
         deterministic_intent = self._extract_objective(normalized)
         deterministic_constraints = _extract_items(normalized, _CONSTRAINT_CUES)
         deterministic_priorities = _extract_items(normalized, _PRIORITY_CUES)
