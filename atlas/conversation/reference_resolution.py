@@ -73,6 +73,40 @@ def has_bounded_reference(text: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Repeat / re-check requests (bounded, WHOLE-TURN).
+#
+# A repeat request refers to the most recent GOVERNED OPERATION, not to a
+# subject or a result. Recognition is deliberately anchored to the whole turn
+# so an incidental "again" inside an ordinary sentence can never become a
+# repeat command. This layer only recognizes the form: the operation KIND is
+# never inferred from the verb here — the caller resolves it from the retained
+# operation record.
+# ---------------------------------------------------------------------------
+
+_REPEAT_REQUEST_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:"
+    r"(?:check|do|run|repeat|investigate)\s+(?:that|this|it)(?:\s+again)?"
+    r"|again"
+    r")\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_repeat_request(text: str) -> bool:
+    """True when the WHOLE turn is a bounded repeat/re-check request.
+
+    Matches only the enumerated verbs (``check``/``do``/``run``/``repeat``/
+    ``investigate``) followed by ``that``/``this``/``it`` (optionally followed
+    by ``again``), or a bare ``again``. Anchored to the whole turn, so ordinary
+    uses of "again" within a larger sentence are never repeat commands.
+    Deterministic; no NLP, no inference.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return _REPEAT_REQUEST_RE.match(collapse_whitespace(text)) is not None
+
+
 class ReferenceResolutionStatus(str, Enum):
     """Outcome of attempting to resolve a conversational reference."""
 

@@ -28,6 +28,61 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 import uuid
 
+#: Bound applied to a retained governed-operation operand.
+_MAX_OPERATION_OPERAND_CHARS: int = 500
+
+
+@dataclass(frozen=True, slots=True)
+class GovernedOperation:
+    """The single most recent governed operation (facts only, no history).
+
+    ``kind`` is the existing :class:`~atlas.conversation.task_intake.TaskType`
+    value (e.g. ``"investigation_request"``), ``operand`` is the operation's
+    retained target when one exists, and ``proposal_id`` links a
+    proposal-backed operation.
+
+    This is a *fact* about what actually happened — never an interpretation of
+    what the user meant and never authority. It is deliberately single-valued:
+    recording a new operation replaces the previous one, and there is no
+    operation history or action ledger.
+    """
+
+    kind: str
+    operand: Optional[str] = None
+    proposal_id: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict."""
+        return {
+            "kind": self.kind,
+            "operand": self.operand,
+            "proposal_id": self.proposal_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Optional["GovernedOperation"]:
+        """Rebuild from a serialized dict, or ``None`` when malformed."""
+        if not isinstance(data, dict):
+            return None
+        kind = data.get("kind")
+        if not isinstance(kind, str) or not kind.strip():
+            return None
+        operand = data.get("operand")
+        proposal_id = data.get("proposal_id")
+        return cls(
+            kind=kind.strip(),
+            operand=(
+                operand.strip()[:_MAX_OPERATION_OPERAND_CHARS]
+                if isinstance(operand, str) and operand.strip()
+                else None
+            ),
+            proposal_id=(
+                proposal_id.strip()
+                if isinstance(proposal_id, str) and proposal_id.strip()
+                else None
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ConversationState:
@@ -117,6 +172,9 @@ class ConversationState:
     # Reference/id of the most recent meaningful action (for "that action").
     relevant_prior_action: Optional[str] = None
 
+    # The single most recent governed operation (facts only; no history).
+    last_operation: Optional[GovernedOperation] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -148,6 +206,11 @@ class ConversationState:
             "pending_confirmation": self.pending_confirmation,
             "latest_result": self.latest_result,
             "relevant_prior_action": self.relevant_prior_action,
+            "last_operation": (
+                self.last_operation.to_dict()
+                if self.last_operation is not None
+                else None
+            ),
             "turn_id": self.turn_id,
         }
 
@@ -187,6 +250,12 @@ class ConversationStateManager:
             k: v for k, v in {**self._state.to_dict(), **fields}.items()
             if k in known
         }
+        # ``to_dict`` serializes the retained operation to a plain dict; rebuild
+        # the typed value so the immutable state keeps its contract.
+        if isinstance(merged.get("last_operation"), dict):
+            merged["last_operation"] = GovernedOperation.from_dict(
+                merged["last_operation"]
+            )
         self._state = ConversationState(**merged)
         return self._state
 
@@ -288,3 +357,22 @@ class ConversationStateManager:
         if result is not None:
             fields["latest_result"] = result
         return self.update(**fields)
+
+    def record_operation(
+        self,
+        kind: str,
+        operand: Optional[str] = None,
+        proposal_id: Optional[str] = None,
+    ) -> ConversationState:
+        """Record the single most recent governed operation.
+
+        Replaces any previously retained operation — there is no history. A
+        blank/non-string ``kind`` is ignored (fail closed), so a malformed
+        caller can never create a nameless operation.
+        """
+        operation = GovernedOperation.from_dict(
+            {"kind": kind, "operand": operand, "proposal_id": proposal_id}
+        )
+        if operation is None:
+            return self._state
+        return self.update(last_operation=operation)

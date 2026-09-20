@@ -25,7 +25,10 @@ from atlas.conversation.investigation import (
     InvestigationService,
 )
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
-from atlas.conversation.reference_resolution import ConversationReferenceResolver
+from atlas.conversation.reference_resolution import (
+    ConversationReferenceResolver,
+    is_repeat_request,
+)
 from atlas.conversation.development_outcome_reporter import (
     DevelopmentOutcomeReporter,
     snapshot_from_result,
@@ -50,6 +53,17 @@ if TYPE_CHECKING:
 
 #: Bound applied to the recorded pending clarification question (L6).
 _MAX_PENDING_QUESTION_CHARS: int = 400
+
+#: Governed operations whose handler is read-only and accepts a retained text
+#: operand, so a bounded repeat request may safely re-enter the SAME existing
+#: handler with the retained operand. Every other retained operation kind is
+#: refused on repeat (never silently re-executed).
+_REPEATABLE_READ_ONLY_KINDS: frozenset[str] = frozenset(
+    {
+        TaskType.INVESTIGATION_REQUEST.value,
+        TaskType.REPOSITORY_IMPACT_REQUEST.value,
+    }
+)
 
 
 class ApprovalManagerProtocol(Protocol):
@@ -521,6 +535,15 @@ class ConversationService:
             if reference_response is not None:
                 self._conversation.add_message(reference_response)
                 return reference_response
+        # Repeat/re-check of the most recent governed operation (bounded,
+        # whole-turn). The RETAINED operation kind decides the response — never
+        # the phrase's verb; only read-only handlers are re-entered and
+        # governed/mutating operations are refused. Unrecognized forms and the
+        # no-retained-operation case fall through unchanged.
+        repeat_response = self._maybe_handle_repeat_request(text, spec)
+        if repeat_response is not None:
+            self._conversation.add_message(repeat_response)
+            return repeat_response
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -799,6 +822,13 @@ class ConversationService:
                 self._conversation.add_message(reference_response)
                 yield reference_response.content
                 return
+        # Repeat/re-check of the most recent governed operation — mirror of
+        # send(): same method, same placement, same semantics.
+        repeat_response = self._maybe_handle_repeat_request(text, spec)
+        if repeat_response is not None:
+            self._conversation.add_message(repeat_response)
+            yield repeat_response.content
+            return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -1425,19 +1455,24 @@ class ConversationService:
         if self._development_bridge is None:
             return None
 
+        operand = spec.goal or spec.intent or None
         result = self._development_bridge(spec)
         if isinstance(result, Message):
+            self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
             return result
         if isinstance(result, str):
+            self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
             return Message(role="assistant", content=result)
         # P7.5 — the bridge returned an authoritative F9 result object rather
         # than a pre-rendered Message. Project it through the reporter so the
         # conversational surface sees a truthful, provenance-preserving report.
         if self._outcome_reporter is not None:
             provenance = self._provenance_from_spec(spec)
-            return self._outcome_reporter.report(
+            message = self._outcome_reporter.report(
                 snapshot_from_result(result, **provenance)
             )
+            self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
+            return message
         return Message(
             role="assistant",
             content="The development request could not be prepared.",
@@ -1486,6 +1521,88 @@ class ConversationService:
             return outcome
         # CONFIRMED -> DEVELOPMENT_REQUEST TaskSpec -> existing bridge.
         return self._maybe_handle_development_request(outcome)
+
+    def _record_operation(
+        self,
+        kind: TaskType,
+        operand: str | None = None,
+        proposal_id: str | None = None,
+    ) -> None:
+        """Record the most recent governed operation (facts only).
+
+        Invoked ONLY from a handler's completion point — never from
+        classification — so a request that was rejected, is awaiting
+        clarification/approval, or did not actually run is never recorded.
+        """
+        if self._state_manager is None:
+            return
+        self._state_manager.record_operation(
+            kind.value if hasattr(kind, "value") else str(kind),
+            operand=operand,
+            proposal_id=proposal_id,
+        )
+
+    def _maybe_handle_repeat_request(
+        self,
+        text: str,
+        spec: TaskSpec | None,
+    ) -> Message | None:
+        """Handle a bounded repeat/re-check of the most recent governed operation.
+
+        Recognition is whole-turn and bounded (``is_repeat_request``). When a
+        repeat form is recognized AND an operation is retained, the retained
+        operation's KIND decides the response — never the verb in the phrase:
+
+          * read-only operations are re-entered through the SAME existing
+            handler with the retained operand;
+          * every other (governed/mutating) operation is refused with a
+            deterministic instruction to use its explicit command/approval
+            path — nothing is executed or approved here.
+
+        When no operation is retained the method returns ``None`` so the
+        existing fail-closed behavior for the turn is unchanged.
+        """
+        if not is_repeat_request(text):
+            return None
+        state = (
+            self._state_manager.state if self._state_manager is not None else None
+        )
+        operation = (
+            getattr(state, "last_operation", None) if state is not None else None
+        )
+        if operation is None:
+            return None
+
+        operand = getattr(operation, "operand", None)
+        if operation.kind in _REPEATABLE_READ_ONLY_KINDS:
+            if not isinstance(operand, str) or not operand.strip():
+                return self._repeat_refusal(operation, "no retained target")
+            if operation.kind == TaskType.INVESTIGATION_REQUEST.value:
+                if self._investigation_service is None:
+                    return self._repeat_refusal(operation, "handler unavailable")
+                return self._maybe_handle_investigation_request(
+                    spec, original_text=operand
+                )
+            return self._maybe_handle_repository_impact_request(
+                spec, original_text=operand
+            )
+
+        return self._repeat_refusal(operation, "governed operation")
+
+    @staticmethod
+    def _repeat_refusal(operation: Any, reason: str) -> Message:
+        """Deterministic refusal to repeat a non-re-runnable governed operation."""
+        kind = getattr(operation, "kind", "unknown")
+        return Message(
+            role="assistant",
+            content=(
+                f"I will not repeat that automatically ({reason}): the most "
+                f"recent governed operation was '{kind}'. Governed operations "
+                "must be re-requested through their explicit command and, where "
+                "applicable, approval path. Nothing was executed."
+            ),
+            metadata={"repeat": {"status": "not_repeated", "kind": kind}},
+        )
 
     def _maybe_handle_investigation_request(
         self,
@@ -1570,6 +1687,14 @@ class ConversationService:
         if proposal_meta:
             metadata["proposal"] = proposal_meta
 
+        # The read-only investigation completed; retain it as the most recent
+        # governed operation (operand = the actual investigation target).
+        self._record_operation(
+            TaskType.INVESTIGATION_REQUEST,
+            operand=report.target,
+            proposal_id=proposal.proposal_id if proposal is not None else None,
+        )
+
         return Message(
             role="assistant",
             content="\n".join(content_parts),
@@ -1598,6 +1723,13 @@ class ConversationService:
 
         if self._state_manager is not None:
             self._state_manager.update(latest_result=result.message)
+
+        # The read-only impact analysis completed; retain it as the most recent
+        # governed operation (operand = the resolved target, else the query).
+        self._record_operation(
+            TaskType.REPOSITORY_IMPACT_REQUEST,
+            operand=result.resolved_module or query,
+        )
 
         return Message(
             role="assistant",
@@ -1818,6 +1950,15 @@ class ConversationService:
                     "content_status", "unknown"
                 ),
             }
+
+        # The planning operation completed (proposal prepared and submitted for
+        # approval); retain it as the most recent governed operation. It is
+        # governed, so a repeat request is refused rather than re-planned.
+        self._record_operation(
+            TaskType.PLANNING_REQUEST,
+            operand=getattr(inv_proposal, "investigation_target", None),
+            proposal_id=ev_proposal.proposal_id,
+        )
 
         return Message(
             role="assistant",
@@ -2405,6 +2546,13 @@ class ConversationService:
                 )
             self._state_manager.update(latest_result=latest)
 
+        # The governed execution ran through the existing bridge; retain it as
+        # the most recent governed operation (never re-run from a repeat).
+        self._record_operation(
+            TaskType.EXECUTION_REQUEST,
+            proposal_id=proposal.proposal_id,
+        )
+
         return message
 
     def _resolve_approved_request(self, proposal_id: str) -> Any | None:
@@ -2548,6 +2696,13 @@ class ConversationService:
                 ),
             )
 
+        # The governed recovery execution ran through the existing bridge;
+        # retain it as the most recent governed operation.
+        self._record_operation(
+            TaskType.EXECUTION_REQUEST,
+            proposal_id=proposal.proposal_id,
+        )
+
         return message
 
     def _maybe_handle_recovery_request(self, spec: TaskSpec) -> Message | None:
@@ -2675,6 +2830,14 @@ class ConversationService:
                 "this recovery request before any recovery attempt can be "
                 "executed. The original approval does NOT authorize recovery."
             )
+
+        # The recovery assessment completed (a recovery decision was produced);
+        # retain it as the most recent governed operation. It is governed, so a
+        # repeat request is refused rather than re-assessed.
+        self._record_operation(
+            TaskType.RECOVERY_REQUEST,
+            proposal_id=recovery_proposal_id,
+        )
 
         return Message(
             role="assistant",
@@ -2889,6 +3052,14 @@ class ConversationService:
         lines.append(f"**Evidence:** {report.evidence}")
         if report.message:
             lines.append(f"**Conclusion:** {report.message}")
+
+        # The verification ran (read-only over an existing development result);
+        # retain it as the most recent governed operation. It is not re-runnable
+        # from a cue-less repeat.
+        self._record_operation(
+            TaskType.VERIFICATION_REQUEST,
+            proposal_id=proposal.proposal_id,
+        )
 
         return Message(
             role="assistant",

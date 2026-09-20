@@ -223,13 +223,17 @@ class TestReferenceConsumptionEndToEnd(unittest.TestCase):
                 )
                 self.assertIn("cannot answer", message.content, text)
 
-    def test_contextual_subject_referent_stays_unsupported(self):
+    def test_repeat_uses_read_only_operation_not_subject_restatement(self):
+        # Stage C: "Check that again." is a bounded repeat of the most recent
+        # governed operation. After a read-only investigation it re-enters the
+        # existing handler with the retained operand — it is neither restated
+        # as a reference nor left unsupported.
         service = self._after_governed_turn()
         message = service.send("Check that again.")
         self.assertNotEqual(
             (message.metadata or {}).get("builtin_intent"), BUILTIN_INTENT_REFERENCE
         )
-        self.assertIn("cannot answer", message.content)
+        self.assertIsNotNone((message.metadata or {}).get("investigation"))
 
     def test_reference_answer_grants_no_authority(self):
         service = self._after_governed_turn()
