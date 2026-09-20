@@ -361,6 +361,20 @@ def main() -> None:
     )
 
     # -------------------------
+    # Architecture Self-Knowledge Model (Phase 1.2, read-only)
+    # -------------------------
+
+    architecture_parser = subparsers.add_parser(
+        "architecture",
+        help="Architecture self-knowledge model (read-only)",
+    )
+    architecture_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of markdown",
+    )
+
+    # -------------------------
     # Validated Knowledge Retrieval (C6.1, read-only)
     # -------------------------
 
@@ -694,6 +708,14 @@ def main() -> None:
 
     if args.command == "capabilities":
         _run_capabilities(args)
+        return
+
+    # -------------------------
+    # Architecture Self-Knowledge Model (Phase 1.2, read-only)
+    # -------------------------
+
+    if args.command == "architecture":
+        _run_architecture(args)
         return
 
     # -------------------------
@@ -1064,6 +1086,28 @@ def _run_capabilities(args: argparse.Namespace) -> None:
         return
     try:
         print(cmd_capabilities(atlas, args))
+    finally:
+        atlas.shutdown()
+
+
+def _run_architecture(args: argparse.Namespace) -> None:
+    """Render the architecture self-knowledge model (Phase 1.2, read-only).
+
+    Presentation-only: the model is produced by the kernel accessor. This
+    surface never mutates state, persists nothing, and requires no external
+    AI model.
+    """
+    from atlas.cli.architecture_commands import cmd_architecture
+    from atlas.kernel.atlas import Atlas
+
+    atlas = Atlas()
+    try:
+        atlas.start()
+    except Exception as exc:
+        print(f"error: failed to load Atlas: {exc}")
+        return
+    try:
+        print(cmd_architecture(atlas, args))
     finally:
         atlas.shutdown()
 

@@ -3622,6 +3622,24 @@ class Atlas:
             tool_registry=self._tool_registry,
         )
 
+    def architecture_model(self):
+        """Return the read-only architecture self-knowledge model (Phase 1.2).
+
+        READ-ONLY projection over the existing authoritative structural sources
+        (``ComponentRegistry``, the C5.1 ``CapabilityModel``, and the cached
+        ``RepositoryMap``). It never mutates registries or the repository map,
+        persists nothing, performs no network I/O, and does not call an external
+        AI model. When the repository map is unavailable, module-level facts are
+        omitted and reported honestly.
+        """
+        from atlas.self_knowledge.architecture_model import build_architecture_model
+
+        return build_architecture_model(
+            component_registry=self._component_registry,
+            capability_model=self.capability_model(),
+            repository_map=self.repository_map,
+        )
+
     def validated_knowledge(self, query: str):
         """Return validated (SUPPORTED) persisted research knowledge (C6.1).
 
