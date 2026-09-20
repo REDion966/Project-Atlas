@@ -119,6 +119,64 @@ class TestResultReferences:
         assert result.resolved_value == "search complete"
 
 
+class TestResultQualifierAliases:
+    """Bounded aliases for the single retained result (no result history).
+
+    Atlas keeps exactly one result in ``ConversationState``. These qualifier
+    forms add reference *coverage* to that single value; they do not express
+    genuine historical ordering and must fail closed when no result exists.
+    """
+
+    _STATE = ConversationState(latest_result="result-1")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "the previous result",
+            "the last result",
+            "the prior result",
+            "What about the previous result?",
+            "What about the last result?",
+            "What about the prior result?",
+        ],
+    )
+    def test_qualifier_forms_resolve_to_latest_result(self, resolver, text):
+        result = resolver.resolve(text, self._STATE)
+        assert result.status == ReferenceResolutionStatus.RESOLVED
+        assert result.resolved_field == "latest_result"
+        assert result.resolved_value == "result-1"
+
+    @pytest.mark.parametrize(
+        "text",
+        ["the previous result", "the last result", "the prior result"],
+    )
+    def test_qualifier_forms_fail_closed_without_result(self, resolver, text):
+        result = resolver.resolve(text, ConversationState())
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+        assert result.resolved_field is None
+        assert result.resolved_value is None
+
+    @pytest.mark.parametrize(
+        "text",
+        ["the previous result", "the last result", "the prior result"],
+    )
+    def test_qualifier_forms_are_bounded_multi_word(self, text):
+        assert has_bounded_reference(text) is True
+
+    @pytest.mark.parametrize(
+        "text", ["the last results", "the previous results", "prior results"]
+    )
+    def test_plural_forms_are_not_captured(self, resolver, text):
+        result = resolver.resolve(text, self._STATE)
+        assert result.status == ReferenceResolutionStatus.UNRESOLVED
+
+    def test_alias_selects_the_only_retained_result(self, resolver):
+        # There is no result history: the qualifier is not a history claim and
+        # must bind the one retained value.
+        result = resolver.resolve("the previous result", self._STATE)
+        assert result.resolved_value == "result-1"
+
+
 class TestActionReferences:
     """Action reference resolution with ambiguity handling."""
 

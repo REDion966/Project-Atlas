@@ -154,9 +154,23 @@ _REFERENCE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = 
         ("current_task",),
         "task",
     ),
-    # Result references
+    # Result references. The qualifier aliases ("previous result" / "last
+    # result" / "prior result") are BOUNDED ALIASES to the single retained
+    # ``latest_result``: Atlas keeps exactly one result in
+    # ``ConversationState``, so these phrases express no genuine historical
+    # ordering and select no older result. They resolve only when
+    # ``latest_result`` is set and stay UNRESOLVED otherwise (fail closed).
+    # This is deliberate coverage, not result-history semantics — revisit only
+    # if result history is ever introduced.
     (
-        ("that result", "the result", "the findings"),
+        (
+            "that result",
+            "the result",
+            "the findings",
+            "previous result",
+            "last result",
+            "prior result",
+        ),
         ("latest_result",),
         "result",
     ),

@@ -210,7 +210,6 @@ class TestReferenceConsumptionEndToEnd(unittest.TestCase):
     def test_unsupported_contextual_questions_are_unchanged(self):
         service = self._after_governed_turn()
         for text in (
-            "What about the previous result?",
             "No, I meant the cognition pipeline.",
             "How is the quality of the output?",
             "blorptastic quux",
@@ -258,6 +257,73 @@ class TestReferenceConsumptionEndToEnd(unittest.TestCase):
             service = self._after_governed_turn()
             contents.add(service.send(RESULT_TEXT).content)
         self.assertEqual(len(contents), 1)
+
+
+class TestResultQualifierAliasesEndToEnd(unittest.TestCase):
+    """Bounded result-qualifier aliases ride the existing Stage A path.
+
+    Atlas retains exactly ONE result (``latest_result``), so "previous/last/
+    prior result" are bounded aliases to that single value — reference
+    coverage, not result-history semantics. When no result is retained the
+    qualifier forms fail closed exactly like any other unsupported turn.
+    """
+
+    QUALIFIERS = (
+        "What about the previous result?",
+        "What about the last result?",
+        "What about the prior result?",
+    )
+
+    def test_qualifier_forms_consumed_after_governed_turn(self):
+        service = TestReferenceConsumptionEndToEnd._after_governed_turn()
+        recorded = service.state_manager.state.latest_result
+        self.assertTrue(recorded)
+        for text in self.QUALIFIERS:
+            with self.subTest(text=text):
+                message = service.send(text)
+                self.assertEqual(
+                    (message.metadata or {}).get("builtin_intent"),
+                    BUILTIN_INTENT_REFERENCE,
+                )
+                self.assertEqual(
+                    (message.metadata or {}).get("reference_field"), "latest_result"
+                )
+                self.assertIn(recorded, message.content)
+        self.assertEqual(_FailingAI.calls, 0, "no provider may be contacted")
+
+    def test_qualifier_forms_fail_closed_without_result(self):
+        for text in self.QUALIFIERS:
+            with self.subTest(text=text):
+                service = _service()  # no governed turn -> no latest_result
+                message = service.send(text)
+                self.assertNotEqual(
+                    (message.metadata or {}).get("builtin_intent"),
+                    BUILTIN_INTENT_REFERENCE,
+                )
+                self.assertIn("cannot answer", message.content)
+        self.assertEqual(_FailingAI.calls, 0, "no provider may be contacted")
+
+    def test_qualifier_stream_parity(self):
+        sent_service = TestReferenceConsumptionEndToEnd._after_governed_turn()
+        streamed_service = TestReferenceConsumptionEndToEnd._after_governed_turn()
+        for text in self.QUALIFIERS:
+            with self.subTest(text=text):
+                sent = sent_service.send(text)
+                self.assertEqual("".join(streamed_service.stream(text)), sent.content)
+
+    def test_qualifier_alias_grants_no_authority(self):
+        service = TestReferenceConsumptionEndToEnd._after_governed_turn()
+        before = service.state_manager.state
+        before_proposals = dict(service._active_proposals)
+        before_approvals = dict(service._active_approval_requests)
+        message = service.send("What about the previous result?")
+        self.assertNotIn("execution", message.metadata)
+        self.assertNotIn("approval", message.metadata)
+        self.assertEqual(dict(service._active_proposals), before_proposals)
+        self.assertEqual(dict(service._active_approval_requests), before_approvals)
+        after = service.state_manager.state
+        self.assertEqual(after.latest_result, before.latest_result)
+        self.assertEqual(after.current_investigation, before.current_investigation)
 
 
 if __name__ == "__main__":
