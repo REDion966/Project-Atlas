@@ -880,6 +880,24 @@ class Atlas:
     # Phase F8: Information Acquisition (manually invoked; bounded)
     # ------------------------------------------------------------------
 
+    def _select_research_sources(self, question: str):
+        """Phase 3.2 — deterministic, authorized local source selection.
+
+        Chooses repository (CODEBASE) sources for a research question using the
+        existing cached repository map. It only SELECTS among sources the
+        existing architecture already recognizes; it grants no authorization and
+        never selects web (the web adapter remains deny-by-default). Fail-closed:
+        an unavailable map or any error yields an empty selection.
+        """
+        from atlas.research.source_selection import select_repository_sources
+
+        try:
+            return select_repository_sources(
+                question, repository_map=self.repository_map
+            )
+        except Exception:
+            return ()
+
     def _init_information_acquisition(self) -> None:
         """Phase F8 (post-Core): additively wire the acquisition service.
 
@@ -2761,6 +2779,7 @@ class Atlas:
             storage=self._research_storage,
             ingest=self._research_ingest_bridge,
             resolve_sources=self._research_factory._resolve_sources,
+            select_sources=self._select_research_sources,
         )
         self._research_factory.register_coordinator(
             self._research_coordinator, self._capability_registry

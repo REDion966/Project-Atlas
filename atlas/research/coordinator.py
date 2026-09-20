@@ -117,6 +117,7 @@ class ConcreteResearchCoordinator(ResearchCoordinator):
         ingest: Any | None = None,
         resolve_sources: SourceResolver | None = None,
         web_hosts: Sequence[str] = (),
+        select_sources: Any | None = None,
     ) -> None:
         """Initialise the coordinator with injected Track A components.
 
@@ -131,6 +132,11 @@ class ConcreteResearchCoordinator(ResearchCoordinator):
             web_hosts: Explicit web host allowlist used by the standalone
                 fallback resolver. Empty (the default) keeps the web adapter
                 deny-by-default; SSRF protections remain mandatory.
+            select_sources: Optional deterministic selector
+                (``question -> Sequence[str]``) consulted ONLY when the query
+                carries no explicit source specs. It may only CHOOSE among
+                already-authorized sources; it grants no authorization. When
+                absent (default) behaviour is unchanged.
         """
         from atlas.research.sources.web import web_host_policy_from_hosts
 
@@ -139,6 +145,7 @@ class ConcreteResearchCoordinator(ResearchCoordinator):
         self._verifier = verifier or ClaimVerifier()
         self._storage = storage
         self._ingest = ingest
+        self._select_sources = select_sources
         if resolve_sources is not None:
             self._resolve_sources = resolve_sources
         else:
@@ -172,6 +179,14 @@ class ConcreteResearchCoordinator(ResearchCoordinator):
         try:
             plan: ResearchPlan = self._planner.plan(query)
             specs = self._query_source_specs(query)
+            if not specs and self._select_sources is not None:
+                # Phase 3.2 — deterministic selection among ALREADY-AUTHORIZED
+                # sources when the query carries none. Fail-soft: a selector
+                # error yields an empty selection (honest empty result).
+                try:
+                    specs = list(self._select_sources(query.question) or ())
+                except Exception:
+                    specs = []
             resolved = self._resolve_sources(specs)
             profiles = [s for s in resolved if isinstance(s, SourceProfile)]
             source_uris = [
