@@ -496,7 +496,7 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 
 ### 13.1 Required Workflow
 
-The complete development workflow is documented in `docs/DEVELOPMENT_WORKFLOW.md`. The canonical per-session workflow is:
+The current agent/development rules are in `docs/ATLAS_STATE.md` §21; the prior standalone workflow document is archived. The canonical per-session workflow is:
 
 ```
 1. Read README.md (public entry point)
@@ -572,7 +572,7 @@ The complete development workflow is documented in `docs/DEVELOPMENT_WORKFLOW.md
 
 Every report must include:
 - Summary: what changed, why, files created/modified
-- Test results: total, passing, failing (raw terminal output per `docs/DEVELOPMENT_WORKFLOW.md`)
+- Test results: total, passing, failing (raw terminal output; see `docs/ATLAS_STATE.md` §21)
 - Assumptions made
 - Issues encountered
 
@@ -641,7 +641,7 @@ For deeper context, read these preserved files after ATLAS_CORE.md and ATLAS_STA
 | Roadmap | `docs/ROADMAP.md` |
 | Development history (historical) | `docs/archive/development/DEVELOPMENT_LOG.md` |
 | Coding guidelines (historical) | `docs/archive/development/CODING_GUIDELINES.md` |
-| Development workflow | `docs/DEVELOPMENT_WORKFLOW.md` |
+| Development workflow (historical) | `docs/archive/DEVELOPMENT_WORKFLOW_v2.md` |
 | AI workflow protocol (historical) | `docs/archive/development/AI_WORKFLOW_PROTOCOL.md` |
 | Model strategy (historical) | `docs/archive/development/MODEL_STRATEGY.md` |
 | Future direction (historical) | `docs/archive/roadmaps/FUTURE_DIRECTION.md` |

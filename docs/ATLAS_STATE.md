@@ -20,9 +20,9 @@ Atlas. No other document may define a competing hierarchy.
 | **2** | `docs/ROADMAP.md` | Authoritative future direction |
 | **3** | `docs/ATLAS_CORE.md` | Permanent architectural principles |
 | **4** | `docs/ATLAS_VISION.md` | Identity and purpose |
-| **5** | Development workflow / specifications / ADRs | Procedural guidance and decision records |
+| **5** | `docs/adr/` — architectural decision records | Decision records and procedural guidance (§21 holds the agent/development rules) |
 | **6** | `README.md` | Public entry point — orientation only; never a second source of truth |
-| **7** | `CHANGELOG.md`, `docs/archive/`, evidence reports | Historical record — never current operational authority |
+| **7** | `CHANGELOG.md`, `docs/archive/` (phase designs, handoffs, and prior roadmap/workflow copies), evidence reports | Historical record — never current operational authority |
 
 Rules:
 
@@ -46,6 +46,21 @@ Rules:
 > Phase-C evidence reports describe how Atlas looked at earlier points in time.
 > They are historical context, not current architecture. Do not reintroduce
 > archived designs without an explicit new decision.
+
+**Documentation map (the entire active surface):**
+
+| Document | Purpose |
+|---|---|
+| `README.md` | Public orientation: what Atlas is, status, entry points |
+| `docs/ATLAS_STATE.md` *(this file)* | Authoritative current state (architecture, modules, governance, development lifecycle, verification, limitations, roadmap status) |
+| `docs/ROADMAP.md` | Authoritative forward direction (Phase 1–5 complete; no Phase 6/L11+) |
+| `docs/ATLAS_CORE.md` | Permanent architectural principles |
+| `docs/ATLAS_VISION.md` | Identity and purpose |
+| `docs/adr/` | Architectural decision records |
+| `CHANGELOG.md`, `docs/archive/` | Historical record only |
+
+Everything else (phase designs, handoffs, prior roadmap/workflow copies,
+investigations) lives under `docs/archive/` and is historical.
 
 ---
 
@@ -635,7 +650,7 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
 ## 22. Phase 22 — Toolchain Execution & Learned-Skill Progression (COMPLETE)
 
 Status: **COMPLETE — FINAL numbered implementation phase for Atlas Core.**
-The authoritative specification is `docs/PHASE_22_DESIGN.md`.
+The (now historical) specification is `docs/archive/PHASE_22_DESIGN.md`.
 
 ### 22.1 Scope delivered (additively in `atlas/toolchain/`)
 
@@ -1211,9 +1226,8 @@ The frozen Phase-C roadmap reached its established evidence boundary. Each
 milestone was gated by a read-only evidence investigation (readiness/scope →
 contract → implementation → real-world validation → closure); only
 capabilities with a validated real-world Category-A gap were built. The
-evidence trail is the `C*_*.md` reports in `docs/archive/phase-c/`; the
-governing roadmap is `docs/ROADMAP.md` ("Current Project State — Phase C
-Evidence-Driven Evolution").
+evidence trail is the `C*_*.md` reports in `docs/archive/phase-c/`; Phase C is
+recorded as COMPLETE in `docs/ROADMAP.md` and this section.
 
 ### Historical Core (COMPLETE)
 

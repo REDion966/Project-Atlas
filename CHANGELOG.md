@@ -177,7 +177,7 @@ untouched.
 
 ### Test Coverage Audit — Placeholder Test-Module Resolution
 
-Closed the recorded test-coverage technical debt (`docs/technical_debt.md`).
+Closed the recorded test-coverage technical debt (`docs/archive/technical_debt.md`).
 The audit verified that every live surface named by the placeholders already
 had meaningful coverage elsewhere, so the eight 0-byte placeholder modules
 were removed without losing any test content:
