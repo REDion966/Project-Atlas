@@ -185,3 +185,37 @@ class TestKernelWiring:
 
     def test_coordinator_has_selector_bound(self, _kernel):
         assert _kernel._research_coordinator._select_sources is not None
+
+
+# ---------------------------------------------------------------------------
+# 4. Research → retain → validated retrieve (Phase 3 capability loop)
+# ---------------------------------------------------------------------------
+
+
+class TestValidatedKnowledgeLoop:
+    def test_selected_source_yields_retrievable_validated_knowledge(
+        self, tmp_path, monkeypatch
+    ):
+        from atlas.research.validated_retrieval import ValidatedKnowledgeRetriever
+        from atlas.storage.research_storage import ResearchSQLiteStorage
+
+        rm = _synthetic_repo(tmp_path).build()
+        monkeypatch.chdir(tmp_path)
+        storage = ResearchSQLiteStorage(tmp_path / "research.db")
+        storage.initialize()
+        assert storage.is_available()
+
+        coordinator = ConcreteResearchCoordinator(
+            storage=storage,
+            select_sources=lambda q: select_repository_sources(q, rm),
+        )
+        result = coordinator.run(
+            ResearchQuery(query_id="phase33", question="the memory service")
+        )
+        assert result.sources
+
+        retrieval = ValidatedKnowledgeRetriever(storage).retrieve("memory service stores")
+        assert retrieval.status.value == "ok"
+        assert retrieval.items
+        assert all(item.validation_status == "SUPPORTED" for item in retrieval.items)
+        assert all(item.citations for item in retrieval.items)

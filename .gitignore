@@ -26,3 +26,8 @@ atlas_data/
 
 # Pytest console output dumps
 pytest_*.txt
+
+# Local investigation / inspection artifacts (generated locally; not versioned)
+atlas_entry_inspection.txt
+atlas_entry_references.txt
+mission_output.txt

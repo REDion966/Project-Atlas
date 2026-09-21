@@ -339,9 +339,122 @@ def cmd_execute(atlas, args) -> str:
         ])
     if run_result.message:
         lines.append(f"  Message: {run_result.message[:300]}")
+    verification = getattr(run_result, "verification", None)
+    if verification is not None:
+        lines.append(
+            "  Verification: "
+            f"{getattr(getattr(verification, 'status', None), 'value', '')}"
+            f" (iterations examined: {getattr(verification, 'iterations_examined', 0)})"
+        )
+    recovery = getattr(run_result, "recovery", None)
+    if recovery is not None:
+        lines.append(
+            "  Recovery: "
+            f"{getattr(getattr(recovery, 'strategy', None), 'value', '')}"
+        )
     notice = _safe_mode_line(atlas)
     if notice:
         lines.append(notice)
+    return "\n".join(lines)
+
+
+def cmd_drive(atlas, args) -> str:
+    """Phase 5.2 — run ONE bounded direct-evolution invocation.
+
+    Directly composes the approved direct-evolution lifecycle. It never
+    promotes and never runs from tick(); promotion is a separate OWNER step.
+    """
+    request = (getattr(args, "request", "") or "").strip()
+    if not request:
+        return "error: drive requires --request"
+
+    metadata: dict = {}
+    spec_file = getattr(args, "spec_file", "") or ""
+    if spec_file:
+        try:
+            with open(spec_file, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError) as exc:
+            return f"error: could not read --spec-file: {exc}"
+        if isinstance(data, dict):
+            for key in (
+                "scaffold",
+                "code_changes",
+                "test_files",
+                "target_components",
+                "evidence_knowledge_ids",
+            ):
+                if key in data:
+                    metadata[key] = data[key]
+
+    try:
+        result = atlas.run_development_driver(request, metadata=metadata)
+    except RuntimeError as exc:
+        return f"error: {exc}"
+
+    lines = [
+        "Bounded direct-evolution invocation complete.",
+        f"  Terminal: {result.terminal.value}",
+        f"  Detail: {result.detail}",
+    ]
+    if result.proposal_id:
+        lines.append(f"  Proposal ID: {result.proposal_id}")
+    if result.authorization_id:
+        lines.append(f"  Authorization: {result.authorization_id}")
+    if result.execution_status:
+        lines.append(
+            f"  Execution: {result.execution_status}"
+            f" / verification: {result.verification_status}"
+        )
+    if result.promotion_request_id:
+        lines.append(f"  Promotion review: {result.promotion_request_id}")
+    lines.append(
+        "  Stopped at the OWNER promotion gate (nothing promoted)."
+    )
+    return "\n".join(lines)
+
+
+def cmd_approve_promotion(atlas, args) -> str:
+    """Phase 5.2 — OWNER approval of a pending promotion review (no mutation)."""
+    request_id = (getattr(args, "promotion_id", "") or "").strip()
+    if not request_id:
+        return "error: approve-promotion requires --promotion-id"
+    session_context = _operator_session(atlas)
+    try:
+        request = atlas.approve_promotion_review(
+            session_context, request_id, comment=getattr(args, "comment", "") or ""
+        )
+    except RuntimeError as exc:
+        return f"error: {exc}"
+    status = getattr(getattr(request, "status", None), "value", "")
+    return (
+        "Promotion review approved (ready for OWNER promotion; nothing "
+        "was promoted).\n"
+        f"  Review ID: {request_id}\n"
+        f"  Status: {status}\n"
+        f"  Promote with: atlas postcore promote --promotion-id {request_id}"
+    )
+
+
+def cmd_promote(atlas, args) -> str:
+    """Phase 5.2 — OWNER-only transactional promotion of a validated change."""
+    request_id = (getattr(args, "promotion_id", "") or "").strip()
+    if not request_id:
+        return "error: promote requires --promotion-id"
+    session_context = _operator_session(atlas)
+    try:
+        result = atlas.promote_validated_change(session_context, request_id)
+    except RuntimeError as exc:
+        return f"error: {exc}"
+    lines = [
+        "Transactional promotion attempt complete.",
+        f"  Outcome: {result.outcome.value}",
+        f"  Detail: {result.detail}",
+    ]
+    if result.promoted_files:
+        lines.append("  Promoted files: " + ", ".join(result.promoted_files))
+    if result.rollback_verified is not None:
+        lines.append(f"  Rollback verified: {result.rollback_verified}")
     return "\n".join(lines)
 
 

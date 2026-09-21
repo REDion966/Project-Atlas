@@ -70,7 +70,8 @@ mechanism by which Atlas may change its own operational state.
 | Field | Value |
 |---|---|
 | Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
-| Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) reached the established evidence boundary (see §31) |
+| Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) at its established evidence boundary (§31), extended by the additive **Phase 1 → Phase 5 direct-evolution program** (§32) |
+| Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
@@ -1293,6 +1294,154 @@ model-independence directive) remain in force: deterministic-first operation,
 model independence, human approval, governed execution, authorization
 boundaries, sandbox verification, fail-closed behavior, evidence-driven
 evolution, and controlled self-evolution.
+
+## 32. Direct-Evolution Program (Phase 1 → Phase 5) — reconciled 2026-09-21
+
+An additive, deterministic, model-independent program layered on the completed
+Atlas Core (Phase 22 / v0.20.0) and Phase C. It adds no new governance
+authority and no parallel storage/registry/planner subsystem, and does not
+modify the RuntimeCoordinator 15-stage order, `Atlas.tick()`, or any locked
+package. Everything below exists in the current tree and is covered by the
+focused suites named.
+
+### 32.1 Phase 1 — Atlas Self-Knowledge (COMPLETE)
+- `atlas/self_knowledge/capability_model.py` (`build_capability_model`) and
+  `architecture_model.py` (`build_architecture_model`): read-only, deterministic
+  projections over the existing `ComponentRegistry`, `CapabilityRegistry`,
+  `ToolRegistry`, and the cached `RepositoryMap`.
+- Kernel accessors `Atlas.capability_model()` / `Atlas.architecture_model()`;
+  read-only CLI `atlas capability` / `atlas architecture`.
+- No competing registry; nothing is mutated. (C5.1 delivery — see §31.)
+
+### 32.2 Phase 2 — Natural Language Understanding (COMPLETE)
+- Deterministic conversational intake `TaskIntake` → bounded `TaskSpec`
+  (`atlas/conversation/task_intake.py`); entity identification; bounded
+  reference resolution; `TurnMeaning` boundary projection.
+- Built-in deterministic response service
+  (`atlas/conversation/builtin_response.py`) answers a bounded casual-intent set
+  with no provider call.
+- Conversational development intake B1–B3 (§30): casual DEVELOPMENT_REQUEST →
+  `DevelopmentNeed` → the existing governed cycle, stopping at
+  `PENDING_APPROVAL`.
+
+### 32.3 Phase 3 — Knowledge Acquisition & Research (COMPLETE, lexically bounded)
+- Deterministic research pipeline (Track A — §3.1): `ResearchPlanner`,
+  document/workspace/codebase adapters, `KnowledgeExtractor`, `ClaimVerifier`,
+  `ResearchSQLiteStorage`, governed KNOWLEDGE ingest (GOV-008).
+- Deterministic authorized source selection
+  (`atlas/research/source_selection.py`): selects only authorized local
+  `code://` sources from the cached repository map; it never grants
+  authorization and never selects web.
+- Bounded lexical canonicalization; validated knowledge retrieval (C6.1).
+- Phase 3.3 correction: `ClaimVerifier` contradiction detection is scoped to a
+  sentence that concerns the claim (`atlas/research/verifier.py`), so a large
+  real source no longer marks every claim contradicted.
+- **Documented limitations:** selection is lexical (no semantic/embedding
+  ranking); a project-name token can over-match; report identity is
+  query-deterministic (repeated identical research reuses the persisted report).
+
+### 32.4 Phase 4 — Governed Self-Development (COMPLETE)
+- Lifecycle: `TaskSpec`/`DevelopmentNeed` →
+  `DevelopmentCycleController.run_development_cycle` (bounded research when
+  evidence is missing → DRAFT `EvolutionProposal` + approval request → STOP at
+  `PENDING_APPROVAL`).
+- OWNER approval (`Atlas.confirm_development_approval`) → `run_development_execution`
+  (OWNER-gated) → `DevelopmentPlanner` (7 steps) → `SelfDevelopmentLoop`
+  (disposable `CodeSandbox`, `CodeApplier`, pytest, snapshot/rollback).
+- Phase 4.2: deterministic relevant-test selection
+  (`atlas/evolution/development_test_selection.py`); failure → diagnosis →
+  bounded retest/recovery integrated into the loop; `DevelopmentVerification`
+  integrated into the execution path; lifecycle evidence persisted.
+- Phase 4.3: verification evidence-fidelity fix
+  (`atlas/evolution/development_verification.py`) and execution-path persistence
+  coherence.
+- Promotion review (`PromotionGate`) remains an audit/human boundary (§27.1).
+
+### 32.5 Phase 5 — Direct Atlas Evolution (Phase 5.2 IMPLEMENTED; Phase 5.3 VALIDATED, G1 CLOSED)
+Deterministic, model-free, stdlib-only modules:
+- **`atlas/evolution/development_gap.py`** — deterministic capability/knowledge
+  gap adjudication (`already_supported` / `missing_capability` /
+  `missing_knowledge` / `unclear`); reuses capability names and
+  `ValidatedKnowledgeRetriever`.
+- **`atlas/evolution/development_scaffold_supplier.py`** — `ScaffoldChangeSupplier`
+  + `CompositeChangeSupplier`: model-independent authoring for ONE bounded,
+  template-defined change class only (no novel-logic or structural synthesis).
+- **`atlas/evolution/development_usefulness.py`** — evidence-based
+  `UsefulnessAssessment` (objective, capability improvement, regression
+  evidence, reproducibility, verification evidence); the numeric score is a
+  derived summary.
+- **`atlas/evolution/development_authorization.py` / `development_envelope.py`** —
+  a distinct `DevelopmentAuthorization` (OWNER vs ENVELOPE) and an opt-in,
+  quota/TTL/window-bounded Development Envelope authorizing ONLY sandbox
+  development. It never authorizes promotion or any live write.
+- **`atlas/evolution/development_driver.py`** — bounded `DevelopmentDriver`
+  orchestrator (gap → bounded research → need → authoring → cycle →
+  envelope-authorized sandbox execution → verification → usefulness →
+  promotion-request preparation). A bounded invocation; never invoked from
+  `tick()`.
+- **`atlas/evolution/promotion_artifact.py` / `promotion_executor.py`** — pre/post
+  content + hash capture and an OWNER-only transactional `PromotionExecutor`
+  (validate → pre-state hash match → snapshot all → apply all → read-back verify
+  all → record CODE version → activate capability → audit → `PROMOTED`). Any
+  failure restores the entire changeset; the rollback is itself verified or the
+  system fails closed.
+- **`atlas/evolution/capability_activation.py`** — bounded, path-confined,
+  fail-closed capability activation (Phase 5.3 / G1): AST-validates the supported
+  capability contract, imports the promoted module only after strict confinement
+  and a byte-match against the validated artifact, adapts handlers to the existing
+  `ExecutionResult` contract, and registers them on the existing
+  `CapabilityRegistry`. Unknown/malformed/unsupported/duplicate contracts are
+  refused; it never runs from `tick()`, and the Envelope can never reach it.
+- Additive `ProposalStatus.SANDBOX_AUTHORIZED` (distinct from OWNER `APPROVED`):
+  `SelfDevelopmentLoop` and `DevelopmentPlanner` accept either for sandbox work;
+  promotion requires OWNER `APPROVED` plus the OWNER gate.
+- Kernel entry points: `Atlas.authorize_development_execution`,
+  `Atlas.run_development_driver`, `Atlas.approve_promotion_review`,
+  `Atlas.promote_validated_change`; accessors `capability_registry`,
+  `capability_dispatcher`.
+- CLI: `atlas postcore drive --request … [--spec-file …]`,
+  `atlas postcore approve-promotion --promotion-id …`,
+  `atlas postcore promote --promotion-id …`.
+
+**Focused verification status** (Phase 5.3, this reconciliation): activation
+suite **16 passed**; Phase 5.2 lifecycle **59 passed**; Phase 4.2/4.3 combined
+**82 passed**; capability/gateway/governance **122 passed**; postcore CLI
+**31 passed**. These are focused executions — the full-suite baseline in §15
+was not re-run for this reconciliation and remains historical.
+
+### 32.6 Capability activation after promotion (the G1 closure)
+A capability Atlas develops and promotes now becomes usable at runtime: the
+promoted capability module is activated inside the OWNER-gated promotion
+transaction, registered on the existing `CapabilityRegistry`, discoverable via
+`Atlas.capability_model()`, and invocable through the normal
+`CapabilityDispatcher` path. Activation records an explicit audit event
+(`EvolutionRecord event_type="capability_activation"`), so a successful lifecycle
+carries promotion → CODE version → activation → registration evidence. Activation
+failure rolls the promotion back and never reports a false success.
+
+### 32.7 Boundaries preserved (Phase 1–5)
+- `Atlas.tick()` does not invoke the development driver, promotion, or activation.
+- `AuthorizationManager.authorize_autonomously()` is not called.
+- Promotion and activation are OWNER-only; the Development Envelope is disabled
+  by default and can never authorize promotion or live mutation.
+- `EvolutionExecutionGateway.execute_request` still refuses `CODE`/`IDENTITY`/
+  `UNKNOWN`; the promotion executor is a separate, explicit seam.
+- Deterministic-first: zero provider/network calls on the deterministic path;
+  external AI is never required and never authoritative.
+
+### 32.8 Not currently implemented (explicit)
+- No autonomous development scheduling and no `tick()`/daemon integration.
+- No autonomous CODE authoring of novel logic; authoring is limited to supplied
+  content or the bounded scaffold template family.
+- No conversational routing of DEVELOPMENT_REQUESTs through `DevelopmentDriver`
+  (the kernel API and `atlas postcore drive` are the direct-evolution surfaces).
+- No automatic startup re-discovery of previously activated capabilities.
+- No WS3b (sandbox repository snapshot) and no WS4 (deeper self-knowledge
+  integration into development reasoning).
+- Promotion artifacts/authorizations are in-process (same-process promotion or
+  re-drive).
+
+---
 
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·

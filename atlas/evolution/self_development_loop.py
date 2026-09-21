@@ -46,7 +46,7 @@ Pure infrastructure. No gateway. No AI. No kernel access.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable
 
@@ -85,6 +85,10 @@ class DevelopmentRunResult:
         message:          Human-readable summary.
         sandbox_path:     The last sandbox root (removed after the run);
             empty when no sandbox was created.
+        diagnosis:        Last read-only DiagnosticResult (failure runs only).
+        recovery:         Last read-only RecoveryDecision (failure runs only).
+        verification:     Read-only VerificationReport for the run, attached by
+            the governed execution path (may be ``None`` when run standalone).
     """
 
     status: DevelopmentOutcomeStatus
@@ -93,6 +97,10 @@ class DevelopmentRunResult:
     iterations_used: int = 0
     message: str = ""
     sandbox_path: str = ""
+    diagnosis: Any | None = None
+    recovery: Any | None = None
+    verification: Any | None = None
+    usefulness: Any | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +359,19 @@ class SelfDevelopmentLoop:
         proposal: EvolutionProposal,
         max_iterations: int | None = None,
     ) -> DevelopmentRunResult:
-        """Run the bounded self-development loop for an approved proposal."""
-        if proposal is None or proposal.status != ProposalStatus.APPROVED:
+        """Run the bounded self-development loop for an approved proposal.
+
+        Accepts ``APPROVED`` (OWNER) and — Phase 5 — ``SANDBOX_AUTHORIZED``
+        (bounded Development Envelope). Both authorize SANDBOX-only execution;
+        neither authorizes promotion. Every other status is refused.
+        """
+        sandbox_authorized = getattr(
+            ProposalStatus, "SANDBOX_AUTHORIZED", ProposalStatus.APPROVED
+        )
+        if proposal is None or proposal.status not in (
+            ProposalStatus.APPROVED,
+            sandbox_authorized,
+        ):
             return DevelopmentRunResult(
                 status=DevelopmentOutcomeStatus.GOVERNANCE_DENIED,
                 plan=None, outcomes=[], iterations_used=0,
@@ -385,6 +404,8 @@ class SelfDevelopmentLoop:
         history: list[DevelopmentOutcome] = []
         outcomes: list[DevelopmentOutcome] = []
         last_sandbox_path = ""
+        last_diagnosis: Any | None = None
+        last_recovery: Any | None = None
 
         for iteration in range(1, budget + 1):
             workload = self._change_supplier(proposal, history)
@@ -429,13 +450,46 @@ class SelfDevelopmentLoop:
                     message="Development completed inside sandbox.",
                     sandbox_path=last_sandbox_path,
                 )
-            # Else continue to the next bounded iteration.
+
+            # Failure: produce a read-only diagnosis and recovery decision.
+            # Non-retryable classes (governance/objective/capability) stop the
+            # run early; every other failure consumes another bounded iteration
+            # (the existing bounded-retest behaviour). The diagnosis is attached
+            # to the outcome (and thus to ``history``) so a corrective supplier
+            # can bias the next bounded attempt.
+            last_diagnosis, last_recovery = self._diagnose_and_decide(
+                plan, outcomes, iteration
+            )
+            outcomes[-1] = self._with_recovery(
+                outcomes[-1], last_diagnosis, last_recovery
+            )
+            history[-1] = outcomes[-1]
+            if self._is_non_retryable(last_diagnosis):
+                return DevelopmentRunResult(
+                    status=DevelopmentOutcomeStatus.FAILED,
+                    plan=plan, outcomes=outcomes, iterations_used=iteration,
+                    message=(
+                        "Non-retryable development failure; stopping early "
+                        f"({getattr(getattr(last_diagnosis, 'failure_class', None), 'value', 'unknown')})."
+                    ),
+                    sandbox_path=last_sandbox_path,
+                    diagnosis=last_diagnosis, recovery=last_recovery,
+                )
+            # Otherwise the failure is potentially correctable within the
+            # budget: consume another bounded iteration. The diagnosis rides on
+            # ``history`` so a corrective supplier can bias the retry.
+            #
+            # Note: the read-only DevelopmentRecovery stays fail-closed
+            # (NO_RECOVERY for unknown/exhausted evidence); the loop's bounded
+            # retest is governed by the existing iteration budget, never by an
+            # automatic authority grant.
 
         return DevelopmentRunResult(
             status=DevelopmentOutcomeStatus.ITERATIONS_EXHAUSTED,
             plan=plan, outcomes=outcomes, iterations_used=budget,
             message=f"ITERATIONS_EXHAUSTED after {budget} iterations",
             sandbox_path=last_sandbox_path,
+            diagnosis=last_diagnosis, recovery=last_recovery,
         )
 
     # ------------------------------------------------------------------
@@ -485,8 +539,15 @@ class SelfDevelopmentLoop:
                     if not applied:
                         step.status = StepStatus.SKIPPED
                         continue
+                    # Phase 4.2 — when the workload names no target, run the
+                    # relevant test(s) selected deterministically from the
+                    # change set instead of an arbitrary path. Bounded and
+                    # fail-safe: no match keeps the existing default.
+                    target: str = workload.verify_target or (
+                        self._default_verify_target(workload, workspace)
+                    )
                     passed, test_outcome, test_message = self._verifier(
-                        workspace.path, workload.verify_target)
+                        workspace.path, target)
                     step.status = (
                         StepStatus.COMPLETED if passed else StepStatus.FAILED
                     )
@@ -564,6 +625,111 @@ class SelfDevelopmentLoop:
         if self._learning_store is None:
             return
         _record_learning([outcome], self._learning_store)
+
+    @staticmethod
+    def _is_non_retryable(diagnostic: Any) -> bool:
+        """True for failure classes a retry cannot resolve.
+
+        Governance/objective/capability failures cannot be fixed by another
+        sandbox attempt, so the bounded loop stops early. Implementation,
+        verification and unknown failures remain retryable within the budget,
+        preserving the existing bounded-retest behaviour.
+        """
+        failure_class = getattr(
+            getattr(diagnostic, "failure_class", None), "value", ""
+        )
+        return failure_class in ("governance", "objective", "capability")
+
+    @staticmethod
+    def _default_verify_target(
+        workload: SandboxWorkload,
+        workspace: Any,
+    ) -> str:
+        """Deterministically select a sandbox test target for the workload.
+
+        Uses the Phase 4.2 change→test selector over the workload's changed
+        paths and its authored test files, returning the first selected test
+        that actually exists in the sandbox. Degrades to ``""`` (the existing
+        whole-workspace default) when nothing relevant is present — never a
+        fabricated target.
+        """
+        from atlas.evolution.development_test_selection import (
+            select_relevant_tests,
+        )
+
+        changed = [
+            str(item.get("path", ""))
+            for item in workload.code_changes
+            if isinstance(item, dict)
+        ]
+        if not changed:
+            return ""
+        for candidate in select_relevant_tests(
+            changed, list(workload.test_files.keys())
+        ):
+            exists = getattr(workspace, "exists", None)
+            if callable(exists) and exists(candidate):
+                return candidate
+        return ""
+
+    def _diagnose_and_decide(
+        self,
+        plan: DevelopmentPlan,
+        outcomes: list[DevelopmentOutcome],
+        iteration: int,
+    ) -> tuple[Any, Any]:
+        """Read-only diagnosis + recovery decision for the current failure.
+
+        Deterministic and model-free. Reuses the EXISTING
+        ``DevelopmentDiagnostic`` and ``DevelopmentRecovery`` contracts; never
+        mutates the repository and never invents a root cause (an unclear
+        failure diagnoses as UNKNOWN and therefore decides NO_RECOVERY).
+        """
+        from atlas.evolution.development_diagnostic import DevelopmentDiagnostic
+        from atlas.evolution.development_recovery import DevelopmentRecovery
+
+        provisional = DevelopmentRunResult(
+            status=DevelopmentOutcomeStatus.FAILED,
+            plan=plan,
+            outcomes=list(outcomes),
+            iterations_used=iteration,
+            message=outcomes[-1].message if outcomes else "",
+        )
+        diagnostic = DevelopmentDiagnostic().diagnose(provisional)
+        recovery = DevelopmentRecovery().decide(provisional, diagnostic)
+        return diagnostic, recovery
+
+    @staticmethod
+    def _with_recovery(
+        outcome: DevelopmentOutcome,
+        diagnostic: Any,
+        recovery: Any,
+    ) -> DevelopmentOutcome:
+        """Attach bounded diagnosis/recovery evidence to an outcome.
+
+        The evidence rides on ``metadata`` so the existing ``history`` seam
+        carries WHY the iteration failed (and whether a retry is appropriate)
+        to the next ``change_supplier`` call — with no protocol change.
+        """
+        metadata = dict(outcome.metadata)
+        metadata["diagnosis"] = {
+            "failure_class": getattr(
+                getattr(diagnostic, "failure_class", None), "value", ""
+            ),
+            "confidence": getattr(
+                getattr(diagnostic, "confidence", None), "value", ""
+            ),
+            "cause": str(getattr(diagnostic, "cause", ""))[:500],
+            "recoverable": getattr(diagnostic, "recoverable", None),
+        }
+        metadata["recovery"] = {
+            "recoverable": bool(getattr(recovery, "recoverable", False)),
+            "strategy": getattr(
+                getattr(recovery, "strategy", None), "value", ""
+            ),
+            "rationale": str(getattr(recovery, "rationale", ""))[:500],
+        }
+        return replace(outcome, metadata=metadata)
 
     @staticmethod
     def _with_status(

@@ -123,10 +123,38 @@ class DevelopmentVerification:
             "ITERATIONS_EXHAUSTED",
             "UNAVAILABLE_CAPABILITY",
         ):
+            # The terminal status is authoritative for the VERDICT (never
+            # VERIFIED), but any recorded iteration evidence is still reported
+            # so test scope is not silently lost. Per the field contract,
+            # ``all_tests_passed`` stays None only when NO evidence exists.
+            terminal_tests_passed: bool | None = None
+            terminal_rollback = False
+            terminal_changed: tuple[str, ...] = ()
+            if outcomes:
+                terminal_tests_passed = all(
+                    bool(getattr(o, "verification_passed", False))
+                    for o in outcomes
+                )
+                terminal_rollback = any(
+                    bool(getattr(o, "rollback_occurred", False))
+                    for o in outcomes
+                )
+                terminal_changed = tuple(
+                    dict.fromkeys(
+                        path
+                        for o in outcomes
+                        for path in (getattr(o, "changed_files", None) or [])
+                    )
+                )
             return VerificationReport(
                 status=VerificationStatus.UNVERIFIED,
-                evidence=f"status={status_name}",
+                evidence=(
+                    f"status={status_name}; recorded_outcomes={len(outcomes)}"
+                ),
                 iterations_examined=iterations_used,
+                all_tests_passed=terminal_tests_passed,
+                any_rollback=terminal_rollback,
+                changed_files=terminal_changed,
                 message=f"Development NOT verified: result status is {status_name}.",
             )
 

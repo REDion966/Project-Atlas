@@ -497,6 +497,15 @@ class Atlas:
         self._research_ingest_bridge: ResearchIngestBridge | None = None
         self._acquisition_service: InformationAcquisitionService | None = None
 
+        # --- Phase 5.2: Direct Atlas Evolution (bounded; opt-in) ---
+        self._development_envelope: Any | None = None
+        self._development_authority: Any | None = None
+        self._development_driver: Any | None = None
+        self._promotion_executor: Any | None = None
+        self._development_authorizations: dict[str, Any] = {}
+        self._promotion_artifacts: dict[str, Any] = {}
+        self._development_envelope_usage: int = 0
+
         # --- Track B: Tool Ecosystem ---
         self._toolchain_storage: ToolchainSQLiteStorage | None = None
         self._toolchain_factory: ToolchainCapabilityFactory | None = None
@@ -976,19 +985,35 @@ class Atlas:
         and the controller uses the existing ``DeterministicChangeSupplier``
         — no model is required, no model-assisted authoring occurs.
         """
-        change_supplier = None
+        from atlas.evolution.development_cycle import DeterministicChangeSupplier
+        from atlas.evolution.development_scaffold_supplier import (
+            CompositeChangeSupplier,
+            ScaffoldChangeSupplier,
+        )
+
+        model_supplier = None
         if bool(
             self._config.get("development", "model_assisted_authoring", default=False)
         ):
-            change_supplier = ModelAssistedChangeSupplier(
+            model_supplier = ModelAssistedChangeSupplier(
                 authoring_model=self._model_assisted_authoring_model,
             )
 
-        # The same optional supplier instance is exposed to the conversational
-        # P17 authoring seam (ConversationService proposal_change_supplier).
-        # When model-assisted authoring is not opted in, this stays None and
-        # the conversational path remains deterministic/evidence-only.
-        self._proposal_change_supplier = change_supplier
+        # Phase 5.2 — deterministic-first authoring over the EXISTING
+        # ChangeSupplier seam: explicitly supplied content, then the bounded
+        # scaffold author, then (opt-in only) the non-authoritative model
+        # supplier. No new synthesis surface is introduced.
+        change_supplier = CompositeChangeSupplier(
+            [
+                DeterministicChangeSupplier(),
+                ScaffoldChangeSupplier(),
+                model_supplier,
+            ]
+        )
+
+        # The optional model supplier instance is still exposed to the
+        # conversational P17 authoring seam; when not opted in it stays None.
+        self._proposal_change_supplier = model_supplier
 
         self._development_controller = DevelopmentCycleController(
             approval_manager=self._approval_manager,
@@ -1000,6 +1025,25 @@ class Atlas:
             ),
             proposal_store=self._evolution_memory,
             approval_request_store=self._evolution_memory,
+        )
+
+        # Phase 5.2 — bounded Development Envelope (disabled by default).
+        from atlas.evolution.development_envelope import (
+            DevelopmentAuthority,
+            DevelopmentEnvelope,
+        )
+
+        envelope_data: Any = None
+        try:
+            envelope_data = self._config.get(
+                "development", "envelope", default=None
+            )
+        except Exception:
+            envelope_data = None
+        self._development_envelope = DevelopmentEnvelope.from_mapping(envelope_data)
+        self._development_authority = DevelopmentAuthority(
+            self._development_envelope,
+            usage_provider=lambda: self._development_envelope_usage,
         )
 
     def _model_assisted_authoring_model(self, prompt: str):
@@ -1253,6 +1297,58 @@ class Atlas:
         }
         metadata["last_outcome"] = dict(last_outcome)
 
+        # Phase 4.2 — persist the read-only verification verdict and the
+        # diagnosis/recovery evidence so the conversational surfaces can
+        # reconstruct WHAT happened, objectively, without a model and without
+        # re-running. Metadata only; never mutates the repository, status,
+        # scope, or approval.
+        verification = getattr(result, "verification", None)
+        if verification is not None:
+            metadata["verification"] = {
+                "status": getattr(
+                    getattr(verification, "status", None), "value", ""
+                ),
+                "iterations_examined": int(
+                    getattr(verification, "iterations_examined", 0) or 0
+                ),
+                "all_tests_passed": getattr(
+                    verification, "all_tests_passed", None
+                ),
+                "any_rollback": bool(
+                    getattr(verification, "any_rollback", False)
+                ),
+                "message": str(getattr(verification, "message", ""))[:500],
+            }
+        diagnostic = getattr(result, "diagnosis", None)
+        if diagnostic is not None:
+            metadata["diagnosis"] = {
+                "failure_class": getattr(
+                    getattr(diagnostic, "failure_class", None), "value", ""
+                ),
+                "confidence": getattr(
+                    getattr(diagnostic, "confidence", None), "value", ""
+                ),
+                "recoverable": getattr(diagnostic, "recoverable", None),
+                "cause": str(getattr(diagnostic, "cause", ""))[:500],
+            }
+        recovery = getattr(result, "recovery", None)
+        if recovery is not None:
+            metadata["recovery"] = {
+                "recoverable": bool(getattr(recovery, "recoverable", False)),
+                "strategy": getattr(
+                    getattr(recovery, "strategy", None), "value", ""
+                ),
+                "rationale": str(getattr(recovery, "rationale", ""))[:500],
+            }
+        usefulness = getattr(result, "usefulness", None)
+        if usefulness is not None:
+            to_dict = getattr(usefulness, "to_dict", None)
+            if callable(to_dict):
+                try:
+                    metadata["usefulness"] = dict(to_dict())
+                except Exception:
+                    pass
+
     @staticmethod
     def _development_execution_message(result: Any) -> Message:
         """Convert a DevelopmentRunResult into a conversational Message.
@@ -1279,6 +1375,26 @@ class Atlas:
         lines.append("")
         lines.append(f"**Iterations used:** {iterations}")
         lines.append(f"**Outcomes recorded:** {len(outcomes)}")
+
+        # Phase 4.2 — surface the objective verification verdict (read-only).
+        verification = getattr(result, "verification", None)
+        verification_meta: dict | None = None
+        if verification is not None:
+            v_status = getattr(getattr(verification, "status", None), "value", "")
+            lines.append(f"**Verification:** {v_status}")
+            verification_meta = {
+                "status": v_status,
+                "iterations_examined": int(
+                    getattr(verification, "iterations_examined", 0) or 0
+                ),
+                "all_tests_passed": getattr(
+                    verification, "all_tests_passed", None
+                ),
+                "any_rollback": bool(
+                    getattr(verification, "any_rollback", False)
+                ),
+                "message": str(getattr(verification, "message", ""))[:500],
+            }
 
         exec_status = "succeeded" if status_name == "SUCCESS" else status_name.lower()
 
@@ -1327,6 +1443,7 @@ class Atlas:
                     "outcomes_count": len(outcomes),
                 },
                 "diagnostic": diagnostic_meta,
+                "verification": verification_meta,
             },
         )
 
@@ -1469,7 +1586,9 @@ class Atlas:
         except Exception:
             self._proactive_advisor = None
 
-    def _require_development_authority(self, session_context, action: str) -> None:
+    def _require_development_authority(
+        self, session_context, action: str, *, allow_envelope: bool = False
+    ) -> None:
         """Fail-closed OWNER authorization for a development action.
 
         Resolves the acting identity through the EXISTING authoritative
@@ -1485,7 +1604,18 @@ class Atlas:
 
         Raises (fail-closed) on missing/mismatched identity or insufficient
         authority.
+
+        Phase 5.2: when ``allow_envelope`` is True and the action is the
+        sandbox-only ``execution`` action, a valid bounded Development Envelope
+        may authorize it instead of an OWNER session. Promotion and every other
+        action remain OWNER-only — the envelope can NEVER authorize them.
         """
+        if allow_envelope and action == "execution":
+            authority = getattr(self, "_development_authority", None)
+            if authority is not None:
+                decision = authority.check("sandbox_development")
+                if decision.allowed:
+                    return
         if session_context is None:
             raise RuntimeError(
                 "Development action requires an active session context "
@@ -1596,7 +1726,9 @@ class Atlas:
         memory.update_proposal_status(proposal_id, ProposalStatus.APPROVED)
         return proposal
 
-    def run_development_execution(self, session_context, proposal_id: str):
+    def run_development_execution(
+        self, session_context, proposal_id: str, *, allow_envelope: bool = False
+    ):
         """Execute an APPROVED, persisted development proposal.
 
         P7.6 — AUTHORIZES the acting identity resolved from
@@ -1609,8 +1741,12 @@ class Atlas:
         LearningMemory evidence). Read-only with respect to the real
         repository; never approves/authorizes/promotes anything.
         """
-        # P7.6 — authorization boundary BEFORE any execution.
-        self._require_development_authority(session_context, action="execution")
+        # P7.6 — authorization boundary BEFORE any execution. Phase 5.2 adds the
+        # bounded Development Envelope as an ALTERNATIVE authority for the
+        # sandbox-only execution action only (never for promotion).
+        self._require_development_authority(
+            session_context, action="execution", allow_envelope=allow_envelope
+        )
 
         memory = self._evolution_memory
         planner = self._development_planner
@@ -1625,14 +1761,493 @@ class Atlas:
         if proposal is None:
             raise RuntimeError(f"Proposal '{proposal_id}' not found.")
         status_name = getattr(proposal.status, "name", "")
-        if status_name != "APPROVED":
+        if status_name not in ("APPROVED", "SANDBOX_AUTHORIZED"):
             raise RuntimeError(
                 f"Proposal '{proposal_id}' is {status_name}, not APPROVED — "
                 "only explicitly approved proposals may be executed."
             )
+        if status_name == "SANDBOX_AUTHORIZED":
+            # The bounded envelope path must present a valid, fingerprint-bound
+            # authorization; the OWNER APPROVED path does not.
+            authorization = self._development_authorizations.get(proposal_id)
+            if authorization is None or not authorization.is_valid_for(proposal):
+                raise RuntimeError(
+                    f"Proposal '{proposal_id}' has no valid sandbox authorization."
+                )
 
         plan = planner.plan(proposal)
-        return loop.run(proposal)
+        result = loop.run(proposal)
+
+        # Phase 4.2 — objective verification of the run. The read-only
+        # DevelopmentVerification report is attached to the result so the
+        # governed execution path (and every caller) carries an explicit,
+        # evidence-backed verification verdict. Fail-soft: verification never
+        # changes the run outcome, never mutates the repository, and never
+        # requires a model.
+        try:
+            from atlas.evolution.development_verification import (
+                DevelopmentVerification,
+            )
+
+            result.verification = DevelopmentVerification().verify(result)
+        except Exception:
+            pass
+
+        # Phase 5.2 — deterministic, EVIDENCE-BASED usefulness assessment
+        # (objective + capability improvement + regression + verification).
+        # Attached to the result so the governed path carries a structured
+        # judgment rather than a bare numeric proxy. Fail-soft; model-free.
+        try:
+            from atlas.evolution.development_usefulness import assess_usefulness
+
+            v_status = getattr(
+                getattr(result.verification, "status", None), "value", ""
+            )
+            run_status = getattr(getattr(result, "status", None), "name", "")
+            result.usefulness = assess_usefulness(
+                proposal_id=proposal_id,
+                objective=str(getattr(proposal, "expected_benefit", "") or ""),
+                verification_status=v_status,
+                capability_present_before=None,
+                capability_present_after=(v_status == "verified"),
+                regression_detected=(run_status not in ("", "SUCCESS")),
+                evidence_count=len(getattr(result, "outcomes", ()) or ()),
+            )
+        except Exception:
+            pass
+
+        # Phase 4.3 — persist the lifecycle evidence (verification/diagnosis/
+        # recovery) on the proposal from THIS entry point too, so the CLI and
+        # conversation paths produce coherent, inspectable outcomes. The
+        # conversational bridge persists as well; the write is idempotent
+        # metadata-only and never mutates the repository, status, or approval.
+        try:
+            self._persist_development_evidence(proposal, result)
+            memory.store_proposal(proposal)
+        except Exception:
+            pass
+
+        # Phase 5.2 (G-B) — retention → reuse. Persist a bounded "development"
+        # EvolutionRecord ONLY for VERIFIED successes (never failed/unverified
+        # work), carrying the authoritative usefulness summary, so the existing
+        # ``_evolution_context_snapshot`` → DecisionIntelligenceEngine/planning
+        # path can retrieve and use the retained development experience. Reuses
+        # the existing memory + record builder; no new subsystem. Fail-soft.
+        try:
+            verified = (
+                getattr(
+                    getattr(getattr(result, "verification", None), "status", None),
+                    "value",
+                    "",
+                )
+                == "verified"
+            )
+            succeeded = (
+                getattr(getattr(result, "status", None), "name", "") == "SUCCESS"
+            )
+            if verified and succeeded and memory is not None:
+                record = self._build_development_record(proposal, result)
+                if record is not None:
+                    usefulness = getattr(result, "usefulness", None)
+                    to_dict = getattr(usefulness, "to_dict", None)
+                    if callable(to_dict):
+                        try:
+                            record.metadata["usefulness"] = dict(to_dict())
+                        except Exception:
+                            pass
+                    memory.store_record(record)
+        except Exception:
+            pass
+        return result
+
+    # ------------------------------------------------------------------
+    # Phase 5.2 — Direct Atlas Evolution (bounded; opt-in)
+    # ------------------------------------------------------------------
+
+    @property
+    def development_envelope(self):
+        """Return the bounded Development Envelope policy (read-only)."""
+        return self._development_envelope
+
+    @property
+    def development_authority(self):
+        """Return the kernel-owned DevelopmentAuthority (read-only)."""
+        return self._development_authority
+
+    def authorize_development_execution(self, proposal_id: str):
+        """Authorize SANDBOX execution via the bounded Development Envelope.
+
+        Sets ``ProposalStatus.SANDBOX_AUTHORIZED`` (NOT ``APPROVED``) and
+        records a fingerprint-bound ``DevelopmentAuthorization(mode=ENVELOPE)``.
+        It NEVER authorizes promotion and never touches the live repository.
+        """
+        authority = self._development_authority
+        if authority is None:
+            raise RuntimeError(
+                "Development authority is not wired; Atlas.start() must run first."
+            )
+        memory = self._evolution_memory
+        proposal = memory.get_proposal(proposal_id) if memory is not None else None
+        if proposal is None:
+            raise RuntimeError(f"Proposal '{proposal_id}' not found.")
+        status_name = getattr(proposal.status, "name", "")
+        if status_name not in ("DRAFT", "PENDING_APPROVAL"):
+            raise RuntimeError(
+                f"Proposal '{proposal_id}' is {status_name}; only DRAFT/"
+                "PENDING_APPROVAL proposals may receive a sandbox authorization."
+            )
+        decision = authority.check("sandbox_development")
+        if not decision.allowed:
+            raise RuntimeError(f"Development envelope denied: {decision.reason}")
+        authorization = authority.authorize(proposal)
+        if authorization is None:
+            raise RuntimeError("Development envelope declined to authorize.")
+
+        self._development_envelope_usage += 1
+        self._development_authorizations[proposal_id] = authorization
+        proposal.status = ProposalStatus.SANDBOX_AUTHORIZED
+        try:
+            memory.store_proposal(proposal)
+        except Exception:
+            pass
+        self._record_development_authorization_audit(proposal, authorization)
+        return authorization
+
+    def _record_development_authorization_audit(self, proposal, authorization) -> None:
+        """Best-effort audit of a granted development authorization."""
+        try:
+            memory = self._evolution_memory
+            if memory is None:
+                return
+            from atlas.evolution.models import EvolutionRecord
+
+            memory.store_record(
+                EvolutionRecord(
+                    record_id=f"devauth:{authorization.authorization_id}",
+                    event_type="development.authorization",
+                    description=(
+                        f"{authorization.mode.value} development authorization "
+                        f"for {getattr(proposal, 'proposal_id', '')}"
+                    ),
+                    related_ids=[getattr(proposal, "proposal_id", "")],
+                    metadata=authorization.to_dict(),
+                )
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _promotion_repo_root():
+        """The live repository root a promotion would target."""
+        from pathlib import Path
+
+        return Path(__file__).resolve().parents[2]
+
+    def _ensure_development_driver(self):
+        """Build (once) the bounded DevelopmentDriver from kernel surfaces."""
+        if self._development_driver is not None:
+            return self._development_driver
+        controller = self._development_controller
+        if controller is None:
+            return None
+        from atlas.evolution.development_driver import DevelopmentDriver
+        from atlas.evolution.development_gap import assess_development_gap
+        from atlas.evolution.development_usefulness import assess_usefulness
+
+        kernel = self
+
+        def _capability_names() -> tuple[str, ...]:
+            names: list[str] = []
+            try:
+                registry = getattr(kernel, "_capability_registry", None)
+                names.extend(
+                    list(getattr(registry, "registered_names", ()) or ())
+                )
+            except Exception:
+                pass
+            return tuple(name for name in names if name)
+
+        def _knowledge_retriever():
+            try:
+                from atlas.research.validated_retrieval import (
+                    ValidatedKnowledgeRetriever,
+                )
+
+                return ValidatedKnowledgeRetriever(kernel._research_storage)
+            except Exception:
+                return None
+
+        def _gap(request: str):
+            return assess_development_gap(
+                request,
+                capability_names=_capability_names(),
+                knowledge_retriever=_knowledge_retriever(),
+            )
+
+        def _executor(proposal):
+            # Register the bounded envelope authorization (SANDBOX_AUTHORIZED)
+            # then execute sandbox-only development under it.
+            kernel.authorize_development_execution(proposal.proposal_id)
+            return kernel.run_development_execution(
+                None, proposal.proposal_id, allow_envelope=True
+            )
+
+        def _promotion_preparer(proposal, run_result):
+            return kernel._prepare_promotion_request(proposal, run_result)
+
+        driver = DevelopmentDriver(
+            gap_assessor=_gap,
+            cycle_runner=controller.run_development_cycle,
+            executor=_executor,
+            authority=self._development_authority,
+            researcher=(
+                self._acquisition_service.acquire
+                if self._acquisition_service is not None
+                else None
+            ),
+            usefulness_fn=assess_usefulness,
+            promotion_preparer=_promotion_preparer,
+        )
+        self._development_driver = driver
+        return driver
+
+    def run_development_driver(self, request: str, metadata=None):
+        """Drive ONE bounded direct-evolution invocation for ``request``.
+
+        Orchestration only; never runs from ``tick()``; never promotes.
+        """
+        driver = self._ensure_development_driver()
+        if driver is None:
+            raise RuntimeError(
+                "Development driver is not wired; Atlas.start() must run first."
+            )
+        return driver.drive(request, metadata=metadata)
+
+    def _ensure_promotion_executor(self):
+        """Build (once) the OWNER-only transactional PromotionExecutor."""
+        if self._promotion_executor is not None:
+            return self._promotion_executor
+        from atlas.evolution.promotion_executor import PromotionExecutor
+
+        self._promotion_executor = PromotionExecutor(
+            self._promotion_repo_root(),
+            version_recorder=self._record_promotion_version,
+            audit_recorder=self._record_promotion_audit,
+            activator=self._activate_promoted_capability,
+        )
+        return self._promotion_executor
+
+    def _activate_promoted_capability(self, artifact):
+        """Bounded capability activation after an OWNER-authorized promotion.
+
+        Runs only inside ``promote_validated_change`` (OWNER-gated); the
+        Development Envelope can never reach this path. Raises on any
+        malformed/invalid declared capability so the executor fails closed.
+        """
+        from atlas.evolution.capability_activation import CapabilityActivator
+
+        activator = CapabilityActivator(
+            self._promotion_repo_root(),
+            self._capability_registry,
+            audit_recorder=self._record_activation_audit,
+        )
+        return activator.activate(artifact)
+
+    def _record_activation_audit(self, activation) -> str:
+        """Best-effort activation audit record (existing memory architecture)."""
+        try:
+            memory = self._evolution_memory
+            if memory is None:
+                return ""
+            from atlas.evolution.models import EvolutionRecord
+
+            capabilities = tuple(getattr(activation, "capabilities", ()) or ())
+            record_id = "capactivation:" + "--".join(capabilities)[:80]
+            memory.store_record(
+                EvolutionRecord(
+                    record_id=record_id,
+                    event_type="capability_activation",
+                    description=(
+                        "Activated promoted capability: "
+                        + (", ".join(capabilities) or "(none)")
+                    ),
+                    related_ids=list(capabilities),
+                    metadata=getattr(activation, "to_dict", lambda: {})(),
+                )
+            )
+            return record_id
+        except Exception:
+            return ""
+
+    @property
+    def capability_registry(self):
+        """Return the kernel-owned CapabilityRegistry (runtime, read-only)."""
+        return self._capability_registry
+
+    @property
+    def capability_dispatcher(self):
+        """Return the kernel-owned CapabilityDispatcher (normal invocation path)."""
+        return self._capability_dispatcher
+
+    def _record_promotion_audit(self, artifact) -> str:
+        """Best-effort audit record for a promoted changeset."""
+        try:
+            memory = self._evolution_memory
+            if memory is None:
+                return ""
+            from atlas.evolution.models import EvolutionRecord
+
+            record_id = f"promoaudit:{getattr(artifact, 'artifact_id', '')}"
+            memory.store_record(
+                EvolutionRecord(
+                    record_id=record_id,
+                    event_type="development_promotion",
+                    description=(
+                        f"Promoted changeset for proposal "
+                        f"{getattr(artifact, 'proposal_id', '')}"
+                    ),
+                    related_ids=[getattr(artifact, "proposal_id", "")],
+                    metadata=getattr(artifact, "to_dict", lambda: {})(),
+                )
+            )
+            return record_id
+        except Exception:
+            return ""
+
+    def _record_promotion_version(self, artifact) -> str:
+        """Record a real CODE version for a promoted changeset.
+
+        Reuses the EXISTING ``VersionManager`` (no parallel versioning
+        subsystem): it builds a CODE-scoped ``EvolutionRequest`` +
+        ``ChangeReceipt`` from the promoted changeset and calls
+        ``record_version``, returning the resulting manifest id. Raises on any
+        failure so the executor fails the promotion closed rather than
+        reporting a false success.
+        """
+        storage = self._autonomy_storage
+        if storage is None:
+            raise RuntimeError(
+                "autonomy storage is unavailable; cannot record a CODE version"
+            )
+        from atlas.evolution.autonomy.models import (
+            ChangeReceipt,
+            EvolutionRequest,
+        )
+        from atlas.evolution.autonomy.version_manager import VersionManager
+        from atlas.evolution.governance.models import ScopeType
+
+        files = tuple(getattr(artifact, "files", ()) or ())
+        if not files:
+            raise RuntimeError("promotion artifact carries no files to version")
+        request_id = f"promo:{getattr(artifact, 'artifact_id', '')}"
+        request = EvolutionRequest(
+            request_id=request_id,
+            source=f"promotion:{getattr(artifact, 'proposal_id', '')}",
+            target_scope=ScopeType.CODE,
+            change_payload={
+                "code_changes": [
+                    {"path": entry.path, "content": entry.post_content}
+                    for entry in files
+                ]
+            },
+            metadata={"kind": "development_promotion"},
+        )
+        receipt = ChangeReceipt(
+            request_id=request_id,
+            changed_keys=[entry.path for entry in files],
+            before_refs={
+                entry.path: (
+                    entry.pre_hash if entry.pre_state is not None else "ABSENT"
+                )
+                for entry in files
+            },
+            after_refs={entry.path: entry.post_hash for entry in files},
+            version_delta="+0.0.1",
+            target_tags=["code", "promotion"],
+        )
+        version = VersionManager(storage=storage).record_version(request, receipt)
+        return str(getattr(version, "manifest_id", "") or "")
+
+    def _prepare_promotion_request(self, proposal, run_result):
+        """Capture the artifact and open a promotion review (no mutation)."""
+        gate = self._promotion_gate
+        if gate is None:
+            raise RuntimeError("Promotion gate is not wired.")
+        from atlas.evolution.promotion_artifact import capture_promotion_artifact
+        from atlas.evolution.promotion_gate import build_change_manifest
+
+        metadata = getattr(proposal, "metadata", None) or {}
+        changes = metadata.get("code_changes", [])
+        if not changes:
+            # The driver may pass a lightweight proposal stand-in; resolve the
+            # persisted proposal (which carries the authored changes).
+            memory = self._evolution_memory
+            if memory is not None:
+                try:
+                    persisted = memory.get_proposal(
+                        getattr(proposal, "proposal_id", "")
+                    )
+                except Exception:
+                    persisted = None
+                if persisted is not None:
+                    proposal = persisted
+                    metadata = getattr(proposal, "metadata", None) or {}
+                    changes = metadata.get("code_changes", [])
+        if not changes:
+            raise RuntimeError("proposal carries no code changes to promote")
+        artifact = capture_promotion_artifact(
+            changes,
+            proposal_id=getattr(proposal, "proposal_id", ""),
+            repo_root=self._promotion_repo_root(),
+        )
+        assessment = gate.assess(
+            run_result,
+            proposal_id=getattr(proposal, "proposal_id", ""),
+            change_manifest=build_change_manifest(changes),
+        )
+        request = gate.request_review(assessment)
+        self._promotion_artifacts[request.request_id] = {
+            "artifact": artifact,
+            "request": request,
+            "assessment": assessment,
+            "proposal_id": getattr(proposal, "proposal_id", ""),
+        }
+        return request.request_id
+
+    def approve_promotion_review(
+        self, session_context, request_id: str, comment: str = ""
+    ):
+        """OWNER-only approval of a pending promotion review (no mutation)."""
+        self._require_development_authority(session_context, action="promotion_approval")
+        entry = self._promotion_artifacts.get(request_id)
+        if entry is None:
+            raise RuntimeError(f"Promotion review '{request_id}' not found.")
+        request = entry["request"]
+        return self._promotion_gate.approve(request, comment=comment)
+
+    def promote_validated_change(self, session_context, request_id: str):
+        """OWNER-only, transactional promotion of a validated changeset."""
+        self._require_development_authority(session_context, action="promotion")
+        entry = self._promotion_artifacts.get(request_id)
+        if entry is None:
+            raise RuntimeError(f"Promotion review '{request_id}' not found.")
+        request = entry["request"]
+        status = getattr(getattr(request, "status", None), "value", "")
+        if status != "approved":
+            raise RuntimeError(
+                f"Promotion review '{request_id}' is {status or 'unknown'}, "
+                "not approved — refusing to promote."
+            )
+        executor = self._ensure_promotion_executor()
+        result = executor.promote(entry["artifact"], authorized=True)
+        if result.ok:
+            try:
+                from atlas.evolution.promotion_gate import PromotionStatus
+
+                request.status = PromotionStatus.PROMOTED
+            except Exception:
+                pass
+        return result
 
     @property
     def self_management_review(self):
@@ -2223,6 +2838,16 @@ class Atlas:
                     "success": bool(record.metadata.get("success", False)),
                     "iterations_used": record.metadata.get(
                         "iterations_used", 0
+                    ),
+                    # Phase 5.2 (G-B) — bounded usefulness evidence so planning
+                    # can retrieve and use retained development experience.
+                    "usefulness_outcome": str(
+                        (record.metadata.get("usefulness") or {}).get("outcome", "")
+                    ),
+                    "capability_improvement": str(
+                        (record.metadata.get("usefulness") or {}).get(
+                            "capability_improvement", ""
+                        )
                     ),
                 }
                 for record in development_records

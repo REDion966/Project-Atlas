@@ -249,6 +249,9 @@ def main() -> None:
             "review",
             "confirm",
             "execute",
+            "drive",
+            "approve-promotion",
+            "promote",
         ],
     )
     postcore_parser.add_argument(
@@ -281,6 +284,21 @@ def main() -> None:
         "--need-file",
         default="",
         help="Path to a development-need JSON file (develop action)",
+    )
+    postcore_parser.add_argument(
+        "--request",
+        default="",
+        help="Direct development request text (drive action)",
+    )
+    postcore_parser.add_argument(
+        "--spec-file",
+        default="",
+        help="Path to a JSON spec (code_changes/scaffold) for the drive action",
+    )
+    postcore_parser.add_argument(
+        "--promotion-id",
+        default="",
+        help="Promotion review request id (approve-promotion/promote actions)",
     )
 
     # -------------------------
@@ -981,10 +999,13 @@ def _run_postcore(args: argparse.Namespace) -> None:
     authorizes, executes, schedules, applies, promotes, or rolls back.
     """
     from atlas.cli.postcore_commands import (
+        cmd_approve_promotion,
         cmd_confirm,
         cmd_develop,
+        cmd_drive,
         cmd_execute,
         cmd_operate,
+        cmd_promote,
         cmd_research,
         cmd_review,
     )
@@ -1015,6 +1036,15 @@ def _run_postcore(args: argparse.Namespace) -> None:
             return
         if args.action == "execute":
             print(cmd_execute(atlas, args))
+            return
+        if args.action == "drive":
+            print(cmd_drive(atlas, args))
+            return
+        if args.action == "approve-promotion":
+            print(cmd_approve_promotion(atlas, args))
+            return
+        if args.action == "promote":
+            print(cmd_promote(atlas, args))
             return
     finally:
         atlas.shutdown()

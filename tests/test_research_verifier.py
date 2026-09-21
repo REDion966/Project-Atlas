@@ -224,3 +224,40 @@ class TestEmptyAndMalformed:
         text = "Atlas uses SQLite for storage."
         results = verify([claim(text)], [source("s1", text)])
         assert ClaimVerification is not None
+
+
+class TestContradictionScope:
+    """A negation only contradicts the claim it actually concerns.
+
+    Regression: contradiction markers are matched within a single sentence and
+    only when that sentence concerns the claim. Scanning the whole document
+    made every claim in a large real-world source (which almost always contains
+    a word like "never") register as contradicted, so no research-derived claim
+    could ever be SUPPORTED/retrieved.
+    """
+
+    def test_unrelated_negation_elsewhere_does_not_contradict(self):
+        claim_text = "Atlas uses SQLite for persistent storage across sessions."
+        source_text = (
+            claim_text + " The separate widget never runs on Tuesdays and is not exported."
+        )
+        results = verify([claim(claim_text)], [source("s1", source_text)])
+        assert results[0].metadata["outcome"] == ClaimOutcome.PLAUSIBLE.name
+        assert results[0].status == VerificationStatus.SUPPORTED
+        assert results[0].metadata["contradicting"] == []
+
+    def test_negated_same_sentence_still_contradicts(self):
+        sources = [source("s1", "Atlas does not use SQLite for storage.")]
+        results = verify([claim("Atlas uses SQLite for storage.")], sources)
+        assert results[0].metadata["outcome"] == ClaimOutcome.CONTESTED.name
+
+    def test_negated_overlapping_sentence_still_contradicts(self):
+        results = verify(
+            [claim("Atlas uses SQLite for persistent storage across sessions.")],
+            [
+                source("s1", "Atlas uses SQLite for persistent storage across sessions."),
+                source("s2", "Atlas does not use SQLite."),
+            ],
+        )
+        assert results[0].metadata["outcome"] == ClaimOutcome.CONTESTED.name
+        assert results[0].metadata["contradicting"] == ["s2"]

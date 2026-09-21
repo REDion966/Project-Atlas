@@ -252,7 +252,12 @@ class ResearchResult:
 
 
 class ProposalStatus(Enum):
-    """Status of an evolution proposal."""
+    """Status of an evolution proposal.
+
+    ``APPROVED`` remains the OWNER (human) approval state. ``SANDBOX_AUTHORIZED``
+    (Phase 5) is a DISTINCT state set only by the bounded Development Envelope:
+    it authorizes sandbox-only development and NEVER authorizes promotion.
+    """
 
     DRAFT = auto()
     PENDING_APPROVAL = auto()
@@ -261,6 +266,7 @@ class ProposalStatus(Enum):
     DEFERRED = auto()
     IMPLEMENTED = auto()
     SUPERSEDED = auto()
+    SANDBOX_AUTHORIZED = auto()
 
 
 @dataclass(slots=True)

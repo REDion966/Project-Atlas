@@ -267,7 +267,16 @@ class DevelopmentPlanner:
             return None
 
     def _validate(self, proposal: EvolutionProposal) -> None:
-        if proposal.status != ProposalStatus.APPROVED:
+        # ``APPROVED`` is the OWNER (human) approval state; Phase 5 adds
+        # ``SANDBOX_AUTHORIZED`` (bounded Development Envelope) as a DISTINCT
+        # state that authorizes SANDBOX-only planning/execution. Neither
+        # authorizes promotion.
+        allowed = {ProposalStatus.APPROVED}
+        sandbox_authorized = getattr(
+            ProposalStatus, "SANDBOX_AUTHORIZED", ProposalStatus.APPROVED
+        )
+        allowed.add(sandbox_authorized)
+        if proposal.status not in allowed:
             raise DevelopmentPlannerError(
                 f"Cannot plan proposal '{proposal.proposal_id}': "
                 f"status is {proposal.status.name!r}, expected 'APPROVED'."

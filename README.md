@@ -52,9 +52,23 @@ C9 readiness is COMPLETE — no evidence-backed gap. C5.2 was NOT AUTHORIZED.**
 No C10 exists or is planned. Current status and deliveries are owned by
 `docs/ATLAS_STATE.md` §31; authorized forward direction by `docs/ROADMAP.md`.
 
-**Latest verified test run:** full suite **5,945 test items executed: 5,876 test
-cases passed (plus 67 subtests passed), 0 failed, 0 errors, 2 skipped** (pytest
-exit 0).
+**Phase 1–5 direct-evolution program (additive; deterministic; model-independent):**
+Phase 3 — knowledge acquisition & research (deterministic authorized source
+selection; validated knowledge retrieval); Phase 4 — governed self-development
+(development cycle → sandbox execution → verification, with deterministic
+relevant-test selection and bounded correction); Phase 5 — direct Atlas evolution
+(capability/knowledge-gap adjudication, bounded deterministic scaffold authoring,
+a bounded Development Driver, an opt-in Development Envelope for sandbox-only
+execution, and OWNER-only transactional promotion with CODE versioning and
+capability activation). **Phase 5.2 is implemented and Phase 5.3 is validated
+(G1 — capability activation — closed).** See `docs/ATLAS_STATE.md` §32. This
+`README.md` remains a public entry point, not an authority.
+
+**Latest verified full-suite run (historical baseline):** full suite **5,945 test
+items executed: 5,876 test cases passed (plus 67 subtests passed), 0 failed,
+0 errors, 2 skipped** (pytest exit 0). This is the last recorded full-suite
+baseline and was **not** re-run for the Phase 3–5 reconciliation, which verified
+focused suites only (see `docs/ATLAS_STATE.md` §32).
 
 **Current schema version:** `11`.
 

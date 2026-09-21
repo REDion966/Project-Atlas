@@ -27,7 +27,7 @@ from collections.abc import Sequence
 from enum import Enum, auto
 from typing import Protocol, runtime_checkable
 
-from atlas.research._text import significant_tokens, source_text
+from atlas.research._text import significant_tokens, source_text, split_sentences
 from atlas.research._verification import confidence_from_evidence, norm_alpha, similarity_ratio
 from atlas.research.models import (
     ClaimVerification,
@@ -177,10 +177,13 @@ class ClaimVerifier:
         is silent about the claim.
 
         Order matters (deterministic precedence):
-          1. explicit contradiction marker in the RAW text → contradict
+          1. a NEGATED sentence that is *about the claim* → contradict
              (a negated sentence such as "Atlas does not use SQLite" still
-             CONTAINS the claim text as a substring, so an explicit
-             negation must win over every substring/similarity/token match)
+             CONTAINS the claim text, so an explicit negation must win over
+             every substring/similarity/token match — but only the negated
+             sentence that actually concerns the claim counts; an unrelated
+             negation elsewhere in a large source must not mark the claim
+             contradicted)
           2. verbatim/substring match → support
           3. high character-level similarity → support
           4. claim-token containment in the source → support
@@ -189,21 +192,59 @@ class ClaimVerifier:
         if not claim_statement or not source_text:
             return None
         claim_norm: str = norm_alpha(claim_statement)
-        source_norm: str = norm_alpha(source_text)
         if not claim_norm:
             return None
-        raw_lower: str = source_text.lower()
-        if any(marker in raw_lower for marker in CONTRADICTION_MARKERS):
+        claim_tokens: set[str] = significant_tokens(claim_statement)
+        if self._negated_sentence_matches(claim_norm, claim_tokens, source_text):
             return "contradict"
+        source_norm: str = norm_alpha(source_text)
         if claim_norm in source_norm:
             return "support"
         if similarity_ratio(claim_norm, source_norm) >= MATCH_SIMILARITY_THRESHOLD:
             return "support"
-        claim_tokens: set[str] = significant_tokens(claim_statement)
         source_tokens: set[str] = significant_tokens(source_text)
         if claim_tokens and claim_tokens <= source_tokens:
             return "support"
         return None
+
+    @staticmethod
+    def _negated_sentence_matches(
+        claim_norm: str,
+        claim_tokens: set[str],
+        source_text: str,
+    ) -> bool:
+        """True when a NEGATED sentence in ``source_text`` concerns the claim.
+
+        Contradiction is scoped to a single sentence that both carries an
+        explicit contradiction marker and matches the claim (verbatim/substring,
+        high similarity, token containment, or strong token overlap). A negation
+        in an unrelated sentence is not evidence about the claim — otherwise any
+        large real-world source containing a word like "never" would mark every
+        claim contradicted. Deterministic; no model.
+        """
+        sentence: str
+        for sentence in split_sentences(source_text):
+            sentence_lower: str = sentence.lower()
+            if not any(
+                marker in sentence_lower for marker in CONTRADICTION_MARKERS
+            ):
+                continue
+            sentence_norm: str = norm_alpha(sentence)
+            if claim_norm in sentence_norm:
+                return True
+            if (
+                similarity_ratio(claim_norm, sentence_norm)
+                >= MATCH_SIMILARITY_THRESHOLD
+            ):
+                return True
+            sentence_tokens: set[str] = significant_tokens(sentence)
+            if claim_tokens and claim_tokens <= sentence_tokens:
+                return True
+            if claim_tokens and sentence_tokens:
+                shared: set[str] = claim_tokens & sentence_tokens
+                if len(shared) >= 2 and len(shared) / len(sentence_tokens) >= 0.5:
+                    return True
+        return False
 
     def _model_outcome(self, claim: KnowledgeClaim, fallback: ClaimOutcome) -> ClaimOutcome:
         """Optional LLM verdict, validated and bounds-checked (never raises)."""
