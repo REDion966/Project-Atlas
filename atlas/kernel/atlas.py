@@ -3735,6 +3735,16 @@ class Atlas:
                 if self._decision_intelligence is not None
                 else None
             ),
+            # WS4: cache-only ArchitectureModel provider (same discipline as
+            # the repository-map provider above). It yields the read-only
+            # self-knowledge projection ONLY when the repository map is
+            # already built — it never triggers a scan. Advisory development
+            # evidence only; it can never authorize, execute, or promote.
+            architecture_model_provider=lambda: (
+                self.architecture_model()
+                if self._repository_map is not None
+                else None
+            ),
         )
         learning_memory = getattr(self._learning_engine, "memory", None)
         self._self_development_loop = SelfDevelopmentLoop(

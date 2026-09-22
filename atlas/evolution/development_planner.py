@@ -34,6 +34,25 @@ from atlas.evolution.models import EvolutionProposal, ProposalStatus
 # Depth bound for repository impact expansion (dependents-of-dependents).
 IMPACT_MAX_DEPTH: int = 3
 
+# Suffix stripped when a file target is normalised into a dotted module query.
+_MODULE_FILE_SUFFIXES: tuple[str, ...] = (".py",)
+
+
+def _module_query(target: str) -> str:
+    """Normalise an affected-file target into a dotted module query.
+
+    A path (``atlas/evolution/development_planner.py``) becomes the dotted
+    module (``atlas.evolution.development_planner``); an already-dotted name
+    is returned unchanged. Pure token normalisation — no resolution is
+    attempted here (that is the architecture model's ``locate()``).
+    """
+    text = str(target).strip().replace("\\", "/").lstrip("./")
+    for suffix in _MODULE_FILE_SUFFIXES:
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+            break
+    return text.replace("/", ".").strip(".")
+
 
 class DevelopmentPlannerError(Exception):
     """Raised when DevelopmentPlanner cannot produce a plan."""
@@ -56,6 +75,7 @@ class DevelopmentPlanner:
         self,
         repository_map_provider=None,
         planning_context_provider=None,
+        architecture_model_provider=None,
     ) -> None:
         """
         Initialise the planner.
@@ -75,9 +95,22 @@ class DevelopmentPlanner:
                 (Stage D) — attached verbatim as advisory
                 ``metadata["planning_context"]`` on produced plans.
                 Fail-soft: provider exceptions leave plans untouched.
+            architecture_model_provider: Optional zero-argument callable
+                returning an already-built ``ArchitectureModel`` (or None).
+                WS4 self-knowledge integration: when a model is available,
+                each affected target is resolved through the model's
+                evidence-only ``locate()`` and the bounded architectural
+                facts are attached as advisory
+                ``metadata["architecture_evidence"]``. The planner NEVER
+                builds or mutates a model itself and never fails because of
+                it — an absent provider, a None snapshot, a non-model value,
+                or a raising provider all preserve the historical behavior
+                exactly. Advisory only: this evidence can never authorize,
+                execute, schedule, promote, or activate anything.
         """
         self._repository_map_provider = repository_map_provider
         self._planning_context_provider = planning_context_provider
+        self._architecture_model_provider = architecture_model_provider
         self._plan_counter = 0
 
     def plan(self, proposal: EvolutionProposal) -> DevelopmentPlan:
@@ -111,6 +144,15 @@ class DevelopmentPlanner:
         validation = self._validate_targets_against_repository(affected_files)
         if validation is not None:
             development_plan.metadata["repository_validation"] = validation
+
+        # Stage WS4 — self-knowledge integration: attach bounded, read-only
+        # ArchitectureModel evidence for the plan's affected-file targets.
+        # Advisory metadata only; it can never fail or authorize planning.
+        architecture_evidence = self._build_architecture_evidence(affected_files)
+        if architecture_evidence is not None:
+            development_plan.metadata["architecture_evidence"] = (
+                architecture_evidence
+            )
 
         # Stage D — context-aware planning: attach the kernel-supplied
         # PlanningContext (evolution history, development outcomes,
@@ -264,6 +306,73 @@ class DevelopmentPlanner:
             }
         except Exception:
             # Awareness must never break planning.
+            return None
+
+    def _build_architecture_evidence(
+        self,
+        affected_files: list[str],
+    ) -> dict | None:
+        """Project bounded, read-only ArchitectureModel evidence for targets.
+
+        Stage WS4 self-knowledge integration. When an already-built
+        ``ArchitectureModel`` is supplied, each affected target is resolved
+        through the model's evidence-only ``locate()`` and the bounded
+        architectural facts (matched kind, module, packages, components,
+        dependencies, dependents, impact) are returned for advisory plan
+        metadata.
+
+        Returns None when no provider is wired, the provider yields None or a
+        non-``ArchitectureModel``, the projection raises, or no target
+        resolves — preserving the historical no-architecture behavior
+        exactly. The model and repository are never mutated, and the returned
+        evidence can never authorize, execute, schedule, promote, or activate
+        anything.
+        """
+        if self._architecture_model_provider is None:
+            return None
+        try:
+            architecture_model = self._architecture_model_provider()
+        except Exception:
+            return None
+        if architecture_model is None:
+            return None
+
+        try:
+            from atlas.self_knowledge.architecture_model import ArchitectureModel
+
+            if not isinstance(architecture_model, ArchitectureModel):
+                return None
+
+            targets: list[dict] = []
+            unresolved: list[str] = []
+            for target in affected_files:
+                located = architecture_model.locate(_module_query(target))
+                if not located.found:
+                    unresolved.append(target)
+                    continue
+                targets.append(
+                    {
+                        "target": target,
+                        "query": located.query,
+                        "matched_kind": located.matched_kind,
+                        "module": located.module,
+                        "packages": list(located.packages),
+                        "components": list(located.components),
+                        "module_paths": list(located.module_paths),
+                        "dependencies": list(located.dependencies),
+                        "dependents": list(located.dependents),
+                        "impact": list(located.impact),
+                    }
+                )
+
+            if not targets:
+                # No architectural fact resolved for any target: omit the
+                # section entirely, mirroring the historical absence rather
+                # than attaching an empty projection.
+                return None
+            return {"targets": targets, "unresolved_targets": unresolved}
+        except Exception:
+            # Advisory self-knowledge must never break planning.
             return None
 
     def _validate(self, proposal: EvolutionProposal) -> None:
