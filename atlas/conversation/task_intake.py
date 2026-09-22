@@ -104,9 +104,13 @@ _RESEARCH_CUES: frozenset[str] = frozenset(
 )
 
 #: Word-boundary greeting regex: short tokens ("hi", "hey") must not match
-#: inside "this" / "they", while multi-word greetings match as phrases.
+#: inside "this" / "they", while multi-word greetings match as phrases. The
+#: "how are you" alternative carries a trailing word boundary so it does not
+#: match the possessive prefix "how are your ..." (e.g. "How are your modules
+#: connected?"), which is a question, not a greeting. This mirrors the
+#: builtin-response greeting vocabulary exactly.
 _GREETING_RE = re.compile(
-    r"\b(?:hello|hi|hey)\b|how are you|good morning|good afternoon|good evening|nice to meet you"
+    r"\b(?:hello|hi|hey)\b|how are you\b|good morning|good afternoon|good evening|nice to meet you"
 )
 
 #: Explicit accepted development cue FORMS. Every entry is matched as a WHOLE

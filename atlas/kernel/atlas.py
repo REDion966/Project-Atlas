@@ -3997,6 +3997,10 @@ class Atlas:
                 service_names=self._container.names,
                 # Built only during start(); only usable after start.
                 started=True,
+                # WS — bounded conversational self-knowledge. Cache-only: the
+                # snapshot never triggers a repository scan, so asking a casual
+                # architecture question cannot cause one. Read-only/advisory.
+                architecture_model_provider=self._architecture_model_snapshot,
             )
         except Exception:
             self._builtin_response = None
@@ -4292,6 +4296,24 @@ class Atlas:
             component_registry=self._component_registry,
             capability_model=self.capability_model(),
             repository_map=self.repository_map,
+        )
+
+    def _architecture_model_snapshot(self):
+        """Cache-only ArchitectureModel snapshot for the conversational floor.
+
+        READ-ONLY and deterministic. Built directly from the registries plus the
+        ALREADY-CACHED repository map attribute — unlike ``architecture_model()``
+        it never triggers a repository scan, so a casual architecture question
+        cannot cause one. When the map has not been built, the model honestly
+        omits module-level facts (the map is passed as None and the model's
+        limitations state so).
+        """
+        from atlas.self_knowledge.architecture_model import build_architecture_model
+
+        return build_architecture_model(
+            component_registry=self._component_registry,
+            capability_model=self.capability_model(),
+            repository_map=self._repository_map,
         )
 
     def validated_knowledge(self, query: str):

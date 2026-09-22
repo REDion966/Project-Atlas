@@ -55,6 +55,7 @@ BUILTIN_INTENT_HELP = "help"
 BUILTIN_INTENT_IDENTITY = "identity"
 BUILTIN_INTENT_CAPABILITIES = "capabilities"
 BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
+BUILTIN_INTENT_ARCHITECTURE = "architecture"
 BUILTIN_INTENT_STATUS = "status"
 BUILTIN_INTENT_RECALL = "recall"
 BUILTIN_INTENT_CONVERSATION_RECALL = "conversation_recall"
@@ -105,9 +106,57 @@ _CAPABILITIES_RE = re.compile(
 #: registered capability or tool, otherwise the standard unsupported
 #: response is used. "tell me about yourself" stays identity (checked
 #: by the identity pattern first).
+#:
+#: The optional determiner/qualifier prefix ("the capability", "the tool")
+#: is DELIBERATELY excluded from the ``name`` group, so an adorned request
+#: resolves the actual registered name ("reasoning.causal") rather than
+#: greedily capturing the surrounding words. An unresolved name still
+#: declines (fail-closed).
 _CAPABILITY_DETAIL_RE = re.compile(
     r"(?:explain|describe|what is|tell me about|how does|details? (?:on|about|for))\s+"
+    r"(?:(?:the\s+)?(?:capabilit(?:y|ies)|tools?)\s+)?"
     r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/ ]{0,60})"
+)
+
+#: "what does <name> do?" — the natural singular capability/tool-purpose form.
+#: Bounded and explicit: the ``name`` is a single identifier token (so a dotted
+#: name such as ``toolchain.execute_chain`` is never split), an optional
+#: determiner/qualifier prefix and an optional trailing qualifier ("the tool
+#: <name>") are consumed but excluded from the name, and the request must end
+#: with a whole-word "do". The name must still resolve against a registered
+#: capability/tool, so an unknown name declines (fail-closed) exactly like the
+#: other detail forms.
+_CAPABILITY_DETAIL_DO_RE = re.compile(
+    r"what does\s+"
+    r"(?:the\s+)?"
+    r"(?:(?:capabilit(?:y|ies)|tools?)\s+)?"
+    r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/]*)"
+    r"(?:\s+(?:capabilit(?:y|ies)|tool|tools))?"
+    r"\s+do\b"
+)
+
+#: Bounded deterministic self-knowledge recognition. Selects the EXISTING
+#: architecture self-knowledge surface for questions about Atlas itself
+#: (architecture / components / subsystems / module dependencies). It never
+#: parses arbitrary natural language and never invents facts: the renderer
+#: answers only from the injected ArchitectureModel.
+_ARCHITECTURE_RE = re.compile(
+    r"\barchitectur(?:e|al)\b"
+    r"|\bsubsystems?\b"
+    r"|\bcomponents?\b"
+    r"|\bsystems?\s+that\s+make\s+up\s+atlas\b"
+    r"|\bmake\s+up\s+atlas\b"
+    r"|\bdependenc(?:y|ies)\b"
+    r"|\bdependent\s+modules?\b"
+    r"|\bhow\s+(?:do|does)\s+(?:your\s+)?(?:modules|components|subsystems|systems)\b"
+    r"|\bmodules?\s+(?:depend|relate|connect|fit)(?:s|d|ed|ing)?\b"
+)
+
+#: Dotted module/package identifiers inside a self-knowledge question, used to
+#: resolve a SPECIFIC target through ``ArchitectureModel.locate()``. Absent a
+#: resolvable target, the renderer stays bounded and reports only model counts.
+_ARCHITECTURE_TARGET_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+"
 )
 
 _STATUS_RE = re.compile(
@@ -226,7 +275,7 @@ _COMMANDS_RE = re.compile(
 #: Same greeting vocabulary as TaskIntake; greetings are the weakest match
 #: and are only answered when no stronger intent matched.
 _GREETING_RE = re.compile(
-    r"\b(?:hello|hi|hey)\b|how are you|good morning|good afternoon"
+    r"\b(?:hello|hi|hey)\b|how are you\b|good morning|good afternoon"
     r"|good evening|nice to meet you"
 )
 
@@ -308,6 +357,18 @@ def _alias_hit(
 
 _MAX_TOOLS_LISTED = 20
 
+#: Bounds applied to the self-knowledge renderer so an architecture answer is a
+#: concise, bounded summary and never a raw repository dump.
+_MAX_ARCHITECTURE_SUBSYSTEMS = 8
+_MAX_ARCHITECTURE_RELATIONS = 8
+_MAX_ARCHITECTURE_LIMITATIONS = 3
+
+
+def _format_names(names: object) -> str:
+    """Render a bounded sequence of identifiers as ``a, `b` ...`` (or '')."""
+    items = [f"`{name}`" for name in (names or ())]
+    return ", ".join(items)
+
 
 class BuiltinResponseService:
     """Deterministic built-in conversational responder.
@@ -329,6 +390,7 @@ class BuiltinResponseService:
             | None
         ) = None,
         started: bool | None = None,
+        architecture_model_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
@@ -336,6 +398,12 @@ class BuiltinResponseService:
         self._memory_service = memory_service
         self._service_names = service_names
         self._started = started
+        #: WS — optional zero-argument callable returning an already-built
+        #: ``ArchitectureModel`` (or None). Read-only and advisory: it supplies
+        #: structural self-knowledge for the bounded architecture intent only,
+        #: is never mutated or persisted, and fails soft to the unsupported
+        #: floor when absent, None, non-model, or raising.
+        self._architecture_model_provider = architecture_model_provider
 
     def _resolve_service_names(self) -> tuple[str, ...] | None:
         """Resolve the container/service snapshot for the status answer.
@@ -369,6 +437,10 @@ class BuiltinResponseService:
     @property
     def memory_service(self) -> MemoryManagerService | None:
         return self._memory_service
+
+    @property
+    def architecture_model_provider(self) -> Callable[[], Any] | None:
+        return self._architecture_model_provider
 
     def handles(
         self,
@@ -477,6 +549,15 @@ class BuiltinResponseService:
                 return None
         if _COMMANDS_RE.search(lowered):
             return BUILTIN_INTENT_COMMANDS
+        # A *resolvable* named-capability/tool detail request outranks the
+        # generic inventory matcher: the bare word "capability"/"tool" in an
+        # adorned request ("explain the capability reasoning.causal") must not
+        # steal a genuinely named request. An unresolved name returns None here
+        # and falls through unchanged, so inventory/help/identity behavior and
+        # fail-closed semantics are preserved exactly.
+        detail = self._match_capability_detail(lowered)
+        if detail is not None:
+            return (BUILTIN_INTENT_CAPABILITY_DETAIL, detail)
         # Bounded capability aliases precede help/identity: genuinely
         # equivalent capability questions must not be captured by the help
         # word ("... help me with") or by the identity predicate's
@@ -491,9 +572,15 @@ class BuiltinResponseService:
             _IDENTITY_ALIAS_RES, lowered
         ):
             return BUILTIN_INTENT_IDENTITY
-        detail = self._match_capability_detail(lowered)
-        if detail is not None:
-            return (BUILTIN_INTENT_CAPABILITY_DETAIL, detail)
+        # Bounded architecture self-knowledge (WS). Reached only by turns the
+        # inventory/help/identity surfaces above did not claim, so it cannot
+        # steal them. It is claimed ONLY when an already-built ArchitectureModel
+        # is actually available; otherwise the turn falls through to the
+        # existing unsupported floor (fail-soft, no partial/empty claim).
+        if _ARCHITECTURE_RE.search(lowered) and (
+            self._resolve_architecture_model() is not None
+        ):
+            return (BUILTIN_INTENT_ARCHITECTURE, text)
         if _STATUS_RE.search(lowered) or _alias_hit(
             _STATUS_ALIAS_RES, lowered
         ):
@@ -537,10 +624,22 @@ class BuiltinResponseService:
         capability handler or tool. Anything else is not a confident
         match, so the caller falls through to the unsupported response.
         """
-        match = _CAPABILITY_DETAIL_RE.search(lowered)
-        if match is None:
-            return None
-        candidate = match.group("name").strip().strip("?.!.,;:'\"()")
+        for pattern in (_CAPABILITY_DETAIL_RE, _CAPABILITY_DETAIL_DO_RE):
+            match = pattern.search(lowered)
+            if match is None:
+                continue
+            resolved = self._resolve_detail_name(match.group("name"))
+            if resolved is not None:
+                return resolved
+        return None
+
+    def _resolve_detail_name(self, raw_name: str) -> str | None:
+        """Resolve a raw candidate against the registered capabilities/tools.
+
+        Conservative: an unresolvable candidate returns None so the caller
+        falls through to the unsupported response (fail-closed).
+        """
+        candidate = raw_name.strip().strip("?.!.,;:'\"()")
         if not candidate:
             return None
         normalized = candidate.lower().replace("-", "_").replace(" ", "_")
@@ -733,6 +832,8 @@ class BuiltinResponseService:
             return self._render_capabilities()
         if intent == BUILTIN_INTENT_CAPABILITY_DETAIL:
             return self._render_capability_detail(detail or "")
+        if intent == BUILTIN_INTENT_ARCHITECTURE:
+            return self._render_architecture(str(detail or ""))
         if intent == BUILTIN_INTENT_STATUS:
             return self._render_status(message_count=message_count)
         if intent == BUILTIN_INTENT_RECALL:
@@ -884,6 +985,136 @@ class BuiltinResponseService:
                 "never directly from conversation."
             )
         return self._render_unsupported()
+
+    # ------------------------------------------------------------------
+    # Architecture self-knowledge (WS) — bounded, read-only
+    # ------------------------------------------------------------------
+
+    def _resolve_architecture_model(self) -> Any | None:
+        """Return the injected ArchitectureModel, or None (fail-soft).
+
+        Never triggers a scan and never mutates: the provider is expected to be
+        cache-only (see the kernel wiring). A missing provider, a None snapshot,
+        a non-``ArchitectureModel`` value, or a raising provider all decline.
+        """
+        if self._architecture_model_provider is None:
+            return None
+        try:
+            model = self._architecture_model_provider()
+        except Exception:
+            return None
+        if model is None:
+            return None
+        from atlas.self_knowledge.architecture_model import ArchitectureModel
+
+        if not isinstance(model, ArchitectureModel):
+            return None
+        return model
+
+    @staticmethod
+    def _locate_architecture_target(model: Any, query: str) -> Any | None:
+        """Resolve the first dotted module/package identifier in ``query``.
+
+        Uses the model's existing evidence-only ``locate()``. Returns None when
+        the question names no resolvable target, so the caller renders only
+        bounded model counts rather than inventing a relationship.
+        """
+        if not query:
+            return None
+        seen: list[str] = []
+        for match in _ARCHITECTURE_TARGET_RE.finditer(query):
+            token = match.group(0).strip(".")
+            if token and token not in seen:
+                seen.append(token)
+        for token in seen:
+            located = model.locate(token)
+            if located.found:
+                return located
+        return None
+
+    def _render_architecture(self, query: str = "") -> str:
+        """Render a bounded, read-only architecture self-knowledge answer.
+
+        Consumes ONLY the injected, already-built ArchitectureModel (and any
+        repository map it already carries). Deterministic, provider-free and
+        network-free. When no usable model is available it fails soft to the
+        existing unsupported floor instead of inventing an answer, and it never
+        claims a fact the model does not record.
+        """
+        model = self._resolve_architecture_model()
+        if model is None:
+            return self._render_unsupported()
+
+        lines = [
+            "Atlas architecture self-knowledge "
+            "(deterministic, read-only; no external AI model used):",
+        ]
+
+        located = self._locate_architecture_target(model, query)
+        if located is not None:
+            if located.module:
+                lines.append(f"- Matched module: `{located.module}`")
+            lines.append(f"- Match kind: {located.matched_kind}")
+            if located.packages:
+                lines.append(f"- Package(s): {_format_names(located.packages)}")
+            if located.components:
+                lines.append(
+                    f"- Component(s): {_format_names(located.components)}"
+                )
+            lines.append(
+                f"- Direct dependencies ({len(located.dependencies)}): "
+                + (
+                    _format_names(located.dependencies[:_MAX_ARCHITECTURE_RELATIONS])
+                    or "none"
+                )
+            )
+            lines.append(
+                f"- Direct dependents ({len(located.dependents)}): "
+                + (
+                    _format_names(located.dependents[:_MAX_ARCHITECTURE_RELATIONS])
+                    or "none"
+                )
+            )
+            lines.append(
+                f"- Transitive impact ({len(located.impact)}): "
+                + (
+                    _format_names(located.impact[:_MAX_ARCHITECTURE_RELATIONS])
+                    or "none"
+                )
+            )
+        else:
+            lines.append(f"- Components (registered): {model.component_count}")
+            lines.append(f"- Subsystems (packages): {model.subsystem_count}")
+            lines.append(f"- Repository modules: {model.module_count}")
+            lines.append(f"- Internal import edges: {model.edge_count}")
+            if model.subsystems:
+                lines.append("")
+                lines.append("Representative subsystems:")
+                for subsystem in model.subsystems[:_MAX_ARCHITECTURE_SUBSYSTEMS]:
+                    lines.append(
+                        f"- `{subsystem.package}` — "
+                        f"{len(subsystem.components)} component(s), "
+                        f"{subsystem.module_count} module(s), "
+                        f"{len(subsystem.provided_capabilities)} capabilit(ies)"
+                    )
+                extra = len(model.subsystems) - _MAX_ARCHITECTURE_SUBSYSTEMS
+                if extra > 0:
+                    lines.append(f"  ... and {extra} more subsystem(s).")
+
+        if model.limitations:
+            lines.append("")
+            lines.append("Known scope boundaries (from the model):")
+            for limitation in model.limitations[:_MAX_ARCHITECTURE_LIMITATIONS]:
+                lines.append(f"- {limitation}")
+
+        lines.append("")
+        lines.append(
+            "This is a bounded projection of Atlas's existing structural "
+            "sources; nothing was modified. Ask about a specific module "
+            "(e.g. 'what depends on atlas.research.repository_map') for its "
+            "dependency facts."
+        )
+        return "\n".join(lines)
 
     def _listed_tools(self) -> list[Any]:
         if self._tool_registry is None:
