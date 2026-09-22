@@ -254,14 +254,18 @@ _REFERENCE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = 
 # candidate, so a bare "it"/"that"/"this" can never resolve merely because some
 # previous turn exists.
 #
-# L5 adds one bounded, lower-precedence candidate source: the subject
-# established explicitly in an earlier turn (``current_subject``, recorded
-# deterministically by L4 entity identification). It is consulted only when no
-# investigation-derived candidate exists, so it never overrides one and a bare
-# pronoun still cannot resolve from the mere existence of a previous turn.
+# L5 adds a bounded, lower-precedence candidate source: facts established
+# explicitly in an earlier turn — the subject recorded deterministically by L4
+# entity identification (``current_subject``) and the development intent
+# retained for a completed development request (``development_intent``). These
+# are consulted only when no investigation-derived candidate exists, so they
+# never override one and a bare pronoun still cannot resolve from the mere
+# existence of a previous turn.
 #
 # Deterministic and fail-closed: exactly one distinct candidate -> RESOLVED;
-# more than one -> AMBIGUOUS; none -> UNRESOLVED. Never guesses.
+# more than one -> AMBIGUOUS; none -> UNRESOLVED. Never guesses — two distinct
+# established facts are genuinely ambiguous and force clarification rather than
+# one silently winning.
 # ---------------------------------------------------------------------------
 
 #: Bounded lead cues that mark a prior USER turn as an investigation subject.
@@ -288,6 +292,16 @@ _CONTEXT_SUBJECT_FIELD = "context_subject"
 #: Field label reported for the explicitly established subject fallback.
 _ESTABLISHED_SUBJECT_FIELD = "current_subject"
 
+#: Field label reported when the contextual referent is the investigation
+#: subject ACTUALLY STORED in ``ConversationState.current_investigation``.
+#: Reporting the real state field (rather than the derived
+#: ``context_subject`` label) is what makes the result consumable by the
+#: existing reference-restatement path.
+_STATE_INVESTIGATION_FIELD = "current_investigation"
+
+#: Field label reported for the established development-intent fallback.
+_ESTABLISHED_DEVELOPMENT_INTENT_FIELD = "development_intent"
+
 #: Maximum distinct contextual subject candidates considered.
 _MAX_CONTEXT_SUBJECTS = 8
 
@@ -301,64 +315,97 @@ def _context_subject_candidates(
     context: Any,
     state: ConversationState | None,
     query: str,
-) -> tuple[str, ...]:
-    """Return distinct bounded investigation-subject candidate texts.
+) -> tuple[tuple[str, str], ...]:
+    """Return distinct bounded investigation-subject candidates.
 
-    Sources: ``state.current_investigation`` first, then recent USER turns of
-    the bounded ``context`` that carry an investigation lead cue. The current
-    turn (whose text matches ``query``) is excluded, so a turn can never
-    resolve to itself. Deterministic order; bounded count.
+    Each candidate is returned as ``(field, text)``. A subject that comes from
+    an ACTUAL ``ConversationState`` field is reported under that real field name
+    (``current_investigation``) so the bounded result stays consumable; a
+    subject derived from a recent USER turn has no stored state fact and keeps
+    the derived ``context_subject`` label. The current turn (whose text matches
+    ``query``) is excluded, so a turn can never resolve to itself. Deterministic
+    order; bounded count.
     """
     query_key = _subject_key(query)
-    candidates: list[str] = []
+    candidates: list[tuple[str, str]] = []
 
-    def _add(value: Any) -> None:
+    def _add(field: str, value: Any) -> None:
         if isinstance(value, str):
             text = value.strip()
             if text and _subject_key(text) != query_key:
-                candidates.append(text)
+                candidates.append((field, text))
 
     if state is not None:
-        _add(getattr(state, "current_investigation", None))
+        _add(
+            _STATE_INVESTIGATION_FIELD,
+            getattr(state, "current_investigation", None),
+        )
 
     for turn in getattr(context, "recent_turns", ()) or ():
         if getattr(turn, "role", "") != "user":
             continue
         content = getattr(turn, "content", "")
         if isinstance(content, str) and _SUBJECT_LEAD_RE.search(content.lower()):
-            _add(content)
+            _add(_CONTEXT_SUBJECT_FIELD, content)
 
-    ordered: list[str] = []
+    ordered: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for candidate in candidates:
-        key = _subject_key(candidate)
+    for pair in candidates:
+        key = _subject_key(pair[1])
         if key and key not in seen:
             seen.add(key)
-            ordered.append(candidate)
+            ordered.append(pair)
     return tuple(ordered[:_MAX_CONTEXT_SUBJECTS])
 
 
-def _established_subject(
+def _resolved_field(pairs: tuple[tuple[str, str], ...], default: str) -> str:
+    """Return the single stored-state field name for ``pairs``, else ``default``.
+
+    A contextual referent that came from one actual ``ConversationState`` field
+    is reported under that REAL field name. Derived turn-based referents and
+    mixed candidate sets (which resolve AMBIGUOUS anyway) keep the bounded
+    ``context_subject`` label.
+    """
+    fields = {field for field, _text in pairs}
+    if len(fields) == 1 and pairs:
+        return pairs[0][0]
+    return default
+
+
+def _established_facts(
     state: ConversationState | None,
     query: str,
-) -> Optional[str]:
-    """Return the explicitly established subject, or ``None`` (L5).
+) -> tuple[tuple[str, str], ...]:
+    """Return the explicitly established state facts, as ``(field, text)`` (L5).
 
-    Last-resort bounded source: the subject recorded deterministically in an
-    earlier turn (``ConversationState.current_subject``). It is consulted only
-    when no investigation-derived candidate exists, so it can never override
-    one, and it never resolves a turn to itself. Absent, blank, non-string, or
-    self-matching subjects return ``None`` — fail closed, never guess.
+    Last-resort bounded source: facts recorded deterministically in an earlier
+    turn — ``ConversationState.current_subject`` (L4 entity identification) and
+    ``ConversationState.development_intent`` (a development request that
+    completed in an earlier turn). Consulted only when no investigation-derived
+    candidate exists, so it can never override one, and it never resolves a
+    turn to itself.
+
+    Deterministic field order, bounded count. Absent, blank, non-string, or
+    self-matching facts are skipped — fail closed, never guess. Two distinct
+    established facts are returned as two candidates, so the caller's existing
+    exactly-one contract yields AMBIGUOUS (clarification) rather than silently
+    preferring one.
     """
     if state is None:
-        return None
-    subject = getattr(state, "current_subject", None)
-    if not isinstance(subject, str):
-        return None
-    text = subject.strip()
-    if not text or _subject_key(text) == _subject_key(query):
-        return None
-    return text
+        return ()
+    facts: list[tuple[str, str]] = []
+    for field_name in (
+        _ESTABLISHED_SUBJECT_FIELD,
+        _ESTABLISHED_DEVELOPMENT_INTENT_FIELD,
+    ):
+        value = getattr(state, field_name, None)
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text or _subject_key(text) == _subject_key(query):
+            continue
+        facts.append((field_name, text))
+    return tuple(facts)
 
 
 class ConversationReferenceResolver:
@@ -453,12 +500,14 @@ class ConversationReferenceResolver:
         supplied context/state, and never executes anything.
 
         L5 bounded carry-forward: when no investigation-derived candidate
-        exists, the subject established explicitly in an earlier turn
-        (``ConversationState.current_subject``) is used as a single fallback
-        candidate, so a follow-up referring to an already-established subject
-        resolves deterministically. Investigation candidates always keep
-        precedence, and a single explicit subject is still exactly one
-        candidate — the fail-closed contract is unchanged.
+        exists, the facts established explicitly in an earlier turn
+        (``ConversationState.current_subject`` and, for a development request
+        that completed in an earlier turn, ``ConversationState
+        .development_intent``) are used as fallback candidates, so a follow-up
+        referring back to one of them resolves deterministically.
+        Investigation candidates always keep precedence, a single established
+        fact is still exactly one candidate, and two distinct established facts
+        remain AMBIGUOUS — the fail-closed contract is unchanged.
         """
         normalized = canonicalize_surface(query).lower()
         if not normalized:
@@ -468,29 +517,44 @@ class ConversationReferenceResolver:
                 reason="Empty contextual reference query.",
             )
 
-        subjects = _context_subject_candidates(context, state, query)
+        pairs = _context_subject_candidates(context, state, query)
         referent_field = _CONTEXT_SUBJECT_FIELD
-        if not subjects:
-            established = _established_subject(state, query)
-            if established is not None:
-                subjects = (established,)
-                referent_field = _ESTABLISHED_SUBJECT_FIELD
+        if not pairs:
+            established = _established_facts(state, query)
+            if len(established) == 1:
+                referent_field, text = established[0]
+                pairs = ((referent_field, text),)
+            elif len(established) > 1:
+                # Two distinct established facts are genuinely ambiguous: the
+                # existing exactly-one contract below yields AMBIGUOUS, so
+                # clarification is requested instead of one silently winning.
+                pairs = established
 
         explicit = _EXPLICIT_CONTEXT_RE.search(normalized)
         if explicit is not None:
             phrase = explicit.group(1).strip()
             if phrase:
                 matches = tuple(
-                    subject
-                    for subject in subjects
-                    if _phrase_pattern(phrase).search(collapse_whitespace(subject).lower())
+                    pair
+                    for pair in pairs
+                    if _phrase_pattern(phrase).search(
+                        collapse_whitespace(pair[1]).lower()
+                    )
                 )
                 return self._context_result(
-                    query, matches, f"the {phrase}", referent_field
+                    query,
+                    tuple(text for _field, text in matches),
+                    f"the {phrase}",
+                    _resolved_field(matches, referent_field),
                 )
 
         if _BARE_REFERENCE_RE.search(normalized):
-            return self._context_result(query, subjects, normalized, referent_field)
+            return self._context_result(
+                query,
+                tuple(text for _field, text in pairs),
+                normalized,
+                _resolved_field(pairs, referent_field),
+            )
 
         return ReferenceResolutionResult(
             status=ReferenceResolutionStatus.UNRESOLVED,

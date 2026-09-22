@@ -491,7 +491,10 @@ class TestContextualReferenceResolution:
             "What about the conversation system?", context, state
         )
         assert result.status == ReferenceResolutionStatus.RESOLVED
-        assert result.resolved_field == "context_subject"
+        # The candidate is the ACTUAL stored state fact, so it is reported under
+        # its real ConversationState field name (consumable), not the derived
+        # ``context_subject`` label used for turn-derived referents.
+        assert result.resolved_field == "current_investigation"
         assert "conversation system" in result.resolved_value
 
     def test_explicit_phrase_multiple_candidates_ambiguous(self, resolver):
@@ -615,7 +618,10 @@ class TestContextualReferenceIntegration:
             spec, "What about the conversation system?"
         )
         assert response is None
-        assert out_spec.context["resolved_reference"]["field"] == "context_subject"
+        assert (
+            out_spec.context["resolved_reference"]["field"]
+            == "current_investigation"
+        )
         assert "conversation system" in out_spec.context["resolved_reference"]["value"]
 
     def test_scenario_b_ambiguous_context_reference_does_not_guess(self):

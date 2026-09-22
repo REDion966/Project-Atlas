@@ -37,7 +37,7 @@ from atlas.conversation.reference_resolution import (
     ConversationReferenceResolver,
     ReferenceResolutionStatus,
 )
-from atlas.conversation.task_intake import TaskIntake
+from atlas.conversation.task_intake import _AMBIGUITY_WEIGHTS, TaskIntake
 from atlas.conversation.turn_meaning import TurnMeaning, build_turn_meaning
 
 SUBJECT = "code_inspector"
@@ -139,7 +139,10 @@ class TestEstablishedSubjectContextualResolution(unittest.TestCase):
         )
         result = self._resolve(FOLLOW_UP, state=state)
         self.assertIs(result.status, ReferenceResolutionStatus.RESOLVED)
-        self.assertEqual(result.resolved_field, "context_subject")
+        # The investigation subject is a STORED state fact, so it is reported
+        # under its real field name (consumable); the derived
+        # ``context_subject`` label remains for turn-derived referents only.
+        self.assertEqual(result.resolved_field, "current_investigation")
         self.assertEqual(result.resolved_value, "memory architecture")
 
     def test_turn_context_candidate_keeps_precedence(self):
@@ -365,7 +368,20 @@ class TestContractPreservation(unittest.TestCase):
         self.assertEqual(self.out_spec.input_hash, self.spec.input_hash)
         self.assertEqual(self.out_spec.source, self.spec.source)
         self.assertEqual(self.out_spec.verified, self.spec.verified)
-        self.assertEqual(self.out_spec.ambiguity, self.spec.ambiguity)
+        # B — a genuinely RESOLVED reference reconciles ONLY its own reason:
+        # every other reason is retained in order and the score is recomputed
+        # from the unchanged weight table (threshold and weights untouched).
+        remaining = tuple(
+            reason
+            for reason in self.spec.ambiguity.ambiguities
+            if reason != "reference"
+        )
+        self.assertIn("reference", self.spec.ambiguity.ambiguities)
+        self.assertEqual(self.out_spec.ambiguity.ambiguities, remaining)
+        self.assertEqual(
+            self.out_spec.ambiguity.ambiguity_score,
+            sum(_AMBIGUITY_WEIGHTS[reason] for reason in remaining),
+        )
 
     def test_turn_meaning_carries_the_reference_unchanged(self):
         meaning = build_turn_meaning(self.out_spec, self.text)
@@ -395,9 +411,12 @@ class TestContractPreservation(unittest.TestCase):
 
         self.assertEqual(carried_out.task_type, baseline_out.task_type)
         self.assertEqual(carried_out.task_type, baseline_spec.task_type)
-        self.assertEqual(
-            carried_out.needs_clarification, baseline_out.needs_clarification
-        )
+        # B — the one intentional difference: the carried turn's reference is
+        # genuinely bound, so its own ambiguity reason is reconciled and the
+        # turn proceeds; the antecedent-free baseline still clarifies. The
+        # governed outcome (type, intent, no authority) is otherwise identical.
+        self.assertFalse(carried_out.needs_clarification)
+        self.assertTrue(baseline_out.needs_clarification)
         self.assertEqual(carried_out.intent, baseline_out.intent)
         self.assertEqual(carried_spec.context.get("resolved_reference"), None)
         self.assertEqual(

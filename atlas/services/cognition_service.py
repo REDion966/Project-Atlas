@@ -157,6 +157,7 @@ class CognitionService(Service):
         reasoning_data: dict[str, Any] = {}
         planning_data: dict[str, Any] = {}
         tool_data: dict[str, Any] = {}
+        ai_response_data: dict[str, Any] = {}
 
         # Extract structured data from pipeline stages
         for stage in result.stages:
@@ -169,6 +170,8 @@ class CognitionService(Service):
                 planning_data = stage.data
             elif "TOOL_EXECUTION" in stage_name:
                 tool_data = stage.data
+            elif "AI_RESPONSE" in stage_name:
+                ai_response_data = stage.data
 
         data_payload: dict[str, Any] = {
             "input": user_input,
@@ -210,6 +213,31 @@ class CognitionService(Service):
             data_payload["planning"] = planning_data
         if tool_data:
             data_payload["tool_results"] = tool_data
+
+        # L8-a — transport the pipeline's own composition output so the
+        # conversation layer can inspect it. Data only: nothing consumes it yet
+        # and no valid/invalid judgement is derived from it (an empty string is
+        # not treated as failure and a non-empty string is not treated as an
+        # answer). Whether that answer came from a real provider or the local
+        # no-network tier is carried separately as ``ai_provenance`` (L8-b-i).
+        data_payload["final_response"] = (
+            result.final_response if isinstance(result.final_response, str) else ""
+        )
+
+        # L8-b-i — bounded AI provenance, extracted from the same stage-data seam
+        # as REASONING/PLANNING/TOOL. Conservative by construction: a skipped
+        # AI_RESPONSE stage, or one whose identity is missing/blank/non-string,
+        # yields an empty mapping rather than an invented value, and a model is
+        # never reported on its own without a provider. The values were already
+        # bounded at the runtime stage, so they are only validated here.
+        provider = ai_response_data.get("provider")
+        model = ai_response_data.get("model")
+        provenance: dict[str, str] = {}
+        if isinstance(provider, str) and provider.strip():
+            provenance["provider"] = provider.strip()
+            if isinstance(model, str) and model.strip():
+                provenance["model"] = model.strip()
+        data_payload["ai_provenance"] = provenance
 
         if self._event_bus is not None:
             self._event_bus.publish(

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
@@ -33,6 +33,13 @@ from atlas.conversation.normalization import (
 )
 from atlas.conversation.repository_impact import (
     looks_like_repository_impact_request,
+)
+from atlas.conversation.utterance_meaning import (
+    MAX_TARGET_CHARS,
+    UTTERANCE_MEANING_KEY,
+    Illocution,
+    Operation,
+    UtteranceMeaning,
 )
 
 # ---------------------------------------------------------------------------
@@ -102,20 +109,35 @@ _GREETING_RE = re.compile(
     r"\b(?:hello|hi|hey)\b|how are you|good morning|good afternoon|good evening|nice to meet you"
 )
 
-_DEVELOPMENT_CUES: frozenset[str] = frozenset(
+#: Explicit accepted development cue FORMS. Every entry is matched as a WHOLE
+#: word (or a fixed phrase), never as a substring, so the development family is
+#: a bounded, auditable list of accepted forms rather than a containment test.
+#: A word that merely contains a cue ("address" for "add", "prefix" for "fix")
+#: and a nominal/inflected form that merely contains one ("implementation",
+#: "improvement", "fixing", "modifying", "refactoring", "building") are not
+#: development signals. "rebuild" is an explicit accepted form rather than
+#: "build" found inside it.
+_DEVELOPMENT_CUE_FORMS: frozenset[str] = frozenset(
     {
         "add",
-        "extend",
-        "implement",
-        "refactor",
-        "fix",
         "build",
-        "modify",
-        "improve",
-        "create a module",
+        "rebuild",
         "create a capability",
+        "create a module",
+        "extend",
+        "fix",
+        "implement",
+        "improve",
+        "modify",
+        "refactor",
     }
 )
+
+#: Natural-language development verbs. Matched as WHOLE words only, so the
+#: standalone verb "develop" is recognized without capturing the unrelated
+#: "development"/"developer"/"developing" (which merely contain "develop" as a
+#: substring and are not, on their own, development requests).
+_DEVELOPMENT_VERB_CUES: frozenset[str] = frozenset({"develop"})
 
 _SELF_TARGETS: frozenset[str] = frozenset(
     {"atlas", "yourself", "your self", "a module", "a capability", "the framework"}
@@ -388,7 +410,15 @@ _EXECUTION_CUES: frozenset[str] = frozenset(
     }
 )
 
-_ACTION_CUES: frozenset[str] = frozenset(
+#: Explicit accepted action cue FORMS. Every entry is matched as a WHOLE word,
+#: never as a substring, so a word that merely contains a cue ("runtime" for
+#: "run", "writer" for "write", "compiler" for "compile", "computer" for
+#: "compute", "makefile" for "make", "unclean" for "clean") and an inflected or
+#: nominal form that merely contains one ("generated", "produced", "summarized",
+#: "compiled", "computed", "deployed", "cleaned", "building") are not action
+#: signals. Nominalizations ("summary", "generation", "analysis", ...) are
+#: deliberately NOT added here.
+_ACTION_CUE_FORMS: frozenset[str] = frozenset(
     {
         "create",
         "write",
@@ -406,6 +436,102 @@ _ACTION_CUES: frozenset[str] = frozenset(
         "deploy",
         "clean",
     }
+)
+
+#: Narrow, explicit compatibility forms for the already-observed compound
+#: action wording. "long-running tasks" is the hyphenated compound phrase whose
+#: internal "run" was previously matched by substring; the observed singular and
+#: plural forms are listed explicitly here so the load-bearing phrasings keep
+#: their existing ACTION classification WITHOUT restoring substring matching for
+#: ordinary words ("runtime", "rerun", "runway", "running") and WITHOUT turning a
+#: bare statement such as "The project is long-running." into an action. This is
+#: a bounded phrase list, not a rule about hyphenated words.
+_ACTION_COMPOUND_FORMS: frozenset[str] = frozenset(
+    {"long-running task", "long-running tasks"}
+)
+
+# ---------------------------------------------------------------------------
+# L3 — minimal structured utterance meaning.
+#
+# Illocution (question / request / statement) and the LEADING requested
+# operation are derived from bounded surface evidence plus the already
+# validated cue families. Cue presence is EVIDENCE, never the verdict: the
+# operation is whichever operation family is attested EARLIEST in the
+# utterance, so a later development cue can no longer outrank the sentence's
+# leading operation.
+# ---------------------------------------------------------------------------
+
+#: Bounded "explain" evidence for the L3 operation domain. No existing cue
+#: family carries an explain operation, and these two verbs are the bounded,
+#: already-used surface of the built-in capability-detail path. They are NOT
+#: added to any classification cue family, so classification is unchanged.
+_EXPLAIN_CUE_FORMS: frozenset[str] = frozenset({"explain", "describe"})
+
+#: Ordered operation evidence sources: ``(cues, word_boundary, operation)``.
+#: Each entry reuses an already-validated cue family with its EXISTING matching
+#: mode. Earliest position wins; the declared order only breaks ties at the same
+#: position (so a leading development form outranks the action cue it shares).
+_UTTERANCE_OPERATION_SOURCES: tuple[tuple[frozenset[str], bool, Operation], ...] = (
+    (_DEVELOPMENT_CUE_FORMS, True, Operation.DEVELOP),
+    (_DEVELOPMENT_VERB_CUES, True, Operation.DEVELOP),
+    (_INVESTIGATION_LEAD_CUES, True, Operation.INVESTIGATE),
+    (_RESEARCH_CUES, False, Operation.RESEARCH),
+    (_EXPLAIN_CUE_FORMS, True, Operation.EXPLAIN),
+    (_ACTION_CUE_FORMS, True, Operation.ACT),
+    (_ACTION_COMPOUND_FORMS, True, Operation.ACT),
+)
+
+#: Leading words that make an utterance a question even without "?".
+_UTTERANCE_QUESTION_WORDS: frozenset[str] = frozenset(
+    {"who", "what", "when", "where", "why", "which", "whose", "whom", "how"}
+)
+
+#: Bounded request frames (checked at the START of the utterance only).
+_UTTERANCE_REQUEST_FRAMES: tuple[str, ...] = (
+    "i'd like",
+    "i would like",
+    "i want",
+    "i need",
+    "i wish",
+    "it would be useful",
+    "it would help",
+    "would be useful",
+    "would be helpful",
+    "please",
+    "could you",
+    "can you",
+    "would you",
+    "will you",
+)
+
+#: Bounded request modals (checked inside the leading window only).
+_UTTERANCE_REQUEST_MODALS: frozenset[str] = frozenset(
+    {"should", "needs", "need", "want", "wish", "please", "useful"}
+)
+
+#: Window (in tokens) in which a request modal counts.
+_UTTERANCE_MODAL_WINDOW: int = 4
+
+#: Auxiliaries dropped after a leading question word when extracting a target.
+_UTTERANCE_AUXILIARIES: frozenset[str] = frozenset(
+    {
+        "is", "are", "was", "were", "do", "does", "did", "can", "could",
+        "would", "will", "should", "has", "have", "had",
+    }
+)
+
+#: Ordered objective-extraction cue sources, as ``(cues, word_boundary)``.
+#: Every eligible cue is located at its ACTUAL position in the input and the
+#: earliest position wins; this declared order only breaks ties at the same
+#: position (equal positions yield the same bounded text anyway). Development
+#: and action cues are whole-word (including the explicit "long-running"
+#: compatibility form); the research verbs keep their substring semantics.
+_OBJECTIVE_CUE_SOURCES: tuple[tuple[frozenset[str], bool], ...] = (
+    (_DEVELOPMENT_VERB_CUES, True),
+    (_DEVELOPMENT_CUE_FORMS, True),
+    (_ACTION_CUE_FORMS, True),
+    (_ACTION_COMPOUND_FORMS, True),
+    (frozenset({"research", "find", "look up", "lookup", "search"}), False),
 )
 
 _CONSTRAINT_CUES: tuple[str, ...] = (
@@ -444,6 +570,31 @@ _SUCCESS_CUES: tuple[str, ...] = (
 #: Word-boundary pronoun detection for unresolved reference ambiguity.
 #: A word-boundary regex avoids false positives such as "it" inside "priority".
 _AMBIGUOUS_PRONOUN_RE = re.compile(r"\b(it|that|this|them|those)\b")
+
+#: Bounded relative/complementizer context for "that" (L6): a determiner or
+#: quantifier, one word, then "that" ("a module that tracks ..."). A "that"
+#: occurrence in this exact closed function-word context is a complementizer —
+#: a different lexeme from a demonstrative/pronoun "that" — so it must not raise
+#: the reference ambiguity reason. No POS tagging, no parser, no content-word
+#: vocabulary: this is a bounded function-word pattern only.
+_RELATIVE_THAT_RE = re.compile(
+    r"\b(?:a|an|the|any|every|some|each|this|that)\s+\w+\s+(that)\b"
+)
+
+#: Ambiguity score at or above which a governed request must be clarified first.
+#: Unchanged: this is the single global threshold, used both when the report is
+#: first scored and when a resolved reference is reconciled (B).
+_CLARIFICATION_THRESHOLD: float = 0.5
+
+#: Weight contributed by each ambiguity reason. Single source of truth: the
+#: initial scoring and the resolved-reference reconciliation (B) both read this
+#: table, so the two can never drift apart.
+_AMBIGUITY_WEIGHTS: dict[str, float] = {
+    "objective": 0.25,
+    "success": 0.25,
+    "reference": 0.3,
+    "task_type": 0.35,
+}
 
 #: Wh-words used to build deterministic clarification questions.
 _CLARIFY_CUES: dict[str, str] = {
@@ -570,14 +721,184 @@ def _occurrence_is_negated(lowered: str, idx: int) -> bool:
     return any(prefix.endswith(neg) for neg in _NEGATION_PREFIXES)
 
 
-def _first_cue_index(lowered: str, cues: frozenset[str]) -> int | None:
-    """Return the earliest index of any cue, or None when absent."""
+def _word_cue_is_negated(lowered: str, cue: str) -> bool:
+    """Return True when ``cue`` occurs as a whole word AND that occurrence is
+    immediately negated (e.g. "don't modify" -> ``modify`` is negated).
+
+    Locating the cue as a whole word keeps the negation check aligned with the
+    accepted-form development policy: an occurrence inside an unrelated word
+    ("prefix" for ``fix``) never counts, and a cue that is absent returns False.
+    """
+    match = re.search(rf"\b{re.escape(cue)}\b", lowered)
+    return match is not None and _occurrence_is_negated(lowered, match.start())
+
+
+def _has_reference_ambiguity(lowered: str) -> bool:
+    """Return True when the utterance still carries a genuine reference guess.
+
+    L6 — evaluated PER OCCURRENCE. A ``that`` occurrence in the bounded
+    relative/complementizer context (:data:`_RELATIVE_THAT_RE`) is excluded, so
+    "Build a module that tracks ..." no longer raises the reference reason.
+    Every OTHER occurrence — "it", "this", "them", "those", and every "that"
+    outside that context — still raises it, so a mixed utterance keeps the
+    reason contributed by its genuine reference, and unresolvable or
+    demonstrative cases stay fail-closed exactly as before.
+    """
+    complementizer_spans = {
+        match.start(1) for match in _RELATIVE_THAT_RE.finditer(lowered)
+    }
+    for match in _AMBIGUOUS_PRONOUN_RE.finditer(lowered):
+        if match.start(1) in complementizer_spans:
+            continue
+        return True
+    return False
+
+
+def _first_cue_index(
+    lowered: str,
+    cues: frozenset[str],
+    *,
+    word_boundary: bool = False,
+) -> int | None:
+    """Return the earliest index of any cue, or None when absent.
+
+    When ``word_boundary`` is True the cue must appear as a whole word,
+    mirroring :func:`_first_hit`, so a standalone development verb such as
+    ``develop`` is located without matching inside ``development`` or
+    ``developed``.
+    """
     best: int | None = None
     for cue in cues:
-        idx = lowered.find(cue)
+        if word_boundary:
+            match = re.search(rf"\b{re.escape(cue)}\b", lowered)
+            idx = match.start() if match is not None else -1
+        else:
+            idx = lowered.find(cue)
         if idx >= 0 and (best is None or idx < best):
             best = idx
     return best
+
+
+def _leading_operation(lowered: str) -> tuple[Operation | None, int | None]:
+    """Return the earliest attested operation and its index, or ``(None, None)``.
+
+    Every source is evaluated at its ACTUAL position in the utterance; the
+    earliest position wins and the declared order breaks ties. Selection never
+    depends on the iteration order of an unordered collection, so the result is
+    stable across processes.
+    """
+    best: tuple[int, int] | None = None
+    best_operation: Operation | None = None
+    for rank, (cues, word_boundary, operation) in enumerate(
+        _UTTERANCE_OPERATION_SOURCES
+    ):
+        idx = _first_cue_index(lowered, cues, word_boundary=word_boundary)
+        if idx is None:
+            continue
+        candidate = (idx, rank)
+        if best is None or candidate < best:
+            best = candidate
+            best_operation = operation
+    if best is None:
+        return None, None
+    return best_operation, best[0]
+
+
+def _utterance_illocution(normalized: str, operation_index: int | None) -> Illocution:
+    """Return the utterance's illocution from bounded surface evidence.
+
+    A question is an explicit ``?`` or a leading question word. A request is a
+    leading imperative operation, a bounded request frame, or a bounded request
+    modal inside the leading window. Anything else is a statement.
+
+    There is deliberately NO separate "desire" value: a non-imperative desire
+    ("I'd like ...", "I want Atlas to ...", "It would be useful ...") is a
+    request.
+    """
+    lowered = normalized.lower()
+    tokens = _tokens(normalized)
+    if "?" in normalized:
+        return Illocution.QUESTION
+    if tokens and tokens[0] in _UTTERANCE_QUESTION_WORDS:
+        return Illocution.QUESTION
+    for frame in _UTTERANCE_REQUEST_FRAMES:
+        if lowered.startswith(frame):
+            return Illocution.REQUEST
+    if operation_index == 0:
+        return Illocution.REQUEST
+    if any(
+        token in _UTTERANCE_REQUEST_MODALS
+        for token in tokens[:_UTTERANCE_MODAL_WINDOW]
+    ):
+        return Illocution.REQUEST
+    return Illocution.STATEMENT
+
+
+def _utterance_target(
+    normalized: str,
+    illocution: Illocution,
+    operation_index: int | None,
+) -> str | None:
+    """Return the bounded target expression, or ``None`` when there is none.
+
+    Bounded rule: start from the L2-canonicalized surface (frame-stripped),
+    then drop ONE leading operator — for a question, a leading question word
+    plus one auxiliary; for a request whose operation starts the utterance, the
+    leading imperative token. The remainder is the target.
+
+    Nothing is resolved or typed here: the target is an UNRESOLVED text
+    expression. Entity identification and reference resolution stay in L4.
+    """
+    surface = canonicalize_surface(normalized)
+    if not surface:
+        return None
+    text = surface.strip()
+    if illocution is Illocution.QUESTION:
+        text = text.rstrip("?").strip()
+        match = re.match(
+            r"^(?:" + "|".join(sorted(_UTTERANCE_QUESTION_WORDS)) + r")\b\s*",
+            text,
+            re.IGNORECASE,
+        )
+        if match is not None:
+            text = text[match.end():]
+        match = re.match(
+            r"^(?:" + "|".join(sorted(_UTTERANCE_AUXILIARIES)) + r")\b\s*",
+            text,
+            re.IGNORECASE,
+        )
+        if match is not None:
+            text = text[match.end():]
+    elif operation_index == 0:
+        first, _, remainder = text.partition(" ")
+        text = remainder or first
+    bounded = _bounded_text(text, MAX_TARGET_CHARS)
+    return bounded or None
+
+
+def build_utterance_meaning(normalized: str) -> UtteranceMeaning:
+    """Build the deterministic L3 interpretation of one normalized utterance.
+
+    Deterministic and model-independent: no clock, no randomness, no I/O, no
+    provider, no embedding. Identical input yields identical output.
+    """
+    operation, operation_index = _leading_operation(normalized.lower())
+    illocution = _utterance_illocution(normalized, operation_index)
+    return UtteranceMeaning(
+        illocution=illocution,
+        operation=operation,
+        target=_utterance_target(normalized, illocution, operation_index),
+    )
+
+
+def _leading_operation_is_research(meaning: UtteranceMeaning | None) -> bool:
+    """True when L3 determined the LEADING requested operation is research."""
+    return meaning is not None and meaning.operation is Operation.RESEARCH
+
+
+def _utterance_is_question(meaning: UtteranceMeaning | None) -> bool:
+    """True when L3 determined the utterance is a question."""
+    return meaning is not None and meaning.illocution is Illocution.QUESTION
 
 
 def _investigation_leads_compound(normalized: str) -> bool:
@@ -949,7 +1270,11 @@ class TaskIntake:
     # Deterministic classification / extraction
     # ------------------------------------------------------------------
 
-    def _classify(self, normalized: str) -> TaskType:
+    def _classify(
+        self,
+        normalized: str,
+        meaning: UtteranceMeaning | None = None,
+    ) -> TaskType:
         lowered = normalized.lower()
         if not normalized:
             return TaskType.UNKNOWN
@@ -973,6 +1298,7 @@ class TaskIntake:
         # ("... and approve it.") keeps its existing classification.
         if _is_explicit_approval(normalized) and not (
             _investigation_leads_compound(normalized)
+            or _utterance_is_question(meaning)
             or _mention_only_hijack(
                 normalized,
                 lowered,
@@ -986,11 +1312,14 @@ class TaskIntake:
         # It requires unambiguous rejection language and cannot be
         # ambiguous conversational responses. A bare mention of the rejection
         # subsystem must not reject a pending proposal by naming it.
-        if _is_explicit_rejection(normalized) and not _mention_only_hijack(
-            normalized,
-            lowered,
-            _REJECTION_MENTION_CUES,
-            _REJECTION_CUES - _REJECTION_MENTION_CUES,
+        if _is_explicit_rejection(normalized) and not (
+            _utterance_is_question(meaning)
+            or _mention_only_hijack(
+                normalized,
+                lowered,
+                _REJECTION_MENTION_CUES,
+                _REJECTION_CUES - _REJECTION_MENTION_CUES,
+            )
         ):
             return TaskType.REJECTION_REQUEST
 
@@ -1091,11 +1420,16 @@ class TaskIntake:
         if looks_like_repository_impact_request(normalized):
             return TaskType.REPOSITORY_IMPACT_REQUEST
 
-        # Development cues are only treated as development when NOT negated.
-        # "don't modify" must not become a development request.
-        development_cue_hit = _first_hit(lowered, _DEVELOPMENT_CUES)
+        # Development cues are matched as explicit accepted WHOLE-WORD forms
+        # (never as broad substrings) and are only treated as development when
+        # NOT negated. "don't modify" must not become a development request,
+        # and "address"/"prefix"/"implementation" must not match add/fix/implement.
+        development_cue_hit = _first_hit(
+            lowered, _DEVELOPMENT_CUE_FORMS, word_boundary=True
+        ) or _first_hit(lowered, _DEVELOPMENT_VERB_CUES, word_boundary=True)
         development_negated = any(
-            _is_negated(lowered, cue) for cue in _DEVELOPMENT_CUES if cue in lowered
+            _word_cue_is_negated(lowered, cue)
+            for cue in (*_DEVELOPMENT_CUE_FORMS, *_DEVELOPMENT_VERB_CUES)
         )
         development = (development_cue_hit and not development_negated) and (
             _first_hit(lowered, _SELF_TARGETS)
@@ -1107,11 +1441,17 @@ class TaskIntake:
         question = "?" in normalized or (
             _first_hit(lowered, _QUESTION_CUES) and len(_tokens(normalized)) <= 20
         )
-        action = _first_hit(lowered, _ACTION_CUES)
+        action = _first_hit(
+            lowered, _ACTION_CUE_FORMS, word_boundary=True
+        ) or _first_hit(lowered, _ACTION_COMPOUND_FORMS, word_boundary=True)
 
         # Development wins over generic research/action because it names
         # Atlas itself or its capabilities as the target.
-        if development:
+        # L3 — the LEADING requested operation outranks a later development cue:
+        # "Research how Atlas could improve ..." is research, not development.
+        # The precedence table itself is unchanged; only the structured
+        # evidence supplied to it is.
+        if development and not _leading_operation_is_research(meaning):
             return TaskType.DEVELOPMENT_REQUEST
         if research:
             return TaskType.INFORMATION_REQUEST
@@ -1125,18 +1465,20 @@ class TaskIntake:
 
     def _extract_objective(self, normalized: str) -> str:
         lowered = normalized.lower()
-        for cue in (
-            *_DEVELOPMENT_CUES,
-            *_ACTION_CUES,
-            "research",
-            "find",
-            "look up",
-            "lookup",
-            "search",
-        ):
-            idx = lowered.find(cue)
-            if idx >= 0:
-                return _bounded_text(normalized[idx:], _MAX_INTENT_CHARS)
+        # Every eligible cue is evaluated at its actual position in the input and
+        # the earliest position wins. Selection never depends on the iteration
+        # order of an unordered collection, so the objective is stable across
+        # processes (Python hash randomization) as well as within one.
+        best: tuple[int, int] | None = None
+        for rank, (cues, word_boundary) in enumerate(_OBJECTIVE_CUE_SOURCES):
+            idx = _first_cue_index(lowered, cues, word_boundary=word_boundary)
+            if idx is None:
+                continue
+            candidate = (idx, rank)
+            if best is None or candidate < best:
+                best = candidate
+        if best is not None:
+            return _bounded_text(normalized[best[0]:], _MAX_INTENT_CHARS)
         return _bounded_text(normalized, _MAX_INTENT_CHARS)
 
     # ------------------------------------------------------------------
@@ -1152,7 +1494,18 @@ class TaskIntake:
     ) -> TaskSpec:
         # Deterministic fields (always computed, even when model assist is on,
         # so there is always a safe fallback).
-        deterministic_type = self._classify(canonicalize_surface(normalized))
+        # L3 — minimal structured utterance meaning. Computed once from the
+        # PRE-canonicalization surface, so request frames ("I'd like ...",
+        # "I want ...", "It would be useful ...") are still visible to L3 even
+        # though canonicalization strips them for the existing consumers. It is
+        # additional structured interpretation: it never replaces task_type,
+        # intent, ambiguity or reference handling, and it grants no authority.
+        meaning = build_utterance_meaning(normalized)
+        context = {**context, UTTERANCE_MEANING_KEY: meaning.to_dict()}
+
+        deterministic_type = self._classify(
+            canonicalize_surface(normalized), meaning
+        )
         deterministic_intent = self._extract_objective(normalized)
         deterministic_constraints = _extract_items(normalized, _CONSTRAINT_CUES)
         deterministic_priorities = _extract_items(normalized, _PRIORITY_CUES)
@@ -1208,7 +1561,7 @@ class TaskIntake:
         )
         needs_clarification = (
             task_type in (TaskType.ACTION_REQUEST, TaskType.DEVELOPMENT_REQUEST)
-            and ambiguity.ambiguity_score >= 0.5
+            and ambiguity.ambiguity_score >= _CLARIFICATION_THRESHOLD
         )
 
         source = "model_assisted" if using_model else "deterministic"
@@ -1259,18 +1612,13 @@ class TaskIntake:
         if task_type == TaskType.UNKNOWN:
             reasons.append("task_type")
 
-        if _AMBIGUOUS_PRONOUN_RE.search(lowered):
+        if _has_reference_ambiguity(lowered):
             reasons.append("reference")
 
         reasons = sorted(set(reasons))
         weight = 0.0
         for reason in reasons:
-            if reason in ("objective", "success"):
-                weight += 0.25
-            elif reason == "reference":
-                weight += 0.3
-            elif reason == "task_type":
-                weight += 0.35
+            weight += _AMBIGUITY_WEIGHTS.get(reason, 0.0)
         score = round(min(1.0, weight), 4)
 
         questions: list[str] = []
@@ -1324,6 +1672,59 @@ class TaskIntake:
         if success_criteria:
             parts.append("success: " + "; ".join(success_criteria))
         return _bounded_text(" | ".join(parts), _MAX_GOAL_CHARS)
+
+
+def reconcile_resolved_reference_ambiguity(spec: TaskSpec) -> TaskSpec:
+    """Clear the *resolved* reference component of an ambiguity report (B).
+
+    Integration seam, not a scorer. Called by the conversation service at the
+    single point where the existing deterministic reference pipeline has
+    returned ``RESOLVED`` and attached a valid ``resolved_reference`` to the
+    spec. The ``reference`` reason is a *guess* signal ("the turn contains an
+    ambiguous pronoun"), so once the reference is actually bound it is no
+    longer a genuine ambiguity and must not block a governed request.
+
+    Bounded by construction:
+
+      * only the ``reference`` reason is removed, together with its own weight
+        and its own clarification question;
+      * every other reason is retained verbatim, so unrelated ambiguity still
+        blocks;
+      * the score is recomputed from the retained reasons using the same
+        :data:`_AMBIGUITY_WEIGHTS` table, and ``needs_clarification`` is
+        re-derived with the same global :data:`_CLARIFICATION_THRESHOLD` — the
+        threshold and every other weight are untouched.
+
+    Fail closed: a spec with no ``reference`` reason (including one whose
+    reference stayed UNRESOLVED or AMBIGUOUS, which never reaches this seam) is
+    returned unchanged, byte for byte.
+    """
+    ambiguity = getattr(spec, "ambiguity", None)
+    reasons = tuple(getattr(ambiguity, "ambiguities", ()) or ())
+    if "reference" not in reasons:
+        return spec
+
+    remaining = tuple(reason for reason in reasons if reason != "reference")
+    weight = 0.0
+    for reason in remaining:
+        weight += _AMBIGUITY_WEIGHTS.get(reason, 0.0)
+    score = round(min(1.0, weight), 4)
+
+    questions = tuple(_CLARIFY_CUES[r] for r in remaining if r in _CLARIFY_CUES)
+    reconciled = AmbiguityReport(
+        ambiguity_score=score,
+        ambiguities=remaining,
+        clarification_questions=questions,
+    )
+    needs_clarification = (
+        spec.task_type in (TaskType.ACTION_REQUEST, TaskType.DEVELOPMENT_REQUEST)
+        and score >= _CLARIFICATION_THRESHOLD
+    )
+    return replace(
+        spec,
+        ambiguity=reconciled,
+        needs_clarification=needs_clarification,
+    )
 
 
 _TASK_TYPE_BY_VALUE: dict[str, TaskType] = {

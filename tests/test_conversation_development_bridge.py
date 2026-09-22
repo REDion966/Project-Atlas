@@ -15,6 +15,7 @@ governed development preparation flow and STOPS at PENDING_APPROVAL:
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -144,6 +145,67 @@ class TestConversationalDevelopmentRouting:
             approval_manager.approve.assert_not_called()
         finally:
             atlas.shutdown()
+
+    def test_natural_develop_wording_reaches_governed_lifecycle(
+        self, monkeypatch, tmp_path
+    ):
+        """A naturally phrased ("develop ...") request is classified as a
+        DEVELOPMENT_REQUEST, is NOT swallowed by the builtin responder, and
+        stops at the EXISTING PENDING_APPROVAL boundary."""
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            _stub_research(atlas)
+            atlas.development_controller._change_supplier = _ConcreteSupplier()  # noqa: SLF001
+            approval_manager = atlas._approval_manager  # noqa: SLF001
+            approval_manager.approve = MagicMock(wraps=approval_manager.approve)
+
+            message = atlas.chat(
+                "I want you to develop a capability for emailing me when a "
+                "long-running task finishes"
+            )
+            pending = atlas.pending_promotion_reviews()
+
+            approval_manager.approve.assert_not_called()
+        finally:
+            atlas.shutdown()
+
+        # The builtin conversational responder must NOT have claimed the turn.
+        assert message.metadata.get("builtin_intent") is None
+        # The EXISTING governed lifecycle was reached and stopped for approval.
+        assert "PENDING_APPROVAL" in message.content
+        assert "Nothing is approved, executed, or promoted" in message.content
+        assert "Run status:" not in message.content
+        # Nothing was executed/promoted/activated, and the sandbox change never
+        # reached the live repository.
+        assert tuple(pending) == ()
+        assert not Path("docs/b3_bridge_note.md").exists()
+
+    def test_natural_develop_wording_fails_closed_without_concrete_changes(
+        self, monkeypatch, tmp_path
+    ):
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            _stub_research(atlas)
+            message = atlas.chat("develop a capability for scheduling follow-ups")
+        finally:
+            atlas.shutdown()
+
+        assert message.metadata.get("builtin_intent") is None
+        assert "FAILED" in message.content
+        assert "supplier" in message.content
+
+    def test_builtin_turns_remain_unaffected(self, monkeypatch, tmp_path):
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            greeting = atlas.chat("Hello Atlas!")
+            capabilities = atlas.chat("What capabilities do you currently have?")
+            unsupported = atlas.chat("What does this module do?")
+        finally:
+            atlas.shutdown()
+
+        assert greeting.metadata.get("builtin_intent") == "greeting"
+        assert capabilities.metadata.get("builtin_intent") == "capabilities"
+        assert unsupported.metadata.get("builtin_intent") == "unsupported"
 
 
 class TestArchitectureGuards:

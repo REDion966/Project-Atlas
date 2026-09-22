@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Protocol
 
-from atlas.ai.routing.models import RoutingRequest
+from atlas.ai.routing.models import LOCAL_PROVIDER_NAMES, RoutingRequest
 from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
@@ -35,6 +35,10 @@ from atlas.conversation.development_outcome_reporter import (
 )
 from atlas.conversation.history import History
 from atlas.conversation.conversation_context import build_conversation_context
+# L7 (entry) — the deterministic floor's no-answer outcome is the only existing
+# signal that separates "answered deterministically" from "declined", so the
+# eligibility boundary reads its bound name rather than a string literal.
+from atlas.conversation.builtin_response import BUILTIN_INTENT_UNSUPPORTED
 from atlas.conversation.turn_meaning import TurnMeaning, build_turn_meaning
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
@@ -53,6 +57,140 @@ if TYPE_CHECKING:
 
 #: Bound applied to the recorded pending clarification question (L6).
 _MAX_PENDING_QUESTION_CHARS: int = 400
+
+#: Bound applied to a retained orchestration result recorded in the existing
+#: ``ConversationState.latest_result`` slot (L5). Only a bounded, already
+#: produced report line is retained; no report object or source corpus is
+#: stored.
+_MAX_ORCHESTRATION_RESULT_CHARS: int = 500
+
+#: Bounded metadata key carrying the L7 cognition-entry eligibility signal on
+#: the deterministic floor's reply. Data only — it never routes anything.
+REASONING_ELIGIBILITY_KEY: str = "reasoning_eligibility"
+
+#: Casual task types the deterministic builtin floor may claim. Local mirror of
+#: the builtin claim contract so this module can state the eligibility boundary
+#: without depending on the claim logic; every governed / Phase 3-5 task type is
+#: excluded by construction.
+_CASUAL_TASK_TYPES: frozenset[TaskType] = frozenset(
+    {TaskType.CONVERSATION, TaskType.UNKNOWN, TaskType.QUESTION}
+)
+
+#: L3 illocutions that describe something the user is asking FOR; a bare
+#: statement is not a reasoning request.
+_ELIGIBLE_ILLOCUTIONS: frozenset[str] = frozenset({"question", "request"})
+
+
+def reasoning_eligibility(
+    spec: TaskSpec | None,
+    builtin_intent: str | None,
+) -> dict[str, Any] | None:
+    """Return the bounded L7 cognition-entry eligibility signal, or ``None``.
+
+    L7 (entry) — the deterministic floor has exactly one outcome that admits it
+    had no answer: :data:`BUILTIN_INTENT_UNSUPPORTED`. That outcome is the only
+    signal the current architecture produces for "declined" as opposed to
+    "answered deterministically", so this helper makes it explicit, bounded and
+    testable as data.
+
+    It is deliberately conservative and fail-closed. A signal is returned only
+    when ALL of the following hold, and ``None`` otherwise:
+
+      * the turn has a :class:`TaskSpec` (intake ran);
+      * the builtin floor answered with its no-answer outcome;
+      * L6 does not require clarification first;
+      * the task type is casual (governed / Phase 3-5 ownership is preserved by
+        construction);
+      * the existing L3 utterance meaning says the user asked a question or made
+        a request.
+
+    Nothing is delegated: it does not route, does not call cognition, does not
+    touch the AI path, and never alters a user-visible value.
+    """
+    if spec is None or not isinstance(spec, TaskSpec):
+        return None
+    if builtin_intent != BUILTIN_INTENT_UNSUPPORTED:
+        return None
+    if bool(getattr(spec, "needs_clarification", False)):
+        return None
+    if spec.task_type not in _CASUAL_TASK_TYPES:
+        return None
+    context = getattr(spec, "context", None)
+    meaning = context.get("utterance_meaning") if isinstance(context, dict) else None
+    if not isinstance(meaning, dict):
+        return None
+    illocution = meaning.get("illocution")
+    if not isinstance(illocution, str) or illocution not in _ELIGIBLE_ILLOCUTIONS:
+        return None
+    operation = meaning.get("operation")
+    return {
+        "eligible": True,
+        "task_type": spec.task_type.value,
+        "illocution": illocution,
+        "operation": operation if isinstance(operation, str) else None,
+    }
+
+
+def _delegated_by_eligibility(message: Message) -> bool:
+    """L8-c — True when the L7 eligibility signal explicitly permits cognition.
+
+    Consumes the bounded signal the deterministic floor already produced
+    (``REASONING_ELIGIBILITY_KEY``) instead of recreating the eligibility
+    contract here. The signal is only ever attached to casual,
+    non-clarification turns the floor could not answer, so Phase 3-5 ownership
+    is preserved by construction.
+    """
+    metadata = message.metadata if isinstance(message.metadata, dict) else {}
+    signal = metadata.get(REASONING_ELIGIBILITY_KEY)
+    return bool(isinstance(signal, dict) and signal.get("eligible") is True)
+
+
+def _pipeline_requires_clarification(data: Any) -> bool:
+    """L8-b-ii — the L6 veto, read from the transported pipeline payload.
+
+    Fail-closed: a blocked plan or an explicit clarification requirement in
+    either the reasoning or the planning payload means the pipeline did not
+    complete an answer, so nothing it produced may be surfaced.
+    """
+    if not isinstance(data, dict):
+        return False
+    for key in ("planning", "reasoning"):
+        block = data.get(key)
+        if not isinstance(block, dict):
+            continue
+        if bool(block.get("requires_clarification")):
+            return True
+        status = block.get("status")
+        if isinstance(status, str) and status.strip().lower() == "blocked":
+            return True
+    return False
+
+
+def _usable_pipeline_response(data: Any) -> str | None:
+    """L8-b-ii — the bounded, evidence-backed response-precedence test.
+
+    A pipeline answer is usable only when it is a non-empty string, the turn is
+    not L6-blocked, a provider identity is present, and that provider is NOT the
+    existing local no-network tier (``LOCAL_PROVIDER_NAMES``). Non-empty text
+    alone is never sufficient, and no answer is ever invented from planning
+    data.
+    """
+    if not isinstance(data, dict):
+        return None
+    if _pipeline_requires_clarification(data):
+        return None
+    answer = data.get("final_response")
+    if not isinstance(answer, str) or not answer.strip():
+        return None
+    provenance = data.get("ai_provenance")
+    if not isinstance(provenance, dict):
+        return None
+    provider = provenance.get("provider")
+    if not isinstance(provider, str) or not provider.strip():
+        return None
+    if provider.strip() in LOCAL_PROVIDER_NAMES:
+        return None
+    return answer.strip()
 
 #: Governed operations whose handler is read-only and accepts a retained text
 #: operand, so a bounded repeat request may safely re-enter the SAME existing
@@ -396,12 +534,23 @@ class ConversationService:
         """
         if self._builtin_response is None or spec is None:
             return None
-        return self._builtin_response.respond(
+        message = self._builtin_response.respond(
             text,
             spec=spec,
             message_count=len(self._conversation.messages),
             context=self._build_conversation_context(),
         )
+        # L7 (entry) — record the bounded eligibility signal as DATA when the
+        # deterministic floor answered with its no-answer outcome. Purely
+        # additive metadata: the reply text and the cascade are unchanged and no
+        # turn is delegated anywhere.
+        if isinstance(message, Message) and isinstance(message.metadata, dict):
+            signal = reasoning_eligibility(
+                spec, message.metadata.get("builtin_intent")
+            )
+            if signal is not None:
+                message.metadata[REASONING_ELIGIBILITY_KEY] = signal
+        return message
 
     def _build_conversation_context(self) -> ConversationContext:
         """Build the bounded, read-only context projection for this turn.
@@ -455,6 +604,44 @@ class ConversationService:
         if message is None:
             return None
         message.metadata["fallback_after_provider_failure"] = True
+        return message
+
+    def _deterministic_fallback(
+        self,
+        text: str,
+        spec: TaskSpec | None,
+        session_context: SessionContext | None,
+        error_context: str,
+    ) -> Message:
+        """The existing deterministic fallback chain, in its existing order.
+
+        Phase 4 order preserved verbatim: the built-in deterministic response
+        first (``_builtin_after_failure``), then the legacy deterministic
+        fallback resolver, then the bounded degraded notice. L8 reuses this for
+        a delegated turn whose pipeline answer is unusable — the terminal
+        deterministic floor must stay reachable without a second AI call.
+        """
+        message = self._builtin_after_failure(text, spec)
+        if message is None and self._fallback_resolver is not None:
+            message = self._fallback_resolver.resolve(
+                text=text,
+                spec=spec,
+                session_context=session_context,
+                error_context=error_context,
+            )
+        if message is None:
+            message = Message(
+                role="assistant",
+                content=(
+                    "External AI inference is currently unavailable and no deterministic "
+                    "fallback resolver is configured."
+                ),
+                metadata={
+                    "degraded": True,
+                    "model_available": False,
+                    "error": error_context,
+                },
+            )
         return message
 
     @property
@@ -661,9 +848,20 @@ class ConversationService:
         # answered deterministically without any AI provider. Governed turns
         # fall through to the existing pipeline unchanged.
         builtin_response = self._maybe_handle_builtin_response(spec, text)
+        cognition_delegated = False
         if builtin_response is not None:
-            self._conversation.add_message(builtin_response)
-            return builtin_response
+            # L8-c — the existing L7 eligibility signal, produced by this very
+            # floor reply, is the only thing that permits delegation to
+            # cognition. It is honoured only when the cognition boundary is
+            # actually wired: with no pipeline to consult there is nothing to
+            # delegate to, so the floor stays terminal exactly as before.
+            if self._cognition_api is not None and _delegated_by_eligibility(
+                builtin_response
+            ):
+                cognition_delegated = True
+            else:
+                self._conversation.add_message(builtin_response)
+                return builtin_response
 
         orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
         if orchestration_response is not None:
@@ -723,6 +921,36 @@ class ConversationService:
                     },
                 )
             )
+
+            # L8-b-ii — deterministic response precedence, applied ONLY to a
+            # turn the eligibility signal actually delegated. A trustworthy
+            # non-local pipeline answer is owned by the conversation layer as
+            # the single user-facing response, so the redundant
+            # conversation-level AI call is not made. Otherwise the pipeline
+            # produced nothing surfaceable (empty, L6-blocked, or the local
+            # no-network tier), and the terminal deterministic fallback chain
+            # applies — again with no second AI invocation. Turns that reached
+            # cognition any other way keep today's behaviour exactly.
+            if cognition_delegated:
+                pipeline_answer = _usable_pipeline_response(decision.data)
+                if pipeline_answer is not None:
+                    assistant_message = Message(
+                        role="assistant",
+                        content=pipeline_answer,
+                        metadata={
+                            "cognition": {"source": "pipeline_final_response"}
+                        },
+                    )
+                    self._conversation.add_message(assistant_message)
+                    return assistant_message
+                assistant_message = self._deterministic_fallback(
+                    text,
+                    spec,
+                    active_session,
+                    "pipeline produced no trustworthy answer",
+                )
+                self._conversation.add_message(assistant_message)
+                return assistant_message
         # --- End cognition context ---
 
         prompt = self._prompt_builder.build(
@@ -743,27 +971,9 @@ class ConversationService:
             # was reached without opt-in): serve the built-in deterministic
             # response first so ordinary conversation stays useful, then the
             # legacy deterministic fallback, then the bounded notice.
-            assistant_message = self._builtin_after_failure(text, spec)
-            if assistant_message is None and self._fallback_resolver is not None:
-                assistant_message = self._fallback_resolver.resolve(
-                    text=text,
-                    spec=spec,
-                    session_context=active_session,
-                    error_context=str(exc),
-                )
-            if assistant_message is None:
-                assistant_message = Message(
-                    role="assistant",
-                    content=(
-                        "External AI inference is currently unavailable and no deterministic "
-                        "fallback resolver is configured."
-                    ),
-                    metadata={
-                        "degraded": True,
-                        "model_available": False,
-                        "error": str(exc),
-                    },
-                )
+            assistant_message = self._deterministic_fallback(
+                text, spec, active_session, str(exc)
+            )
 
         self._conversation.add_message(
             assistant_message
@@ -962,10 +1172,18 @@ class ConversationService:
         # Model-independent conversational path (Phase 1): same placement as
         # send() — after every governed handler, before orchestration/AI.
         builtin_response = self._maybe_handle_builtin_response(spec, text)
+        cognition_delegated = False
         if builtin_response is not None:
-            self._conversation.add_message(builtin_response)
-            yield builtin_response.content
-            return
+            # L8-c — same bounded delegation rule as send(): only the existing
+            # L7 eligibility signal, and only when cognition is wired.
+            if self._cognition_api is not None and _delegated_by_eligibility(
+                builtin_response
+            ):
+                cognition_delegated = True
+            else:
+                self._conversation.add_message(builtin_response)
+                yield builtin_response.content
+                return
 
         orchestration_response = self._maybe_handle_orchestration_request(spec, active_session)
         if orchestration_response is not None:
@@ -1020,6 +1238,32 @@ class ConversationService:
                     },
                 )
             )
+
+            # L8-b-ii — streaming parity with send(): identical deterministic
+            # precedence, gated on the same delegated-turn condition, with no
+            # second AI invocation.
+            if cognition_delegated:
+                pipeline_answer = _usable_pipeline_response(decision.data)
+                if pipeline_answer is not None:
+                    assistant_message = Message(
+                        role="assistant",
+                        content=pipeline_answer,
+                        metadata={
+                            "cognition": {"source": "pipeline_final_response"}
+                        },
+                    )
+                    self._conversation.add_message(assistant_message)
+                    yield pipeline_answer
+                    return
+                fallback_message = self._deterministic_fallback(
+                    text,
+                    spec,
+                    active_session,
+                    "pipeline produced no trustworthy answer",
+                )
+                self._conversation.add_message(fallback_message)
+                yield fallback_message.content
+                return
         # --- End cognition context ---
 
         prompt = self._prompt_builder.build(
@@ -1263,12 +1507,57 @@ class ConversationService:
         field: str,
         value: Any,
     ) -> TaskSpec:
-        """Return a copy of ``spec`` carrying the resolved reference evidence."""
+        """Return a copy of ``spec`` carrying the resolved reference evidence.
+
+        B — integration seam. Attachment itself is unchanged. When the pipeline
+        has genuinely bound the reference (``RESOLVED`` with a valid bounded
+        field/value pair), the scorer's ``reference`` ambiguity reason is no
+        longer a real ambiguity and is reconciled through the existing
+        :func:`reconcile_resolved_reference_ambiguity`: only that component is
+        cleared, every other reason and the global threshold are untouched. A
+        reference that stayed UNRESOLVED or AMBIGUOUS never reaches this method,
+        so its clarification behavior is byte-for-byte unchanged.
+        """
         from dataclasses import replace as _replace
 
         enriched = dict(spec.context) if isinstance(spec.context, dict) else {}
         enriched["resolved_reference"] = {"field": field, "value": value}
-        return _replace(spec, context=enriched)
+        enriched_spec = _replace(spec, context=enriched)
+
+        if not isinstance(field, str) or not field:
+            return enriched_spec
+        if not isinstance(value, str) or not value.strip():
+            return enriched_spec
+
+        from atlas.conversation.task_intake import (
+            reconcile_resolved_reference_ambiguity,
+        )
+
+        return reconcile_resolved_reference_ambiguity(enriched_spec)
+
+    @staticmethod
+    def _resolved_development_antecedent(spec: TaskSpec) -> str | None:
+        """Return the resolved DEVELOPMENT antecedent carried by ``spec``, or None.
+
+        L5 — a development request whose target is a resolved reference
+        ("Develop that capability.") must use the resolved antecedent as its
+        operand rather than the unresolved surface phrase. Only a reference the
+        existing L4 pipeline already bound to the ``development_intent`` slot
+        qualifies; an explicit development target carries no such evidence, so
+        this returns ``None`` and the caller behaves exactly as before.
+        """
+        context = getattr(spec, "context", None)
+        if not isinstance(context, dict):
+            return None
+        payload = context.get("resolved_reference")
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("field") != "development_intent":
+            return None
+        value = payload.get("value")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip()
 
     def set_experience_capture(self, accumulator) -> None:
         """Inject the ExperienceAccumulator used for orchestration capture."""
@@ -1375,6 +1664,7 @@ class ConversationService:
                     obj = self._dict_to_orchestration_result(payload)
                     if obj is not None:
                         self._record_orchestration_experience(spec=spec, result_obj=obj, text=spec.goal if hasattr(spec, "goal") else "")
+            self._retain_orchestration_result(result)
             return result
         if isinstance(result, dict):
             content = str(result.get("content", "") or "").strip()
@@ -1387,11 +1677,38 @@ class ConversationService:
                     obj2 = self._dict_to_orchestration_result(orch)
                     if obj2 is not None:
                         self._record_orchestration_experience(spec=spec, result_obj=obj2, text=spec.goal if hasattr(spec, "goal") else "")
+                self._retain_orchestration_result(msg)
                 return msg
         if isinstance(result, str):
             return Message(role="assistant", content=result.strip())
         # Never swallow a typed, non-clarification request silently.
         return self._orchestration_clarification_message(spec)
+
+    def _retain_orchestration_result(self, message: Message) -> None:
+        """L5 — retain a bounded orchestration result for later reference.
+
+        The research/orchestration path produces a deterministic report but
+        previously left ``ConversationState`` untouched, so the EXISTING findings
+        reference pattern ("what did you find?" -> ``current_investigation |
+        latest_result``) had nothing to resolve against. Only a COMPLETED
+        orchestration result is retained, as a bounded single-line copy of the
+        report this turn already produced. Nothing is invented or summarised, no
+        report object or source corpus is stored, and the existing
+        ``latest_result`` slot is reused (no new state field).
+        """
+        if self._state_manager is None:
+            return
+        metadata = message.metadata if isinstance(message.metadata, dict) else {}
+        payload = metadata.get("orchestration")
+        if not isinstance(payload, dict) or payload.get("status") != "completed":
+            return
+        content = message.content if isinstance(message.content, str) else ""
+        text = " ".join(content.split())
+        if not text:
+            return
+        if len(text) > _MAX_ORCHESTRATION_RESULT_CHARS:
+            text = text[:_MAX_ORCHESTRATION_RESULT_CHARS].rstrip() + "..."
+        self._state_manager.update(latest_result=text)
 
     def _record_pending_question(self, questions: tuple[str, ...]) -> None:
         """Record the clarification question Atlas is waiting on (L6).
@@ -1455,13 +1772,26 @@ class ConversationService:
         if self._development_bridge is None:
             return None
 
+        # L5 — a reference-only development follow-up ("Develop that
+        # capability.") carries an L4-resolved antecedent. Use the RESOLVED
+        # antecedent as the concrete operand the bridge receives, so the request
+        # itself carries the referent and the antecedent is not replaced by the
+        # unresolved surface phrase. Explicit development requests carry no such
+        # evidence and behave exactly as before.
+        resolved_antecedent = self._resolved_development_antecedent(spec)
+        if resolved_antecedent is not None:
+            from dataclasses import replace as _replace
+
+            spec = _replace(
+                spec, intent=resolved_antecedent, goal=resolved_antecedent
+            )
         operand = spec.goal or spec.intent or None
         result = self._development_bridge(spec)
         if isinstance(result, Message):
-            self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
+            self._accept_development_request(operand)
             return result
         if isinstance(result, str):
-            self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
+            self._accept_development_request(operand)
             return Message(role="assistant", content=result)
         # P7.5 — the bridge returned an authoritative F9 result object rather
         # than a pre-rendered Message. Project it through the reporter so the
@@ -1471,12 +1801,43 @@ class ConversationService:
             message = self._outcome_reporter.report(
                 snapshot_from_result(result, **provenance)
             )
-            self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
+            self._accept_development_request(operand)
             return message
         return Message(
             role="assistant",
             content="The development request could not be prepared.",
         )
+
+    def _accept_development_request(self, operand: str | None) -> None:
+        """Record an ACCEPTED development request (facts only).
+
+        A — the single point at which a development request becomes a
+        conversational antecedent, reached only after the injected
+        ``_development_bridge`` has returned an accepted result. Never called
+        from classification, and never for a request that was
+        clarification-pending, rejected, or failed before the handler.
+
+        Two records are made, both from the same already-bounded text (the
+        existing development goal/intent operand, bounded by the intake to
+        ``_MAX_GOAL_CHARS`` / ``_MAX_INTENT_CHARS``):
+
+          * the retained ``last_operation`` fact (unchanged behavior);
+          * the bounded :attr:`ConversationState.development_intent`
+            antecedent, so a later turn can refer back to it ("develop that
+            capability"). Single-value semantics: the newest accepted
+            development request replaces the previous intent — no history.
+
+        A blank or non-string operand still records the operation but leaves
+        the antecedent unchanged (fail closed); no other state field is
+        touched, so ``current_subject`` keeps its catalog-entity contract.
+        """
+        self._record_operation(TaskType.DEVELOPMENT_REQUEST, operand=operand)
+        if self._state_manager is None or not isinstance(operand, str):
+            return
+        text = operand.strip()
+        if not text:
+            return
+        self._state_manager.update(development_intent=text)
 
     @staticmethod
     def _provenance_from_spec(spec: TaskSpec) -> dict[str, str]:

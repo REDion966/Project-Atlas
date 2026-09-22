@@ -7,6 +7,10 @@ source-text provenance anchor:
 
   * ``intent``      — bounded operational-intent snapshot of the existing
                       ``TaskSpec`` (routing meaning, not a second TaskSpec).
+                      L7: when the spec carries the existing L3
+                      ``context["utterance_meaning"]`` block it is lifted here
+                      verbatim (bounded), so the reasoning projection can carry
+                      ``illocution`` / ``operation`` / ``target``.
   * ``uncertainty`` — snapshot of the existing ``AmbiguityReport``.
   * ``reference``   — snapshot of the existing ``resolved_reference`` evidence.
   * ``source_text`` — bounded user input, used only as a provenance anchor.
@@ -96,7 +100,7 @@ class TurnMeaning:
         uncertainty = self.uncertainty if isinstance(self.uncertainty, dict) else {}
         reference = self.reference if isinstance(self.reference, dict) else {}
 
-        return {
+        projected: dict[str, Any] = {
             "task_type": _bounded_string(intent.get("task_type")),
             "intent": _bounded_string(intent.get("intent")),
             "goal": _bounded_string(intent.get("goal")),
@@ -112,6 +116,15 @@ class TurnMeaning:
                 "value": _bounded_string(reference.get("value")),
             },
         }
+        # L7 — the existing L3 utterance meaning rides the same bounded
+        # projection when it is present. It is omitted entirely when absent, so
+        # the output stays byte-identical for callers that do not provide L3.
+        utterance_meaning = _project_utterance_meaning(
+            intent.get("utterance_meaning")
+        )
+        if utterance_meaning:
+            projected["utterance_meaning"] = utterance_meaning
+        return projected
 
 
 def _bounded_text(value: Any, limit: int = MAX_SOURCE_TEXT_CHARS) -> str:
@@ -135,6 +148,36 @@ def _bounded_strings(value: Any) -> list[str]:
         if text:
             items.append(text)
     return items
+
+
+def _bounded_optional_string(value: Any) -> str | None:
+    """Return a bounded string; ``None`` stays ``None``; other non-strings -> ``""``."""
+    if value is None:
+        return None
+    return _bounded_string(value)
+
+
+def _project_utterance_meaning(value: Any) -> dict[str, Any]:
+    """Bounded transport projection of the existing L3 utterance meaning.
+
+    L7 — the L3 block already produced by ``TaskIntake`` (``illocution`` /
+    ``operation`` / ``target``) is transported unchanged so the REASONING and
+    PLANNING stages receive the complete structured meaning. Nothing is
+    inferred, normalised, or reinterpreted here: unknown keys are dropped and
+    the three existing values are only bounded. Absent, non-dict, or wholly
+    empty input projects to ``{}``, so callers that never populate L3 keep
+    byte-identical output.
+    """
+    if not isinstance(value, dict):
+        return {}
+    projected = {
+        "illocution": _bounded_string(value.get("illocution")),
+        "operation": _bounded_optional_string(value.get("operation")),
+        "target": _bounded_optional_string(value.get("target")),
+    }
+    if not any(entry for entry in projected.values()):
+        return {}
+    return projected
 
 
 def _bounded_number(value: Any) -> float:
@@ -176,6 +219,14 @@ def build_turn_meaning(spec: Any, source_text: str) -> TurnMeaning:
         resolved = context.get("resolved_reference")
         if isinstance(resolved, dict):
             reference = copy.deepcopy(resolved)
+        # L7 — the existing L3 utterance meaning is lifted out of the bounded
+        # ``TaskSpec.context`` channel exactly like the resolved reference, so
+        # the reasoning projection can carry it. An absent, non-dict, or empty
+        # block is dropped, leaving ``intent`` byte-identical for every caller
+        # that never populates L3.
+        utterance = context.get("utterance_meaning")
+        if isinstance(utterance, dict) and utterance:
+            intent["utterance_meaning"] = copy.deepcopy(utterance)
 
     provenance: dict[str, Any] = {
         "source": "deterministic",

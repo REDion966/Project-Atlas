@@ -69,6 +69,18 @@ def _requires_clarification(meaning: dict[str, Any]) -> bool:
     return bool(meaning.get("needs_clarification"))
 
 
+#: Bound applied to the provider/model identity recorded on the AI_RESPONSE
+#: stage data (L8-b-i). Identity strings are short; the bound is defensive.
+_MAX_PROVIDER_ID_CHARS: int = 120
+
+
+def _bounded_identity(value: Any) -> str:
+    """Return a bounded, whitespace-collapsed identity string, else ``""``."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:_MAX_PROVIDER_ID_CHARS]
+
+
 class RuntimeCoordinator:
     """
     Permanent unified cognitive runtime coordinator.
@@ -874,7 +886,15 @@ class RuntimeCoordinator:
         return StageResult(
             stage=StageType.AI_RESPONSE,
             status=StageStatus.SUCCESS,
-            data={"response_length": len(state.ai_response)},
+            data={
+                "response_length": len(state.ai_response),
+                # L8-b-i — transport the answering provider identity the AI
+                # layer already attaches to every AIResponse. Bounded strings
+                # only: nothing is derived, no routing/provider selection is
+                # touched, and a missing identity is represented as "".
+                "provider": _bounded_identity(getattr(response, "provider", "")),
+                "model": _bounded_identity(getattr(response, "model", "")),
+            },
             confidence=0.9,
         )
 

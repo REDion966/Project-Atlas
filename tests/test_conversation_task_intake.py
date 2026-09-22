@@ -44,6 +44,41 @@ class TestObjectiveExtraction:
         spec = TaskIntake().intake("build " + ("x" * 10_000))
         assert len(spec.intent) <= 400
 
+    def test_develop_objective_anchors_at_the_whole_word_verb(self):
+        spec = TaskIntake().intake(
+            "Develop an email notification capability for long-running tasks."
+        )
+        assert spec.task_type is TaskType.DEVELOPMENT_REQUEST
+        assert spec.intent.startswith("Develop an email notification capability")
+        assert "email notification capability" in spec.intent
+        assert spec.intent != "running tasks."
+
+    def test_objective_anchors_at_the_earliest_action_cue(self):
+        # "generate" and "deploy" are both action cues; the earliest position
+        # wins, independent of collection iteration order.
+        spec = TaskIntake().intake("Generate a report for the deployment.")
+        assert spec.intent == "Generate a report for the deployment."
+
+    def test_objective_anchors_at_the_earliest_development_cue(self):
+        spec = TaskIntake().intake("improve and add a module")
+        assert spec.intent == "improve and add a module"
+
+    def test_objective_earliest_cue_across_development_and_action(self):
+        # An action cue before a whole-word development verb anchors the
+        # objective; a development verb at the earliest position still wins.
+        action_first = TaskIntake().intake("create a capability and develop it")
+        assert action_first.intent == "create a capability and develop it"
+
+        verb_first = TaskIntake().intake(
+            "Develop a scheduling capability and create a report."
+        )
+        assert verb_first.intent.startswith("Develop a scheduling capability")
+
+    def test_objective_falls_back_to_the_whole_instruction(self):
+        text = "the memory architecture is interesting"
+        spec = TaskIntake().intake(text)
+        assert spec.intent == text
+
 
 class TestItemExtraction:
     def test_constraints(self):
@@ -99,6 +134,98 @@ class TestAmbiguity:
         # "it" inside "priority" must not trigger reference ambiguity.
         spec = TaskIntake().intake("build a report with priority")
         assert "reference" not in spec.ambiguity.ambiguities
+
+
+class TestRelativeComplementizerThat:
+    """L6 — a bounded relative/complementizer "that" is not a reference.
+
+    The reference reason is evaluated PER OCCURRENCE: a "that" in the closed
+    function-word context ``<determiner|quantifier> <word> that`` is a
+    complementizer (a different lexeme from a demonstrative/pronoun "that") and
+    contributes nothing, while every other occurrence keeps its existing
+    fail-closed behavior.
+    """
+
+    def test_relative_that_no_longer_raises_the_reference_reason(self):
+        spec = TaskIntake().intake("Build a module that tracks long-running tasks.")
+        assert spec.task_type is TaskType.DEVELOPMENT_REQUEST
+        assert spec.ambiguity.ambiguities == ("success",)
+        assert "reference" not in spec.ambiguity.ambiguities
+        assert spec.ambiguity.ambiguity_score == 0.25
+        assert spec.needs_clarification is False
+
+    def test_second_relative_that_case(self):
+        spec = TaskIntake().intake("Add a capability that remembers context.")
+        assert spec.task_type is TaskType.DEVELOPMENT_REQUEST
+        assert "reference" not in spec.ambiguity.ambiguities
+        assert spec.needs_clarification is False
+
+    def test_other_relative_that_cases(self):
+        for text in (
+            "Build a module that tracks tasks.",
+            "Add a capability that remembers context.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert "reference" not in spec.ambiguity.ambiguities, text
+            assert spec.needs_clarification is False, text
+
+    def test_mixed_occurrence_keeps_the_genuine_reference(self):
+        # The "that" is a complementizer, but "this" IS a genuine (unresolved)
+        # reference: only the relative "that" contribution is removed, so the
+        # reason survives and the turn stays fail-closed.
+        for text in (
+            "Create a module that handles this.",
+            "Improve the module that tracks this.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.ambiguity.ambiguities == ("reference", "success"), text
+            assert spec.ambiguity.ambiguity_score == 0.55, text
+            assert spec.needs_clarification is True, text
+
+    def test_genuine_demonstrative_reference_is_unchanged(self):
+        spec = TaskIntake().intake("Develop that capability.")
+        assert spec.ambiguity.ambiguities == ("reference", "success")
+        assert spec.ambiguity.ambiguity_score == 0.55
+        assert spec.needs_clarification is True
+
+    def test_bare_references_are_unchanged(self):
+        for text in ("Build it.", "Run this.", "Summarize them.", "make it work"):
+            spec = TaskIntake().intake(text)
+            assert spec.ambiguity.ambiguities == ("reference", "success"), text
+            assert spec.ambiguity.ambiguity_score == 0.55, text
+            assert spec.needs_clarification is True, text
+
+    def test_determiner_demonstrative_is_unchanged(self):
+        spec = TaskIntake().intake("Deploy this service.")
+        assert spec.ambiguity.ambiguities == ("reference", "success")
+        assert spec.ambiguity.ambiguity_score == 0.55
+        assert spec.needs_clarification is True
+
+    def test_research_reference_evidence_is_unchanged(self):
+        spec = TaskIntake().intake(
+            "Find evidence about how this repository currently handles references."
+        )
+        assert spec.task_type is TaskType.INFORMATION_REQUEST
+        assert spec.ambiguity.ambiguities == ("reference",)
+        assert spec.ambiguity.ambiguity_score == 0.30
+        assert spec.needs_clarification is False
+
+    def test_deferred_expletive_it_is_unchanged(self):
+        for text in (
+            "It would be useful if Atlas could notify me when something takes too long.",
+            "Would it be possible for Atlas to research this and tell me if finds?",
+        ):
+            spec = TaskIntake().intake(text)
+            assert "reference" in spec.ambiguity.ambiguities, text
+            assert spec.ambiguity.ambiguity_score == 0.30, text
+
+    def test_relative_that_does_not_suppress_other_reasons(self):
+        # Only the reference reason is affected; the success reason is untouched.
+        spec = TaskIntake().intake("Build a module that tracks tasks.")
+        assert spec.ambiguity.ambiguities == ("success",)
+        assert spec.ambiguity.clarification_questions == (
+            "What outcome would tell you this is done?",
+        )
 
 
 class TestRobustness:
@@ -235,3 +362,297 @@ class TestInvestigationFirstCompoundClassification:
     def test_approval_only_wording_stays_approval(self):
         spec = TaskIntake().intake("approve this proposal")
         assert spec.task_type is TaskType.APPROVAL
+
+
+class TestNaturalLanguageDevelopmentCues:
+    """The natural verb "develop" is a bounded, WHOLE-WORD development cue.
+
+    It must recognize the standalone verb without capturing the unrelated
+    ``development``/``developer``/``developing`` substrings, and it must keep
+    requiring a self-target ("capability"/"module"/... ) to qualify.
+    """
+
+    def test_develop_phrases_are_development_requests(self):
+        for text in (
+            "I want you to develop that capability",
+            "develop that capability",
+            "Atlas, develop that capability",
+            "develop a capability for scheduling follow-ups",
+            "develop Atlas further",
+            "develop a module for scheduling",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.DEVELOPMENT_REQUEST, text
+
+    def test_existing_development_contracts_preserved(self):
+        for text in (
+            "implement that capability",
+            "add an email notification capability",
+            "Add a new capability to Atlas for scheduling",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.DEVELOPMENT_REQUEST, text
+
+    def test_build_email_notifier_keeps_existing_classification(self):
+        # "build" is an existing action cue; no self-target/capability/module
+        # target is named, so the existing ACTION_REQUEST contract is kept.
+        spec = TaskIntake().intake("build an email notifier")
+        assert spec.task_type is TaskType.ACTION_REQUEST
+
+    def test_unrelated_develop_wording_is_not_development(self):
+        for text in (
+            "the development roadmap is long",
+            "explain the development lifecycle",
+            "who developed this code",
+            "what development work is pending",
+            "how do I develop a plugin",
+            "develop a plan for tomorrow",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.DEVELOPMENT_REQUEST, text
+
+    def test_negated_develop_is_not_development(self):
+        for text in (
+            "don't develop that capability",
+            "do not develop that capability",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.DEVELOPMENT_REQUEST, text
+
+    def test_develop_verb_cue_is_whole_word_only(self):
+        # "development"/"developed" merely contain "develop": the objective cue
+        # must not match inside them, and the turn must stay non-development.
+        for text in (
+            "explain the development lifecycle",
+            "who developed this code",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.DEVELOPMENT_REQUEST, text
+            assert not spec.intent.lower().startswith("develop"), text
+
+    def test_long_running_action_classification_is_unchanged(self):
+        # Fixing objective extraction must not change ACTION/DEVELOPMENT
+        # classification: the action cue inside "long-running" still decides.
+        for text in (
+            "I need an email notifier for long-running tasks.",
+            "I want Atlas to have an email notification capability for "
+            "long-running tasks.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.ACTION_REQUEST, text
+
+
+class TestBoundedDevelopmentForms:
+    """Development cues are explicit accepted WHOLE-WORD forms.
+
+    Substring containment must never turn an unrelated word ("address",
+    "prefix") or a nominal/inflected form ("implementation", "improvement",
+    "fixing", "modifying", "refactoring", "building") into a development
+    signal, while the accepted forms (including the explicit "rebuild") stay
+    recognized. The same policy feeds objective extraction.
+    """
+
+    def test_accepted_development_forms_are_recognized(self):
+        for text in (
+            "Add a capability for scheduled follow-ups.",
+            "Build a capability for scheduled follow-ups.",
+            "Rebuild the capability.",
+            "Create a capability for scheduled follow-ups.",
+            "Create a module for scheduled follow-ups.",
+            "Fix the capability.",
+            "Implement the capability.",
+            "Improve the capability.",
+            "Modify the module.",
+            "Refactor the module.",
+            "Develop the capability.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.DEVELOPMENT_REQUEST, text
+
+    def test_accidental_substrings_are_not_development(self):
+        for text in (
+            "Address the capability.",
+            "Prefix the capability.",
+            "The implementation of the capability is complete.",
+            "The improvement is useful.",
+            "Fixing the capability is important.",
+            "Modifying the capability is unnecessary.",
+            "Refactoring the module is complete.",
+            "Building the capability is underway.",
+            "The capability was developed yesterday.",
+            "Development of the capability is complete.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.DEVELOPMENT_REQUEST, text
+
+    def test_objective_does_not_anchor_on_accidental_substrings(self):
+        for text in (
+            "Address the capability.",
+            "Prefix the capability.",
+            "The implementation of the capability is complete.",
+            "The improvement is useful.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.intent == text, text
+
+    def test_rebuild_anchors_at_the_accepted_form(self):
+        spec = TaskIntake().intake("Rebuild the capability.")
+        assert spec.task_type is TaskType.DEVELOPMENT_REQUEST
+        assert spec.intent == "Rebuild the capability."
+
+    def test_long_running_development_phrasings_are_preserved(self):
+        for text in (
+            "I want Atlas to add an email notification capability for "
+            "long-running tasks.",
+            "I want Atlas to develop an email notification capability for "
+            "long-running tasks.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.DEVELOPMENT_REQUEST, text
+
+
+class TestBoundedActionForms:
+    """Action cues are explicit accepted WHOLE-WORD forms.
+
+    Substring containment must never turn a word that merely contains a cue
+    ("runtime", "writer", "compiler", "computer", "makefile", "unclean") or an
+    inflected/passive form ("generated", "compiled", "deployed", "analyzed")
+    into an action signal. The same bounded policy feeds objective extraction.
+    The observed "long-running" compound is preserved by one narrow explicit
+    form rather than by restoring substring matching.
+    """
+
+    def test_accepted_action_forms_are_recognized(self):
+        for text in (
+            "Run the verification.",
+            "Write the report.",
+            "Create a report.",
+            "Generate a report.",
+            "Produce a report.",
+            "Summarize the report.",
+            "Compile the project.",
+            "Compute the result.",
+            "Calculate the result.",
+            "Clean the workspace.",
+            "Deploy the service.",
+            "Organize the files.",
+            "Make a report.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.ACTION_REQUEST, text
+
+    def test_words_containing_a_cue_are_not_action(self):
+        for text in (
+            "The runtime is available.",
+            "Please rerun the verification.",
+            "The project is running correctly.",
+            "The runway is clear.",
+            "Documentation for the writer.",
+            "Use the compiler.",
+            "Use the makefile.",
+            "Please remake the report.",
+            "The records are unclean.",
+            "A rebuild is needed.",
+            "The recreation area is closed.",
+            "The project is long-running.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.ACTION_REQUEST, text
+
+    def test_inflected_and_passive_forms_are_not_action(self):
+        for text in (
+            "The report was generated.",
+            "The report was produced.",
+            "The report was summarized.",
+            "The project was compiled.",
+            "The result was computed.",
+            "The service was deployed.",
+            "The workspace was cleaned.",
+            "The data was analyzed.",
+            "The total was calculated.",
+            "The files were organized.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.ACTION_REQUEST, text
+
+    def test_genuine_whole_word_cue_wins_over_a_collision(self):
+        for text in (
+            "Run this on the computer.",
+            "Write documentation for the writer module.",
+            "Compute the result on the computer.",
+            "Clean up the unclean records.",
+            "Generate a report for the deployment.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.ACTION_REQUEST, text
+
+    def test_objective_does_not_anchor_on_accidental_substrings(self):
+        for text in (
+            "The runtime is available.",
+            "Please rerun the verification.",
+            "Documentation for the writer.",
+            "Use the compiler.",
+            "Use the makefile.",
+            "The records are unclean.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.intent == text, text
+
+    def test_objective_anchors_at_the_genuine_action_verb(self):
+        for text, prefix in (
+            ("Run this on the computer.", "Run this on the computer."),
+            ("Write documentation for the writer module.", "Write documentation"),
+            ("Compute the result on the computer.", "Compute the result"),
+            ("Clean up the unclean records.", "Clean up the unclean records."),
+            ("Generate a report for the deployment.", "Generate a report"),
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.intent.startswith(prefix), text
+
+    def test_long_running_compound_compatibility_is_preserved(self):
+        for text in (
+            "I need an email notifier for long-running tasks.",
+            "I want Atlas to have an email notification capability for "
+            "long-running tasks.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is TaskType.ACTION_REQUEST, text
+            assert spec.intent == "long-running tasks."
+
+    def test_run_collisions_are_not_action(self):
+        # "run" is whole-word: the compound compatibility form must not leak
+        # into ordinary words or into a bare statement.
+        for text in (
+            "The project is long-running.",
+            "The project is running.",
+            "Check the runtime.",
+            "Please rerun.",
+            "The runway is clear.",
+        ):
+            spec = TaskIntake().intake(text)
+            assert spec.task_type is not TaskType.ACTION_REQUEST, text
+
+    def test_frozen_development_and_investigation_precedence_is_unchanged(self):
+        # These words are intercepted BEFORE the action family by contracts that
+        # are out of scope for this matcher change: "build"/"rebuild" name a
+        # self-target ("module") for the development family, and "analyze" is an
+        # investigation cue. They must not be re-classified as ACTION here.
+        assert (
+            TaskIntake().intake("Analyze the report.").task_type
+            is TaskType.INVESTIGATION_REQUEST
+        )
+        assert (
+            TaskIntake().intake("Build a module.").task_type
+            is TaskType.DEVELOPMENT_REQUEST
+        )
+        assert (
+            TaskIntake().intake("Rebuild the module.").task_type
+            is TaskType.DEVELOPMENT_REQUEST
+        )
+        # Residual: the development objective source owns the whole-word
+        # "rebuild" accepted form, so this CONVERSATION turn still anchors its
+        # objective there. Changing that would alter the frozen development
+        # objective source, so it is pinned here rather than silently drifted.
+        rebuild_statement = TaskIntake().intake("A rebuild is needed.")
+        assert rebuild_statement.task_type is TaskType.CONVERSATION
+        assert rebuild_statement.intent == "rebuild is needed."
