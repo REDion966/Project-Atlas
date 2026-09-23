@@ -445,3 +445,160 @@ class TestKernelWiring:
             assert _intent(msg) == "architecture"
         finally:
             atlas.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Self-knowledge routing precedence — Atlas questions must not become research
+# ---------------------------------------------------------------------------
+
+
+class TestSelfKnowledgeRoutingPrecedence:
+    """A question ABOUT Atlas reaches self-knowledge, not research."""
+
+    def _svc(self, tmp_path):
+        return _service(architecture_model_provider=lambda: _model(tmp_path))
+
+    def test_architecture_question_is_self_knowledge(self, tmp_path):
+        text = (
+            "Which parts of your architecture are responsible for memory, "
+            "reasoning, research, and evolution?"
+        )
+        # Intake labels this an information/research request because it
+        # mentions the bounded cue "research"; routing must still reach the
+        # deterministic self-knowledge surface.
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.INFORMATION_REQUEST
+
+        msg = self._svc(tmp_path).respond(text, spec=spec)
+        assert msg is not None
+        assert _intent(msg) == "architecture"
+
+    def test_process_question_is_self_knowledge(self, tmp_path):
+        text = "How does a request move through Atlas?"
+        msg = self._svc(tmp_path).respond(text, spec=TaskIntake().intake(text))
+        assert _intent(msg) == "architecture"
+
+    def test_atlas_capability_question_is_self_knowledge(self, tmp_path):
+        text = "What components of Atlas handle memory?"
+        msg = self._svc(tmp_path).respond(text, spec=TaskIntake().intake(text))
+        assert _intent(msg) == "architecture"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Research the latest approaches to long-term AI agent memory.",
+            "Research the architecture of transformer models.",
+            "Research your architecture recommendations for me.",
+        ],
+    )
+    def test_genuine_research_is_not_captured(self, tmp_path, text):
+        spec = TaskIntake().intake(text)
+        assert spec.task_type is TaskType.INFORMATION_REQUEST
+        # Not claimed by the self-knowledge surface -> the existing research
+        # path (orchestration) keeps ownership.
+        assert self._svc(tmp_path).respond(text, spec=spec) is None
+
+    def test_general_technical_question_not_self_knowledge(self, tmp_path):
+        text = "How does a transformer model use attention?"
+        msg = self._svc(tmp_path).respond(text, spec=TaskIntake().intake(text))
+        assert _intent(msg) != "architecture"
+
+    def test_generic_request_flow_not_self_knowledge(self, tmp_path):
+        text = "How does a request flow through a web server?"
+        msg = self._svc(tmp_path).respond(text, spec=TaskIntake().intake(text))
+        assert _intent(msg) != "architecture"
+
+
+class TestSelfKnowledgeDoesNotEnterResearch:
+    def test_architecture_question_never_reaches_orchestration(self, tmp_path):
+        from atlas.conversation.conversation_service import ConversationService
+
+        calls = []
+
+        def resolver(spec, session_context):
+            calls.append(getattr(spec, "task_type", None))
+            return None
+
+        service = ConversationService(
+            None,
+            task_intake=TaskIntake(),
+            builtin_response=_service(
+                architecture_model_provider=lambda: _model(tmp_path)
+            ),
+            orchestration_resolver=resolver,
+        )
+        text = (
+            "Which parts of your architecture are responsible for memory, "
+            "reasoning, research, and evolution?"
+        )
+
+        msg = service.send(text)
+
+        assert (msg.metadata or {}).get("builtin_intent") == "architecture"
+        assert calls == []  # research/orchestration never entered
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.9 — Atlas can explain what it is / what it does
+# ---------------------------------------------------------------------------
+
+
+class TestSelfDescription:
+    """Natural self-description is answered from Atlas's own self-knowledge."""
+
+    VARIANTS = (
+        "Explain what Atlas does.",
+        "What does Atlas do?",
+        "How does Atlas work?",
+        "How do you work?",
+        "explain what atlas does",
+    )
+
+    @pytest.mark.parametrize("text", VARIANTS)
+    def test_variants_resolve_to_self_description(self, tmp_path, text):
+        svc = _service(architecture_model_provider=lambda: _model(tmp_path))
+        msg = svc.respond(text)
+        assert msg is not None
+        assert _intent(msg) == "self_description"
+        assert "I am Atlas" in msg.content
+
+    def test_answer_is_projected_from_self_knowledge(self, tmp_path):
+        model = _model(tmp_path)
+        svc = _service(architecture_model_provider=lambda: model)
+        content = svc.respond("What does Atlas do?").content
+        assert f"- Components (registered): {model.component_count}" in content
+        assert f"- Subsystems (packages): {model.subsystem_count}" in content
+        assert "no external AI model used" in content
+
+    def test_answer_is_not_a_fixed_description(self, tmp_path):
+        # The SAME question against a model with different facts yields a
+        # different answer -> the text is projected, not hand-maintained.
+        with_map = _service(
+            architecture_model_provider=lambda: _model(tmp_path)
+        ).respond("What does Atlas do?").content
+        without_map = _service(
+            architecture_model_provider=lambda: _model(tmp_path, with_repo_map=False)
+        ).respond("What does Atlas do?").content
+        assert with_map != without_map
+        assert "- Repository modules: 0" in without_map
+
+    def test_unavailable_model_fails_soft_to_unsupported(self):
+        assert _intent(_service(architecture_model_provider=None).respond(
+            "What does Atlas do?"
+        )) == "unsupported"
+
+    @pytest.mark.parametrize(
+        ("text", "intent"),
+        [
+            ("Who are you?", "identity"),
+            ("What is Atlas?", "identity"),
+            ("Tell me about yourself.", "identity"),
+            ("What can you do?", "help"),
+            ("What are your capabilities?", "capabilities"),
+            ("What are the main systems that make up Atlas?", "architecture"),
+            ("Why is the sky blue?", "unsupported"),
+        ],
+    )
+    def test_existing_surfaces_keep_precedence(self, tmp_path, text, intent):
+        svc = _service(architecture_model_provider=lambda: _model(tmp_path))
+        assert _intent(svc.respond(text)) == intent

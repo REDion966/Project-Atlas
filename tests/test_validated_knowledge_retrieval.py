@@ -497,3 +497,61 @@ class TestCliSurface:
         ).read_text(encoding="utf-8")
         assert "load_claims" not in source
         assert "research" not in source.lower().replace("validated knowledge", "")
+
+
+# ---------------------------------------------------------------------------
+# Command 4 — validated evidence reaching a downstream decision consumer
+# ---------------------------------------------------------------------------
+
+
+class TestValidatedEvidenceInfluencesDownstreamDecision:
+    """What validated research knowledge actually changes downstream.
+
+    Command 4 investigation result: the ONLY decision consumer of the
+    validated-knowledge surface in the repository is the development
+    capability-gap adjudicator (``assess_development_gap``). A SUPPORTED
+    (validated) claim changes its verdict; a non-SUPPORTED one does not. This
+    is the extent of the research -> validated knowledge -> decision link:
+    the conversational response path presents the acquisition rather than
+    consuming validated knowledge, and no reasoning/response consumer of the
+    validated surface exists.
+    """
+
+    @staticmethod
+    def _retriever(status):
+        claims = [_claim("c-1", "adapter already among sources")]
+        verifications = [_verification("c-1", status)]
+        return ValidatedKnowledgeRetriever(_FakeStore(claims, verifications))
+
+    def test_supported_knowledge_changes_the_gap_decision(self):
+        from atlas.evolution.development_gap import (
+            DevelopmentGapKind,
+            assess_development_gap,
+        )
+
+        request = "adapter already among"
+
+        without = assess_development_gap(
+            request, capability_names=["research.query"], knowledge_retriever=None
+        )
+        with_validated = assess_development_gap(
+            request,
+            capability_names=["research.query"],
+            knowledge_retriever=self._retriever(VerificationStatus.SUPPORTED),
+        )
+
+        assert without.kind is DevelopmentGapKind.MISSING_KNOWLEDGE
+        assert with_validated.kind is DevelopmentGapKind.MISSING_CAPABILITY
+
+    def test_unvalidated_knowledge_does_not_change_the_decision(self):
+        from atlas.evolution.development_gap import (
+            DevelopmentGapKind,
+            assess_development_gap,
+        )
+
+        gap = assess_development_gap(
+            "adapter already among",
+            capability_names=["research.query"],
+            knowledge_retriever=self._retriever(VerificationStatus.CONTRADICTED),
+        )
+        assert gap.kind is DevelopmentGapKind.MISSING_KNOWLEDGE

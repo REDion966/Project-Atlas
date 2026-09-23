@@ -344,17 +344,23 @@ class TestProductionPathLoop:
         assert expected.intent == UNRESOLVED_ACTION
         assert bridge[0].intent.startswith("Add or improve capability:")
 
-    def test_denial_and_ambiguity_never_reach_the_development_bridge(self):
+    def test_denial_and_supersession_never_reach_the_development_bridge(self):
         context = _context()
         service, bridge, _cognition = _service(
             context, coordinator=DevelopmentNeedCoordinator()
         )
+        # Denial still closes the pending confirmation and never develops.
         service.send(UNRESOLVED_ACTION)
-        ambiguous = service.send("what would that involve?")
-        assert ambiguous.metadata["development_need_dialogue"]["status"] == "re_asking"
-        assert bridge == []
         denied = service.send("no")
         assert denied.metadata["development_need_dialogue"]["status"] == "denied"
+        assert bridge == []
+        # A new/unrelated turn supersedes the pending confirmation instead of
+        # being trapped in an endless re-ask: it is not treated as approval, is
+        # answered normally by the deterministic floor, and still never reaches
+        # the development bridge.
+        service.send(UNRESOLVED_ACTION)
+        superseded = service.send("what can you do?")
+        assert "development_need_dialogue" not in (superseded.metadata or {})
         assert bridge == []
 
     def test_without_a_coordinator_the_existing_clarification_is_unchanged(self):

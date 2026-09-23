@@ -180,3 +180,73 @@ class TestDeterminism:
         need = task_spec_to_development_need(spec)
         assert need is not None
         assert need.title == "improve the capability registry"
+
+
+# ---------------------------------------------------------------------------
+# F9 authoring boundary (Command 6)
+# ---------------------------------------------------------------------------
+
+
+class TestAuthoringBoundary:
+    """A conversational DevelopmentNeed carries no authoring input, so the
+    kernel's deterministic composite change supplier cannot author and the
+    governed cycle must fail closed. This documents the existing F9 contract:
+    change content is SUPPLIED (operator spec / pre-authored metadata /
+    scaffold spec / opt-in model), never derived from a natural-language goal.
+    """
+
+    _GOAL = (
+        "Add a capability to Atlas that exports the conversation history to a "
+        "Markdown file so that I can keep notes. Success criteria: the export "
+        "writes a valid Markdown file."
+    )
+
+    def _need(self):
+        need = task_spec_to_development_need(_spec(self._GOAL))
+        assert need is not None
+        return need
+
+    def test_conversational_need_carries_no_authoring_input(self):
+        need = self._need()
+        assert "code_changes" not in need.metadata
+        assert "test_files" not in need.metadata
+        assert "scaffold" not in need.metadata
+        assert need.has_direct_evidence is False
+
+    def test_deterministic_composite_cannot_author_it(self):
+        from atlas.evolution.development_cycle import (
+            DeterministicChangeSupplier,
+        )
+        from atlas.evolution.development_scaffold_supplier import (
+            CompositeChangeSupplier,
+            ScaffoldChangeSupplier,
+        )
+
+        need = self._need()
+        composite = CompositeChangeSupplier(
+            [DeterministicChangeSupplier(), ScaffoldChangeSupplier()]
+        )
+        assert DeterministicChangeSupplier().supply_changes(need) is None
+        assert ScaffoldChangeSupplier().supply_changes(need) is None
+        assert composite.supply_changes(need) is None
+
+    def test_scaffold_authoring_requires_a_supplied_spec(self):
+        from atlas.evolution.development_cycle import DevelopmentNeed
+        from atlas.evolution.development_scaffold_supplier import (
+            ScaffoldChangeSupplier,
+        )
+
+        need = DevelopmentNeed(
+            title="add example capability",
+            summary="add example capability",
+            metadata={
+                "scaffold": {
+                    "module": "atlas/example/demo_handlers.py",
+                    "capability_name": "example.run",
+                }
+            },
+        )
+        supplied = ScaffoldChangeSupplier().supply_changes(need)
+        assert supplied is not None
+        assert supplied.origin == "deterministic-scaffold"
+        assert supplied.code_changes[0][0] == "atlas/example/demo_handlers.py"

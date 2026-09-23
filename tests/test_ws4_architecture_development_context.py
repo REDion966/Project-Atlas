@@ -377,3 +377,74 @@ class TestKernelWiring:
             )
         finally:
             atlas.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Command 3 — self-knowledge capability evidence vs development gap reasoning
+# ---------------------------------------------------------------------------
+
+
+class TestSelfKnowledgeCapabilityEvidenceContract:
+    """What architectural capability evidence exists, and what the capability
+    gap adjudicator (the development driver's evidence source) actually uses.
+
+    Investigation result (evidence, not aspiration): Atlas's self-knowledge
+    surfaces DO expose the capability evidence — ``ArchitectureModel`` component
+    ``provided_capabilities`` / ``capability_index`` and the ``CapabilityModel``
+    entries. The gap adjudicator is deterministic and reuses *capability names*,
+    but the verdict depends entirely on the name source it is given: a
+    capability Atlas genuinely provides is reported ``ALREADY_SUPPORTED`` when
+    the model's capability names are supplied, and a fabricated gap when a
+    narrower name source (the registry-handler source the kernel wires) is
+    used. No production change was made; see the Command 3 report.
+    """
+
+    def test_architecture_model_exposes_provided_capability_evidence(self, tmp_path):
+        model = _architecture_model(tmp_path)
+
+        index = dict(model.capability_index)
+        assert index["memory_search"] == ("memory_service",)
+        provided = {
+            cap for comp in model.components for cap in comp.provided_capabilities
+        }
+        assert "memory_search" in provided
+
+    def test_gap_verdict_depends_on_the_supplied_capability_names(self):
+        from atlas.evolution.development_gap import (
+            DevelopmentGapKind,
+            assess_development_gap,
+        )
+
+        request = "memory search"
+
+        # Evidence from Atlas's own self-knowledge -> already supported.
+        supported = assess_development_gap(
+            request, capability_names=["memory_search"]
+        )
+        assert supported.kind is DevelopmentGapKind.ALREADY_SUPPORTED
+        assert "memory_search" in supported.matched
+
+        # A narrower source that does not contain the provided capability (the
+        # shape of the production registry-handler source) -> fabricated gap.
+        gap = assess_development_gap(
+            request, capability_names=["research.query", "analysis"]
+        )
+        assert gap.kind is DevelopmentGapKind.MISSING_KNOWLEDGE
+
+    def test_gap_adjudicator_is_deterministic(self):
+        from atlas.evolution.development_gap import assess_development_gap
+
+        first = assess_development_gap(
+            "memory search", capability_names=["memory_search"]
+        )
+        second = assess_development_gap(
+            "memory search", capability_names=["memory_search"]
+        )
+        assert first == second
+
+    def test_planner_has_no_capability_gap_surface(self):
+        # The DevelopmentPlanner plans an already-approved proposal; it does not
+        # adjudicate capability gaps (that lives in atlas.evolution.development_gap).
+        planner = DevelopmentPlanner()
+        for attr in ("assess_gap", "assess_development_gap", "capability_names"):
+            assert not hasattr(planner, attr)

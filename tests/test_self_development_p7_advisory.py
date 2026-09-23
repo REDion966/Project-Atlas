@@ -285,7 +285,9 @@ class TestConfirmationGates:
         service = _service(dev_bridge=bridge, coordinator=coordinator, session=session)
         resp = service.send("maybe", session_context=session)
         bridge.assert_not_called()
-        assert coordinator.has_pending  # still pending
+        # A non-answer reply supersedes the pending confirmation safely (no
+        # endless re-ask trap); it is never treated as approval.
+        assert not coordinator.has_pending
 
     def test_unrelated_reply_no_bridge(self):
         bridge = MagicMock(return_value=Message(role="assistant", content="PREPARED"))
@@ -293,7 +295,7 @@ class TestConfirmationGates:
         service = _service(dev_bridge=bridge, coordinator=coordinator, session=session)
         resp = service.send("the weather is nice", session_context=session)
         bridge.assert_not_called()
-        assert coordinator.has_pending
+        assert not coordinator.has_pending
 
 
 # ---------------------------------------------------------------------------

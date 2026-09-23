@@ -209,6 +209,24 @@ class DevelopmentNeedDialogue:
             return ConfirmationStatus.DENIED
         return ConfirmationStatus.AMBIGUOUS
 
+    def is_answer_attempt(self, reply: str) -> bool:
+        """True when ``reply`` carries an actual yes/no confirmation signal.
+
+        Bounded and deterministic: a reply containing NEITHER a bounded
+        affirmative NOR a bounded negative is not an answer to the yes/no
+        question at all — it is a new/unrelated turn (a cancellation, a topic
+        change, a correction, or an unrelated request). The coordinator uses
+        this to stop a pending confirmation from owning such a turn forever.
+        A mixed reply (both signals, e.g. "yes but actually no") still counts
+        as an answer attempt and stays ambiguous.
+        """
+        normalized = collapse_whitespace(reply).lower()
+        if not normalized:
+            return False
+        return self._matches_affirmative(normalized) or self._matches_negative(
+            normalized
+        )
+
     def denied_response(self) -> Message:
         """Bounded acknowledgment that the user declined the opportunity."""
         return Message(

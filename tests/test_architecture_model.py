@@ -523,3 +523,83 @@ class TestCliSurface:
         parsed = json.loads(proc.stdout)
         assert parsed["component_count"] > 0
         assert parsed["subsystem_count"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4 — interface/service model: evidence contract
+# ---------------------------------------------------------------------------
+
+
+class TestInterfaceServiceModelEvidence:
+    """Phase 2.4 investigation result (evidence, not aspiration).
+
+    The "interface/service model" Atlas genuinely needs already exists as a
+    machine-readable projection of its authoritative sources:
+
+    * The service/component composition is authoritative in the
+      ``ComponentRegistry`` (``ComponentMetadata``: name, package, declared
+      entry ``module_path``, ``dependencies`` = the declared DI/composition
+      boundary, ``provided_capabilities``) and the ``ArchitectureModel``
+      projects it — per-component ``declared_dependencies`` and
+      per-subsystem ``outbound_component_dependencies`` — with an
+      evidence-only ``locate()``.
+    * The ``ServiceContainer`` is the runtime composition registry
+      (exact-key-set-tested) and its service set is already surfaced
+      deterministically by the status answer
+      (``tests/test_builtin_state_answers.py``).
+
+    Interfaces/contracts DO exist in executable Python — ABCs such as
+    ``atlas.services.service.Service`` and ``atlas.ai.provider.AIProvider``,
+    and ``typing.Protocol`` surfaces such as
+    ``atlas.advanced_reasoning.protocols`` — but no authoritative
+    machine-readable source records interface/protocol membership, and no
+    current or immediately justified consumer (Phase 4/5/6/9, self-knowledge,
+    architecture explanation) requires it. The model therefore states that
+    boundary honestly instead of inventing a parallel interface registry that
+    would duplicate the ``ServiceContainer``. No production change was made
+    for Phase 2.4.
+    """
+
+    def test_service_composition_is_machine_readable(self):
+        entry = _component(_model(), "memory_service")
+        # The declared DI/composition boundary and the declared entry point
+        # are both present, machine-readably, in the existing model.
+        assert entry.declared_dependencies == ("memory_repository",)
+        assert entry.module_path.startswith("atlas.memory.service.")
+        subsystem = _subsystem(_model(), "atlas.memory.service")
+        assert subsystem.outbound_component_dependencies == ("memory_repository",)
+
+    def test_interface_scope_boundary_is_stated_honestly(self):
+        assert any(
+            "Interfaces/contracts are not represented" in item
+            for item in _model().limitations
+        )
+
+    def test_interface_mechanisms_exist_in_executable_python(self):
+        from abc import ABC
+
+        import atlas.advanced_reasoning.protocols as protocols_mod
+        import atlas.ai.provider as provider_mod
+        import atlas.services.service as service_mod
+
+        # ABC-based interfaces are enforced by the interpreter.
+        assert issubclass(service_mod.Service, ABC)
+        assert issubclass(provider_mod.AIProvider, ABC)
+        assert service_mod.Service.start.__isabstractmethod__ is True
+        assert provider_mod.AIProvider.chat.__isabstractmethod__ is True
+
+        # Protocol-based interfaces are structural and runtime-checkable.
+        assert getattr(protocols_mod.EvidenceProvider, "_is_protocol", False)
+        assert getattr(
+            protocols_mod.EvidenceProvider, "_is_runtime_protocol", False
+        )
+
+    def test_no_parallel_interface_or_service_registry(self):
+        # Phase 2.4 intentionally introduced no interface/service registry:
+        # the existing ComponentRegistry stays authoritative for
+        # components/services and nothing duplicates the ServiceContainer.
+        import atlas.self_knowledge as self_knowledge
+
+        banned = {"InterfaceModel", "ServiceModel", "InterfaceRegistry",
+                  "ServiceRegistryModel"}
+        assert banned.isdisjoint(set(dir(self_knowledge)))

@@ -56,6 +56,7 @@ BUILTIN_INTENT_IDENTITY = "identity"
 BUILTIN_INTENT_CAPABILITIES = "capabilities"
 BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
 BUILTIN_INTENT_ARCHITECTURE = "architecture"
+BUILTIN_INTENT_SELF_DESCRIPTION = "self_description"
 BUILTIN_INTENT_STATUS = "status"
 BUILTIN_INTENT_RECALL = "recall"
 BUILTIN_INTENT_CONVERSATION_RECALL = "conversation_recall"
@@ -79,6 +80,16 @@ _BUILTIN_TASK_TYPES: frozenset[str] = frozenset(
 #: phrase matches AND a deterministic candidate exists (otherwise this service
 #: declines and the existing orchestrated path applies unchanged).
 _RECALL_ELIGIBLE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
+
+#: Task types eligible for the SELF-KNOWLEDGE precedence exception only. Intake
+#: types a question about Atlas's own architecture as an information/research
+#: request when it merely mentions a word such as "research" or "memory" (both
+#: are bounded research cues). Such a self-referential question must still be
+#: answered by the deterministic self-knowledge surface rather than being sent
+#: into research/orchestration. The exception is deliberately narrow: it needs
+#: an Atlas self-reference AND an architecture cue AND an available model, so
+#: genuine external research requests are never captured.
+_SELF_KNOWLEDGE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
 
 _HELP_RE = re.compile(
     r"\bhelp\b|what can you do\b|how do i (use|talk to|chat with)\b"
@@ -157,6 +168,33 @@ _ARCHITECTURE_RE = re.compile(
 #: resolvable target, the renderer stays bounded and reports only model counts.
 _ARCHITECTURE_TARGET_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+"
+)
+
+#: Atlas self-reference. The literal name, or a second-person possessive bound
+#: to a self-knowledge noun ("your architecture", "your components"). Bounded:
+#: it identifies WHO the question is about, not an arbitrary keyword.
+_SELF_REFERENCE_RE = re.compile(
+    r"\batlas\b"
+    r"|\byour\s+(?:architectur(?:e|al)|components?|subsystems?|modules?|"
+    r"dependenc(?:y|ies)|design|structure|systems?)\b"
+)
+
+#: A leading imperative research verb. A self-referential turn that *begins*
+#: with one is a genuine request to research something external, so the
+#: self-knowledge precedence exception must not capture it.
+_LEADING_RESEARCH_RE = re.compile(
+    r"^\s*(?:research|find|search|look\s*up|lookup|investigate)\b"
+)
+
+#: Process/flow wording for "how does a request move through Atlas?". Broader
+#: than a structural noun, so the caller additionally requires an Atlas
+#: self-reference — a generic "how does a request flow" question about some
+#: other system must not become self-knowledge.
+_ARCHITECTURE_PROCESS_RE = re.compile(
+    r"\b(?:request|message|prompt|turn|input)s?\s+"
+    r"(?:mov|flow|travel|pass|get\s+processed|get\s+handled)\w*\b"
+    r"|\bprocess(?:es|ed|ing)?\s+(?:a\s+|the\s+|my\s+)?"
+    r"(?:request|message|prompt|input)s?\b"
 )
 
 _STATUS_RE = re.compile(
@@ -316,6 +354,17 @@ _CAPABILITY_ALIAS_RES: tuple[re.Pattern[str], ...] = (
 #: Narrow identity phrasings equivalent to the canonical identity surface.
 _IDENTITY_ALIAS_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bwhat (?:exactly )?is atlas\b"),
+)
+
+#: Phase 2.9 — bounded natural self-description phrasings ("what does Atlas
+#: do", "how does Atlas work"). These ask what Atlas IS/DOES rather than a
+#: structural architecture question, and are answered from the EXISTING
+#: self-knowledge models (never a second, drift-prone hand-written
+#: description). Word-boundary and bounded by construction.
+_SELF_DESCRIPTION_RE = re.compile(
+    r"\bwhat\s+(?:does\s+atlas\s+do|atlas\s+does)\b"
+    r"|\bexplain\s+(?:what\s+)?atlas\s+(?:does|is)\b"
+    r"|\bhow\s+(?:does|do)\s+(?:atlas|you)\s+(?:work|operate|function)\b"
 )
 
 #: Status phrasings equivalent to the canonical status surface.
@@ -544,6 +593,24 @@ class BuiltinResponseService:
                     recall = self._match_conversation_recall(lowered, context)
                     if recall is not None:
                         return (BUILTIN_INTENT_CONVERSATION_RECALL, recall)
+                # SELF-KNOWLEDGE PRECEDENCE (routing seam). Intake types a
+                # question about Atlas's own architecture as an external
+                # information/research request whenever it merely mentions a
+                # bounded research cue ("research", "memory", "find", ...).
+                # Such a self-referential question must be answered by the
+                # deterministic self-knowledge surface, not sent into
+                # research/orchestration. Narrow by construction: an Atlas
+                # self-reference AND an architecture cue AND an available
+                # model. A genuine external research request has no Atlas
+                # self-reference, so it is never captured here.
+                if (
+                    task_type in _SELF_KNOWLEDGE_TASK_TYPES
+                    and not _LEADING_RESEARCH_RE.search(lowered)
+                    and _SELF_REFERENCE_RE.search(lowered)
+                    and self._matches_architecture(lowered)
+                    and self._resolve_architecture_model() is not None
+                ):
+                    return (BUILTIN_INTENT_ARCHITECTURE, text)
                 return None
             if bool(getattr(spec, "needs_clarification", False)):
                 return None
@@ -572,12 +639,22 @@ class BuiltinResponseService:
             _IDENTITY_ALIAS_RES, lowered
         ):
             return BUILTIN_INTENT_IDENTITY
+        # Phase 2.9 — bounded natural self-description ("what does Atlas do",
+        # "how does Atlas work"). Placed after the established identity /
+        # capability / help surfaces so their precedence is preserved, and
+        # answered from the EXISTING self-knowledge models (no second
+        # description). Claimed only when a model is available; otherwise the
+        # turn falls through to the existing unsupported floor (fail-soft).
+        if _SELF_DESCRIPTION_RE.search(lowered) and (
+            self._resolve_architecture_model() is not None
+        ):
+            return (BUILTIN_INTENT_SELF_DESCRIPTION, text)
         # Bounded architecture self-knowledge (WS). Reached only by turns the
         # inventory/help/identity surfaces above did not claim, so it cannot
         # steal them. It is claimed ONLY when an already-built ArchitectureModel
         # is actually available; otherwise the turn falls through to the
         # existing unsupported floor (fail-soft, no partial/empty claim).
-        if _ARCHITECTURE_RE.search(lowered) and (
+        if self._matches_architecture(lowered) and (
             self._resolve_architecture_model() is not None
         ):
             return (BUILTIN_INTENT_ARCHITECTURE, text)
@@ -834,6 +911,8 @@ class BuiltinResponseService:
             return self._render_capability_detail(detail or "")
         if intent == BUILTIN_INTENT_ARCHITECTURE:
             return self._render_architecture(str(detail or ""))
+        if intent == BUILTIN_INTENT_SELF_DESCRIPTION:
+            return self._render_self_description()
         if intent == BUILTIN_INTENT_STATUS:
             return self._render_status(message_count=message_count)
         if intent == BUILTIN_INTENT_RECALL:
@@ -987,8 +1066,83 @@ class BuiltinResponseService:
         return self._render_unsupported()
 
     # ------------------------------------------------------------------
+    # Self-description (Phase 2.9) — bounded, read-only, model-grounded
+    # ------------------------------------------------------------------
+
+    def _render_self_description(self) -> str:
+        """Answer "what does Atlas do / how does Atlas work" deterministically.
+
+        Composed from Atlas's EXISTING authoritative self-knowledge: the
+        established identity statement plus bounded facts projected from the
+        injected ``ArchitectureModel`` (itself built from the component
+        registry, the capability model, and the cached repository map). No
+        second, drift-prone description is maintained, and no external AI
+        model is required or contacted. Fails soft to the unsupported floor
+        when no model is available.
+        """
+        model = self._resolve_architecture_model()
+        if model is None:
+            return self._render_unsupported()
+
+        lines = [
+            self._render_identity(),
+            "",
+            "What I do, from my own self-knowledge "
+            "(deterministic, read-only; no external AI model used):",
+            f"- Components (registered): {model.component_count}",
+            f"- Subsystems (packages): {model.subsystem_count}",
+            f"- Repository modules: {model.module_count}",
+            f"- Internal import edges: {model.edge_count}",
+        ]
+
+        capabilities = sorted(
+            {
+                capability
+                for component in model.components
+                for capability in component.provided_capabilities
+                if capability
+            }
+        )
+        lines.append(
+            f"- Capabilities provided by registered components: {len(capabilities)}"
+        )
+        if capabilities:
+            lines.append(
+                "- Representative capabilities: "
+                + _format_names(capabilities[:_MAX_ARCHITECTURE_RELATIONS])
+            )
+        if model.limitations:
+            lines.append(
+                "- Scope boundary: " + model.limitations[0]
+            )
+
+        lines.append("")
+        lines.append(
+            "Ask 'what can you do' for the conversational capability list, or "
+            "name a module (for example 'atlas.research.repository_map') for "
+            "its dependency facts."
+        )
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Architecture self-knowledge (WS) — bounded, read-only
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _matches_architecture(lowered: str) -> bool:
+        """True when the turn is an Atlas self-knowledge/architecture question.
+
+        The structural vocabulary is the existing ``_ARCHITECTURE_RE``. The
+        process/flow wording (``_ARCHITECTURE_PROCESS_RE``) is broader, so it
+        additionally requires an Atlas self-reference: "how does a request
+        flow" about some other system is not Atlas self-knowledge.
+        """
+        if _ARCHITECTURE_RE.search(lowered):
+            return True
+        return bool(
+            _ARCHITECTURE_PROCESS_RE.search(lowered)
+            and _SELF_REFERENCE_RE.search(lowered)
+        )
 
     def _resolve_architecture_model(self) -> Any | None:
         """Return the injected ArchitectureModel, or None (fail-soft).

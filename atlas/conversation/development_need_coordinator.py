@@ -169,12 +169,21 @@ class DevelopmentNeedCoordinator:
         """Interpret a user reply against the pending confirmation.
 
         Returns:
-          * ``None`` — no pending confirmation, or the reply's session /
-            principal does not match the pending context (fail-closed; the
-            caller treats the message as ordinary input).
+          * ``None`` — no pending confirmation; the reply's session / principal
+            does not match the pending context (fail-closed; pending retained);
+            or the reply is not an answer to the confirmation at all, in which
+            case the obsolete pending confirmation has been SUPERSEDED (closed)
+            and the caller must process the turn through the normal pipeline.
           * :class:`Message` — a conversational response (denial or re-ask).
           * :class:`TaskSpec` — a CONFIRMED ``DEVELOPMENT_REQUEST`` to be
             routed by the caller through its existing development bridge.
+
+        Supersession rule: a pending confirmation owns a turn only while the
+        turn is actually trying to answer the yes/no question. A reply carrying
+        no confirmation signal (a cancellation, topic change, correction, or
+        unrelated request) closes the pending confirmation and is handed back
+        to the normal conversational pipeline — it is never treated as
+        approval and the previously proposed action is never executed.
         """
         if self._pending is None:
             return None
@@ -187,7 +196,17 @@ class DevelopmentNeedCoordinator:
             self._pending = None
             return self._dialogue.denied_response()
         if status is ConfirmationStatus.AMBIGUOUS:
-            return self._dialogue.clarification_response()
+            # A reply that does try to answer but is not decisive (mixed
+            # signals, e.g. "yes but actually no") stays ambiguous: re-ask and
+            # keep the pending confirmation.
+            if self._dialogue.is_answer_attempt(text):
+                return self._dialogue.clarification_response()
+            # Otherwise the reply is a NEW turn, not an answer. Supersede: close
+            # the obsolete pending confirmation safely and return ``None`` so
+            # the caller processes the new turn normally. Nothing is approved,
+            # executed, or proposed here.
+            self._pending = None
+            return None
         if status is ConfirmationStatus.NO_PENDING_CONTEXT:
             return None
 

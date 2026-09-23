@@ -175,21 +175,30 @@ class TestConfirmationFlow:
         assert isinstance(outcome, Message)
         assert not coordinator.has_pending
 
-    def test_ambiguous_no_development_request(self, coordinator):
+    def test_non_answer_releases_pending_confirmation(self, coordinator):
         session = _session_context(user_id="alice")
         spec = _spec("run the quantum stabilizer diagnostic", session)
         coordinator.detect_unresolved_action(spec)
-        outcome = coordinator.handle_reply("maybe", session)
-        assert isinstance(outcome, Message)
-        assert coordinator.has_pending  # still pending
+        # A reply that is not an answer to the yes/no question is a NEW turn:
+        # the obsolete pending confirmation is superseded (released) and the
+        # turn is handed back to the normal pipeline.
+        assert coordinator.handle_reply("maybe", session) is None
+        assert not coordinator.has_pending
 
-    def test_unrelated_response_no_confirm(self, coordinator):
+    def test_unrelated_response_releases_pending_confirmation(self, coordinator):
         session = _session_context(user_id="alice")
         spec = _spec("run the quantum stabilizer diagnostic", session)
         coordinator.detect_unresolved_action(spec)
-        outcome = coordinator.handle_reply("the weather is nice", session)
+        assert coordinator.handle_reply("the weather is nice", session) is None
+        assert not coordinator.has_pending
+
+    def test_mixed_reply_stays_ambiguous_and_retained(self, coordinator):
+        session = _session_context(user_id="alice")
+        spec = _spec("run the quantum stabilizer diagnostic", session)
+        coordinator.detect_unresolved_action(spec)
+        outcome = coordinator.handle_reply("yes but actually no", session)
         assert isinstance(outcome, Message)
-        assert coordinator.has_pending
+        assert coordinator.has_pending  # genuine ambiguity keeps awaiting
 
     def test_missing_pending_fails_closed(self, coordinator):
         session = _session_context(user_id="alice")
@@ -325,6 +334,161 @@ class TestConversationServiceIntegration:
         # After confirm, no pending state remains; a second "yes" is ordinary.
         service.send("yes", session_context=session)
         assert bridge.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Pending-confirmation supersession (conversation state-machine repair)
+# ---------------------------------------------------------------------------
+
+
+_UNRESOLVED = "run the quantum stabilizer diagnostic"
+
+
+class TestPendingConfirmationSupersession:
+    """A pending confirmation owns a turn only while the turn answers it.
+
+    A reply that is not an answer to the yes/no question (a cancellation, a
+    topic change, a correction, or an unrelated request) must close the
+    obsolete pending confirmation safely and be processed normally — never
+    trapped in an endless re-ask, never treated as approval, and never
+    executing the previously proposed action.
+    """
+
+    def _make_service(self, *, bridge=None, session=None, coordinator=None):
+        return _service(
+            dev_bridge=bridge,
+            coordinator=coordinator or DevelopmentNeedCoordinator(),
+            session=session,
+        )
+
+    @staticmethod
+    def _bridge():
+        return MagicMock(return_value=Message(role="assistant", content="PREPARED"))
+
+    def test_yes_still_confirms_and_reaches_bridge(self):
+        session = _session_context(user_id="alice")
+        bridge = self._bridge()
+        service = self._make_service(bridge=bridge, session=session)
+        service.send(_UNRESOLVED, session_context=session)
+        out = service.send("yes", session_context=session)
+        assert out.content == "PREPARED"
+        bridge.assert_called_once()
+
+    def test_no_still_denies_and_never_reaches_bridge(self):
+        session = _session_context(user_id="alice")
+        bridge = self._bridge()
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(
+            bridge=bridge, session=session, coordinator=coordinator
+        )
+        service.send(_UNRESOLVED, session_context=session)
+        out = service.send("no", session_context=session)
+        assert "won't propose" in out.content.lower()
+        bridge.assert_not_called()
+        assert not coordinator.has_pending
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "nevermind, forget that",
+            "nevermind",
+            "forget that",
+            "forget it",
+            "cancel that",
+        ],
+    )
+    def test_cancellation_supersedes_without_execution(self, reply):
+        session = _session_context(user_id="alice")
+        bridge = self._bridge()
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(
+            bridge=bridge, session=session, coordinator=coordinator
+        )
+        service.send(_UNRESOLVED, session_context=session)
+        assert coordinator.has_pending
+
+        out = service.send(reply, session_context=session)
+
+        assert not coordinator.has_pending
+        bridge.assert_not_called()
+        assert "yes or no" not in out.content.lower()  # no endless re-ask trap
+
+    def test_topic_change_supersedes(self):
+        session = _session_context(user_id="alice")
+        bridge = self._bridge()
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(
+            bridge=bridge, session=session, coordinator=coordinator
+        )
+        service.send(_UNRESOLVED, session_context=session)
+
+        out = service.send("the weather is lovely today", session_context=session)
+
+        assert not coordinator.has_pending
+        bridge.assert_not_called()
+        assert "yes or no" not in out.content.lower()
+
+    def test_new_unrelated_question_is_processed_normally(self):
+        session = _session_context(user_id="alice")
+        control = self._make_service(session=session)
+        baseline = control.send(
+            "what is the capital of France?", session_context=session
+        )
+
+        bridge = self._bridge()
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(
+            bridge=bridge, session=session, coordinator=coordinator
+        )
+        service.send(_UNRESOLVED, session_context=session)
+        assert coordinator.has_pending
+
+        out = service.send("what is the capital of France?", session_context=session)
+
+        assert not coordinator.has_pending
+        bridge.assert_not_called()
+        assert out.content == baseline.content
+
+    def test_pending_action_is_never_executed_after_supersession(self):
+        session = _session_context(user_id="alice")
+        bridge = self._bridge()
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(
+            bridge=bridge, session=session, coordinator=coordinator
+        )
+        service.send(_UNRESOLVED, session_context=session)
+        service.send("nevermind, forget that", session_context=session)
+        # A later literal "yes" cannot approve an already-superseded proposal.
+        service.send("yes", session_context=session)
+        bridge.assert_not_called()
+
+    def test_mixed_reply_does_not_approve_and_still_reasks(self):
+        session = _session_context(user_id="alice")
+        bridge = self._bridge()
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(
+            bridge=bridge, session=session, coordinator=coordinator
+        )
+        service.send(_UNRESOLVED, session_context=session)
+
+        out = service.send("yes but actually no", session_context=session)
+
+        bridge.assert_not_called()
+        assert coordinator.has_pending
+        assert out.metadata["development_need_dialogue"]["status"] == "re_asking"
+
+    def test_streaming_supersedes_consistently(self):
+        session = _session_context(user_id="alice")
+        coordinator = DevelopmentNeedCoordinator()
+        service = self._make_service(session=session, coordinator=coordinator)
+        service.send(_UNRESOLVED, session_context=session)
+
+        chunks = list(
+            service.stream("nevermind, forget that", session_context=session)
+        )
+
+        assert not coordinator.has_pending
+        assert "yes or no" not in "".join(chunks).lower()
 
 
 # ---------------------------------------------------------------------------
