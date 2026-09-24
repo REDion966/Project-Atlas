@@ -4001,6 +4001,11 @@ class Atlas:
                 # snapshot never triggers a repository scan, so asking a casual
                 # architecture question cannot cause one. Read-only/advisory.
                 architecture_model_provider=self._architecture_model_snapshot,
+                # C6.1 — bounded conversational access to EXISTING validated
+                # knowledge. The kernel capability is passed through unchanged
+                # (read-only, deterministic, no model): the conversation layer
+                # never queries storage directly and never acquires anything.
+                validated_knowledge_provider=self.validated_knowledge,
             )
         except Exception:
             self._builtin_response = None

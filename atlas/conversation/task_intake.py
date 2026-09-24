@@ -454,6 +454,27 @@ _ACTION_COMPOUND_FORMS: frozenset[str] = frozenset(
     {"long-running task", "long-running tasks"}
 )
 
+#: NLU-1 — bounded planning/assistance artifacts. A request that asks Atlas to
+#: produce one of these artifacts ("help me create a systematic plan ...",
+#: "create a review checklist ...") is an ANSWERABLE request for planning
+#: assistance, not a request to execute a tool/capability. Such a request must
+#: not enter the development-need (capability-gap) path merely because Atlas
+#: has no registered tool named after its subject. Whole-word matched; the
+#: explicit self-development family above always keeps precedence, so
+#: "create a module/capability" stays a DEVELOPMENT_REQUEST.
+_PLANNING_ARTIFACT_CUES: frozenset[str] = frozenset(
+    {
+        "plan",
+        "plans",
+        "checklist",
+        "check list",
+        "roadmap",
+        "road map",
+        "outline",
+        "process",
+    }
+)
+
 # ---------------------------------------------------------------------------
 # L3 — minimal structured utterance meaning.
 #
@@ -471,6 +492,14 @@ _ACTION_COMPOUND_FORMS: frozenset[str] = frozenset(
 #: added to any classification cue family, so classification is unchanged.
 _EXPLAIN_CUE_FORMS: frozenset[str] = frozenset({"explain", "describe"})
 
+#: NLU-1 — bounded "compare" evidence for the L3 operation domain. A leading
+#: comparison ("Compare the camera systems ... and tell me what matters ...")
+#: is an ordinary information/comparison REQUEST, not a bare statement. Like
+#: the explain forms, these verbs are NOT added to any classification cue
+#: family, so TaskType classification is unchanged; only the L3 operation (and
+#: therefore the illocution) is attested.
+_COMPARE_CUE_FORMS: frozenset[str] = frozenset({"compare", "contrast"})
+
 #: Ordered operation evidence sources: ``(cues, word_boundary, operation)``.
 #: Each entry reuses an already-validated cue family with its EXISTING matching
 #: mode. Earliest position wins; the declared order only breaks ties at the same
@@ -481,6 +510,7 @@ _UTTERANCE_OPERATION_SOURCES: tuple[tuple[frozenset[str], bool, Operation], ...]
     (_INVESTIGATION_LEAD_CUES, True, Operation.INVESTIGATE),
     (_RESEARCH_CUES, False, Operation.RESEARCH),
     (_EXPLAIN_CUE_FORMS, True, Operation.EXPLAIN),
+    (_COMPARE_CUE_FORMS, True, Operation.COMPARE),
     (_ACTION_CUE_FORMS, True, Operation.ACT),
     (_ACTION_COMPOUND_FORMS, True, Operation.ACT),
 )
@@ -492,6 +522,7 @@ _UTTERANCE_QUESTION_WORDS: frozenset[str] = frozenset(
 
 #: Bounded request frames (checked at the START of the utterance only).
 _UTTERANCE_REQUEST_FRAMES: tuple[str, ...] = (
+    "help me",
     "i'd like",
     "i would like",
     "i want",
@@ -1462,6 +1493,17 @@ class TaskIntake:
         if greeting:
             return TaskType.CONVERSATION
         if question:
+            return TaskType.QUESTION
+        # NLU-1 — a request for a bounded planning/assistance artifact (a plan,
+        # checklist, roadmap, or process) is an ANSWERABLE request, not an
+        # executable tool action. Routing it as a casual question keeps it out
+        # of the orchestration/development-need path, which would otherwise
+        # misread "no registered tool for this subject" as an Atlas
+        # capability gap. Explicit self-development evidence above keeps
+        # precedence, so "create a module/capability" remains DEVELOPMENT.
+        if action and not development and _has_word_cue(
+            lowered, _PLANNING_ARTIFACT_CUES
+        ):
             return TaskType.QUESTION
         if action:
             return TaskType.ACTION_REQUEST

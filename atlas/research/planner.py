@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 
 from atlas.evolution.models import ResearchQuery
+from atlas.research.dimensions import extract_dimensions
 from atlas.research.models import ResearchPlan, SourceKind
 from atlas.research.source_catalog import (
     CODE_EXTENSIONS,
@@ -189,7 +190,17 @@ class ResearchPlanner:
         return words[-1]
 
     def aspects(self, question: str, core_subject: str) -> tuple[str, ...]:
-        """Ordered aspects to research, derived from the core subject."""
+        """Ordered aspects to research.
+
+        NLU-3 — when the request EXPLICITLY enumerates the aspects it wants
+        (two or more comma/``and`` separated fragments), those requested
+        dimensions are the aspects. Otherwise the single aspect derived from
+        the core subject is used, exactly as before, so single-aspect research
+        is unchanged.
+        """
+        requested: tuple[str, ...] = extract_dimensions(question)
+        if requested:
+            return requested
         subject_aspect: str = _TAG_ASPECTS.get(core_subject, "overview")
         return (subject_aspect,)
 

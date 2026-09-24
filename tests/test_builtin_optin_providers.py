@@ -182,13 +182,93 @@ class TestRouterOptInGate(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.provider_name, "Ollama")
         low = router.route(RoutingRequest(complexity=0.2))
-        self.assertEqual(low.provider_name, "Mock Provider")
+        # NLU-0: with the opt-in enabled the deterministic no-network tier is
+        # excluded, so even a low-complexity turn selects the registered real
+        # provider rather than the cheapest mock profile.
+        self.assertEqual(low.provider_name, "Ollama")
 
     def test_default_is_disabled(self):
         router = ModelRouter(_profiles())
         self.assertFalse(router.external_providers)
         decision = router.route(RoutingRequest(complexity=0.9))
         self.assertEqual(decision.provider_name, "Mock Provider")
+
+
+# ---------------------------------------------------------------------------
+# NLU-0: explicit real-provider opt-in excludes the deterministic tier
+# ---------------------------------------------------------------------------
+
+
+class TestOptInExcludesDeterministicTier(unittest.TestCase):
+    """The explicit real-provider opt-in must prevent the deterministic
+    no-network tier from winning ordinary conversational routing on cost."""
+
+    def test_ordinary_conversation_selects_real_provider(self):
+        router = ModelRouter(_profiles(), external_providers=True)
+        decision = router.route(RoutingRequest(complexity=0.3))
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.provider_name, "Ollama")
+        self.assertEqual(decision.model_name, "qwen3:8b")
+
+    def test_deterministic_tier_never_wins_on_cost(self):
+        router = ModelRouter(_profiles(), external_providers=True)
+        for complexity in (0.1, 0.2, 0.3, 0.5, 0.8, 1.0):
+            with self.subTest(complexity=complexity):
+                decision = router.route(RoutingRequest(complexity=complexity))
+                self.assertIsNotNone(decision)
+                self.assertEqual(decision.provider_name, "Ollama")
+
+    def test_deterministic_tier_preserved_when_no_real_provider(self):
+        # Opt-in enabled but ONLY the deterministic tier registered: the
+        # deterministic floor is preserved (no silent external resolution,
+        # no empty decision).
+        registry = ModelProfileRegistry()
+        registry.register(
+            ModelProfile(
+                provider_name="Mock Provider",
+                model_name="atlas-mock-v1",
+                complexity_score=0.3,
+                priority=10,
+            )
+        )
+        router = ModelRouter(registry, external_providers=True)
+        decision = router.route(RoutingRequest(complexity=0.3))
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.provider_name, "Mock Provider")
+
+    def test_optin_does_not_enable_remote_when_disabled(self):
+        # Deny-by-default: with the opt-in OFF, every remote provider name is
+        # excluded regardless of complexity.
+        registry = ModelProfileRegistry()
+        registry.register(
+            ModelProfile(
+                provider_name="Mock Provider",
+                model_name="atlas-mock-v1",
+                complexity_score=0.3,
+                priority=10,
+            )
+        )
+        for remote in ("OpenAI", "Anthropic", "OpenRouter", "LM Studio"):
+            registry.register(
+                ModelProfile(
+                    provider_name=remote,
+                    model_name="remote-1",
+                    complexity_score=0.9,
+                    priority=99,
+                )
+            )
+        router = ModelRouter(registry, external_providers=False)
+        for complexity in (0.3, 0.6, 0.9, 1.0):
+            with self.subTest(complexity=complexity):
+                decision = router.route(RoutingRequest(complexity=complexity))
+                self.assertEqual(decision.provider_name, "Mock Provider")
+
+    def test_local_provider_names_semantics_unchanged(self):
+        # NLU-0 must not redefine the no-network tier that the final-response
+        # acceptance gate consumes.
+        from atlas.ai.routing.models import LOCAL_PROVIDER_NAMES
+
+        self.assertEqual(frozenset({"Mock Provider"}), LOCAL_PROVIDER_NAMES)
 
 
 # ---------------------------------------------------------------------------

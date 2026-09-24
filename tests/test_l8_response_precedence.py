@@ -264,6 +264,15 @@ class TestResponsePrecedence:
         assert _usable_pipeline_response(
             {**base, "ai_provenance": {"provider": "Mock Provider"}}
         ) is None
+        # NLU-0: a real provider's provenance is accepted; the deterministic
+        # no-network tier's is rejected by the same existing rule. The rule
+        # itself is unchanged.
+        assert _usable_pipeline_response(
+            {**base, "ai_provenance": {"provider": "Ollama", "model": "qwen3:8b"}}
+        ) == "A"
+        assert _usable_pipeline_response(
+            {**base, "ai_provenance": {"provider": "Mock Provider", "model": "atlas-mock-v1"}}
+        ) is None
         assert _usable_pipeline_response("not-a-dict") is None
 
 

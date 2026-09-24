@@ -26,9 +26,12 @@ from atlas.conversation.investigation import (
 )
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.reference_resolution import (
+    CAPTURED_ENTITY_FIELD,
     ConversationReferenceResolver,
     is_repeat_request,
 )
+from atlas.conversation.research_objective import research_subject_gap
+from atlas.conversation.entity_capture import CapturedEntity, capture_named_entities
 from atlas.conversation.development_outcome_reporter import (
     DevelopmentOutcomeReporter,
     snapshot_from_result,
@@ -689,6 +692,10 @@ class ConversationService:
             user_message
         )
 
+        # NLU-4 — capture explicitly named conversational entities for
+        # reference resolution on later turns.
+        self._capture_conversational_entities(text)
+
         context = self._context.build(
             self._conversation,
             memory_query=text,
@@ -1001,6 +1008,10 @@ class ConversationService:
         self._conversation.add_message(
             user_message
         )
+
+        # NLU-4 — capture explicitly named conversational entities for
+        # reference resolution on later turns.
+        self._capture_conversational_entities(text)
 
         context = self._context.build(
             self._conversation,
@@ -1391,6 +1402,29 @@ class ConversationService:
 
         return _replace(spec, context=enriched)
 
+    def _capture_conversational_entities(self, text: str) -> None:
+        """NLU-4 — capture explicitly named conversational entities.
+
+        Conversation-scoped, bounded, provenance-carrying, and high-precision:
+        only a strong proper-noun surface form is captured. A captured entity
+        records only that the user referred to a name — it is never a verified
+        fact and never authority. Capture never raises.
+        """
+        if self._state_manager is None or not isinstance(text, str) or not text.strip():
+            return
+        try:
+            names = capture_named_entities(text)
+        except Exception:  # noqa: BLE001 - capture must never break a turn
+            return
+        if not names:
+            return
+        turn_id = getattr(self._state_manager.state, "turn_id", "")
+        entities = tuple(
+            CapturedEntity(name=name, normalized=name.lower(), turn_id=turn_id)
+            for name in names
+        )
+        self._state_manager.record_captured_entities(entities)
+
     def _apply_entity_identification(self, spec: TaskSpec, text: str) -> TaskSpec:
         """Bounded deterministic entity identification for the current turn (L4).
 
@@ -1497,6 +1531,28 @@ class ConversationService:
                 return self._attach_resolved_reference(
                     spec, contextual.resolved_field, contextual.resolved_value
                 ), None
+            # NLU-5 — a descriptive reference that matches MORE than one captured
+            # entity is a genuine ambiguity: ask which one, rather than guessing
+            # or silently proceeding. (Only the captured-entity layer raises
+            # this; existing investigation/established ambiguities keep the
+            # documented "leave routing unchanged" behavior.)
+            if (
+                contextual.status is ReferenceResolutionStatus.AMBIGUOUS
+                and contextual.resolved_field == CAPTURED_ENTITY_FIELD
+            ):
+                from dataclasses import replace as _replace
+
+                clarified = _replace(
+                    spec,
+                    needs_clarification=True,
+                    ambiguity=_replace(
+                        spec.ambiguity,
+                        clarification_questions=(
+                            "Which of the products you mentioned should I use?",
+                        ),
+                    ),
+                )
+                return spec, self._orchestration_clarification_message(clarified)
 
         # UNRESOLVED -> fail closed; current routing is unchanged.
         return spec, None
@@ -1641,6 +1697,31 @@ class ConversationService:
         # Honor TaskIntake's ambiguity gate deterministically.
         if bool(getattr(spec, "needs_clarification", False)):
             return self._orchestration_clarification_message(spec)
+        # NLU-2 — research-objective completeness. A research request whose
+        # subject is materially underspecified (a generic "a phone"/"a product"
+        # with no concrete entity, or an unspecified comparison set) must ask a
+        # bounded clarification instead of researching a subject it never
+        # established. Nothing is guessed and no entity is invented.
+        if spec.task_type is TaskType.INFORMATION_REQUEST:
+            context = getattr(spec, "context", None)
+            reference_resolved = bool(
+                isinstance(context, dict)
+                and isinstance(context.get("resolved_reference"), dict)
+            )
+            gap = research_subject_gap(
+                spec.intent or spec.goal or "",
+                reference_resolved=reference_resolved,
+            )
+            if gap is not None:
+                self._record_pending_question((gap,))
+                return Message(
+                    role="assistant",
+                    content=(
+                        "I need one more detail before I can research this:\n"
+                        f"- {gap}"
+                    ),
+                    metadata={"research_clarification": {"reason": "missing_subject"}},
+                )
         # Resolver is the single decision surface: it never invents targets;
         # a ``None`` return means the typed request is not boundedly
         # actionable → bounded clarification (additive; never silently falls

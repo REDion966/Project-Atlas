@@ -111,6 +111,30 @@ def orchestration_result_to_message(
             metadata={"orchestration": result.to_dict()},
         )
 
+    if status == "partial":
+        # NLU-3 — a dimension-partial research result gets an honest, explicit
+        # report naming the supported and unsupported requested dimensions,
+        # instead of the generic step-level "completed with issues" summary.
+        research = _research_partial(result)
+        if research is not None:
+            supported, unsupported = research
+            lines.append(
+                f"Research partially completed: {intent_line}"
+                if intent_line
+                else "Research partially completed."
+            )
+            if supported:
+                lines.append("Relevant evidence obtained for:")
+                lines.extend(f"- {dimension}" for dimension in supported)
+            if unsupported:
+                lines.append("No sufficient evidence obtained for:")
+                lines.extend(f"- {dimension}" for dimension in unsupported)
+            return Message(
+                role="assistant",
+                content="\n".join(lines[:64]),
+                metadata={"orchestration": result.to_dict()},
+            )
+
     if status in ("failed", "partial", "empty"):
         if intent_line:
             prefix = "Completed with issues:" if status == "partial" else "Could not complete:"
@@ -145,6 +169,30 @@ def orchestration_result_to_message(
         content=(f"Execution {status}." if status else "Execution finished."),
         metadata={"orchestration": result.to_dict()},
     )
+
+
+def _research_partial(result: Any) -> tuple[list[str], list[str]] | None:
+    """Return ``(supported, unsupported)`` dimensions for a partial research step.
+
+    ``None`` when the result is not a dimension-partial research result.
+    """
+    for step in tuple(getattr(result, "steps", ()) or ()):
+        metadata = getattr(step, "metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        completeness = metadata.get("research_completeness")
+        if not isinstance(completeness, dict):
+            continue
+        if completeness.get("status") != "partial":
+            continue
+        supported = [
+            d for d in (completeness.get("supported") or ()) if isinstance(d, str) and d
+        ]
+        unsupported = [
+            d for d in (completeness.get("unsupported") or ()) if isinstance(d, str) and d
+        ]
+        return supported, unsupported
+    return None
 
 
 def _step_summary(result: Any) -> str:

@@ -52,6 +52,10 @@ class Operation(str, Enum):
     DEVELOP = "develop"
     ACT = "act"
     EXPLAIN = "explain"
+    #: NLU-1 — a bounded comparison request ("Compare these camera systems
+    #: ..."). Recognized as a leading operation so a comparison imperative is
+    #: an explicit request rather than a bare statement.
+    COMPARE = "compare"
 
 
 @dataclass(frozen=True, slots=True)

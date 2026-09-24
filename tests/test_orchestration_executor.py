@@ -480,8 +480,15 @@ class TestSeamDelegation:
                 self.storage = None
 
             def run(self, query):
+                # A genuine success must carry authorized evidence. The
+                # acquisition service maps a result WITH resolved sources to
+                # status "ok"; a result with no sources is a noop (see
+                # test_research_without_evidence_is_not_success).
                 return ResearchResult(
-                    query_id="q1", findings="findings", sources=[], confidence=0.8
+                    query_id="q1",
+                    findings="findings",
+                    sources=["https://example.test/spec"],
+                    confidence=0.8,
                 )
 
         authority, ctx = _make_authority(owner=True)
@@ -497,6 +504,41 @@ class TestSeamDelegation:
 
         assert result.status is ExecutionStatus.COMPLETED
         assert result.steps[0].output.get("status") in ("ok", "noop", "partial")
+
+    def test_research_without_evidence_is_not_success(self):
+        """NLU-1 — a research run that produced no authorized evidence must not
+        be reported as a completed step."""
+        from atlas.evolution.models import ResearchResult
+        from atlas.research.acquisition import InformationAcquisitionService
+
+        class _NoEvidenceCoordinator:
+            def __init__(self):
+                self.planner = None
+                self.storage = None
+
+            def run(self, query):
+                return ResearchResult(
+                    query_id="q1", findings="", sources=[], confidence=0.0
+                )
+
+        authority, ctx = _make_authority(owner=True)
+        service = InformationAcquisitionService(coordinator=_NoEvidenceCoordinator())
+        ex = _executor(authority, research_service=service)
+
+        result = ex.execute(
+            ExecutionRequest(
+                steps=(_step("n1", NodeKind.RESEARCH, "acquire", inputs={"question": "q"}),),
+                session_context=ctx,
+            )
+        )
+
+        assert result.status is ExecutionStatus.FAILED
+        step = result.steps[0]
+        assert step.state is ExecutionState.FAILED
+        assert step.failure_kind == "no_evidence"
+        assert "no authorized evidence" in step.error
+        # The acquisition's own status is still surfaced (no fabrication).
+        assert step.output.get("status") == "noop"
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ governed pipeline. Nothing here authorizes, executes, mutates, or approves.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
@@ -57,6 +58,16 @@ BUILTIN_INTENT_CAPABILITIES = "capabilities"
 BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
 BUILTIN_INTENT_ARCHITECTURE = "architecture"
 BUILTIN_INTENT_SELF_DESCRIPTION = "self_description"
+#: C5.1 — bounded self-knowledge question families (architecture/components,
+#: reference resolution, evidence/failure behaviour, current limitations,
+#: research process), answered from verified internal knowledge only.
+BUILTIN_INTENT_SELF_KNOWLEDGE = "self_knowledge"
+#: C6.1 — bounded, READ-ONLY conversational access to EXISTING validated
+#: knowledge (the kernel's ``validated_knowledge`` capability / the existing
+#: ``ValidatedKnowledgeRetriever``). It answers only from claims an authorized
+#: source already SUPPORTED, never acquires, never writes, never promotes a user
+#: assertion, and never invents a fact.
+BUILTIN_INTENT_VALIDATED_KNOWLEDGE = "validated_knowledge"
 BUILTIN_INTENT_STATUS = "status"
 BUILTIN_INTENT_RECALL = "recall"
 BUILTIN_INTENT_CONVERSATION_RECALL = "conversation_recall"
@@ -91,8 +102,24 @@ _RECALL_ELIGIBLE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
 #: genuine external research requests are never captured.
 _SELF_KNOWLEDGE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
 
+#: C6.1 — task types eligible for the validated-knowledge bridge only. Intake
+#: types a verified-knowledge question ("what verified information do you have
+#: about X?") as an information/research request because of its cue word, so the
+#: bridge must also be reachable from that non-builtin task type. It is claimed
+#: only by the bounded cue family below AND only with an extractable,
+#: non-self-referential topic, so no other request of that type is affected.
+_VALIDATED_KNOWLEDGE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
+
+#: NLU-1 — a LEADING "help me <verb> ..." turn is a request for assistance with
+#: a concrete task ("Help me create a systematic plan for reviewing a
+#: smartphone camera."), not a request for Atlas's usage/help information. The
+#: help intent therefore matches "help" everywhere EXCEPT when it opens the turn
+#: as a "help me <something>" assistance request. Bare "help" / "help me" and
+#: usage phrasings ("What can Atlas help me with?", "how do I use this?") are
+#: preserved exactly.
 _HELP_RE = re.compile(
-    r"\bhelp\b|what can you do\b|how do i (use|talk to|chat with)\b"
+    r"(?!^\s*help\s+me\s+\S)\bhelp\b|what can you do\b"
+    r"|how do i (use|talk to|chat with)\b"
     r"|\bcommands\b|\busage\b|^\s*help\s*[?!.\s]*$"
 )
 
@@ -197,6 +224,122 @@ _ARCHITECTURE_PROCESS_RE = re.compile(
     r"(?:request|message|prompt|input)s?\b"
 )
 
+#: C5.1 — bounded self-reference for a self-knowledge question. Only the
+#: question families below use it; it identifies WHO the question is about.
+_SELF_REFERENCE_ANY_RE = re.compile(r"\b(?:you|your|yours|yourself|atlas)\b")
+
+#: C5.1 — the capability WORDS that caused the C3 domain misroute. The
+#: first-person capability aliases (e.g. "what can you do") are deliberately
+#: NOT covered here, so their existing behaviour is untouched.
+_CAPABILITY_WORD_RE = re.compile(r"\bcapabilit(?:y|ies)\b|\bcapable\b")
+
+#: C5.1 — a DOMAIN (non-Atlas) capability reference: a third-person possessive
+#: or a demonstrative bound to a product/device noun. Used only to keep domain
+#: questions ("its cameras are capable", "this phone's capabilities") out of the
+#: Atlas self-inventory.
+_CAPABILITY_DOMAIN_REFERENCE_RE = re.compile(
+    r"\b(?:its|their)\s+\w+"
+    r"|\b(?:this|that|these|those)\s+(?:phone|phones|smartphone|smartphones|"
+    r"device|devices|product|products|laptop|laptops|tablet|tablets|camera|"
+    r"cameras|model|models|gadget|gadgets|item|items|monitor|display|console)\b"
+)
+
+#: C5.1 — the bounded self-knowledge question families evidenced by C3. Each
+#: entry is ``(topic, cue pattern, verified anchor module paths)``. The cue
+#: pattern must be paired with an Atlas self-reference, and the anchors are
+#: VERIFIED against the ArchitectureModel before any behaviour is described, so
+#: an answer is only produced from knowledge the architecture actually records.
+#: (The architecture/components family is served by the EXISTING architecture
+#: surface; see ``_ARCHITECTURE_PARTS_RE``.)
+_SELF_KNOWLEDGE_TOPICS: tuple[
+    tuple[str, "re.Pattern[str]", tuple[str, ...]], ...
+] = (
+    (
+        "reference resolution",
+        re.compile(
+            r"\breference\s+resolution\b"
+            r"|\bresolve\s+(?:references?|pronouns?)\b"
+            r"|\bresolve\s+(?:its|it|this|that)\b"
+            r"|\bhow\s+(?:do|does)\s+(?:you|atlas)\s+resolve\b"
+        ),
+        (
+            "atlas.conversation.reference_resolution",
+            "atlas.conversation.entity_capture",
+        ),
+    ),
+    (
+        "evidence and failure behaviour",
+        re.compile(
+            r"\b(?:not\s+enough|no|insufficient|lack\w*|without)\s+"
+            r"(?:authorized\s+|relevant\s+|available\s+|enough\s+)?evidence\b"
+            r"|\bwhen\s+you\s+(?:don'?t|cannot|can'?t)\s+"
+            r"(?:have|find|get|obtain)\b"
+            r"|\bcannot\s+find\s+evidence\b"
+        ),
+        (
+            "atlas.orchestration.executor",
+            "atlas.research.relevance",
+            "atlas.research.acquisition",
+        ),
+    ),
+    (
+        "current limitations",
+        re.compile(
+            r"\blimitations?\b"
+            r"|\bwhat\s+(?:can'?t|cannot)\s+you\s+(?:currently\s+|presently\s+)?do\b"
+            r"|\bwhat\s+are\s+you\s+(?:not\s+able|unable)\s+to\s+do\b"
+        ),
+        (
+            "atlas.self_knowledge.architecture_model",
+            "atlas.self_knowledge.capability_model",
+        ),
+    ),
+    (
+        "research process",
+        re.compile(
+            r"\bresearch\s+(?:process|pipeline|flow|workflow)\b"
+            r"|\bhow\s+(?:do|does)\s+(?:you|atlas)\b[^.?]{0,60}\bresearch\b"
+            r"|\bhow\s+(?:you|atlas)\s+(?:do|perform|conduct|run)s?\s+research\b"
+        ),
+        (
+            "atlas.research.acquisition",
+            "atlas.research.coordinator",
+            "atlas.research.sources.web",
+            "atlas.orchestration.executor",
+        ),
+    ),
+)
+
+
+def _match_self_knowledge_topic(lowered: str) -> str | None:
+    """Return the bounded self-knowledge topic for ``lowered``, or None.
+
+    A topic is claimed only when its cue pattern AND an Atlas self-reference are
+    both present, so a domain question about some other system is never captured.
+    """
+    if not _SELF_REFERENCE_ANY_RE.search(lowered):
+        return None
+    for topic, pattern, _anchors in _SELF_KNOWLEDGE_TOPICS:
+        if pattern.search(lowered):
+            return topic
+    return None
+
+
+def _self_knowledge_anchors(topic: str) -> tuple[str, ...]:
+    """Return the verified anchor module paths recorded for ``topic``."""
+    for name, _pattern, anchors in _SELF_KNOWLEDGE_TOPICS:
+        if name == topic:
+            return anchors
+    return ()
+
+
+#: C5.1 — plain-language structural phrasing evidenced by C3 ("what parts of
+#: your system handle conversation?"). Self-referential by construction ("your"),
+#: so it cannot capture a question about some other system.
+_ARCHITECTURE_PARTS_RE = re.compile(
+    r"\bparts?\s+of\s+your\s+(?:system|architecture|codebase|design|framework)\b"
+)
+
 _STATUS_RE = re.compile(
     r"\bstatus\b|how are you\b|are you (ok|okay|online|working|up|running)\b"
     r"|system (status|health)\b|how is atlas\b"
@@ -212,6 +355,156 @@ _RECALL_RE = re.compile(
     r"|search (?:your )?(?:memory|knowledge)(?: for)?\b"
     r"|look up .*?(?:in|from) (?:your )?(?:memory|knowledge)\b"
 )
+
+# ---------------------------------------------------------------------------
+# C6.1 — bounded conversational access to EXISTING validated knowledge.
+#
+# The kernel already owns an evidence-validated, provenance-carrying, persistent
+# knowledge store and exposes it read-only through ``validated_knowledge(query)``.
+# This bridge makes that EXISTING capability reachable from a turn, and nothing
+# more: it is a bounded cue vocabulary + a bounded topic extraction, answered
+# exclusively by the injected validated-knowledge provider.
+#
+# Two cue tiers, because precedence must be preserved exactly:
+#
+#   * EXPLICIT cues ("what did you find/learn about X", "what verified
+#     information do you have about X") are NOT claimed by any existing intent.
+#     They are claimed whenever a usable topic exists, and report the retrieval's
+#     own authoritative outcome (validated claims / empty / store unavailable).
+#
+#   * SHARED cues ("what do you know about X", "what do you remember about X",
+#     "do you remember X") ARE claimed by the existing memory/knowledge recall.
+#     They are therefore bridged ONLY when an already-validated claim actually
+#     matches; otherwise this matcher declines and the existing recall path
+#     answers exactly as before.
+# ---------------------------------------------------------------------------
+
+#: C6.1 — explicit verified-knowledge cues (no existing intent claims these).
+#: Every cue requires the bounded "about" topic marker, so topic-less phrasings
+#: ("what did you learn from that research?", "what did you find?") are NOT
+#: bridged and keep their existing behaviour exactly.
+_VALIDATED_KNOWLEDGE_EXPLICIT_CUES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"what\s+(?:information|knowledge)\s+(?:did|have)\s+you\s+"
+        r"(?:verif(?:y|ied)|validat(?:e|ed)|confirm(?:ed)?)\s+about\b"
+    ),
+    re.compile(
+        r"what\s+did\s+you\s+(?:verif(?:y|ied)|validat(?:e|ed)|confirm)\s+about\b"
+    ),
+    re.compile(
+        r"what\s+have\s+you\s+(?:verif(?:y|ied)|validat(?:e|ed)|confirm)\s+about\b"
+    ),
+    re.compile(
+        r"what\s+(?:verified|validated|confirmed)\s+(?:information|knowledge|facts?)\b"
+    ),
+    re.compile(r"what\s+did\s+you\s+(?:find(?:\s+out)?|learn|discover)\s+about\b"),
+    re.compile(
+        r"what\s+facts?\s+did\s+you\s+(?:verif(?:y|ied)|validat(?:e|ed))\s+about\b"
+    ),
+)
+
+#: C6.1 — cues shared with the existing memory/knowledge recall. Bridged only on
+#: an actual validated match, so recall behaviour is unchanged otherwise.
+_VALIDATED_KNOWLEDGE_SHARED_CUES: tuple["re.Pattern[str]", ...] = (
+    re.compile(r"what\s+do\s+you\s+(?:know|remember)\s+about\b"),
+    re.compile(r"\bdo\s+you\s+remember\b"),
+    re.compile(r"what\s+(?:information|knowledge)\s+do\s+you\s+have\s+about\b"),
+)
+
+#: C6.1 — determiners/lead words dropped from a validated-knowledge topic.
+_TOPIC_LEAD_WORDS: frozenset[str] = frozenset({"about", "on", "regarding", "the", "a", "an"})
+
+#: C6.1 — bounded function words dropped from a topic so the query stays a tight
+#: token set (the retriever matches only claims containing every query token).
+#: "you" is dropped because a cue's own tail ("…do you have about X") would
+#: otherwise leave an assistant-reference token inside the topic.
+_TOPIC_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "about", "and", "any", "are", "at", "be", "been", "by", "did", "do",
+        "does", "for", "from", "had", "has", "have", "how", "in", "is", "it",
+        "its", "of", "on", "or", "that", "the", "their", "them", "these",
+        "this", "those", "to", "was", "were", "what", "when", "where", "which",
+        "who", "why", "with", "you",
+    }
+)
+
+#: C6.1 — a topic about Atlas ITSELF belongs to the existing self-knowledge /
+#: identity surfaces, never to this bridge.
+_TOPIC_SELF_REFERENCE_RE = re.compile(
+    r"\b(?:you|your|yours|yourself|yourselves|your\s+own)\b"
+)
+
+#: C6.1 — a bare "atlas" topic, or "atlas <self-noun>", is a self-question. A
+#: third-party subject that merely begins with the word (a device/test subject
+#: named "Atlas …") is not captured here.
+_TOPIC_ATLAS_SELF_RE = re.compile(
+    r"^atlas$"
+    r"|\batlas\b(?:\s+\w+){0,2}\s+"
+    r"(?:architectur\w*|components?|subsystems?|modules?|design|codebase|"
+    r"systems?|implementation|internals?|limitations?|capabilit(?:y|ies))\b"
+)
+
+#: C6.1 — bounds applied to an extracted topic.
+_MAX_VALIDATED_TOPIC_TOKENS: int = 8
+_MAX_VALIDATED_TOPIC_CHARS: int = 60
+
+#: C6.1 — bounded render bound for a validated claim statement.
+_MAX_VALIDATED_CLAIM_CHARS: int = 500
+
+
+def _validated_knowledge_topic(remainder: str) -> str | None:
+    """Extract a bounded topic from the text following a cue, or None.
+
+    Deterministic and conservative: the topic never crosses a clause boundary,
+    is reduced to a small token set, and is REJECTED whenever it refers to Atlas
+    itself (those questions belong to the existing self-knowledge surfaces).
+    A cue without a usable topic fails closed (``None``) — the store is never
+    queried with an empty or arbitrary input merely to produce an answer.
+    """
+    text = remainder
+    for stop in ("?", ".", "!", ";", ":"):
+        index = text.find(stop)
+        if index != -1:
+            text = text[:index]
+    tokens = [
+        token
+        for token in re.split(r"[^a-z0-9_]+", text)
+        if token and token not in _TOPIC_STOP_WORDS
+    ]
+    while tokens and tokens[0] in _TOPIC_LEAD_WORDS:
+        tokens.pop(0)
+    tokens = [token for token in tokens if len(token) >= 2 or token.isdigit()]
+    if not tokens:
+        return None
+    topic = " ".join(tokens[:_MAX_VALIDATED_TOPIC_TOKENS])
+    if len(topic) > _MAX_VALIDATED_TOPIC_CHARS:
+        topic = topic[:_MAX_VALIDATED_TOPIC_CHARS].rstrip()
+    if _TOPIC_SELF_REFERENCE_RE.search(topic) or _TOPIC_ATLAS_SELF_RE.search(topic):
+        return None
+    return topic
+
+
+def _match_validated_knowledge_cue(lowered: str) -> tuple[str, bool] | None:
+    """Return ``(query, explicit)`` for a bounded validated-knowledge turn.
+
+    Explicit cues are checked first. ``explicit`` is True when no existing
+    intent claims the phrasing, so the turn reports the retrieval's own outcome
+    directly; shared cues are bridged only on an actual validated match.
+    """
+    for explicit, cues in (
+        (True, _VALIDATED_KNOWLEDGE_EXPLICIT_CUES),
+        (False, _VALIDATED_KNOWLEDGE_SHARED_CUES),
+    ):
+        for cue in cues:
+            match = cue.search(lowered)
+            if match is None:
+                continue
+            query = _validated_knowledge_topic(lowered[match.end() :])
+            if query is None:
+                return None
+            return (query, explicit)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Phase 5 — bounded conversational-turn recall.
@@ -412,6 +705,39 @@ _MAX_ARCHITECTURE_SUBSYSTEMS = 8
 _MAX_ARCHITECTURE_RELATIONS = 8
 _MAX_ARCHITECTURE_LIMITATIONS = 3
 
+#: C5.1 — bounded bare-token topic lookup for the architecture renderer.
+#: The stop-set keeps question/self/structural words out, so a generic
+#: "what are Atlas's components?" question is not turned into a lookup of the
+#: literal top-level package, and only a genuine TOPIC token is tried.
+_ARCHITECTURE_TOPIC_TOKEN_RE = re.compile(r"[a-z][a-z_]{3,}")
+_MAX_ARCHITECTURE_TOPIC_TOKENS = 6
+_ARCHITECTURE_TOPIC_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "atlas", "you", "your", "yours", "yourself", "what", "which", "who",
+        "whom", "does", "do", "are", "is", "was", "the", "and", "for", "with",
+        "that", "this", "these", "those", "from", "into", "over", "under",
+        "handle", "handles", "handled", "implement", "implements", "implemented",
+        "component", "components", "module", "modules", "subsystem",
+        "subsystems", "part", "parts", "system", "systems", "about", "tell",
+        "explain", "describe", "current", "currently", "work", "works",
+        "working", "made", "make", "madeup", "consist", "consists", "comprise",
+        "comprises", "include", "includes", "included", "structure", "design",
+        "codebase", "framework", "architecture",
+    }
+)
+
+
+def _enum_values(enum_cls: object) -> str:
+    """Return an enum's value set as a bounded comma-separated string (C5.1).
+
+    Used to state only the value vocabulary the architecture itself defines; an
+    unavailable enum yields "(unavailable)" rather than an invented value.
+    """
+    try:
+        return ", ".join(sorted(str(member.value) for member in enum_cls))
+    except Exception:  # noqa: BLE001
+        return "(unavailable)"
+
 
 def _format_names(names: object) -> str:
     """Render a bounded sequence of identifiers as ``a, `b` ...`` (or '')."""
@@ -440,6 +766,7 @@ class BuiltinResponseService:
         ) = None,
         started: bool | None = None,
         architecture_model_provider: Callable[[], Any] | None = None,
+        validated_knowledge_provider: Callable[[str], Any] | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
@@ -453,6 +780,12 @@ class BuiltinResponseService:
         #: is never mutated or persisted, and fails soft to the unsupported
         #: floor when absent, None, non-model, or raising.
         self._architecture_model_provider = architecture_model_provider
+        #: C6.1 — optional one-argument callable delegating to the EXISTING
+        #: kernel validated-knowledge capability (``kernel.validated_knowledge``).
+        #: Read-only by contract: it is called for retrieval only, its result is
+        #: never mutated, and the bridge is simply declined when it is absent or
+        #: raises (fail closed — no fallback to memory, state, or a model).
+        self._validated_knowledge_provider = validated_knowledge_provider
 
     def _resolve_service_names(self) -> tuple[str, ...] | None:
         """Resolve the container/service snapshot for the status answer.
@@ -490,6 +823,10 @@ class BuiltinResponseService:
     @property
     def architecture_model_provider(self) -> Callable[[], Any] | None:
         return self._architecture_model_provider
+
+    @property
+    def validated_knowledge_provider(self) -> Callable[[str], Any] | None:
+        return self._validated_knowledge_provider
 
     def handles(
         self,
@@ -533,6 +870,11 @@ class BuiltinResponseService:
         }
         if intent == BUILTIN_INTENT_CONVERSATION_RECALL and isinstance(detail, tuple):
             metadata["recall_source"] = detail[0]
+        if intent == BUILTIN_INTENT_VALIDATED_KNOWLEDGE and isinstance(detail, tuple):
+            metadata["validated_query"] = detail[0]
+            metadata["validated_knowledge_status"] = self._validated_knowledge_status(
+                detail[1]
+            )
         if intent == BUILTIN_INTENT_REFERENCE and isinstance(detail, tuple):
             metadata["reference_field"] = detail[0]
         return Message(
@@ -603,14 +945,38 @@ class BuiltinResponseService:
                 # self-reference AND an architecture cue AND an available
                 # model. A genuine external research request has no Atlas
                 # self-reference, so it is never captured here.
+                # C5.1 — the same precedence extends to the bounded
+                # self-knowledge question families (reference resolution,
+                # evidence/failure behaviour, current limitations, research
+                # process), so a self-referential question that Intake typed as
+                # a research request is answered by the self-knowledge surface
+                # instead of being sent into research/orchestration.
                 if (
                     task_type in _SELF_KNOWLEDGE_TASK_TYPES
                     and not _LEADING_RESEARCH_RE.search(lowered)
-                    and _SELF_REFERENCE_RE.search(lowered)
-                    and self._matches_architecture(lowered)
                     and self._resolve_architecture_model() is not None
                 ):
-                    return (BUILTIN_INTENT_ARCHITECTURE, text)
+                    if _SELF_REFERENCE_RE.search(
+                        lowered
+                    ) and self._matches_architecture(lowered):
+                        return (BUILTIN_INTENT_ARCHITECTURE, text)
+                    topic = _match_self_knowledge_topic(lowered)
+                    if topic is not None:
+                        return (BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+                # C6.1 — the same precedence seam carries the bounded
+                # validated-knowledge bridge: Intake types a verified-knowledge
+                # question ("what verified information do you have about X?") as
+                # an information/research request, and it must be answered from
+                # the EXISTING validated store instead of being sent into
+                # research/orchestration. A leading research verb keeps its
+                # authority, and a topic about Atlas itself was already left to
+                # the self-knowledge surfaces above.
+                if task_type in _VALIDATED_KNOWLEDGE_TASK_TYPES and not (
+                    _LEADING_RESEARCH_RE.search(lowered)
+                ):
+                    validated = self._match_validated_knowledge(lowered)
+                    if validated is not None:
+                        return (BUILTIN_INTENT_VALIDATED_KNOWLEDGE, validated)
                 return None
             if bool(getattr(spec, "needs_clarification", False)):
                 return None
@@ -629,9 +995,16 @@ class BuiltinResponseService:
         # equivalent capability questions must not be captured by the help
         # word ("... help me with") or by the identity predicate's
         # "what are you" ("what are you capable of").
-        if _CAPABILITIES_RE.search(lowered) or _alias_hit(
-            _CAPABILITY_ALIAS_RES, lowered
+        # C5.1 — the bare capability WORD must be a first-person/Atlas question:
+        # a domain question about an external subject's capabilities is not an
+        # Atlas self-capability question (C3 finding). The first-person aliases
+        # below are unaffected.
+        capabilities_word = _CAPABILITIES_RE.search(lowered) is not None
+        if capabilities_word and not self._capabilities_intent_applies(
+            lowered, context
         ):
+            capabilities_word = False
+        if capabilities_word or _alias_hit(_CAPABILITY_ALIAS_RES, lowered):
             return BUILTIN_INTENT_CAPABILITIES
         if _HELP_RE.search(lowered):
             return BUILTIN_INTENT_HELP
@@ -649,6 +1022,16 @@ class BuiltinResponseService:
             self._resolve_architecture_model() is not None
         ):
             return (BUILTIN_INTENT_SELF_DESCRIPTION, text)
+        # C5.1 — bounded self-knowledge question families (reference
+        # resolution, evidence/failure behaviour, current limitations, research
+        # process). Claimed only when an already-built ArchitectureModel is
+        # available, so the answer is grounded in verified knowledge or the turn
+        # falls soft to the existing unsupported floor.
+        self_knowledge_topic = _match_self_knowledge_topic(lowered)
+        if self_knowledge_topic is not None and (
+            self._resolve_architecture_model() is not None
+        ):
+            return (BUILTIN_INTENT_SELF_KNOWLEDGE, self_knowledge_topic)
         # Bounded architecture self-knowledge (WS). Reached only by turns the
         # inventory/help/identity surfaces above did not claim, so it cannot
         # steal them. It is claimed ONLY when an already-built ArchitectureModel
@@ -669,6 +1052,15 @@ class BuiltinResponseService:
         conversation_recall = self._match_conversation_recall(lowered, context)
         if conversation_recall is not None:
             return (BUILTIN_INTENT_CONVERSATION_RECALL, conversation_recall)
+        # C6.1 — bounded bridge to EXISTING validated knowledge. Reached only
+        # after every self/inventory/help/identity/self-knowledge surface above,
+        # so all of them keep their precedence, and before store recall. Shared
+        # recall phrasings ("what do you know about X") are bridged ONLY when an
+        # already-validated claim matches; otherwise this declines and the
+        # existing memory/knowledge recall answers exactly as before.
+        validated = self._match_validated_knowledge(lowered)
+        if validated is not None:
+            return (BUILTIN_INTENT_VALIDATED_KNOWLEDGE, validated)
         recall_query = self._match_recall(lowered)
         if recall_query is not None:
             return (BUILTIN_INTENT_RECALL, recall_query)
@@ -732,6 +1124,60 @@ class BuiltinResponseService:
             ):
                 return name
         return None
+
+    def _match_validated_knowledge(self, lowered: str) -> tuple[str, Any] | None:
+        """Claim a bounded validated-knowledge turn, or None to fall through.
+
+        C6.1 — the ONLY operation performed is the read-only retrieval already
+        exposed by the kernel. Nothing is acquired, written, promoted, updated,
+        or inferred. Returns ``(query, result)``; ``result`` is the existing
+        capability's own result object, rendered verbatim (including its
+        authoritative ``empty`` / ``store_unavailable`` outcome).
+
+        Returns ``None`` when no provider is wired, when no bounded cue with a
+        usable topic matches, when the provider fails (fail closed), or — for a
+        cue that the existing recall also claims — when nothing validated
+        matched, so the existing recall path keeps the turn unchanged.
+        """
+        if self._validated_knowledge_provider is None:
+            return None
+        matched = _match_validated_knowledge_cue(lowered)
+        if matched is None:
+            return None
+        query, explicit = matched
+        result = self._retrieve_validated_knowledge(query)
+        if result is None:
+            return None
+        if not explicit and not self._validated_knowledge_items(result):
+            return None
+        return (query, result)
+
+    def _retrieve_validated_knowledge(self, query: str) -> Any | None:
+        """Delegate the read-only retrieval, or None when it cannot be read."""
+        provider = self._validated_knowledge_provider
+        if provider is None:
+            return None
+        try:
+            return provider(query)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _validated_knowledge_items(result: Any) -> tuple[Any, ...]:
+        """Existing validated claims on ``result`` (never synthesized)."""
+        items = getattr(result, "items", None)
+        if not items:
+            return ()
+        try:
+            return tuple(items)
+        except TypeError:
+            return ()
+
+    @staticmethod
+    def _validated_knowledge_status(result: Any) -> str:
+        """The retrieval's own authoritative status value."""
+        status = getattr(result, "status", None)
+        return str(getattr(status, "value", status) or "")
 
     def _match_recall(self, lowered: str) -> str | None:
         """Extract a recall query, or None when no confident trigger exists.
@@ -911,12 +1357,16 @@ class BuiltinResponseService:
             return self._render_capability_detail(detail or "")
         if intent == BUILTIN_INTENT_ARCHITECTURE:
             return self._render_architecture(str(detail or ""))
+        if intent == BUILTIN_INTENT_SELF_KNOWLEDGE:
+            return self._render_self_knowledge(str(detail or ""))
         if intent == BUILTIN_INTENT_SELF_DESCRIPTION:
             return self._render_self_description()
         if intent == BUILTIN_INTENT_STATUS:
             return self._render_status(message_count=message_count)
         if intent == BUILTIN_INTENT_RECALL:
             return self._render_recall(detail or "")
+        if intent == BUILTIN_INTENT_VALIDATED_KNOWLEDGE:
+            return self._render_validated_knowledge(detail)
         if intent == BUILTIN_INTENT_CONVERSATION_RECALL and isinstance(detail, tuple):
             return self._render_conversation_recall(detail)
         if intent == BUILTIN_INTENT_REFERENCE and isinstance(detail, tuple):
@@ -1129,6 +1579,30 @@ class BuiltinResponseService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _has_established_subject(context: Any) -> bool:
+        """True when the conversation already carries a captured subject (C5.1)."""
+        state = getattr(context, "state", None)
+        if state is None:
+            return False
+        return bool(getattr(state, "captured_entities", ()) or ())
+
+    def _capabilities_intent_applies(self, lowered: str, context: Any = None) -> bool:
+        """True when a capability-WORD turn is an ATLAS capability question.
+
+        C5.1 — bounded distinction for the C3 finding: a third-person possessive
+        or a demonstrative bound to a product/device noun, or an established
+        conversational subject with no first-person Atlas reference, means the
+        turn is about an EXTERNAL subject's capabilities and must not be answered
+        with Atlas's own inventory. Never guesses: an unclear turn in a
+        conversation that already has an external subject declines the inventory.
+        """
+        if _CAPABILITY_DOMAIN_REFERENCE_RE.search(lowered):
+            return False
+        if _SELF_REFERENCE_ANY_RE.search(lowered):
+            return True
+        return not self._has_established_subject(context)
+
+    @staticmethod
     def _matches_architecture(lowered: str) -> bool:
         """True when the turn is an Atlas self-knowledge/architecture question.
 
@@ -1138,6 +1612,8 @@ class BuiltinResponseService:
         flow" about some other system is not Atlas self-knowledge.
         """
         if _ARCHITECTURE_RE.search(lowered):
+            return True
+        if _ARCHITECTURE_PARTS_RE.search(lowered):
             return True
         return bool(
             _ARCHITECTURE_PROCESS_RE.search(lowered)
@@ -1180,11 +1656,164 @@ class BuiltinResponseService:
             token = match.group(0).strip(".")
             if token and token not in seen:
                 seen.append(token)
-        for token in seen:
+        # C5.1 — plain-language questions name a topic, not a dotted identifier
+        # ("... handle conversation?"). Also try the bounded bare tokens so the
+        # answer can resolve to the component the model actually records. Only
+        # tokens the model VERIFIES are used, so this cannot invent a component.
+        for token in _ARCHITECTURE_TOPIC_TOKEN_RE.findall(query.lower()):
+            if token not in seen and token not in _ARCHITECTURE_TOPIC_STOPWORDS:
+                seen.append(token)
+        for token in seen[:_MAX_ARCHITECTURE_TOPIC_TOKENS]:
             located = model.locate(token)
             if located.found:
                 return located
         return None
+
+    @staticmethod
+    def _verify_anchor(path: str) -> bool:
+        """True when the anchor module actually exists (C5.1).
+
+        Verified through the import system rather than a repository scan, so the
+        check is deterministic, read-only, model-free and available even before
+        a repository map has been built. An unverified anchor is never stated.
+        """
+        try:
+            return importlib.util.find_spec(path) is not None
+        except Exception:
+            return False
+
+    def _self_knowledge_bullets(self, topic: str, model: Any) -> tuple[str, ...]:
+        """Bounded behaviour bullets for a self-knowledge topic (C5.1).
+
+        Every bullet is derived from a VERIFIED source: the injected
+        ArchitectureModel, the live capability registry, or the enumerated value
+        sets the architecture actually defines. No free-form prose is invented.
+        """
+        try:
+            if topic == "reference resolution":
+                from atlas.conversation.reference_resolution import (
+                    ConversationReferenceResolver,
+                    ReferenceResolutionStatus,
+                )
+
+                return (
+                    "References are resolved by the existing "
+                    f"{ConversationReferenceResolver.__name__}, which resolves a "
+                    "bounded set of reference forms against conversation state and "
+                    "captured entities.",
+                    "Resolution statuses defined by the architecture: "
+                    + _enum_values(ReferenceResolutionStatus)
+                    + ".",
+                    "Resolution is fail-closed: an ambiguous or unresolvable reference "
+                    "is never guessed — Atlas asks for clarification, or proceeds "
+                    "without attaching a referent.",
+                )
+            if topic == "evidence and failure behaviour":
+                from atlas.orchestration.execution_models import (
+                    ExecutionStatus,
+                    StepFailureKind,
+                )
+
+                return (
+                    "Research/execution outcomes are mapped to explicit failure kinds "
+                    "defined by the architecture: "
+                    + _enum_values(StepFailureKind)
+                    + ".",
+                    "Run results are represented as: "
+                    + _enum_values(ExecutionStatus)
+                    + ".",
+                    "No evidence and no relevant evidence are never reported as success; "
+                    "an authority/governance denial is represented as a rejected result.",
+                )
+            if topic == "current limitations":
+                bullets: list[str] = []
+                if model.limitations:
+                    bullets.append(
+                        "Limitations recorded by the architecture model: "
+                        + "; ".join(
+                            model.limitations[:_MAX_ARCHITECTURE_LIMITATIONS]
+                        )
+                    )
+                else:
+                    bullets.append(
+                        "The architecture model records no additional limitations."
+                    )
+                bullets.append(
+                    f"Registered capabilities: {len(self._capability_names())}."
+                )
+                bullets.append(
+                    "Verified self-knowledge currently covers only these question "
+                    "families: architecture/components, reference resolution, "
+                    "evidence/failure behaviour, current limitations, research "
+                    "process. Anything else is reported as not verified, not guessed."
+                )
+                return tuple(bullets)
+            if topic == "research process":
+                from atlas.research.acquisition import InformationAcquisitionService
+                from atlas.research.coordinator import ConcreteResearchCoordinator
+
+                return (
+                    "A research request becomes a bounded orchestration RESEARCH step "
+                    "whose question is the research objective.",
+                    "The existing "
+                    f"{ConcreteResearchCoordinator.__name__} decomposes the objective, "
+                    "resolves only already-authorized sources, extracts claims, and "
+                    "verifies them.",
+                    "The existing "
+                    f"{InformationAcquisitionService.__name__} maps the outcome "
+                    "honestly and external (web) sources remain deny-by-default unless "
+                    "explicitly allowlisted.",
+                    "Completion is reported only when authorized evidence addresses "
+                    "the objective; otherwise no_evidence / no_relevant_evidence / "
+                    "partial are reported.",
+                )
+        except Exception:  # noqa: BLE001 - never fabricate: emit no bullets
+            return ()
+        return ()
+
+    def _render_self_knowledge(self, topic: str) -> str:
+        """Render a bounded, evidence-grounded self-knowledge answer (C5.1).
+
+        Consumes ONLY verified read-only sources: the injected ArchitectureModel
+        (anchors), the live capability registry (counts), and the enumerated
+        value sets the architecture defines. Every anchor is verified present
+        before it is stated; when no anchor is verified the answer is an honest
+        bounded unknown. Nothing is mutated and no model is called.
+        """
+        model = self._resolve_architecture_model()
+        if model is None:
+            return self._render_unsupported()
+
+        anchors = _self_knowledge_anchors(topic)
+        verified = [path for path in anchors if self._verify_anchor(path)]
+        if not verified:
+            return (
+                "Atlas self-knowledge is bounded to verified internal sources, and "
+                "I don't have verified self-knowledge for that yet: the documented "
+                "component(s) that would substantiate an answer are not present. "
+                "Nothing was guessed."
+            )
+
+        lines = [
+            f"Atlas self-knowledge — {topic} "
+            "(deterministic, read-only; no external AI model used):",
+            "",
+            "Verified architectural anchors:",
+        ]
+        for path in verified:
+            lines.append(
+                f"- `{path.replace('.', '/')}.py` (module verified present)"
+            )
+        lines.append("")
+        lines.append("Bounded behaviour (from the verified architecture):")
+        for bullet in self._self_knowledge_bullets(topic, model):
+            lines.append(f"- {bullet}")
+        lines.append("")
+        lines.append(
+            "This is a bounded projection of verified internal sources; anything "
+            "not listed is not asserted. Nothing was modified."
+        )
+        return "\n".join(lines)
 
     def _render_architecture(self, query: str = "") -> str:
         """Render a bounded, read-only architecture self-knowledge answer.
@@ -1336,6 +1965,85 @@ class BuiltinResponseService:
         if message_count is not None:
             lines.append(f"- Messages in this conversation: {message_count}.")
         return "\n".join(lines)
+
+    def _render_validated_knowledge(self, detail: object) -> str:
+        """Render the EXISTING validated-knowledge result honestly (C6.1).
+
+        Presents only already-validated (SUPPORTED) claims with their
+        validation status and source attribution, and reports the retrieval's
+        own authoritative outcome when nothing matched or the store cannot be
+        read. Nothing is acquired, inferred, or invented.
+        """
+        if not isinstance(detail, tuple) or len(detail) != 2:
+            return self._render_unsupported()
+        query, result = detail
+        status = self._validated_knowledge_status(result)
+        items = self._validated_knowledge_items(result)
+        if status == "ok" and items:
+            lines = [
+                f"Validated knowledge for '{query}' "
+                "(read-only retrieval from the validated knowledge store; "
+                "no model used):",
+                "",
+                f"{len(items)} validated (SUPPORTED) claim(s) matched.",
+                "",
+            ]
+            for item in items[:3]:
+                statement = str(getattr(item, "statement", "") or "").strip()
+                if len(statement) > _MAX_VALIDATED_CLAIM_CHARS:
+                    statement = statement[:_MAX_VALIDATED_CLAIM_CHARS].rstrip() + "..."
+                lines.append(
+                    "### Validated claim "
+                    f"({getattr(item, 'validation_status', 'SUPPORTED')})"
+                )
+                lines.append(statement)
+                confidence = getattr(item, "claim_confidence", None)
+                if isinstance(confidence, (int, float)):
+                    lines.append(f"- Claim confidence: {confidence}")
+                score = getattr(item, "verification_score", None)
+                if isinstance(score, (int, float)):
+                    lines.append(f"- Verification score: {score}")
+                for citation in self._validated_knowledge_citations(item):
+                    lines.append(f"- Source: {citation}")
+                lines.append("")
+            return "\n".join(lines).strip()
+        if status in ("store_unavailable", "store_error"):
+            message = str(getattr(result, "message", "") or "").strip()
+            return (
+                f"Validated knowledge for '{query}': the validated knowledge "
+                f"store is unavailable (status: {status or 'store_unavailable'})."
+                + (f" {message}" if message else "")
+                + " I fail closed rather than answer from memory, conversation "
+                "state, or a model."
+            )
+        message = str(getattr(result, "message", "") or "").strip()
+        lines = [
+            f"No validated knowledge matched '{query}' "
+            f"(status: {status or 'empty'}).",
+        ]
+        if message:
+            lines.append(message)
+        lines.append(
+            "Only claims an authorized source already SUPPORTED are reported; "
+            "nothing is acquired, inferred, or invented for this answer."
+        )
+        return " ".join(lines)
+
+    @staticmethod
+    def _validated_knowledge_citations(item: Any) -> tuple[str, ...]:
+        """Source attribution for a validated claim (provenance preserved)."""
+        rendered: list[str] = []
+        for citation in tuple(getattr(item, "citations", ()) or ())[:3]:
+            uri = str(getattr(citation, "source_uri", "") or "")
+            title = str(getattr(citation, "source_title", "") or "")
+            label = title or uri
+            if not label:
+                label = str(getattr(citation, "record_id", "") or "unknown source")
+            location = str(getattr(citation, "page_or_line", "") or "")
+            section = str(getattr(citation, "section", "") or "")
+            suffix = ", ".join(part for part in (section, location) if part)
+            rendered.append(f"{label} ({suffix})" if suffix else label)
+        return tuple(rendered)
 
     def _render_recall(self, query: str) -> str:
         memories = self._search_memories(query)

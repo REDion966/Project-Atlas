@@ -280,10 +280,14 @@ _EXPLICIT_CONTEXT_RE = re.compile(
 )
 
 #: Bounded bare demonstrative/pronoun reference (one word, optionally followed
-#: by one generic noun). Never resolved on its own.
+#: by one generic noun). Never resolved on its own. NLU-4 adds the possessive
+#: "its" and the product/device nouns so "this phone" / "its camera" are
+#: recognized as references to a captured conversational entity.
 _BARE_REFERENCE_RE = re.compile(
-    r"\b(?:it|that|this)"
-    r"(?:\s+(?:issue|problem|subject|topic|one|investigation|result|task|thing))?\b"
+    r"\b(?:it|its|that|this)"
+    r"(?:\s+(?:issue|problem|subject|topic|one|investigation|result|task|thing"
+    r"|phone|smartphone|mobile|device|product|model|laptop|notebook|tablet"
+    r"|camera|gadget|item|monitor|display|console|printer))?\b"
 )
 
 #: Field label reported for a context-derived referent.
@@ -301,6 +305,11 @@ _STATE_INVESTIGATION_FIELD = "current_investigation"
 
 #: Field label reported for the established development-intent fallback.
 _ESTABLISHED_DEVELOPMENT_INTENT_FIELD = "development_intent"
+
+#: Field label reported for a referent resolved to a captured conversational
+#: entity (NLU-4/NLU-5). Public because the conversation service uses it to
+#: recognise a captured-entity ambiguity that must be clarified.
+CAPTURED_ENTITY_FIELD = "captured_entity"
 
 #: Maximum distinct contextual subject candidates considered.
 _MAX_CONTEXT_SUBJECTS = 8
@@ -406,6 +415,142 @@ def _established_facts(
             continue
         facts.append((field_name, text))
     return tuple(facts)
+
+
+def _captured_entity_candidates(
+    state: ConversationState | None,
+    query: str,
+) -> tuple[tuple[str, str], ...]:
+    """Return the bounded captured conversational entities as candidates (NLU-4).
+
+    Lowest-precedence candidate source: used only when no investigation-derived
+    or established fact candidate exists, so it can never override existing
+    behavior. Each distinct captured entity is one candidate, so two captured
+    entities correctly yield AMBIGUOUS (clarification) rather than a silent
+    choice. Deduplicated, bounded, and never self-matching.
+    """
+    if state is None:
+        return ()
+    query_key = _subject_key(query)
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entity in getattr(state, "captured_entities", ()) or ():
+        name = getattr(entity, "name", None)
+        if not isinstance(name, str):
+            continue
+        text = name.strip()
+        if not text:
+            continue
+        key = _subject_key(text)
+        if not key or key == query_key or key in seen:
+            continue
+        seen.add(key)
+        candidates.append((CAPTURED_ENTITY_FIELD, text))
+    return tuple(candidates[:_MAX_CONTEXT_SUBJECTS])
+
+
+#: NLU-5 — bounded grammatical wrappers plus generic product/device nouns. A
+#: descriptive reference resolves only from a token OUTSIDE this vocabulary, so
+#: a generic noun alone ("the phone") can never select an entity.
+_GENERIC_ENTITY_TOKENS: frozenset[str] = frozenset(
+    {
+        "the", "this", "that", "these", "those", "my", "your", "our", "their",
+        "its", "it", "a", "an", "and", "or", "of", "for", "with", "to", "in",
+        "on", "at", "from", "as", "about",
+        "phone", "phones", "smartphone", "smartphones", "mobile", "device",
+        "devices", "product", "products", "laptop", "notebook", "tablet",
+        "camera", "cameras", "computer", "gadget", "gadgets", "item", "items",
+        "model", "models", "monitor", "display", "console", "printer",
+        "television", "watch", "headphone", "earbud", "drone", "router",
+        "keyboard", "mouse", "speaker", "appliance",
+    }
+)
+
+#: Token pattern used for descriptor comparison.
+_DESCRIPTOR_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'-]*")
+
+#: Bounded descriptive phrase: a determiner/possessive followed by up to four
+#: words ("the Samsung phone", "this Samsung phone", "the Samsung phone's …").
+_DESCRIPTIVE_PHRASE_RE = re.compile(
+    r"\b(?:the|this|that|these|those|my|your|our|their)\s+"
+    r"([a-z0-9][a-z0-9'-]*(?:\s+[a-z0-9][a-z0-9'-]*){0,3})"
+)
+
+
+def _descriptor_tokens(text: str) -> frozenset[str]:
+    """Distinctive descriptor tokens of a phrase (NLU-5).
+
+    Lower-cased, possessive-normalized, with bounded grammatical wrappers and
+    generic product/device nouns removed, so only identity-bearing tokens
+    remain. Tokens of two characters or fewer are ignored (they are not
+    distinctive). No fuzzy matching, no aliases, no semantic inference.
+    """
+    lowered = text.lower().replace("'s", " ")
+    return frozenset(
+        token
+        for token in _DESCRIPTOR_TOKEN_RE.findall(lowered)
+        if len(token) > 2 and token not in _GENERIC_ENTITY_TOKENS
+    )
+
+
+def _descriptive_entity_match(
+    normalized_query: str,
+    pairs: tuple[tuple[str, str], ...],
+    query: str,
+) -> ReferenceResolutionResult | None:
+    """Bounded descriptive-reference match against captured entities (NLU-5).
+
+    Matches only when the query contains a determiner-led descriptive phrase
+    whose distinctive descriptor tokens intersect a captured entity's name
+    tokens. Exactly one distinct entity => RESOLVED; more than one => AMBIGUOUS;
+    none => ``None`` (fall through to the existing paths). Never guesses and
+    never uses fuzzy/semantic matching.
+    """
+    descriptors: set[str] = set()
+    for match in _DESCRIPTIVE_PHRASE_RE.finditer(normalized_query):
+        descriptors |= _descriptor_tokens(match.group(1))
+    if not descriptors:
+        return None
+
+    matched: list[str] = []
+    for _field, name in pairs:
+        name_lower = name.lower()
+        if name_lower in normalized_query:
+            # The entity is named explicitly in this turn. An explicit target
+            # is not a descriptive reference, so it cannot be selected (nor
+            # made ambiguous) by descriptor matching.
+            continue
+        name_tokens = set(
+            _DESCRIPTOR_TOKEN_RE.findall(name_lower.replace("'s", " "))
+        )
+        if descriptors & name_tokens:
+            matched.append(name)
+    unique = list(dict.fromkeys(matched))
+    if not unique:
+        return None
+    if len(unique) == 1:
+        return ReferenceResolutionResult(
+            status=ReferenceResolutionStatus.RESOLVED,
+            query=query,
+            resolved_field=CAPTURED_ENTITY_FIELD,
+            resolved_value=unique[0],
+            reason=(
+                f"Unique captured entity resolved for descriptive reference "
+                f"{normalized_query!r}."
+            ),
+        )
+    # Carrying the referent field marks this as a captured-entity ambiguity so
+    # the caller can request clarification (rather than silently choosing).
+    return ReferenceResolutionResult(
+        status=ReferenceResolutionStatus.AMBIGUOUS,
+        query=query,
+        resolved_field=CAPTURED_ENTITY_FIELD,
+        candidates=tuple(unique),
+        reason=(
+            "Multiple captured entities match the descriptive reference: "
+            f"{', '.join(unique)}. Clarification required."
+        ),
+    )
 
 
 class ConversationReferenceResolver:
@@ -529,6 +674,24 @@ class ConversationReferenceResolver:
                 # existing exactly-one contract below yields AMBIGUOUS, so
                 # clarification is requested instead of one silently winning.
                 pairs = established
+        if not pairs:
+            # NLU-4 — lowest-precedence bounded source: entities the user
+            # explicitly named earlier in THIS conversation. Used only when no
+            # investigation/established candidate exists, so existing behavior
+            # is unchanged; two captured entities remain AMBIGUOUS.
+            captured = _captured_entity_candidates(state, query)
+            if captured:
+                pairs = captured
+                referent_field = CAPTURED_ENTITY_FIELD
+
+        # NLU-5 — bounded descriptive match. Only when the referent source is
+        # the captured-entity layer (so every existing investigation/established
+        # behavior is untouched): a distinctive descriptor that selects exactly
+        # one captured entity resolves; more than one is AMBIGUOUS.
+        if referent_field == CAPTURED_ENTITY_FIELD and pairs:
+            descriptive = _descriptive_entity_match(normalized, pairs, query)
+            if descriptive is not None:
+                return descriptive
 
         explicit = _EXPLICIT_CONTEXT_RE.search(normalized)
         if explicit is not None:

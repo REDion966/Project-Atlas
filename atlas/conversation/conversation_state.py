@@ -28,8 +28,13 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 import uuid
 
+from atlas.conversation.entity_capture import CapturedEntity
+
 #: Bound applied to a retained governed-operation operand.
 _MAX_OPERATION_OPERAND_CHARS: int = 500
+
+#: NLU-4 — upper bound on conversation-scoped captured entities retained.
+MAX_CAPTURED_ENTITIES: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +180,11 @@ class ConversationState:
     # The single most recent governed operation (facts only; no history).
     last_operation: Optional[GovernedOperation] = None
 
+    # NLU-4 — bounded, conversation-scoped entities the user explicitly named
+    # (most recent last). Provenance-carrying references only; never a durable
+    # memory store, never a verified fact, never authority.
+    captured_entities: tuple[CapturedEntity, ...] = ()
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -211,6 +221,9 @@ class ConversationState:
                 if self.last_operation is not None
                 else None
             ),
+            "captured_entities": [
+                entity.to_dict() for entity in self.captured_entities
+            ],
             "turn_id": self.turn_id,
         }
 
@@ -256,6 +269,19 @@ class ConversationStateManager:
             merged["last_operation"] = GovernedOperation.from_dict(
                 merged["last_operation"]
             )
+        # Likewise rebuild the bounded captured-entity records (NLU-4).
+        raw_entities = merged.get("captured_entities")
+        if isinstance(raw_entities, (list, tuple)):
+            rebuilt: list[CapturedEntity] = []
+            for item in raw_entities:
+                entity = (
+                    item
+                    if isinstance(item, CapturedEntity)
+                    else CapturedEntity.from_dict(item)
+                )
+                if entity is not None:
+                    rebuilt.append(entity)
+            merged["captured_entities"] = tuple(rebuilt)
         self._state = ConversationState(**merged)
         return self._state
 
@@ -376,3 +402,38 @@ class ConversationStateManager:
         if operation is None:
             return self._state
         return self.update(last_operation=operation)
+
+    def record_captured_entities(
+        self,
+        entities: "tuple[CapturedEntity, ...] | list[CapturedEntity]",
+        *,
+        limit: int = MAX_CAPTURED_ENTITIES,
+    ) -> ConversationState:
+        """Append bounded captured entities (NLU-4).
+
+        Deduplicated by normalized name — re-mentioning an entity moves it to
+        the most-recent position rather than adding a duplicate — and capped at
+        ``MAX_CAPTURED_ENTITIES`` (oldest dropped). Non-``CapturedEntity``,
+        blank, and over-long entries are ignored (fail closed).
+        """
+        if not entities:
+            return self._state
+        ordered: dict[str, CapturedEntity] = {}
+        for entity in self._state.captured_entities or ():
+            if isinstance(entity, CapturedEntity):
+                ordered[entity.normalized or entity.name.lower()] = entity
+        for entity in entities:
+            if not isinstance(entity, CapturedEntity):
+                continue
+            name = entity.name.strip()
+            if not name:
+                continue
+            key = entity.normalized or name.lower()
+            ordered.pop(key, None)
+            ordered[key] = CapturedEntity(
+                name=name,
+                normalized=key,
+                turn_id=entity.turn_id,
+            )
+        bounded = tuple(list(ordered.values())[-max(1, limit):])
+        return self.update(captured_entities=bounded)

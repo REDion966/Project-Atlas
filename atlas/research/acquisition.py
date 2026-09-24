@@ -44,6 +44,7 @@ from atlas.evolution.freshness.models import (
 )
 from atlas.evolution.models import ResearchQuery
 from atlas.research.coordinator import ConcreteResearchCoordinator
+from atlas.research.dimensions import dimension_coverage, extract_dimensions
 from atlas.research.models import (
     KnowledgeClaim,
     ResearchReport,
@@ -139,6 +140,11 @@ class AcquisitionResult:
     source_evidence: tuple[SourceEvidence, ...] = ()
     failures: tuple[tuple[str, str], ...] = ()
     elapsed_seconds: float = 0.0
+    # NLU-3 — bounded dimension coverage for an explicitly enumerated request.
+    # Empty for a single-aspect request (behaviour unchanged).
+    requested_dimensions: tuple[str, ...] = ()
+    supported_dimensions: tuple[str, ...] = ()
+    unsupported_dimensions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +165,9 @@ class AcquisitionResult:
             "source_evidence": [s.to_dict() for s in self.source_evidence],
             "failures": list(self.failures),
             "elapsed_seconds": round(self.elapsed_seconds, 4),
+            "requested_dimensions": list(self.requested_dimensions),
+            "supported_dimensions": list(self.supported_dimensions),
+            "unsupported_dimensions": list(self.unsupported_dimensions),
         }
 
 
@@ -361,6 +370,22 @@ class InformationAcquisitionService:
         else:
             status = "noop"
 
+        # NLU-3 — bounded dimension coverage. Only an explicitly enumerated
+        # request has dimensions; a single-aspect request keeps the empty
+        # coverage (behaviour unchanged). Evidence is the acquired claim text
+        # plus the resolved source URIs.
+        requested_dimensions = extract_dimensions(question)
+        supported_dimensions: tuple[str, ...] = ()
+        unsupported_dimensions: tuple[str, ...] = ()
+        if requested_dimensions:
+            evidence_texts = [
+                claim.statement for claim in (report.claims if report is not None else ())
+            ]
+            evidence_texts.extend(resolved_sources)
+            supported_dimensions, unsupported_dimensions = dimension_coverage(
+                requested_dimensions, evidence_texts
+            )
+
         return AcquisitionResult(
             acquisition_id=acq_id,
             decision="research",
@@ -379,6 +404,9 @@ class InformationAcquisitionService:
             source_evidence=evidence,
             failures=tuple(failures),
             elapsed_seconds=time.monotonic() - started,
+            requested_dimensions=requested_dimensions,
+            supported_dimensions=supported_dimensions,
+            unsupported_dimensions=unsupported_dimensions,
         )
 
     def _load_report(self, qid: str, question: str):

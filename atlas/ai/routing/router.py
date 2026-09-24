@@ -68,7 +68,11 @@ class ModelRouter:
         Returns:
             A RoutingDecision, or None if no profiles are registered.
             Without the external-providers opt-in, the decision resolves
-            only to an explicitly recognized local no-network profile.
+            only to an explicitly recognized local no-network profile. With
+            the opt-in enabled and a real provider registered, the
+            deterministic no-network tier is excluded from candidate
+            selection, so it cannot win ordinary conversational routing on
+            cost alone.
         """
 
         profiles = self._registry.list_profiles()
@@ -78,6 +82,21 @@ class ModelRouter:
                 for profile in profiles
                 if profile.provider_name in LOCAL_PROVIDER_NAMES
             ]
+        else:
+            # Explicit real-provider opt-in: when a real (non deterministic
+            # no-network tier) profile is actually registered, exclude the
+            # deterministic tier from candidate selection so it cannot win
+            # ordinary conversational routing merely by holding the cheapest
+            # complexity score. LOCAL_PROVIDER_NAMES semantics are untouched:
+            # it still defines the no-network tier consumed by the
+            # final-response acceptance gate.
+            real_profiles = [
+                profile
+                for profile in profiles
+                if profile.provider_name not in LOCAL_PROVIDER_NAMES
+            ]
+            if real_profiles:
+                profiles = real_profiles
         return self._policy.select(request, profiles)
 
     @property

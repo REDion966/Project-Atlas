@@ -59,6 +59,15 @@ class StepFailureKind(str, Enum):
     EXECUTION_FAILED = "execution_failed"
     BOUND_EXCEEDED = "bound_exceeded"
     DENIED_SURFACE = "denied_surface"
+    # NLU-1 — the operation ran but produced no authorized evidence satisfying
+    # the requested objective (e.g. a research acquisition that returned a
+    # noop/partial result with no sources or claims). This is NOT success, and
+    # it must never be reported as a completed step.
+    NO_EVIDENCE = "no_evidence"
+    # NLU-2 — evidence WAS acquired, but it does not address the requested
+    # research objective (e.g. unrelated local code sources matched by a
+    # coincidental token). Also NOT success.
+    NO_RELEVANT_EVIDENCE = "no_relevant_evidence"
 
 
 class ExecutionStatus(str, Enum):

@@ -33,12 +33,14 @@ from atlas.orchestration.execution_models import (
     ExecutionStep,
     OrchestrationResult,
     StepExecutionResult,
+    StepFailureKind,
     new_run_id,
 )
 from atlas.orchestration.models import NodeKind
 from atlas.reasoning.capabilities.models import Capability
 from atlas.reasoning.execution.dispatcher import CapabilityDispatcher
 from atlas.reasoning.execution.registry import CapabilityRegistry
+from atlas.research.relevance import Relevance, classify_relevance
 
 if TYPE_CHECKING:
     from atlas.session.context import SessionContext
@@ -430,6 +432,12 @@ class OrchestrationExecutor:
         output = dict(result.get("output", {}) or {})
         error = str(result.get("error", "") or "")
         if success:
+            metadata = {"result": _safe_snapshot(result.get("metadata", {}))}
+            # NLU-3 — carry bounded dimension completeness onto the step so the
+            # run status and reporting can reflect a PARTIAL research result.
+            completeness = result.get("research_completeness")
+            if isinstance(completeness, dict):
+                metadata["research_completeness"] = _safe_snapshot(completeness)
             return StepExecutionResult(
                 step_id=step.step_id,
                 kind=kind,
@@ -440,14 +448,14 @@ class OrchestrationExecutor:
                 principal_id=principal_id,
                 authority=authority,
                 allowed=True,
-                metadata={"result": _safe_snapshot(result.get("metadata", {}))},
+                metadata=metadata,
             )
         return StepExecutionResult(
             step_id=step.step_id,
             kind=kind,
             target=target,
             state=ExecutionState.FAILED,
-            failure_kind="execution_failed",
+            failure_kind=result.get("failure_kind", "execution_failed"),
             error=error or "step execution failed",
             output=output,
             execution_time_ms=elapsed,
@@ -521,10 +529,80 @@ class OrchestrationExecutor:
                 "error": f"research acquisition failed: {_safe_snapshot(failures)}",
                 "output": _result_dict(result),
             }
+        # NLU-1 — only ``ok`` means the acquisition produced authorized
+        # evidence for the requested objective. ``noop`` (nothing authorized to
+        # retrieve, or a report with no claims) and ``partial`` (no durable
+        # evidence) did NOT satisfy the research objective, so they must not be
+        # reported as a completed step. This is the honest counterpart of the
+        # deny-by-default research policy: a denied/empty acquisition is
+        # surfaced as a failure to obtain evidence, never as fabricated success.
+        payload = _result_dict(result)
+        if status == "ok":
+            # NLU-2 — evidence RELEVANCE. "Claims exist" is not objective
+            # satisfaction: the acquired sources must address the requested
+            # research subject. A coincidental token match against an unrelated
+            # local source (e.g. a code module named "...review...") must never
+            # be reported as successful research.
+            relevance = classify_relevance(
+                params.get("question", ""), payload.get("sources")
+            )
+            if relevance is Relevance.RELEVANT:
+                # NLU-3 — dimension coverage. Subject-relevant evidence is not
+                # automatically complete: when the request EXPLICITLY named
+                # dimensions, every requested dimension must be supported.
+                requested = tuple(payload.get("requested_dimensions") or ())
+                supported = tuple(payload.get("supported_dimensions") or ())
+                unsupported = tuple(payload.get("unsupported_dimensions") or ())
+                if requested and not supported:
+                    return {
+                        "success": False,
+                        "error": (
+                            "relevant evidence was acquired but it does not "
+                            "address any of the requested dimensions"
+                        ),
+                        "output": payload,
+                        "failure_kind": StepFailureKind.NO_RELEVANT_EVIDENCE.value,
+                    }
+                completed: dict = {
+                    "success": True,
+                    "output": payload,
+                    "error": "",
+                }
+                if requested and unsupported:
+                    completed["research_completeness"] = {
+                        "status": "partial",
+                        "requested": list(requested),
+                        "supported": list(supported),
+                        "unsupported": list(unsupported),
+                    }
+                return completed
+            if relevance is Relevance.NO_EVIDENCE:
+                return {
+                    "success": False,
+                    "error": (
+                        "research produced no authorized evidence for the "
+                        "requested objective"
+                    ),
+                    "output": payload,
+                    "failure_kind": StepFailureKind.NO_EVIDENCE.value,
+                }
+            return {
+                "success": False,
+                "error": (
+                    "acquired evidence does not address the requested research "
+                    "objective (no subject in common with the acquired sources)"
+                ),
+                "output": payload,
+                "failure_kind": StepFailureKind.NO_RELEVANT_EVIDENCE.value,
+            }
         return {
-            "success": status in ("ok", "noop", "partial"),
-            "output": _result_dict(result),
-            "error": "" if status in ("ok", "noop") else f"research partial: {status}",
+            "success": False,
+            "error": (
+                "research produced no authorized evidence for the requested "
+                f"objective (acquisition status: {status})"
+            ),
+            "output": payload,
+            "failure_kind": StepFailureKind.NO_EVIDENCE.value,
         }
 
     # ------------------------------------------------------------------
@@ -585,6 +663,10 @@ class OrchestrationExecutor:
         if any(r.failed and r.failure_kind == "authorization_failed" for r in results):
             return ExecutionStatus.REJECTED
         if all(r.completed for r in results):
+            # NLU-3 — a completed research step whose requested dimensions are
+            # only partly covered is a PARTIAL result, never COMPLETED.
+            if any(_research_completeness(r) == "partial" for r in results):
+                return ExecutionStatus.PARTIAL
             return ExecutionStatus.COMPLETED
         if any(r.completed for r in results):
             return ExecutionStatus.PARTIAL
@@ -609,6 +691,19 @@ class OrchestrationExecutor:
             principal_id=principal_id,
             authority=authority,
         )
+
+
+def _research_completeness(step: Any) -> str:
+    """Return a step's bounded research-completeness status, or ``""``."""
+    metadata = getattr(step, "metadata", None)
+    if not isinstance(metadata, dict):
+        return ""
+    completeness = metadata.get("research_completeness")
+    if isinstance(completeness, dict):
+        status = completeness.get("status")
+        if isinstance(status, str):
+            return status
+    return ""
 
 
 def _result_dict(result: Any) -> dict:

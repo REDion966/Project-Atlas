@@ -129,7 +129,17 @@ class TestInformationOrchestration:
                 self.storage = None
 
             def run(self, query):
-                return ResearchResult(query_id="q", findings="found", sources=[], confidence=0.8)
+                # A genuine research success must carry authorized evidence
+                # that is RELEVANT to the objective (NLU-2): the source URI
+                # shares the objective's subject token ("memory"). The
+                # acquisition service maps a result WITH resolved sources to
+                # status "ok" (see TestResearchEvidenceHonesty).
+                return ResearchResult(
+                    query_id="q",
+                    findings="found",
+                    sources=["https://example.test/memory-consolidation"],
+                    confidence=0.8,
+                )
 
         service = InformationAcquisitionService(coordinator=_Coordinator())
         executor = OrchestrationExecutor(research_service=service, authority_service=authority)
@@ -156,7 +166,17 @@ class TestInformationOrchestration:
                 self.storage = None
 
             def run(self, query):
-                return ResearchResult(query_id="q", findings="found", sources=[], confidence=0.8)
+                # A genuine research success must carry authorized evidence
+                # that is RELEVANT to the objective (NLU-2): the source URI
+                # shares the objective's subject token ("memory"). The
+                # acquisition service maps a result WITH resolved sources to
+                # status "ok" (see TestResearchEvidenceHonesty).
+                return ResearchResult(
+                    query_id="q",
+                    findings="found",
+                    sources=["https://example.test/memory-consolidation"],
+                    confidence=0.8,
+                )
 
         executor = OrchestrationExecutor(
             research_service=InformationAcquisitionService(coordinator=_Coordinator()),
@@ -168,6 +188,58 @@ class TestInformationOrchestration:
         msg = orchestration_result_to_message(result, intent=spec.intent)
         assert msg.role == "assistant"
         assert msg.metadata["orchestration"]["status"] == "completed"
+
+
+class TestResearchEvidenceHonesty:
+    """NLU-1 — a research run with no authorized evidence must never be
+    reported as successful completion ("Done" / "Steps completed: 1/1")."""
+
+    def _run(self):
+        from atlas.evolution.models import ResearchResult
+        from atlas.research.acquisition import InformationAcquisitionService
+
+        authority = AuthorityService("Owner")
+        ctx = SessionContext.from_session(SessionManager(authority).create_session("owner"))
+
+        class _NoEvidenceCoordinator:
+            def __init__(self):
+                self.planner = None
+                self.storage = None
+
+            def run(self, query):
+                return ResearchResult(
+                    query_id="q", findings="", sources=[], confidence=0.0
+                )
+
+        executor = OrchestrationExecutor(
+            research_service=InformationAcquisitionService(
+                coordinator=_NoEvidenceCoordinator()
+            ),
+            authority_service=authority,
+        )
+        spec = TaskIntake().intake("Find the latest research on memory consolidation")
+        steps = task_spec_to_execution_steps(spec)
+        return executor, spec, ctx, steps
+
+    def test_zero_evidence_is_not_a_completed_step(self):
+        executor, spec, ctx, steps = self._run()
+        result = executor.execute(
+            ExecutionRequest(steps=tuple(steps), session_context=ctx)
+        )
+        assert result.status is ExecutionStatus.FAILED
+        assert result.steps[0].state is ExecutionState.FAILED
+        assert result.steps[0].failure_kind == "no_evidence"
+
+    def test_reporting_never_claims_done_without_evidence(self):
+        executor, spec, ctx, steps = self._run()
+        result = executor.execute(
+            ExecutionRequest(steps=tuple(steps), session_context=ctx)
+        )
+        msg = orchestration_result_to_message(result, intent=spec.intent)
+        assert "Done" not in msg.content
+        assert "Steps completed: 1/1" not in msg.content
+        assert msg.metadata["orchestration"]["status"] == "failed"
+        assert "no authorized evidence" in msg.content
 
 
 # ---------------------------------------------------------------------------

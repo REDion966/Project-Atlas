@@ -64,6 +64,28 @@ def _inputs_for(spec: TaskSpec) -> dict[str, Any]:
     return inputs
 
 
+def _research_question(spec: TaskSpec, slot: str) -> str:
+    """Research question for a spec, carrying a resolved conversational subject.
+
+    NLU-4 — when the turn's reference ("its", "this phone") was resolved by the
+    existing reference machinery, the resolved subject is prepended to the
+    research objective so the acquisition preserves the actual target the user
+    referred to. Without a resolved reference the question is byte-for-byte the
+    bounded intent, exactly as before.
+    """
+    context = getattr(spec, "context", None)
+    resolved = context.get("resolved_reference") if isinstance(context, dict) else None
+    value = resolved.get("value") if isinstance(resolved, dict) else None
+    if isinstance(value, str) and value.strip():
+        cleaned = value.strip()
+        # An explicitly named target already carries itself in the objective;
+        # do not duplicate it.
+        if cleaned.lower() in slot.lower():
+            return slot
+        return f"{cleaned}: {slot}"[:_MAX_INPUTS_CHARS]
+    return slot
+
+
 def task_spec_to_execution_steps(
     spec: TaskSpec | None,
     *,
@@ -127,7 +149,7 @@ def task_spec_to_execution_steps(
                     step_id="step-0000",
                     kind=NodeKind.RESEARCH,
                     target="acquire",
-                    inputs={"question": slot},
+                    inputs={"question": _research_question(spec, slot)},
                     description=spec.intent,
                 ),
             )
