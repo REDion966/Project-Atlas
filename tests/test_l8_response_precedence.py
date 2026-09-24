@@ -236,7 +236,16 @@ class TestResponsePrecedence:
     def test_internal_structures_are_not_exposed(self):
         service, _recording = _service()
         message = service.send(ELIGIBLE)
-        assert set(message.metadata) == {"cognition"}
+        # Task 1.1 — an accepted external-provider pipeline answer is now also
+        # reported as model-backed with its bounded provenance. The key set stays
+        # exactly pinned (no internal structure is exposed) and ``cognition``
+        # still carries only its source marker.
+        assert set(message.metadata) == {"cognition", "model_used", "ai_provenance"}
+        assert message.metadata["model_used"] is True
+        assert message.metadata["ai_provenance"] == {
+            "provider": NON_LOCAL[0],
+            "model": NON_LOCAL[1],
+        }
         assert set(message.metadata["cognition"]) == {"source"}
         text = message.content
         for internal in ("planning", "capabilities", "respond:", "final_response"):

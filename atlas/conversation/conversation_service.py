@@ -195,6 +195,77 @@ def _usable_pipeline_response(data: Any) -> str | None:
         return None
     return answer.strip()
 
+
+def _external_provider_provenance(provider: Any, model: Any) -> dict[str, str] | None:
+    """Bounded provider/model provenance for a NON-local provider answer.
+
+    Task 1.1 — the conversation layer now reports whether its final answer came
+    from an actual external/model provider. The classification reuses the
+    EXISTING authoritative boundary (``LOCAL_PROVIDER_NAMES``, already consulted
+    by the L8-b-ii precedence gate above) instead of any provider-specific
+    check: an absent identity, or the deterministic local no-network tier,
+    yields ``None``, so a response can never be reported as model-backed merely
+    because a model request was attempted.
+    """
+    provider_name = str(provider or "").strip()
+    if not provider_name or provider_name in LOCAL_PROVIDER_NAMES:
+        return None
+    provenance = {"provider": provider_name}
+    model_name = str(model or "").strip()
+    if model_name:
+        provenance["model"] = model_name
+    return provenance
+
+
+def _pipeline_provider_provenance(data: Any) -> dict[str, str] | None:
+    """Bounded external-provider provenance of a pipeline answer, or ``None``.
+
+    Reads the same ``ai_provenance`` payload the L8-b-ii precedence gate already
+    validated; nothing is inferred from a mere attempt.
+    """
+    if not isinstance(data, dict):
+        return None
+    provenance = data.get("ai_provenance")
+    if not isinstance(provenance, dict):
+        return None
+    return _external_provider_provenance(
+        provenance.get("provider"), provenance.get("model")
+    )
+
+
+def _pipeline_response_metadata(data: Any) -> dict[str, Any]:
+    """Metadata for an accepted pipeline answer (L8-b-ii).
+
+    The existing cognition marker is always present. Task 1.1 additionally
+    reports a genuine external/model answer as model-backed, together with its
+    bounded provenance, so a model-generated answer is not indistinguishable
+    from the deterministic floor.
+    """
+    metadata: dict[str, Any] = {"cognition": {"source": "pipeline_final_response"}}
+    provenance = _pipeline_provider_provenance(data)
+    if provenance is not None:
+        metadata["model_used"] = True
+        metadata["ai_provenance"] = provenance
+    return metadata
+
+
+def _model_response_metadata(response: Any) -> dict[str, Any]:
+    """Metadata for an answer returned by the residual AI path (Task 1.1).
+
+    ``model_used`` is True only for a genuine external/model provider — never the
+    deterministic local no-network tier, and never merely because a request was
+    attempted. Absent/unknown provider identity reports False and claims no
+    provenance.
+    """
+    provenance = _external_provider_provenance(
+        getattr(response, "provider", None),
+        getattr(response, "model", None),
+    )
+    metadata: dict[str, Any] = {"model_used": provenance is not None}
+    if provenance is not None:
+        metadata["ai_provenance"] = provenance
+    return metadata
+
 #: Governed operations whose handler is read-only and accepts a retained text
 #: operand, so a bounded repeat request may safely re-enter the SAME existing
 #: handler with the retained operand. Every other retained operation kind is
@@ -944,9 +1015,7 @@ class ConversationService:
                     assistant_message = Message(
                         role="assistant",
                         content=pipeline_answer,
-                        metadata={
-                            "cognition": {"source": "pipeline_final_response"}
-                        },
+                        metadata=_pipeline_response_metadata(decision.data),
                     )
                     self._conversation.add_message(assistant_message)
                     return assistant_message
@@ -972,6 +1041,7 @@ class ConversationService:
             assistant_message = Message(
                 role="assistant",
                 content=response.text,
+                metadata=_model_response_metadata(response),
             )
         except Exception as exc:
             # Phase 4 — an opted-in external provider failed (or the AI path
