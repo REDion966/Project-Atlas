@@ -1011,9 +1011,11 @@ class Atlas:
             ]
         )
 
-        # The optional model supplier instance is still exposed to the
-        # conversational P17 authoring seam; when not opted in it stays None.
-        self._proposal_change_supplier = model_supplier
+        # Task 2 — the SAME authoritative composition is exposed to both
+        # consumers: the F9 development controller above and the conversational
+        # P17 authoring seam. No second, competing supplier is constructed, and
+        # the deterministic-first ordering is unchanged.
+        self._proposal_change_supplier = change_supplier
 
         self._development_controller = DevelopmentCycleController(
             approval_manager=self._approval_manager,

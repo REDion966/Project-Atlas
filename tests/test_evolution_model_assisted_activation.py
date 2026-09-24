@@ -4,12 +4,19 @@ Proves the kernel-level OPT-IN activation policy for
 ``ModelAssistedChangeSupplier``:
 
   * OFF BY DEFAULT: ``[development] model_assisted_authoring = false`` keeps
-    the existing ``DeterministicChangeSupplier``; no model is required and no
+    the existing deterministic-first composition — the authoritative
+    ``CompositeChangeSupplier`` composes ``DeterministicChangeSupplier`` then
+    ``ScaffoldChangeSupplier`` and NO model member; no model is required and no
     model-assisted authoring occurs.
-  * EXPLICIT OPT-IN: when the flag is ``true``, the kernel constructs and
-    injects ``ModelAssistedChangeSupplier`` through the existing
-    ``change_supplier`` seam; a fake authoring model can produce a bounded
-    ``SuppliedChanges`` with ``origin="model-assisted-draft"``.
+  * EXPLICIT OPT-IN: when the flag is ``true``, the kernel composes the
+    existing ``ModelAssistedChangeSupplier`` as the LAST member of that same
+    authoritative composition; a fake authoring model configured on that member
+    can produce a bounded ``SuppliedChanges`` with
+    ``origin="model-assisted-draft"``.
+  * SHARED COMPOSITION (Task 2): the F9 ``DevelopmentCycleController`` and the
+    conversational P17 authoring seam receive the SAME authoritative
+    ``CompositeChangeSupplier`` instance — there is exactly one composition,
+    with the fixed order Deterministic -> Scaffold -> Model.
   * GOVERNANCE: the cycle STOPS at PENDING_APPROVAL; approval, execution, and
     promotion are never called automatically.
   * FAIL-CLOSED: a failing/malformed model produces a supplier failure and no
@@ -129,6 +136,60 @@ def _need():
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 5.2 composition helpers (Task 2 reconciliation).
+#
+# The authoritative supplier is a CompositeChangeSupplier with a fixed
+# deterministic-first order: Deterministic -> Scaffold -> Model (the model
+# member exists only when [development].model_assisted_authoring is opted in).
+# Both the F9 DevelopmentCycleController and the conversational P17 seam
+# receive that SAME instance, so configuration must be applied to the model
+# MEMBER, never to the composite itself.
+# ---------------------------------------------------------------------------
+
+
+def _authoritative_supplier(atlas):
+    """The shared Phase 5.2 composition used by both consumers."""
+    from atlas.evolution.development_scaffold_supplier import (
+        CompositeChangeSupplier,
+    )
+
+    supplier = atlas.development_controller._change_supplier  # noqa: SLF001
+    assert isinstance(supplier, CompositeChangeSupplier)
+    return supplier
+
+
+def _model_member(supplier):
+    """The ModelAssistedChangeSupplier member of the composition, or None."""
+    from atlas.evolution.model_assisted_supplier import (
+        ModelAssistedChangeSupplier,
+    )
+
+    return next(
+        (
+            member
+            for member in supplier.suppliers
+            if isinstance(member, ModelAssistedChangeSupplier)
+        ),
+        None,
+    )
+
+
+def _configure_authoring_model(supplier, authoring_model):
+    """Install a deterministic authoring double on the MODEL member."""
+    from atlas.evolution.model_assisted_supplier import (
+        ModelAssistedChangeSupplier,
+    )
+
+    member = _model_member(supplier)
+    assert isinstance(member, ModelAssistedChangeSupplier), (
+        "model-assisted authoring is opted in but the composition carries no "
+        "ModelAssistedChangeSupplier member"
+    )
+    member._authoring_model = authoring_model  # noqa: SLF001
+    return member
+
+
 def _valid_model_payload() -> str:
     return json.dumps(
         {
@@ -147,14 +208,21 @@ class TestOffByDefault:
         self, monkeypatch, tmp_path, _config_flag
     ):
         from atlas.evolution.development_cycle import DeterministicChangeSupplier
+        from atlas.evolution.development_scaffold_supplier import (
+            ScaffoldChangeSupplier,
+        )
 
         _config_flag(False)
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
-            assert isinstance(
-                atlas.development_controller._change_supplier,  # noqa: SLF001
-                DeterministicChangeSupplier,
-            )
+            # Phase 5.2 — the controller receives the authoritative
+            # deterministic-first composition: Deterministic then Scaffold, and
+            # NO model member when the flag is off.
+            supplier = _authoritative_supplier(atlas)
+            assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
+            assert isinstance(supplier.suppliers[1], ScaffoldChangeSupplier)
+            assert _model_member(supplier) is None
+            assert len(supplier.suppliers) == 2
         finally:
             atlas.shutdown()
 
@@ -194,6 +262,10 @@ class TestExplicitOptIn:
     def test_config_true_injects_model_supplier(
         self, monkeypatch, tmp_path, _config_flag
     ):
+        from atlas.evolution.development_cycle import DeterministicChangeSupplier
+        from atlas.evolution.development_scaffold_supplier import (
+            ScaffoldChangeSupplier,
+        )
         from atlas.evolution.model_assisted_supplier import (
             ModelAssistedChangeSupplier,
         )
@@ -201,10 +273,15 @@ class TestExplicitOptIn:
         _config_flag(True)
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
-            assert isinstance(
-                atlas.development_controller._change_supplier,  # noqa: SLF001
-                ModelAssistedChangeSupplier,
-            )
+            # Phase 5.2 — the model supplier is composed as the LAST member of
+            # the authoritative deterministic-first composition.
+            supplier = _authoritative_supplier(atlas)
+            assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
+            assert isinstance(supplier.suppliers[1], ScaffoldChangeSupplier)
+            member = _model_member(supplier)
+            assert isinstance(member, ModelAssistedChangeSupplier)
+            assert supplier.suppliers[-1] is member
+            assert len(supplier.suppliers) == 3
         finally:
             atlas.shutdown()
 
@@ -215,9 +292,13 @@ class TestExplicitOptIn:
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
-            # Replace the kernel's AIService-backed model with a fake.
-            supplier = atlas.development_controller._change_supplier  # noqa: SLF001
-            supplier._authoring_model = lambda prompt: _valid_model_payload()  # noqa: SLF001
+            # Configure the fake authoring model on the MODEL member of the
+            # authoritative composition (the composite itself carries no
+            # authoring model); no provider is contacted.
+            _configure_authoring_model(
+                _authoritative_supplier(atlas),
+                lambda prompt: _valid_model_payload(),
+            )
 
             result = atlas.run_development_cycle(_need())
             assert result.ok
@@ -244,8 +325,10 @@ class TestExplicitOptIn:
 
             manager.create_approval_request = spy  # noqa: SLF001
 
-            supplier = atlas.development_controller._change_supplier  # noqa: SLF001
-            supplier._authoring_model = lambda prompt: _valid_model_payload()  # noqa: SLF001
+            supplier = _authoritative_supplier(atlas)
+            _configure_authoring_model(
+                supplier, lambda prompt: _valid_model_payload()
+            )
 
             atlas.run_development_cycle(_need())
             meta = captured["proposal"].metadata["development_cycle"]
@@ -265,8 +348,10 @@ class TestGovernance:
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
-            supplier = atlas.development_controller._change_supplier  # noqa: SLF001
-            supplier._authoring_model = lambda prompt: _valid_model_payload()  # noqa: SLF001
+            supplier = _authoritative_supplier(atlas)
+            _configure_authoring_model(
+                supplier, lambda prompt: _valid_model_payload()
+            )
 
             approval_manager = atlas._approval_manager  # noqa: SLF001
             original_approve = approval_manager.approve
@@ -290,9 +375,11 @@ class TestModelFailure:
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
-            supplier = atlas.development_controller._change_supplier  # noqa: SLF001
-            supplier._authoring_model = lambda prompt: (_ for _ in ()).throw(  # noqa: SLF001
-                RuntimeError("provider unavailable")
+            _configure_authoring_model(
+                _authoritative_supplier(atlas),
+                lambda prompt: (_ for _ in ()).throw(  # noqa: SLF001
+                    RuntimeError("provider unavailable")
+                ),
             )
             result = atlas.run_development_cycle(_need())
             assert not result.ok
@@ -307,8 +394,10 @@ class TestModelFailure:
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
-            supplier = atlas.development_controller._change_supplier  # noqa: SLF001
-            supplier._authoring_model = lambda prompt: "{not json"  # noqa: SLF001
+            _configure_authoring_model(
+                _authoritative_supplier(atlas),
+                lambda prompt: "{not json",
+            )
             result = atlas.run_development_cycle(_need())
             assert not result.ok
             assert any(stage == "supplier" for stage, _ in result.failures)
@@ -368,16 +457,20 @@ class TestConversationalSeamWiring:
     (deterministic/evidence-only) otherwise. No provider is contacted: the
     authoring callable is replaced with a deterministic test double."""
 
-    def test_flag_off_conversational_seam_gets_no_supplier(
+    def test_flag_off_conversational_seam_has_no_model_supplier(
         self, monkeypatch, tmp_path, _config_flag
     ):
         _config_flag(False)
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
-            assert (
+            # Phase 5.2 (Task 2) — the seam receives the SAME authoritative
+            # composition as the controller; with the flag off it composes no
+            # model member, so no model-assisted authoring can occur.
+            seam_supplier = (
                 atlas._conversation._proposal_converter._change_supplier  # noqa: SLF001
-                is None
             )
+            assert seam_supplier is _authoritative_supplier(atlas)
+            assert _model_member(seam_supplier) is None
 
             # Deterministic/evidence-only behavior is unchanged: planning
             # still reaches the governed PENDING_APPROVAL stop with no
@@ -393,9 +486,12 @@ class TestConversationalSeamWiring:
         finally:
             atlas.shutdown()
 
-    def test_flag_on_conversational_seam_receives_model_supplier(
+    def test_flag_on_conversational_seam_receives_authoritative_composition(
         self, monkeypatch, tmp_path, _config_flag
     ):
+        from atlas.evolution.development_scaffold_supplier import (
+            CompositeChangeSupplier,
+        )
         from atlas.evolution.model_assisted_supplier import (
             ModelAssistedChangeSupplier,
         )
@@ -406,12 +502,17 @@ class TestConversationalSeamWiring:
             seam_supplier = (
                 atlas._conversation._proposal_converter._change_supplier  # noqa: SLF001
             )
-            assert isinstance(seam_supplier, ModelAssistedChangeSupplier)
-            # The SAME already-constructed instance backs both the F9
-            # controller and the conversational seam — no second supplier.
+            # Phase 5.2 (Task 2) — the SAME already-constructed authoritative
+            # composition backs both the F9 controller and the conversational
+            # seam: no second supplier, deterministic-first order preserved.
+            assert isinstance(seam_supplier, CompositeChangeSupplier)
             assert (
                 seam_supplier
                 is atlas.development_controller._change_supplier  # noqa: SLF001
+            )
+            # ... and with the flag on it composes the model-assisted member.
+            assert isinstance(
+                _model_member(seam_supplier), ModelAssistedChangeSupplier
             )
         finally:
             atlas.shutdown()
@@ -429,9 +530,10 @@ class TestConversationalSeamWiring:
                 atlas._conversation._proposal_converter._change_supplier  # noqa: SLF001
             )
             # Deterministic test double replaces the kernel's AI-backed
-            # callable; no provider is contacted.
-            supplier._authoring_model = (  # noqa: SLF001
-                lambda prompt: _valid_model_payload()
+            # callable on the MODEL member of the shared composition; no
+            # provider is contacted.
+            _configure_authoring_model(
+                supplier, lambda prompt: _valid_model_payload()
             )
 
             approval_manager = atlas._approval_manager  # noqa: SLF001
