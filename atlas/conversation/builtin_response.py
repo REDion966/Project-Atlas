@@ -767,6 +767,7 @@ class BuiltinResponseService:
         started: bool | None = None,
         architecture_model_provider: Callable[[], Any] | None = None,
         validated_knowledge_provider: Callable[[str], Any] | None = None,
+        knowledge_decision_provider: Callable[[str], Any] | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
@@ -786,6 +787,13 @@ class BuiltinResponseService:
         #: never mutated, and the bridge is simply declined when it is absent or
         #: raises (fail closed — no fallback to memory, state, or a model).
         self._validated_knowledge_provider = validated_knowledge_provider
+        #: D3 — optional one-argument callable returning validated knowledge for
+        #: a query, LOCAL-FIRST and possibly acquiring through the governed D2
+        #: boundary. It is consulted ONLY when the local validated store already
+        #: has nothing, and its result is used only when it actually carries
+        #: validated claims — otherwise the existing (C6.1) outcome is rendered
+        #: unchanged. External content it returns is data, never authority.
+        self._knowledge_decision_provider = knowledge_decision_provider
 
     def _resolve_service_names(self) -> tuple[str, ...] | None:
         """Resolve the container/service snapshot for the status answer.
@@ -902,6 +910,36 @@ class BuiltinResponseService:
         if msg is None:
             return
         yield msg.content
+
+    def match_registered_capability_detail(self, text: str) -> Message | None:
+        """Return the capability-detail reply for an EXPLICIT detail request
+        that names a REGISTERED capability/tool, or ``None``.
+
+        Narrower than :meth:`respond`: it claims ONLY the capability-detail
+        intent, and only when the candidate name resolves against the
+        authoritative capability/tool registries. It exists so the conversation
+        layer can honour the advertised ``explain <name>`` form for a
+        registered name BEFORE generic investigation/research cue matching can
+        preempt it when the name itself contains a cue token (``analysis``,
+        ``trace``, ``research``). It performs no other classification, invents
+        nothing, and grants no authority: an unresolved name returns ``None``
+        (fail-closed), exactly like the existing detail matcher.
+        """
+        lowered = canonicalize_surface(text).lower()
+        if not lowered:
+            return None
+        name = self._match_capability_detail(lowered)
+        if name is None:
+            return None
+        return Message(
+            role="assistant",
+            content=self._render_capability_detail(name),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_CAPABILITY_DETAIL,
+                "model_used": False,
+            },
+        )
 
     def _classify(
         self,
@@ -1148,9 +1186,31 @@ class BuiltinResponseService:
         result = self._retrieve_validated_knowledge(query)
         if result is None:
             return None
+        # D3 — local-first, then governed acquisition. Only when the local store
+        # has nothing is the knowledge-decision provider consulted; it is used
+        # only when it returns validated claims. In every other case (including
+        # the default deny-by-default configuration) the local result is
+        # returned unchanged, so C6.1 behaviour is preserved verbatim.
+        if (
+            self._knowledge_decision_provider is not None
+            and not self._validated_knowledge_items(result)
+        ):
+            enriched = self._try_knowledge_decision(query)
+            if enriched is not None and self._validated_knowledge_items(enriched):
+                result = enriched
         if not explicit and not self._validated_knowledge_items(result):
             return None
         return (query, result)
+
+    def _try_knowledge_decision(self, query: str) -> Any | None:
+        """Consult the D3 knowledge-decision provider (fail-soft, read-only)."""
+        provider = self._knowledge_decision_provider
+        if provider is None:
+            return None
+        try:
+            return provider(query)
+        except Exception:  # fail closed -> existing behaviour unchanged
+            return None
 
     def _retrieve_validated_knowledge(self, query: str) -> Any | None:
         """Delegate the read-only retrieval, or None when it cannot be read."""

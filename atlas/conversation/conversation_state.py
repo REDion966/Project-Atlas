@@ -36,6 +36,56 @@ _MAX_OPERATION_OPERAND_CHARS: int = 500
 #: NLU-4 — upper bound on conversation-scoped captured entities retained.
 MAX_CAPTURED_ENTITIES: int = 8
 
+#: D1 — bound applied to a retained corrective reading.
+_MAX_CORRECTION_CHARS: int = 300
+
+#: D1 — upper bound on retained corrections (older superseded readings dropped).
+MAX_CORRECTIONS: int = 5
+
+#: D1 — upper bound on retained compound subtasks.
+MAX_SUBTASKS: int = 4
+
+
+@dataclass(frozen=True, slots=True)
+class Correction:
+    """A user correction/amendment (D1): a superseded reading and its replacement.
+
+    Facts only — it records that the user superseded a prior conversational
+    objective and what they said instead. It never re-routes anything and is
+    never authority (it cannot approve, authorize, execute, or promote).
+    """
+
+    previous: str
+    corrected: str
+    turn_id: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict."""
+        return {
+            "previous": self.previous,
+            "corrected": self.corrected,
+            "turn_id": self.turn_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Optional["Correction"]:
+        """Rebuild from a serialized dict, or ``None`` when malformed."""
+        if not isinstance(data, dict):
+            return None
+        previous = data.get("previous")
+        corrected = data.get("corrected")
+        if not isinstance(previous, str) or not previous.strip():
+            return None
+        if not isinstance(corrected, str) or not corrected.strip():
+            return None
+        turn_id = data.get("turn_id")
+        return cls(
+            previous=previous.strip()[:_MAX_CORRECTION_CHARS],
+            corrected=corrected.strip()[:_MAX_CORRECTION_CHARS],
+            turn_id=turn_id if isinstance(turn_id, str) else "",
+        )
+
+
 
 @dataclass(frozen=True, slots=True)
 class GovernedOperation:
@@ -185,6 +235,18 @@ class ConversationState:
     # memory store, never a verified fact, never authority.
     captured_entities: tuple[CapturedEntity, ...] = ()
 
+    # D1 — the current bounded conversational objective, when one is expressed.
+    # A representation of what the human is asking for — never what Atlas is
+    # authorized to do.
+    current_objective: Optional[str] = None
+
+    # D1 — bounded, ordered subtasks of a compound request (representation
+    # only; execution, if any, remains with existing governed systems).
+    subtasks: tuple[str, ...] = ()
+
+    # D1 — bounded record of user corrections/amendments (superseded readings).
+    corrections: tuple[Correction, ...] = ()
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -224,6 +286,9 @@ class ConversationState:
             "captured_entities": [
                 entity.to_dict() for entity in self.captured_entities
             ],
+            "current_objective": self.current_objective,
+            "subtasks": list(self.subtasks),
+            "corrections": [c.to_dict() for c in self.corrections],
             "turn_id": self.turn_id,
         }
 
@@ -282,6 +347,25 @@ class ConversationStateManager:
                 if entity is not None:
                     rebuilt.append(entity)
             merged["captured_entities"] = tuple(rebuilt)
+        # D1 — rebuild bounded subtasks and correction records so a
+        # to_dict round-trip preserves their types.
+        raw_subtasks = merged.get("subtasks")
+        if isinstance(raw_subtasks, (list, tuple)):
+            merged["subtasks"] = tuple(
+                item.strip()[:200]
+                for item in raw_subtasks
+                if isinstance(item, str) and item.strip()
+            )[:MAX_SUBTASKS]
+        raw_corrections = merged.get("corrections")
+        if isinstance(raw_corrections, (list, tuple)):
+            rebuilt_corrections: list[Correction] = []
+            for item in raw_corrections:
+                correction = (
+                    item if isinstance(item, Correction) else Correction.from_dict(item)
+                )
+                if correction is not None:
+                    rebuilt_corrections.append(correction)
+            merged["corrections"] = tuple(rebuilt_corrections)[-MAX_CORRECTIONS:]
         self._state = ConversationState(**merged)
         return self._state
 

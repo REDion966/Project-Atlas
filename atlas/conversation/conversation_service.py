@@ -15,6 +15,7 @@ from atlas.cognition.api import CognitionAPI
 from atlas.conversation.context import ContextManager
 from atlas.conversation.conversation import Conversation
 from atlas.conversation.development_intake import task_spec_to_development_need
+from atlas.conversation.engine import ConversationEngine
 from atlas.conversation.conversation_state import ConversationStateManager
 from atlas.conversation.execution import Level3ExecutionService
 from atlas.conversation.investigation import (
@@ -503,6 +504,14 @@ class ConversationService:
         self._ai = ai_service
         self._cognition_api = cognition_api
         self._task_intake = task_intake
+        # D1 — deterministic Conversation Engine: interpretation + bounded
+        # semantic projection only. It never routes, authorizes, or executes;
+        # the existing governed handler cascade below remains authoritative.
+        self._engine: ConversationEngine | None = (
+            ConversationEngine(task_intake=task_intake)
+            if task_intake is not None
+            else None
+        )
         self._development_bridge = development_bridge
         self._orchestration_resolver = orchestration_resolver
         self._fallback_resolver = fallback_resolver
@@ -625,6 +634,22 @@ class ConversationService:
             if signal is not None:
                 message.metadata[REASONING_ELIGIBILITY_KEY] = signal
         return message
+
+    def _maybe_handle_capability_detail_request(self, text: str) -> Message | None:
+        """C4.1 — honour an explicit ``explain <name>`` request for a
+        REGISTERED capability/tool before generic investigation/research cue
+        matching can preempt it.
+
+        The builtin service is the single authoritative matcher: it claims the
+        turn ONLY when the named capability/tool actually resolves against the
+        registries, so nothing is fabricated and an unknown name still falls
+        through to the existing fail-closed path. No investigation, research,
+        development, or governance behavior is consulted or changed here, and
+        no authority is created.
+        """
+        if self._builtin_response is None:
+            return None
+        return self._builtin_response.match_registered_capability_detail(text)
 
     def _build_conversation_context(self) -> ConversationContext:
         """Build the bounded, read-only context projection for this turn.
@@ -809,6 +834,19 @@ class ConversationService:
         if repeat_response is not None:
             self._conversation.add_message(repeat_response)
             return repeat_response
+        # C4.1 — explicit capability-detail precedence. An "explain <name>"
+        # request that names a REGISTERED capability/tool must reach the
+        # deterministic capability-detail surface even when the name itself
+        # contains an investigation/research cue token ("analysis", "trace",
+        # "research"), which would otherwise preempt it via intake
+        # classification. Narrow and authoritative: only a registered name is
+        # claimed and nothing is fabricated. Ordinary investigation/research
+        # requests do not start with an explicit detail verb, so they are never
+        # captured here.
+        capability_detail = self._maybe_handle_capability_detail_request(text)
+        if capability_detail is not None:
+            self._conversation.add_message(capability_detail)
+            return capability_detail
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -1119,6 +1157,15 @@ class ConversationService:
         if repeat_response is not None:
             self._conversation.add_message(repeat_response)
             yield repeat_response.content
+            return
+        # C4.1 — explicit capability-detail precedence. Mirror of send(): same
+        # handler, same placement, same semantics. Registered names containing
+        # an investigation/research cue token reach the capability-detail
+        # surface instead of being preempted by intake classification.
+        capability_detail = self._maybe_handle_capability_detail_request(text)
+        if capability_detail is not None:
+            self._conversation.add_message(capability_detail)
+            yield capability_detail.content
             return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
@@ -1457,7 +1504,30 @@ class ConversationService:
         )
 
     def _intake(self, text: str, history_length: int = 0) -> TaskSpec | None:
-        """Run the optional task intake, preserving legacy behavior when None."""
+        """Run the optional task intake, preserving legacy behavior when None.
+
+        D1 — interpretation now flows through the deterministic Conversation
+        Engine: the existing intake result is unchanged, the bounded
+        :class:`SemanticIntake` projection is attached to ``spec.context``, and
+        the bounded conversational-state fields (objective/subtasks/corrections)
+        are updated. The engine never routes, authorizes, or executes; every
+        existing routing rule downstream is untouched.
+        """
+        if self._engine is not None:
+            state = (
+                self._state_manager.state if self._state_manager is not None else None
+            )
+            interpretation = self._engine.interpret(
+                text, history_length=history_length, state=state
+            )
+            spec = interpretation.spec
+            if spec is None:
+                return None
+            if self._state_manager is not None:
+                updates = self._engine.state_updates(interpretation, state)
+                if updates:
+                    self._state_manager.update(**updates)
+            return self._engine.with_semantic(spec, interpretation.semantic)
         if self._task_intake is None:
             return None
         return self._task_intake.intake(text, history_length=history_length)

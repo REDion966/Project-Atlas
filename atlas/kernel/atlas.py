@@ -475,6 +475,18 @@ class Atlas:
         # --- Stage F: latest bounded research evidence (cache-only) ---
         self._last_research_evidence: dict | None = None
 
+        # --- D2: controlled external-knowledge acquisition (lazy; deny-by-default) ---
+        self._external_acquirer: Any | None = None
+
+        # --- D3: conversation <-> knowledge integration (lazy) ---
+        self._knowledge_decision: Any | None = None
+
+        # --- D4: self-directed work orchestration (lazy) ---
+        self._work_orchestrator: Any | None = None
+
+        # --- D5: development independence orchestration (lazy) ---
+        self._development_run_orchestrator: Any | None = None
+
         # --- Phase 13.5: Persistent Evolution Knowledge ---
         self._knowledge_consolidator: EvolutionKnowledgeConsolidator | None = None
         self._knowledge_repository: EvolutionKnowledgeRepository | None = None
@@ -925,6 +937,243 @@ class Atlas:
     def acquisition_service(self):
         """Return the kernel-owned InformationAcquisitionService (Phase F8)."""
         return self._acquisition_service
+
+    @property
+    def external_acquisition(self):
+        """Return the kernel-owned ExternalKnowledgeAcquirer (D2).
+
+        Controlled external-knowledge acquisition built over the EXISTING
+        acquisition service and validated-knowledge retriever. Its host policy
+        is derived from the EXISTING ``research.web_allowed_hosts`` config, so
+        it is deny-by-default: with no allowlist entry, no host is fetchable.
+        Read-only with respect to governance: it never approves, authorizes,
+        executes, promotes, or self-modifies anything.
+        """
+        if self._external_acquirer is None:
+            from atlas.research.external_acquisition import ExternalKnowledgeAcquirer
+            from atlas.research.sources.web import web_host_policy_from_hosts
+            from atlas.research.validated_retrieval import ValidatedKnowledgeRetriever
+
+            hosts = self._config.get("research", "web_allowed_hosts", default=())
+            self._external_acquirer = ExternalKnowledgeAcquirer(
+                acquisition_service=self._acquisition_service,
+                validated_retriever=ValidatedKnowledgeRetriever(self._research_storage),
+                host_policy=web_host_policy_from_hosts(tuple(hosts or ())),
+            )
+        return self._external_acquirer
+
+    def acquire_external_knowledge(
+        self,
+        objective: str,
+        candidate_urls=(),
+        knowledge_query: str = "",
+    ):
+        """Run ONE controlled external-knowledge acquisition (D2).
+
+        Returns an ``ExternalAcquisitionResult``. Deny-by-default: candidate
+        hosts must be explicitly allowlisted in ``research.web_allowed_hosts``.
+        Never approves, authorizes, executes, or promotes anything.
+        """
+        return self.external_acquisition.acquire(
+            objective,
+            candidate_urls=tuple(candidate_urls or ()),
+            knowledge_query=knowledge_query,
+        )
+
+    @property
+    def knowledge_decision(self):
+        """Return the kernel-owned KnowledgeDecisionService (D3).
+
+        Integrates the existing validated-knowledge retrieval with the D2
+        acquisition boundary. Read-only with respect to governance: it never
+        approves, authorizes, executes, promotes, or self-modifies anything.
+        """
+        if self._knowledge_decision is None:
+            from atlas.research.knowledge_decision import KnowledgeDecisionService
+            from atlas.research.validated_retrieval import ValidatedKnowledgeRetriever
+
+            self._knowledge_decision = KnowledgeDecisionService(
+                validated_retriever=ValidatedKnowledgeRetriever(self._research_storage),
+                external_acquirer=self.external_acquisition,
+            )
+        return self._knowledge_decision
+
+    def _external_source_urls(self):
+        """Authorized external candidate URLs from optional config (default none).
+
+        Empty by default: no candidate source, so D2 stays deny-by-default and
+        the conversational knowledge path performs no network access.
+        """
+        try:
+            urls = self._config.get("research", "external_source_urls", default=())
+        except Exception:
+            return ()
+        if not isinstance(urls, (list, tuple)):
+            return ()
+        return tuple(u for u in urls if isinstance(u, str) and u.strip())
+
+    def _knowledge_decision_enrich(self, query: str):
+        """D3 local-first enrichment for the conversational knowledge surface.
+
+        Returns validated knowledge (existing first, else via governed D2
+        acquisition) or ``None``. Fail-soft: any error leaves behavior unchanged.
+        """
+        try:
+            return self.knowledge_decision.retrieve_with_acquisition(
+                query, candidate_urls=self._external_source_urls()
+            )
+        except Exception:
+            return None
+
+    def answer_knowledge_question(
+        self,
+        objective: str,
+        candidate_urls=(),
+        knowledge_query: str = "",
+    ):
+        """Structured D3 knowledge decision (API seam; never fabricates).
+
+        Returns a ``KnowledgeAnswer`` describing sufficiency and, where
+        applicable, the governed acquisition outcome. Pure decision + retrieval:
+        it never approves, authorizes, executes, or promotes anything.
+        """
+        return self.knowledge_decision.decide(
+            objective,
+            knowledge_query=knowledge_query,
+            candidate_urls=tuple(candidate_urls or ()),
+        )
+
+    @property
+    def work_orchestrator(self):
+        """Return the kernel-owned WorkOrchestrator (D4).
+
+        Bounded orchestration over the EXISTING knowledge decision, capability
+        registry/dispatcher, and session/authority boundary. It never creates
+        authority and never executes governed development.
+        """
+        if self._work_orchestrator is None:
+            from atlas.orchestration.work_orchestrator import WorkOrchestrator
+
+            self._work_orchestrator = WorkOrchestrator(
+                knowledge_decision=self.knowledge_decision,
+                capability_registry=self._capability_registry,
+                dispatcher=self._capability_dispatcher,
+                authorization_check=self._orchestration_authorization_check,
+            )
+        return self._work_orchestrator
+
+    @staticmethod
+    def _orchestration_authorization_check(session_context) -> bool:
+        """Consult the EXISTING authority boundary (read-only).
+
+        True only for a session context the existing authority layer already
+        established as OWNER. It never creates authority and never infers it
+        from language, a proposal, or external content.
+        """
+        return bool(
+            session_context is not None
+            and getattr(session_context, "is_owner", False)
+        )
+
+    def run_work_objective(
+        self,
+        objective: str,
+        semantic=None,
+        candidate_urls=(),
+        require_authorization: bool = False,
+        session_context=None,
+    ):
+        """Run ONE bounded D4 orchestration lifecycle (API seam).
+
+        Returns an ``OrchestrationRun``. Never approves, authorizes, executes
+        governed development, or promotes anything.
+        """
+        return self.work_orchestrator.run(
+            objective,
+            semantic=semantic,
+            session_context=session_context,
+            candidate_urls=tuple(candidate_urls or ()),
+            require_authorization=require_authorization,
+        )
+
+    @property
+    def development_orchestrator(self):
+        """Return the kernel-owned DevelopmentOrchestrator (D5).
+
+        Bounded coordinator over the EXISTING governed development lifecycle:
+        proposal preparation, OWNER approval (read-only), sandbox execution,
+        verification, promotion review/executor, and self-knowledge refresh.
+        It never approves, authorizes, executes without an approved proposal,
+        or promotes itself.
+        """
+        if self._development_run_orchestrator is None:
+            from atlas.orchestration.development_orchestrator import (
+                DevelopmentOrchestrator,
+            )
+
+            self._development_run_orchestrator = DevelopmentOrchestrator(
+                driver=lambda objective, metadata: self.run_development_driver(
+                    objective, metadata=metadata
+                ),
+                approval_checker=self._development_proposal_approved,
+                execution_runner=lambda session, proposal_id: (
+                    self.run_development_execution(session, proposal_id)
+                ),
+                promotion_reviewer=lambda session, run_result, proposal_id: (
+                    self.submit_development_for_promotion_review(
+                        session, run_result, proposal_id=proposal_id
+                    )
+                ),
+                promotion_executor=lambda session, request_id: (
+                    self.promote_validated_change(session, request_id)
+                ),
+                self_knowledge_refresher=self._development_self_knowledge_snapshot,
+            )
+        return self._development_run_orchestrator
+
+    def _development_proposal_approved(self, proposal_id: str) -> bool:
+        """READ-ONLY check of the EXISTING persisted approval state.
+
+        True only when the existing EvolutionMemory holds the proposal in
+        ``APPROVED`` status. It never creates or infers approval.
+        """
+        try:
+            proposal = self._evolution_memory.get_proposal(proposal_id)
+        except Exception:
+            return False
+        if proposal is None:
+            return False
+        return getattr(getattr(proposal, "status", None), "name", "") == "APPROVED"
+
+    def _development_self_knowledge_snapshot(self) -> dict:
+        """Read-only self-knowledge snapshot (existing capability model)."""
+        try:
+            model = self.capability_model()
+            return {
+                "capabilities": int(getattr(model, "capability_count", 0) or 0),
+                "components": int(getattr(model, "component_count", 0) or 0),
+                "tools": int(getattr(model, "tool_count", 0) or 0),
+            }
+        except Exception:
+            return {}
+
+    def run_development_objective(
+        self,
+        objective: str,
+        session_context=None,
+        metadata=None,
+    ):
+        """Run ONE bounded governed development lifecycle (D5 API seam).
+
+        Returns a ``DevelopmentRun``. The orchestrator never approves,
+        authorizes, or promotes itself; it stops at ``AWAITING_OWNER`` without
+        approval and executes only through the existing governed paths.
+        """
+        return self.development_orchestrator.run(
+            objective,
+            session_context=session_context,
+            metadata=dict(metadata or {}),
+        )
 
     def run_information_acquisition(
         self,
@@ -4003,6 +4252,11 @@ class Atlas:
                 # snapshot never triggers a repository scan, so asking a casual
                 # architecture question cannot cause one. Read-only/advisory.
                 architecture_model_provider=self._architecture_model_snapshot,
+                # D3 — knowledge-decision provider: local-first validated
+                # knowledge, else governed D2 acquisition. Deny-by-default, so
+                # with no authorized source configured the C6.1 outcome is
+                # rendered unchanged and no network access occurs.
+                knowledge_decision_provider=self._knowledge_decision_enrich,
                 # C6.1 — bounded conversational access to EXISTING validated
                 # knowledge. The kernel capability is passed through unchanged
                 # (read-only, deterministic, no model): the conversation layer
@@ -4476,6 +4730,10 @@ class Atlas:
         self._development_controller = None
         self._ai_availability = None
         self._self_management_review = None
+        self._external_acquirer = None
+        self._knowledge_decision = None
+        self._work_orchestrator = None
+        self._development_run_orchestrator = None
         self._boot_activation = None
         self._boot_report = None
 
