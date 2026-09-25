@@ -238,10 +238,15 @@ class TestClassBValidation:
 
 class TestClassCRetention:
     def test_research_result_is_retained_as_conversation_state(self, kernel):
-        """A completed research turn is retained in conversation state.
+        """A research turn's outcome is retained in conversation state.
 
-        Observation: after a completed research turn, `latest_result` holds a
-        bounded report line, and the design follows the same UI label.
+        Observation (C6): after a completed research turn, `latest_result` held a
+        bounded report line (the orchestration report).
+        Observation (post-I3, reconciled): a research turn is answered by the
+        existing local-first knowledge path, and ITS outcome is retained in the
+        dedicated ``last_knowledge`` slot (subject / status / answer material
+        with provenance). ``latest_result`` remains the slot for orchestration
+        results that do reach the bridge.
         Classification: CONTEXT_ONLY — this is conversation state, NOT durable
         learned knowledge.
         """
@@ -250,7 +255,10 @@ class TestClassCRetention:
             "Research the memory service, including memory storage and memory "
             "search of the atlas memory subsystem."
         )
-        assert service.state_manager.state.latest_result
+        retained = service.state_manager.state.last_knowledge
+        assert isinstance(retained, dict)
+        assert retained.get("query")
+        assert retained.get("content")
 
     def test_conversational_subject_is_retained_across_turns(self, kernel):
         """A subject named in turn 1 is retained for turn 2 (NLU-4).
@@ -265,27 +273,32 @@ class TestClassCRetention:
         ]
 
     def test_authorized_corpus_knowledge_is_surfaced_by_conversational_recall(self, kernel):
-        """Authorized-corpus research knowledge is now reachable conversationally.
+        """Authorized-corpus research knowledge is reachable conversationally.
 
         C6 evidence originally observed this as a MATERIAL gap (the retained,
         validated knowledge could not be reached from a turn). C6.1 closed it
-        with a bounded read-only bridge: turn 1 researches the local (authorized)
-        code corpus — the claims are validated and persisted, `kernel.
-        validated_knowledge` returns them — and turn 2 now resolves against that
-        same store instead of reporting no knowledge.
+        with a bounded read-only bridge; the bridge is unchanged.
+
+        Reconciled (Evidence-Driven Improvement 3): the bridge is what SURFACES
+        knowledge — it does not populate the store. Pre-I3 this test relied on a
+        conversational research turn running a work-acquisition over the code
+        corpus; I3 deliberately routes a research request through the
+        local-first knowledge path instead. The knowledge is therefore produced
+        by the existing authorized acquisition API and must still be surfaced by
+        conversational recall.
 
         Classification: SUCCESS (the C6.1 contract; the pre-C6.1 behaviour is
         pinned separately by tests/test_c6_1_validated_knowledge_conversation.py).
         """
         service = _conversation(kernel)
-        service.send(
-            "Research the memory service, including memory storage and memory "
-            "search of the atlas memory subsystem."
+        acquired = kernel.acquisition_service.acquire(
+            question=_CLAIM_QUERY, sources=[str(_FACT_A)]
         )
-        validated = kernel.validated_knowledge("memory storage")
+        assert acquired.status == "ok", acquired.message
+        validated = kernel.validated_knowledge("atlas evidence device operating mode")
         assert validated.status.value == "ok", validated.message
 
-        recall = service.send("what do you know about memory storage?")
+        recall = service.send("what do you know about atlas evidence device operating mode?")
         assert recall.metadata.get("builtin_intent") == "validated_knowledge"
         assert recall.metadata.get("validated_knowledge_status") == "ok"
         assert "validated (supported) claim" in recall.content.lower()
@@ -577,13 +590,14 @@ class TestClassJModelIndependence:
         Classification: SUCCESS (model independence intact).
         """
         service = _conversation(kernel)
-        # The research turn is handled by the deterministic orchestration path
-        # (no builtin response metadata); the memory/knowledge-language turns are
-        # handled by the deterministic builtin floor. Neither uses a model.
+        # Reconciled (Evidence-Driven Improvement 3): a research turn is now
+        # answered by the deterministic local-first knowledge path (the builtin
+        # floor reports `model_used: False`); the memory/knowledge-language turns
+        # are handled by the same deterministic floor. None uses a model.
         research = service.send(
             "Research the memory service, including memory storage of the atlas memory subsystem."
         )
-        assert isinstance((research.metadata or {}).get("orchestration"), dict)
+        assert (research.metadata or {}).get("model_used") is False
         for text in (
             "Remember this information for later.",
             "Learn this fact.",

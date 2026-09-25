@@ -1025,6 +1025,21 @@ class Atlas:
         except Exception:
             return None
 
+    def _knowledge_status(self, query: str):
+        """G2 — structured D3 sufficiency decision for the conversational report.
+
+        Delegates to the EXISTING ``knowledge_decision`` service: the same
+        decision ``answer_knowledge_question`` returns. The conversation layer
+        uses it only to REPORT sufficiency and the governed-acquisition outcome
+        for a question the local store could not answer. Deterministic,
+        read-only in effect for the conversation, and fail-soft: any error leaves
+        the existing (C6.1) rendering unchanged.
+        """
+        try:
+            return self.knowledge_decision.decide(query)
+        except Exception:
+            return None
+
     def answer_knowledge_question(
         self,
         objective: str,
@@ -2194,6 +2209,122 @@ class Atlas:
 
         return Path(__file__).resolve().parents[2]
 
+    def _registered_capability_names(self) -> tuple[str, ...]:
+        """Names registered on the EXISTING capability registry (bounded, read-only)."""
+        names: list[str] = []
+        try:
+            registry = getattr(self, "_capability_registry", None)
+            names.extend(list(getattr(registry, "registered_names", ()) or ()))
+        except Exception:
+            pass
+        return tuple(name for name in names if name)
+
+    def _pending_approval_request_id(self, proposal_id: str) -> str:
+        """The EXISTING ApprovalManager's pending request id for ``proposal_id``.
+
+        Read-only lookup over the existing pending requests; returns ``""`` when there is
+        none. Never creates, approves, or mutates anything.
+        """
+        if not proposal_id:
+            return ""
+        try:
+            requests = self._evolution_memory.get_pending_approval_requests()
+        except Exception:
+            return ""
+        for request in tuple(requests or ()):
+            if str(getattr(request, "proposal_id", "") or "") == str(proposal_id):
+                return str(getattr(request, "request_id", "") or "")
+        return ""
+
+    def _development_driver_bridge(self, spec) -> Message:
+        """G3 — route a conversational development request through the EXISTING driver.
+
+        The bounded ``DevelopmentDriver`` is the governed self-development orchestrator
+        (gap assessment -> bounded research -> need -> authoring -> cycle ->
+        envelope-authorized sandbox execution -> verification -> usefulness ->
+        promotion-request preparation). This seam is the conversational entry point the
+        documented gap calls for; the kernel API and ``atlas postcore drive`` are unchanged.
+
+        Authoring content is derived DETERMINISTICALLY from the request's own words through
+        the existing scaffold specification contract; when the request names no capability
+        nothing is invented and the driver's own honest terminal is reported. The report
+        states only what the driver actually did: it never claims an approval, an execution
+        outside the bounded Development Envelope, or a promotion.
+        """
+        from atlas.evolution.development_request_scaffold import (
+            scaffold_spec_for_request,
+        )
+
+        need = task_spec_to_development_need(spec)
+        if need is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "I could not prepare this as a governed development "
+                    "request. Please clarify the objective and success criteria."
+                ),
+            )
+
+        request = str(
+            getattr(spec, "intent", "") or getattr(spec, "goal", "") or need.title
+        ).strip()
+        metadata: dict[str, Any] = {}
+        scaffold = scaffold_spec_for_request(
+            request, registered_names=self._registered_capability_names()
+        )
+        if scaffold is not None:
+            metadata["scaffold"] = scaffold
+
+        result = self.run_development_driver(request, metadata=metadata or None)
+
+        lines = [
+            "Governed self-development request routed through the existing "
+            "DevelopmentDriver (deterministic; no external AI model used):",
+            f"- Outcome: {result.terminal.value}",
+        ]
+        if result.detail:
+            lines.append(f"- Detail: {result.detail}")
+        status = ""
+        if result.proposal_id:
+            lines.append(f"- Proposal ID: {result.proposal_id}")
+            try:
+                proposal = self._evolution_memory.get_proposal(result.proposal_id)
+                raw_status = getattr(proposal, "status", None)
+                status = str(
+                    getattr(raw_status, "name", "")
+                    or getattr(raw_status, "value", "")
+                    or ""
+                )
+            except Exception:
+                status = ""
+            if status:
+                lines.append(f"- Status: {status}")
+            approval_request_id = self._pending_approval_request_id(result.proposal_id)
+            if approval_request_id:
+                lines.append(f"- Approval Request: {approval_request_id}")
+        if result.authorization_id:
+            lines.append(f"- Sandbox authorization: {result.authorization_id}")
+        if result.execution_status:
+            lines.append(f"- Execution: {result.execution_status}")
+        if result.verification_status:
+            lines.append(f"- Verification: {result.verification_status}")
+        outcome = getattr(getattr(result, "usefulness", None), "outcome", "")
+        if outcome:
+            lines.append(f"- Usefulness: {outcome}")
+        if result.promotion_request_id:
+            lines.append(f"- Promotion Request: {result.promotion_request_id}")
+        for stage, failure in tuple(result.failures)[:5]:
+            lines.append(f"- {stage}: {failure}")
+        lines.append(
+            "Nothing is approved, executed, or promoted; promotion requires "
+            "explicit OWNER authorization."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={"development_driver": result.to_dict()},
+        )
+
     def _ensure_development_driver(self):
         """Build (once) the bounded DevelopmentDriver from kernel surfaces."""
         if self._development_driver is not None:
@@ -2208,15 +2339,7 @@ class Atlas:
         kernel = self
 
         def _capability_names() -> tuple[str, ...]:
-            names: list[str] = []
-            try:
-                registry = getattr(kernel, "_capability_registry", None)
-                names.extend(
-                    list(getattr(registry, "registered_names", ()) or ())
-                )
-            except Exception:
-                pass
-            return tuple(name for name in names if name)
+            return kernel._registered_capability_names()
 
         def _knowledge_retriever():
             try:
@@ -4252,6 +4375,23 @@ class Atlas:
                 # snapshot never triggers a repository scan, so asking a casual
                 # architecture question cannot cause one. Read-only/advisory.
                 architecture_model_provider=self._architecture_model_snapshot,
+                # G2 — bounded RELATIONSHIP snapshot for an EXPLICIT named-target
+                # dependency/impact question. This is the SAME
+                # ``architecture_model()`` the CLI/API expose: it builds the
+                # repository map at most once per process through the existing
+                # builder and caches it on the kernel. It is consulted by the
+                # conversational renderer only when the turn names an explicit
+                # dotted target, so a casual architecture question still never
+                # triggers a scan. Read-only/advisory; it can never authorize,
+                # execute, or promote anything.
+                architecture_relationship_provider=self.architecture_model,
+                # G2 — structured sufficiency/acquisition reporting for a
+                # knowledge question the local store could not answer. This is
+                # the EXISTING knowledge-decision service used by
+                # ``answer_knowledge_question``; the conversation layer only
+                # REPORTS its decision (status + governed-acquisition outcome)
+                # and never gains authority from it.
+                knowledge_status_provider=self._knowledge_status,
                 # D3 — knowledge-decision provider: local-first validated
                 # knowledge, else governed D2 acquisition. Deny-by-default, so
                 # with no authorized source configured the C6.1 outcome is
@@ -4292,6 +4432,13 @@ class Atlas:
             context_engine=context_engine,
             cognition_api=self._cognition_api,
             development_bridge=self._development_bridge,
+            # G3 — the governed self-development route: a conversational
+            # development request reaches the EXISTING bounded DevelopmentDriver
+            # (gap -> authoring -> envelope-authorized sandbox -> verification ->
+            # promotion request). Duck-typed, kernel-owned: the conversation layer
+            # never imports atlas.evolution, never approves, never promotes, and
+            # tick() never invokes it.
+            development_driver_bridge=self._development_driver_bridge,
             orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
             fallback_resolver=self._deterministic_fallback,

@@ -168,6 +168,9 @@ class SemanticIntake:
     requested_response: str = "answer"
     corrections: tuple[dict[str, Any], ...] = ()
     task_type: str = ""
+    #: Evidence-Driven Improvement 2 — bounded conversational role of the turn
+    #: (see ``atlas.conversation.turn_role.TurnRole``). Interpretation only.
+    turn_role: str = ""
     confidence: float = 0.0
     provenance: dict[str, Any] = field(default_factory=dict)
 
@@ -196,6 +199,7 @@ class SemanticIntake:
             "requested_response": self.requested_response,
             "corrections": [dict(c) for c in self.corrections],
             "task_type": self.task_type,
+            "turn_role": self.turn_role,
             "confidence": self.confidence,
             "provenance": dict(self.provenance),
         }
@@ -207,6 +211,7 @@ def build_semantic_intake(
     *,
     subtasks: tuple[str, ...] = (),
     corrections: tuple[dict[str, Any], ...] = (),
+    turn_role: str = "",
 ) -> SemanticIntake:
     """Project ``spec`` (and deterministic extras) into a ``SemanticIntake``.
 
@@ -269,6 +274,7 @@ def build_semantic_intake(
         requested_response=_REQUESTED_RESPONSE.get(task_type, "answer"),
         corrections=tuple(dict(c) for c in corrections)[-_MAX_CORRECTIONS:],
         task_type=task_type,
+        turn_role=_bounded_text(turn_role, 40),
         confidence=round(max(0.0, min(1.0, confidence)), 4),
         provenance={
             "source": _bounded_text(getattr(spec, "source", ""), 64),

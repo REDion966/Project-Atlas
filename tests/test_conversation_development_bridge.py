@@ -1,15 +1,23 @@
 """B3 — Conversational development bridge (kernel integration) tests.
 
 Proves the conversational seam routes a DEVELOPMENT_REQUEST into the EXISTING
-governed development preparation flow and STOPS at PENDING_APPROVAL:
+governed development preparation flow and STOPS before approval:
 
-  * ``Atlas.chat()`` reaches the development preparation flow.
-  * Successful preparation (with an injected concrete change supplier) stops
-    at PENDING_APPROVAL and never approves/executes/promotes.
-  * The deterministic default supplier fails closed when no concrete
-    ``code_changes`` exist (no fabricated code).
+  * ``Atlas.chat()`` reaches the governed development flow.
+  * Preparation (with an injected concrete change supplier) stops at
+    PENDING_APPROVAL and never approves/executes/promotes.
+  * A request whose change class has no authoring content is refused honestly.
   * An under-specified request is stopped by clarification before any
     development work.
+
+G3 reconciliation (documented, scope owner-approved): the conversational route now
+rides the EXISTING bounded ``DevelopmentDriver``, and the driver derives the bounded
+capability-handler scaffold specification deterministically from the request's own
+words. The former premise — "the conversational route has no authoring content, so it
+must fail at the supplier" — is therefore superseded. The INVARIANTS these tests
+protected are unchanged and still asserted: the turn is not swallowed by the builtin
+responder, nothing is approved/executed/promoted, the ApprovalManager is never called
+by the conversation, and no sandbox change reaches the live repository.
 """
 
 from __future__ import annotations
@@ -74,23 +82,52 @@ def _stub_research(atlas):
 
 
 class TestConversationalDevelopmentRouting:
-    def test_chat_fails_closed_without_concrete_changes(
+    def test_chat_reaches_the_governed_driver_and_stops_at_the_envelope(
         self, monkeypatch, tmp_path
     ):
+        """G3 — the request reaches the driver and stops at the envelope boundary.
+
+        Reconciled (see the module docstring): the driver derives the bounded scaffold
+        for this change class, so the request is prepared as a bounded proposal and
+        stops at the Development Envelope / approval boundary instead of failing at
+        the supplier. Nothing is approved, executed, promoted, or written live.
+        """
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
             message = atlas.chat("add a new capability to Atlas for scheduling")
+            driver = dict(message.metadata or {}).get("development_driver") or {}
+            pending = atlas.pending_promotion_reviews()
         finally:
             atlas.shutdown()
 
         assert message.role == "assistant"
-        # Deterministic supplier found no code_changes -> honest refusal.
-        assert "FAILED" in message.content
+        # The governed driver was reached and reported its OWN honest terminal.
+        assert driver.get("terminal") == "envelope_disabled"
+        assert driver.get("proposal_id")
+        assert "PENDING_APPROVAL" in message.content
+        assert "Approval Request:" in message.content
+        # The boundary is stated and never violated.
+        assert "Nothing is approved, executed, or promoted" in message.content
+        assert driver.get("execution_status") in ("", None)
+        assert not driver.get("promotion_request_id")
+        assert tuple(pending) == ()
+
+    def test_chat_without_an_authorable_change_class_is_refused_honestly(
+        self, monkeypatch, tmp_path
+    ):
+        """A request naming no capability is refused honestly (no fabrication)."""
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            _stub_research(atlas)
+            message = atlas.chat("Can you add a new capability to Atlas?")
+            driver = dict(message.metadata or {}).get("development_driver") or {}
+        finally:
+            atlas.shutdown()
+
+        assert driver.get("terminal") == "author_unavailable"
         assert "supplier" in message.content
-        assert "approved" not in message.content.lower()
-        assert "executed" not in message.content.lower()
-        assert "promoted" not in message.content.lower()
+        assert "Nothing is approved, executed, or promoted" in message.content
 
     def test_chat_successful_preparation_stops_at_pending_approval(
         self, monkeypatch, tmp_path
@@ -100,7 +137,7 @@ class TestConversationalDevelopmentRouting:
             _stub_research(atlas)
             atlas.development_controller._change_supplier = _ConcreteSupplier()  # noqa: SLF001
             message = atlas.chat(
-                "add a new capability to Atlas for scheduling so that tasks run on time"
+                "add a new capability to Atlas for widget batching"
             )
         finally:
             atlas.shutdown()
@@ -149,9 +186,15 @@ class TestConversationalDevelopmentRouting:
     def test_natural_develop_wording_reaches_governed_lifecycle(
         self, monkeypatch, tmp_path
     ):
-        """A naturally phrased ("develop ...") request is classified as a
-        DEVELOPMENT_REQUEST, is NOT swallowed by the builtin responder, and
-        stops at the EXISTING PENDING_APPROVAL boundary."""
+        """A naturally phrased ("develop ...") request reaches the governed flow.
+
+        Reconciled (see the module docstring): the governed driver adjudicates the
+        gap FIRST, so this request — which already matches a registered capability —
+        is honestly reported as already supported instead of being prepared. The
+        invariants are unchanged: the builtin responder did not claim the turn, the
+        ApprovalManager was never called, nothing was executed/promoted/activated,
+        and no sandbox change reached the live repository.
+        """
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
@@ -163,6 +206,7 @@ class TestConversationalDevelopmentRouting:
                 "I want you to develop a capability for emailing me when a "
                 "long-running task finishes"
             )
+            driver = dict(message.metadata or {}).get("development_driver") or {}
             pending = atlas.pending_promotion_reviews()
 
             approval_manager.approve.assert_not_called()
@@ -171,8 +215,9 @@ class TestConversationalDevelopmentRouting:
 
         # The builtin conversational responder must NOT have claimed the turn.
         assert message.metadata.get("builtin_intent") is None
-        # The EXISTING governed lifecycle was reached and stopped for approval.
-        assert "PENDING_APPROVAL" in message.content
+        # The EXISTING governed driver adjudicated the request and reported it.
+        assert driver.get("terminal") == "already_supported"
+        assert "already-registered capability" in message.content
         assert "Nothing is approved, executed, or promoted" in message.content
         assert "Run status:" not in message.content
         # Nothing was executed/promoted/activated, and the sandbox change never
@@ -180,19 +225,39 @@ class TestConversationalDevelopmentRouting:
         assert tuple(pending) == ()
         assert not Path("docs/b3_bridge_note.md").exists()
 
-    def test_natural_develop_wording_fails_closed_without_concrete_changes(
+    def test_natural_develop_wording_is_prepared_and_stops_before_approval(
         self, monkeypatch, tmp_path
     ):
+        """A naturally phrased, not-yet-supported request stops before approval.
+
+        Reconciled (see the module docstring): the driver derives the bounded scaffold
+        for this change class, so preparation succeeds and stops at the Development
+        Envelope / approval boundary — never approved, executed, or promoted.
+        """
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             _stub_research(atlas)
-            message = atlas.chat("develop a capability for scheduling follow-ups")
+            atlas.development_controller._change_supplier = _ConcreteSupplier()  # noqa: SLF001
+            approval_manager = atlas._approval_manager  # noqa: SLF001
+            approval_manager.approve = MagicMock(wraps=approval_manager.approve)
+
+            message = atlas.chat(
+                "I want you to develop a capability for widget batching"
+            )
+            driver = dict(message.metadata or {}).get("development_driver") or {}
+            pending = atlas.pending_promotion_reviews()
+
+            approval_manager.approve.assert_not_called()
         finally:
             atlas.shutdown()
 
         assert message.metadata.get("builtin_intent") is None
-        assert "FAILED" in message.content
-        assert "supplier" in message.content
+        assert driver.get("terminal") == "envelope_disabled"
+        assert "PENDING_APPROVAL" in message.content
+        assert "Nothing is approved, executed, or promoted" in message.content
+        assert "Run status:" not in message.content
+        assert tuple(pending) == ()
+        assert not Path("docs/b3_bridge_note.md").exists()
 
     def test_builtin_turns_remain_unaffected(self, monkeypatch, tmp_path):
         atlas = _started_atlas(monkeypatch, tmp_path)

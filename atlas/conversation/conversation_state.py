@@ -247,6 +247,12 @@ class ConversationState:
     # D1 — bounded record of user corrections/amendments (superseded readings).
     corrections: tuple[Correction, ...] = ()
 
+    # Evidence-driven improvement 1 — the immediately preceding knowledge
+    # answer, retained so bare follow-ups ("what did you find?", "what source
+    # supports that?", "can you continue?") can resolve against it. Bounded,
+    # conversation-scoped FACTS only; never authority, never a second store.
+    last_knowledge: Optional[dict[str, Any]] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -289,6 +295,11 @@ class ConversationState:
             "current_objective": self.current_objective,
             "subtasks": list(self.subtasks),
             "corrections": [c.to_dict() for c in self.corrections],
+            "last_knowledge": (
+                dict(self.last_knowledge)
+                if isinstance(self.last_knowledge, dict)
+                else None
+            ),
             "turn_id": self.turn_id,
         }
 
@@ -366,6 +377,9 @@ class ConversationStateManager:
                 if correction is not None:
                     rebuilt_corrections.append(correction)
             merged["corrections"] = tuple(rebuilt_corrections)[-MAX_CORRECTIONS:]
+        # Retained knowledge fact must stay a plain dict (or None).
+        if not isinstance(merged.get("last_knowledge"), dict):
+            merged["last_knowledge"] = None
         self._state = ConversationState(**merged)
         return self._state
 

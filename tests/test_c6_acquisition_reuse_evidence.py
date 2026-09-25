@@ -225,6 +225,10 @@ class TestPublicPath:
         report/claim rows — the public path does not answer from the validated
         knowledge it already holds.
         Classification: RESEARCH_CONTRACT (fresh evidence per request).
+
+        G1 note: this subject is deliberately NOT claimed by the bounded
+        local-first knowledge path (the existing NLU-2 subject-gap gate declines
+        it), so the research contract above still holds for it.
         """
         service = _conversation(kernel)
         question = "Research the memory ranking module of the atlas memory subsystem."
@@ -240,7 +244,11 @@ class TestPublicPath:
         assert after[0] > before[0] and after[3] > before[3]
 
     def test_research_turn_does_not_report_validated_knowledge(self, kernel):
-        """A research turn never answers with the C6.1 knowledge surface."""
+        """A research turn never answers with the C6.1 knowledge surface.
+
+        G1 note: as above — the NLU-2 subject-gap gate declines this subject, so
+        it keeps its existing research/orchestration path.
+        """
         service = _conversation(kernel)
         message = service.send(
             "Research the memory ranking module of the atlas memory subsystem."
@@ -496,8 +504,18 @@ class TestPhrasing:
 
 
 class TestC61Control:
-    def test_c6_1_retrieves_while_a_research_turn_reacquires(self, kernel, tmp_path):
-        """Knowledge access and research are architecturally distinct."""
+    def test_research_turn_reuses_existing_validated_knowledge(self, kernel, tmp_path):
+        """Reconciled (Evidence-Driven Improvement 3).
+
+        The original assertion pinned "knowledge access and research are
+        architecturally distinct" (a research turn had to re-acquire and could
+        not serve the validated answer). Improvement 3 deliberately changes that
+        contract: a conversational research request is a request for
+        information, so it uses the EXISTING local-first knowledge path. The
+        guarded invariant is preserved and strengthened: the answer is served
+        from the already-validated local knowledge, with the original source
+        already removed from disk, and no orchestration/acquisition run occurs.
+        """
         source = _fixture(
             tmp_path, "control.md", "The Atlas Evidence Device control marker is C8."
         )
@@ -513,8 +531,10 @@ class TestC61Control:
         assert "C8" in knowledge.content
 
         research = service.send("Research the Atlas Evidence Device control marker.")
-        assert research.metadata.get("builtin_intent") != "validated_knowledge"
-        assert "C8" not in research.content
+        assert research.metadata.get("builtin_intent") == "validated_knowledge"
+        assert research.metadata.get("validated_knowledge_status") == "ok"
+        assert not isinstance(research.metadata.get("orchestration"), dict)
+        assert "C8" in research.content
 
 
 # ---------------------------------------------------------------------------

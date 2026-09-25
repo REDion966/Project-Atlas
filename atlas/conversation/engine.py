@@ -35,26 +35,20 @@ from atlas.conversation.semantic_intake import (
     build_semantic_intake,
 )
 from atlas.conversation.task_intake import TaskIntake, TaskSpec
+from atlas.conversation.turn_role import (
+    CORRECTION_MARKERS,
+    TurnRole,
+    corrected_subject,
+    detect_turn_role,
+)
 
 #: Context key under which the semantic projection rides the existing TaskSpec.
 SEMANTIC_INTAKE_KEY: str = "semantic_intake"
 
 #: Bounded deterministic correction cues. A correction is only ever RECORDED
 #: (as a superseded reading); it never re-routes and never grants authority.
-_CORRECTION_MARKERS: tuple[str, ...] = (
-    "actually",
-    "i meant",
-    "i mean",
-    "no, i meant",
-    "i didn't mean",
-    "i did not mean",
-    "not that",
-    "forget the previous",
-    "forget that",
-    "let me rephrase",
-    "to clarify",
-    "instead",
-)
+#: Canonical set lives in :mod:`atlas.conversation.turn_role`.
+_CORRECTION_MARKERS: tuple[str, ...] = CORRECTION_MARKERS
 
 #: Bounded compound-request connectors (representation only — no execution).
 _SUBTASK_SPLIT_RE: re.Pattern[str] = re.compile(
@@ -95,6 +89,7 @@ class EngineInterpretation:
     semantic: SemanticIntake | None
     subtasks: tuple[str, ...] = ()
     corrections: tuple[Correction, ...] = ()
+    turn_role: TurnRole = TurnRole.NEW_OBJECTIVE
 
 
 class ConversationEngine:
@@ -126,17 +121,25 @@ class ConversationEngine:
             return EngineInterpretation(spec=None, semantic=None)
         subtasks = detect_subtasks(text)
         corrections = self._detect_correction(text, spec, state)
+        turn_role = detect_turn_role(
+            text,
+            has_prior_objective=bool(
+                state is not None and state.current_objective
+            ),
+        )
         semantic = build_semantic_intake(
             spec,
             text,
             subtasks=subtasks,
             corrections=tuple(c.to_dict() for c in corrections),
+            turn_role=turn_role.value,
         )
         return EngineInterpretation(
             spec=spec,
             semantic=semantic,
             subtasks=subtasks,
             corrections=corrections,
+            turn_role=turn_role,
         )
 
     def with_semantic(self, spec: TaskSpec, semantic: SemanticIntake | None) -> TaskSpec:
@@ -160,13 +163,30 @@ class ConversationEngine:
 
         Only D1 fields are ever produced (``current_objective`` / ``subtasks`` /
         ``corrections``); no governed or authoritative field is touched.
+
+        Evidence-Driven Improvement 2 — the ACTIVE OBJECTIVE is replaced only by
+        a genuinely new objective (``TurnRole.NEW_OBJECTIVE``) or by a correction
+        (``TurnRole.CORRECTION``, which installs the corrected subject).
+        Follow-up / recall / acknowledgement / continuation / clarification /
+        reference turns PRESERVE it: a meta turn must never clobber the work the
+        user is actually pursuing.
         """
         updates: dict[str, Any] = {}
+        role = interpretation.turn_role
         if interpretation.spec is not None:
             objective = _bounded(
                 getattr(interpretation.spec, "intent", ""), _MAX_OBJECTIVE_CHARS
             )
-            if objective:
+            if role is TurnRole.CORRECTION and interpretation.corrections:
+                corrected = _bounded(
+                    interpretation.corrections[-1].corrected,
+                    _MAX_OBJECTIVE_CHARS,
+                )
+                if corrected:
+                    updates["current_objective"] = corrected
+                elif objective:
+                    updates["current_objective"] = objective
+            elif role is TurnRole.NEW_OBJECTIVE and objective:
                 updates["current_objective"] = objective
         if interpretation.subtasks:
             updates["subtasks"] = interpretation.subtasks[:MAX_SUBTASKS]
@@ -193,6 +213,11 @@ class ConversationEngine:
         Only fires when a prior conversational objective exists and a bounded
         correction cue is present. The result RECORDS the superseded reading and
         the replacement; it does not change routing or authority.
+
+        Evidence-Driven Improvement 2 — the recorded replacement is the bounded
+        extracted SUBJECT (the corrected reading the turn installs), so the
+        correction can drive the active interpretation rather than only being
+        appended as evidence.
         """
         if state is None or not state.current_objective:
             return ()
@@ -201,7 +226,9 @@ class ConversationEngine:
         lowered = text.lower()
         if not any(marker in lowered for marker in _CORRECTION_MARKERS):
             return ()
-        corrected = _bounded(spec.intent or text, _MAX_OBJECTIVE_CHARS)
+        corrected = corrected_subject(text) or _bounded(
+            spec.intent or text, _MAX_OBJECTIVE_CHARS
+        )
         if not corrected:
             return ()
         return (

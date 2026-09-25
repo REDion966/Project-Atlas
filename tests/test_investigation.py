@@ -2180,14 +2180,48 @@ class TestAuthoringWiring:
         atlas.start()
         return atlas
 
-    def test_kernel_wiring_has_no_change_supplier(self, tmp_path, monkeypatch):
-        """No bounded deterministic author exists yet; the kernel must wire
-        authoring disabled (None) until one is justified."""
+    def test_kernel_wiring_uses_bounded_deterministic_change_supplier(
+        self, tmp_path, monkeypatch
+    ):
+        """The kernel wires the AUTHORITATIVE bounded change supplier.
+
+        Reconciled (Evidence-Driven Improvement 2). The original assertion
+        required ``_change_supplier is None`` ("no bounded deterministic author
+        exists yet"). That premise was superseded by the committed change-supplier
+        unification: the kernel now exposes ONE authoritative composition
+        (``CompositeChangeSupplier([DeterministicChangeSupplier(),
+        ScaffoldChangeSupplier(), model_supplier])``) to BOTH the F9 development
+        controller and the conversational P17 authoring seam, with the model
+        supplier included only when ``development.model_assisted_authoring`` is
+        explicitly true. The obsolete assertion contradicted the current
+        contract, so it now asserts the current one: a bounded, deterministic-
+        first supplier is wired and no model supplier is present by default.
+        """
+        from atlas.evolution.development_cycle import DeterministicChangeSupplier
+        from atlas.evolution.development_scaffold_supplier import (
+            CompositeChangeSupplier,
+            ScaffoldChangeSupplier,
+        )
+        from atlas.evolution.model_assisted_supplier import (
+            ModelAssistedChangeSupplier,
+        )
+
         atlas = self._make_atlas(tmp_path, monkeypatch)
         try:
+            supplier = atlas._conversation._proposal_converter._change_supplier
+            assert isinstance(supplier, CompositeChangeSupplier)
+            ordered = supplier.suppliers
+            assert isinstance(ordered[0], DeterministicChangeSupplier)
+            assert isinstance(ordered[1], ScaffoldChangeSupplier)
+            assert not any(
+                isinstance(entry, ModelAssistedChangeSupplier)
+                for entry in ordered
+            )
             assert (
-                atlas._conversation._proposal_converter._change_supplier
-                is None
+                atlas._config.get(
+                    "development", "model_assisted_authoring", default=False
+                )
+                is False
             )
         finally:
             atlas.shutdown()

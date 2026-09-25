@@ -178,6 +178,24 @@ _INVESTIGATION_LEAD_CUES: frozenset[str] = frozenset(
     }
 )
 
+#: G1 — SUBJECT-AWARE investigation recognition. A natural investigation
+#: imperative (audit / review / assess / study / probe / scan / evaluate) counts
+#: as an investigation request only when its target is an Atlas/repository thing
+#: or a self reference. A globally added cue word regressed pinned NLU-1/NLU-2/C3
+#: behaviour, so the discriminator is the TARGET, not the verb alone.
+_INVESTIGATION_SUBJECT_RE = re.compile(
+    r"\b(?:audit|review|assess|study|probe|scan|evaluate)\b[^.?]{0,40}\b(?:"
+    r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
+    r"components?|subsystems?|sandbox|approval|authori[sz]ation|promotion|"
+    r"gates?|boundar(?:y|ies)|lifecycles?|implementation|pipeline|systems?|"
+    r"engines?|handlers?|registr(?:y|ies)|dispatcher|governance|evolution|"
+    r"conversation|knowledge|memory|atlas|code|tests?|sources?|evidence|"
+    r"proposals?|capabilit(?:y|ies)|routing|lifecycle"
+    r")\b"
+    r"|\b(?:your|atlas)\b[^.?]{0,30}\b(?:audit|review|assess|study|probe)\b",
+    re.IGNORECASE,
+)
+
 #: Explicit conversational-recall phrasing. A request that asks Atlas to
 #: recall/remember an existing result is not a request for a NEW
 #: investigation, even when its target mentions an "investigation",
@@ -1435,7 +1453,7 @@ class TaskIntake:
         # matches because the cue appears as a standalone word.
         investigation = _first_hit(
             lowered, _INVESTIGATION_CUES, word_boundary=True
-        )
+        ) or bool(_INVESTIGATION_SUBJECT_RE.search(lowered))
         # Only an imperative investigation cue marks the requested operation.
         # A recall/remembrance request targets an existing conversation result,
         # so an investigation noun in its target must not hijack it.

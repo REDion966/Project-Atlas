@@ -87,6 +87,7 @@ mechanism by which Atlas may change its own operational state.
 | Released baseline | **v0.20.0** (stable; Atlas Core complete; tag `v0.20.0` at `b92c5d9`) |
 | Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) at its established evidence boundary (§31), extended by the additive **Phase 1 → Phase 5 direct-evolution program** (§32) |
 | Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
+| Target-state gates | **G1 COMPLETE · G2 COMPLETE · G3 COMPLETE (Governed Self-Development)** — owner-scoped, additive gates on top of the frozen roadmap and the direct-evolution program; deterministic-first, model-independent, no new engine/planner/router/store/authority — see §33. **No G4 is defined or authorized.** |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
@@ -1446,14 +1447,129 @@ failure rolls the promotion back and never reports a false success.
 ### 32.8 Not currently implemented (explicit)
 - No autonomous development scheduling and no `tick()`/daemon integration.
 - No autonomous CODE authoring of novel logic; authoring is limited to supplied
-  content or the bounded scaffold template family.
-- No conversational routing of DEVELOPMENT_REQUESTs through `DevelopmentDriver`
-  (the kernel API and `atlas postcore drive` are the direct-evolution surfaces).
+  content or the bounded scaffold template family. A conversational request's
+  bounded scaffold SPECIFICATION is now derived deterministically (§33.3, G3) —
+  still template-bounded, never model-authored on the default path.
 - No automatic startup re-discovery of previously activated capabilities.
 - No WS3b (sandbox repository snapshot) and no WS4 (deeper self-knowledge
   integration into development reasoning).
 - Promotion artifacts/authorizations are in-process (same-process promotion or
   re-drive).
+
+*(The former item "No conversational routing of DEVELOPMENT_REQUESTs through
+`DevelopmentDriver`" is DELIVERED by target-state gate **G3** — see §33.3.)*
+
+---
+
+## 33. Target-State Gates G1 → G3 — COMPLETE
+
+Three owner-scoped target-state gates were completed ADDITIVELY on top of the frozen
+Phase C roadmap and the Phase 1–5 direct-evolution program. They add no new engine,
+planner, router, memory store, or authority system: each gate extends existing surfaces,
+remains deterministic-first and model-independent, and preserves human (OWNER) approval,
+governed execution, sandbox verification, and fail-closed behaviour. **No G4 is defined
+or authorized**, and no roadmap/phase status was altered to authorize this work.
+
+*Naming note:* "G1" in §32.5/§32.6 denotes the earlier Phase 5.3 capability-activation
+closure inside the direct-evolution program; it is NOT the target-state gate G1 described
+here. The two are independent milestones that happen to share a label.
+
+### 33.1 G1 — General Conversational Understanding (COMPLETE)
+- `atlas/conversation/semantic_frame.py` (with `lexicon.py` and `turn_role.py`) — one
+  deterministic, model-independent semantic layer (`SemanticFrame`) turning ordinary
+  language into bounded structure (role, domain, operation, subject, concept,
+  sub-requests, clarification need, governance flag). The frame SUPPLIES meaning and
+  never answers; operational routing remains authoritative, and `TurnRole` derives from
+  it. Existing cue-based logic is retained as the fallback.
+- Consumed only through guarded ADDITIVE seams placed after every pre-existing surface,
+  so no existing classification is pre-empted; the NLU-2 subject-gap gate stays
+  authoritative and a declined subject is never turned into a fabricated answer.
+- Acceptance evidence (deterministic benchmark; 189 + 130 prompts, 30 conversations /
+  109 turns): routing 186/189 (98.4%); self-knowledge 30/30; knowledge 30/30;
+  context/reference 14/14; correction 10/10; compound 18/20 (90%); all category
+  minimums met; governance state 0/0/0 before and after; zero self-authorization,
+  fabricated execution/promotion/knowledge, or unauthorized state mutation;
+  `model_used=false` throughout.
+- Tests: `tests/test_target_state_g1.py` (172), `tests/test_target_state_g1_routing.py` (52).
+- Documented residuals (below the aggregate threshold; not chased):
+  "Probe the approval boundary." resolves to a self-knowledge topic (pre-existing I1
+  topic overlap); a bare "I want to know about X" and two mechanism questions resolve
+  through adjacent self-knowledge/architecture surfaces; two compound clauses are not
+  fully decomposed (a non-operation clause; a self-approval clause that is correctly
+  refused); and the noun/verb collision where "…the Voyager probes." matches the
+  investigation verb class.
+
+### 33.2 G2 — Deep Self-Knowledge + Open-Ended Knowledge (COMPLETE)
+- **Deep self-knowledge.** Dependency/dependent/impact questions about an EXPLICIT named
+  module are answered from the EXISTING `ArchitectureModel` / `RepositoryMap`
+  (`locate()`). A bounded relationship provider (`Atlas.architecture_model`, the same
+  builder the CLI/API expose) is consulted ONLY when the turn names an explicit dotted
+  target AND the cache-only snapshot has no module facts, so a casual architecture
+  question still never triggers a repository scan (the previously pinned behaviour is
+  preserved).
+- **Evidenced wording gaps closed** with subject-aware rules in the shared frame (no
+  global cue expansion): knowledge-decision mechanism questions; "how would you add a
+  new capability?" (an explanatory question is self-knowledge, not a development
+  directive); and "I want to know/learn about X" (an information request, not a
+  capability gap).
+- **Open-ended knowledge.** A knowledge question the local validated store cannot answer
+  now reports the EXISTING D3 knowledge decision's own sufficiency and
+  governed-acquisition status plus the explicit boundary (nothing acquired, inferred, or
+  invented), instead of a bare no-match sentence. Local-first ordering and
+  deny-by-default acquisition are unchanged.
+- Evidence: knowledge 30/30 and self-knowledge 30/30 on the G1 benchmark; new
+  `tests/test_target_state_g2.py` (21). The focused runs surfaced four G1-era precedence
+  regressions (the frame-clarification seam preempting a resolvable reference, the frame
+  seam claiming the self-description shape as an inventory, and the external-status rule
+  firing on a subjectless status question); each was root-caused by comparison against
+  the HEAD tree and fixed without weakening any pinned assertion.
+
+### 33.3 G3 — Governed Self-Development (COMPLETE)
+- **The documented gap in §32.8 is closed.** A conversational `DEVELOPMENT_REQUEST` now
+  reaches the EXISTING bounded `DevelopmentDriver` (gap assessment → bounded research →
+  need → authoring → cycle → envelope-authorized sandbox execution → verification →
+  usefulness → promotion-request preparation), and the reply reports that invocation's
+  OWN honest terminal: `proposed`, `validated`, `already_supported`,
+  `author_unavailable`, `insufficient_evidence`, `envelope_disabled`, or `failed` —
+  together with the proposal id, proposal status, approval-request id, sandbox
+  authorization, execution/verification status, usefulness outcome, promotion-request
+  id, and any stage failures.
+- `atlas/evolution/development_request_scaffold.py` (new; pure and read-only) derives the
+  bounded capability-handler scaffold SPECIFICATION deterministically from the request's
+  own words and validates it through the EXISTING `ScaffoldChangeSupplier`; a request
+  naming no capability returns nothing, so the driver's honest `author_unavailable`
+  terminal is reported instead of anything being invented. The documented authoring
+  boundary is unchanged (supplied content or the bounded scaffold template family), and
+  no model-authored code is introduced on the default path
+  (`model_assisted_authoring` remains opt-in and off).
+- **Boundaries preserved.** The Development Envelope is honoured unchanged: disabled by
+  default (`envelope_disabled`, nothing executes) and, when enabled by the OWNER, the
+  bounded sandbox phase may run and a promotion REQUEST may be prepared — while
+  promotion itself remains OWNER-only, no proposal ever reaches `APPROVED` through this
+  route, and no sandbox change reaches the live repository. The conversation layer keeps
+  NO `atlas.evolution` import (the seam is duck-typed and kernel-owned), `tick()` never
+  invokes the route, and the kernel API plus `atlas postcore drive` are unchanged.
+- Evidence: `tests/test_target_state_g3.py` (22) — including a live bounded sandbox run
+  reaching `validated` + `verified` + a promotion request with the live tree unwritten —
+  plus focused/regression suites over the driver, cycle, CLI, capability activation,
+  investigation development/approval classes, L9/stream parity, and the G1/G2/I1–I3
+  suites, all green with zero provider/network calls on the deterministic route.
+- Reconciled pinned tests (premise superseded by this owner-approved scope; invariants
+  preserved and documented in-file): four in `tests/test_conversation_development_bridge.py`
+  and one in `tests/test_l9_end_to_end_language.py`.
+
+### 33.4 Remaining limitations after G1 → G3
+- The Development Envelope is still disabled by default: with it disabled, a
+  conversational self-development request stops at `envelope_disabled` with a prepared
+  bounded proposal and a recorded approval request; the OWNER enables the envelope to
+  let the bounded sandbox phase run.
+- Derived authoring covers the documented change class only; a request naming no
+  capability is refused (`author_unavailable`), and a request already matching a
+  registered capability is reported `already_supported` rather than developed.
+- The G1 residuals listed in §33.1 remain documented and below the aggregate threshold.
+- Unchanged from §32.8: no WS3b (sandbox repository snapshot), no WS4 (deeper
+  self-knowledge integration into development reasoning), no autonomous scheduling or
+  `tick()`/daemon integration, and promotion artifacts/authorizations remain in-process.
 
 ---
 
@@ -1473,5 +1589,10 @@ Phase C evidence-driven evolution reconciled: 2026-09-16 (C0 → C9 reached the
 established evidence boundary; §31; full suite 5,945 test items executed:
 5,876 test cases passed (plus 67 subtests passed), 0 failed, 0 errors, 2
 skipped).
+Target-state gates G1 → G3 reconciled: 2026-09-25 (G1 — general conversational
+understanding; G2 — deep self-knowledge + open-ended knowledge; G3 — governed
+self-development: conversational DEVELOPMENT_REQUEST routing through the EXISTING
+`DevelopmentDriver` with deterministic bounded scaffold derivation; §33; focused and
+regression suites green, no full-suite re-run; no G4 defined or authorized).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

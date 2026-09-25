@@ -105,20 +105,26 @@ class TestClassAInformationResearch:
     def test_named_subject_is_understood_and_routed_but_has_no_authorized_source(self, kernel):
         """'Research the camera system of the Samsung Galaxy S26 Ultra.'
 
-        Observed: information_request -> research step -> acquisition noop ->
-        honest 'Could not complete ... no_evidence'.
+        Observed (pre-I3): information_request -> research step -> acquisition
+        noop -> honest 'Could not complete ... no_evidence'.
+        Observed (post-I3, reconciled): information_request -> existing
+        local-first knowledge path (validated knowledge, then the D3 knowledge
+        decision that owns the governed D2 boundary) -> honest
+        'No validated knowledge matched ... (status: empty)'.
         Classification: D (KNOWLEDGE/SOURCE) — the request is understood and
-        routed correctly; there is simply no authorized source for consumer
-        product facts (web stays deny-by-default).
+        answered by the authoritative knowledge path; there is simply no
+        authorized source for consumer product facts (web stays
+        deny-by-default). Never a fabricated answer and never a 'done' claim.
         """
         message = _conversation(kernel).send(
             "Research the camera system of the Samsung Galaxy S26 Ultra."
         )
         text = message.content.lower()
-        assert "could not complete" in text
-        assert "no_evidence" in text
+        assert message.metadata.get("builtin_intent") == "validated_knowledge"
+        assert message.metadata.get("validated_knowledge_status") == "empty"
+        assert "no validated knowledge matched" in text
         assert "done" not in text
-        assert isinstance(message.metadata.get("orchestration"), dict)
+        assert not isinstance(message.metadata.get("orchestration"), dict)
 
     def test_comparison_request_is_routed_to_the_answerable_path(self, kernel):
         """'Compare the Samsung Galaxy S26 Ultra and iPhone 17 Pro cameras.'
@@ -136,19 +142,23 @@ class TestClassAInformationResearch:
         assert message.metadata.get("reasoning_eligibility", {}).get("eligible") is True
         assert message.metadata.get("model_used") is False
 
-    def test_generic_domain_research_reports_no_relevant_evidence(self, kernel):
+    def test_generic_domain_research_declines_honestly(self, kernel):
         """'Research the latest information about smartphone camera sensors.'
 
-        Observed: information_request -> research acquired local sources that do
-        not address the subject -> honest 'no_relevant_evidence'.
-        Classification: D (KNOWLEDGE/SOURCE); NLU-2 relevance gate behaving
-        correctly.
+        Observed (pre-I3): information_request -> research acquired local
+        sources that do not address the subject -> honest
+        'no_relevant_evidence' (NLU-2 relevance gate).
+        Observed (post-I3, reconciled): the request now enters the existing
+        local-first knowledge path, which declines honestly with
+        'No validated knowledge matched ... (status: empty)' — the same
+        NLU-2 outcome (no authorized, relevant evidence) reported by the
+        authoritative knowledge path. Classification: D (KNOWLEDGE/SOURCE).
         """
         message = _conversation(kernel).send(
             "Research the latest information about smartphone camera sensors."
         )
         text = message.content.lower()
-        assert "no_relevant_evidence" in text
+        assert "no validated knowledge matched" in text
         assert "done" not in text
 
 
@@ -297,19 +307,26 @@ class TestClassCContextualFollowups:
 
 
 class TestClassDCorrection:
-    def test_correction_utterance_is_not_applied_to_the_objective(self, kernel):
+    def test_correction_utterance_response_stays_bounded(self, kernel):
         """'Actually, I meant the S26 Ultra's video recording.'
 
-        Observed: conversation/statement -> deterministic floor. The prior
-        research objective is NOT revised, and no correction transition exists.
-        Classification: F (CONTEXT/STATE) — Atlas's conversation state has a
-        topic-replacement primitive but nothing detects a correction utterance
-        to invoke it. Recorded (MINOR: the objective is per-turn, and the
-        follow-up answer is model-dependent).
+        Observed (C3, pre-I2/I3): conversation/statement -> deterministic floor;
+        the prior research objective was NOT revised.
+        Observed (post-I2): the correction IS applied — conversation state
+        records it and installs the corrected subject as ``current_objective``
+        (see tests/test_evidence_improvement_2.py for the full contract).
+        Observed (post-I3, reconciled): the correction utterance itself is still
+        the bounded deterministic reply, and the preceding research turn is now
+        answered honestly by the knowledge path (no authorized source for
+        consumer product facts). This test now asserts only what it can
+        deterministically pin: both turns return bounded, honest, model-free
+        responses and never a fabricated result.
         """
         service = _conversation(kernel)
         first = service.send("Research the Galaxy S26 Ultra camera.")
-        assert "could not complete" in first.content.lower()
+        assert first.metadata.get("builtin_intent") == "validated_knowledge"
+        assert "no validated knowledge matched" in first.content.lower()
+        assert "done" not in first.content.lower()
         corrected = service.send("Actually, I meant the S26 Ultra's video recording.")
         assert "without an external ai model" in corrected.content.lower()
         assert corrected.metadata.get("builtin_intent") in {"unsupported", "conversation"}

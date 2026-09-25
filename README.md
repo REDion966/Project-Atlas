@@ -42,6 +42,24 @@ governance — its own governed development.
     **sandbox-only** execution, and **OWNER-only transactional promotion** with
     CODE versioning and capability activation. **Phase 5.2 is implemented and
     Phase 5.3 is validated (G1 — capability activation — closed).**
+- **Target-state gates G1 → G3 are COMPLETE** (owner-scoped, additive; no G4 is
+  defined or authorized — see `docs/ATLAS_STATE.md` §33):
+  - **G1** — general conversational understanding: one deterministic,
+    model-independent semantic layer (`SemanticFrame`) supplying bounded meaning
+    to the EXISTING routing surfaces (which stay authoritative). (This gate label
+    is distinct from the Phase 5.3 "G1" capability-activation closure above.)
+  - **G2** — deep self-knowledge + open-ended knowledge: relationship/dependency
+    answers from the existing architecture model for an explicit named target,
+    and an unmatched knowledge question reports the existing D3 knowledge
+    decision's own sufficiency and governed-acquisition status instead of a bare
+    no-match.
+  - **G3** — governed self-development: a conversational development request now
+    reaches the EXISTING bounded `DevelopmentDriver` (gap → authoring →
+    envelope-authorized sandbox → verification → promotion request), with the
+    bounded capability-handler scaffold specification derived deterministically
+    from the request's own words. The Development Envelope stays disabled by
+    default, promotion remains OWNER-only, and nothing is approved, executed, or
+    promoted by conversation.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
 - **Latest verified full-suite baseline (historical, not re-run for the Phase 3–5

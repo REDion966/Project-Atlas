@@ -302,13 +302,33 @@ in `docs/ATLAS_STATE.md` §32 (and §30 for conversational development intake).
 
 - Episodic context into the `RuntimeCoordinator` pipeline (locked stage order —
   requires an explicit pipeline review).
-- Conversational routing of `DEVELOPMENT_REQUEST`s through the `DevelopmentDriver`
-  (current direct-evolution surfaces are the kernel API and `atlas postcore drive`).
 - Startup re-discovery of previously activated capabilities; durable
   (cross-process) promotion artifacts and authorizations.
 - WS3b (sandbox repository snapshot) and WS4 (deeper self-knowledge integration
   into development reasoning).
 - BootActivation re-verification semantics (owner decision pending).
+
+**DELIVERED (was deferred here):** conversational routing of
+`DEVELOPMENT_REQUEST`s through the `DevelopmentDriver` — implemented by
+target-state gate **G3** (see `docs/ATLAS_STATE.md` §33.3). The kernel API and
+`atlas postcore drive` remain the direct-evolution surfaces and are unchanged.
+
+---
+
+## Target-state gates (owner-scoped, additive — not roadmap phases)
+
+The gates below were completed additively on top of the frozen roadmap and the
+Phase 1–5 direct-evolution program. They add no new engine, planner, router,
+memory store, or authority system, and they do not replace, rename, or remove any
+roadmap phase. Details and evidence: `docs/ATLAS_STATE.md` §33.
+
+- **G1 — General Conversational Understanding. COMPLETE.**
+- **G2 — Deep Self-Knowledge + Open-Ended Knowledge. COMPLETE.**
+- **G3 — Governed Self-Development. COMPLETE.**
+
+**No G4 is defined or authorized.** The master Phase 0 → Phase 13 roadmap, the
+frozen Phase C (C0 → C9) roadmap, and the additive L0 → L10 language roadmap are
+unchanged by these gates.
 
 ---
 

@@ -345,7 +345,23 @@ class TestRealWorldScenarioMatrix(unittest.TestCase):
         self.assertFalse(
             self.atlas._conversation._development_need_coordinator.has_pending
         )
-        self.assertIn("FAILED", response.content)
+        # G3 reconciliation (documented): the confirmed need now rides the EXISTING
+        # governed DevelopmentDriver, which adjudicates the gap honestly
+        # ("already supported" / "no authoring content available") instead of
+        # failing at the supplier. The invariant is unchanged — the outcome is an
+        # honest governed terminal, never a fabricated success, and nothing is
+        # approved, executed, or promoted.
+        self.assertRegex(
+            response.content,
+            r"Outcome: (already_supported|author_unavailable|envelope_disabled|"
+            r"insufficient_evidence|proposed|validated|failed)",
+        )
+        self.assertNotIn("approval", (response.metadata or {}))
+        # Promotion remains OWNER-only: no proposal reaches the APPROVED state.
+        proposals = tuple(self.atlas._evolution_memory.get_all_proposals())
+        self.assertTrue(
+            all(proposal.status.name != "APPROVED" for proposal in proposals)
+        )
 
     def test_governed_lifecycle_reaches_planning_and_approval(self):
         investigation = self.atlas.chat("Investigate the memory architecture.")

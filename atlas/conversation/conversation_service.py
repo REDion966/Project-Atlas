@@ -6,6 +6,8 @@ Coordinates Atlas conversations.
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Protocol
@@ -42,7 +44,15 @@ from atlas.conversation.conversation_context import build_conversation_context
 # L7 (entry) — the deterministic floor's no-answer outcome is the only existing
 # signal that separates "answered deterministically" from "declined", so the
 # eligibility boundary reads its bound name rather than a string literal.
-from atlas.conversation.builtin_response import BUILTIN_INTENT_UNSUPPORTED
+from atlas.conversation.builtin_response import (
+    BUILTIN_INTENT_UNSUPPORTED,
+    BUILTIN_INTENT_VALIDATED_KNOWLEDGE,
+    is_bounded_reference_subject,
+    is_explanatory_self_knowledge,
+    knowledge_topic,
+    research_request_subject,
+    substitute_reference_subject,
+)
 from atlas.conversation.turn_meaning import TurnMeaning, build_turn_meaning
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
@@ -71,6 +81,21 @@ _MAX_ORCHESTRATION_RESULT_CHARS: int = 500
 #: Bounded metadata key carrying the L7 cognition-entry eligibility signal on
 #: the deterministic floor's reply. Data only — it never routes anything.
 REASONING_ELIGIBILITY_KEY: str = "reasoning_eligibility"
+
+
+def _normalized_subject(text: str) -> str:
+    """Case/punctuation-insensitive comparison key for a knowledge subject."""
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+#: A leading subordinate clause marks a turn whose existing path (clarification
+#: or a governed route) must keep precedence over the G1 knowledge seam.
+_SUBORDINATE_CLAUSE_RE = re.compile(
+    r",\s*(?:but|and|then)\b|"
+    r"^\s*(?:before|after|while|when|if|once|although|though|as soon as)\b",
+    re.IGNORECASE,
+)
+
 
 #: Casual task types the deterministic builtin floor may claim. Local mirror of
 #: the builtin claim contract so this module can state the eligibility boundary
@@ -405,6 +430,7 @@ class ConversationService:
         approval_manager: ApprovalManagerProtocol | None = None,
         development_execution_bridge: Callable[..., Any] | None = None,
         proposal_change_supplier: Any | None = None,
+        development_driver_bridge: Callable[..., Any] | None = None,
         autonomy_check: Callable[..., AutonomyDecisionProtocol] | None = None,
     ):
         """
@@ -482,6 +508,16 @@ class ConversationService:
                 ``INVALID_OBJECTIVE`` exactly as before. The supplier receives
                 data only and can never mutate proposals, approvals, or state.
 
+            development_driver_bridge:
+                G3 — optional duck-typed callable mapping a DEVELOPMENT_REQUEST
+                :class:`TaskSpec` into a conversational :class:`Message` (or
+                string) by routing it through the EXISTING governed
+                DevelopmentDriver. Consulted AFTER the B3 clarification gate and
+                BEFORE the legacy F9 ``development_bridge``; this module never
+                imports the evolution package, never approves, never promotes, and
+                ``tick()`` never invokes it. When ``None`` (or raising), the
+                legacy route is preserved verbatim.
+
             autonomy_check:
                 Optional callable injected by the kernel that performs an
                 autonomy check for a given proposal, session, and level,
@@ -513,6 +549,12 @@ class ConversationService:
             else None
         )
         self._development_bridge = development_bridge
+        #: G3 — optional duck-typed governed self-development route (the existing
+        #: bounded DevelopmentDriver, kernel-owned). Consulted for a
+        #: DEVELOPMENT_REQUEST after the B3 clarification gate and before the
+        #: legacy F9 bridge. Duck-typed and fail-soft: absent or raising keeps the
+        #: legacy route verbatim. It grants no authority here and never promotes.
+        self._development_driver_bridge = development_driver_bridge
         self._orchestration_resolver = orchestration_resolver
         self._fallback_resolver = fallback_resolver
         self._builtin_response = builtin_response
@@ -633,7 +675,26 @@ class ConversationService:
             )
             if signal is not None:
                 message.metadata[REASONING_ELIGIBILITY_KEY] = signal
+            self._record_knowledge_result(message)
         return message
+
+    def _record_knowledge_result(self, message: Message) -> None:
+        """Retain a bounded snapshot of a knowledge answer for follow-ups.
+
+        Evidence-driven improvement 1 — facts only (query/status/content),
+        bounded to ``last_knowledge``; never authority, never a second store.
+        """
+        metadata = message.metadata or {}
+        if metadata.get("builtin_intent") != BUILTIN_INTENT_VALIDATED_KNOWLEDGE:
+            return
+        content = message.content if isinstance(message.content, str) else ""
+        self._state_manager.update(
+            last_knowledge={
+                "query": metadata.get("validated_query"),
+                "status": metadata.get("validated_knowledge_status"),
+                "content": content[:600],
+            }
+        )
 
     def _maybe_handle_capability_detail_request(self, text: str) -> Message | None:
         """C4.1 — honour an explicit ``explain <name>`` request for a
@@ -650,6 +711,522 @@ class ConversationService:
         if self._builtin_response is None:
             return None
         return self._builtin_response.match_registered_capability_detail(text)
+
+    def _maybe_handle_evidence_self_knowledge(self, text: str) -> Message | None:
+        """Evidence-driven: Atlas-specific self-knowledge topics (read-only).
+
+        Claimed before the development/execution handlers so an informational
+        question about Atlas's own flow/governance can never be answered as a
+        development action. Grants no authority; creates no proposal.
+        """
+        if self._builtin_response is None:
+            return None
+        return self._builtin_response.match_self_knowledge_topic(text)
+
+    def _maybe_handle_external_knowledge(self, text: str) -> Message | None:
+        """Evidence-driven: external-knowledge requests routed via D3/D2.
+
+        Reuses the existing validated-knowledge surface (local-first, then the
+        D3 knowledge decision and the governed D2 boundary). Never calls an
+        external provider directly and never makes the result authoritative.
+        """
+        if self._builtin_response is None:
+            return None
+        message = self._builtin_response.match_external_knowledge(text)
+        if message is not None:
+            self._record_knowledge_result(message)
+        return message
+
+    # ------------------------------------------------------------------
+    # Evidence-Driven Improvement 3 — conversational knowledge integration
+    # ------------------------------------------------------------------
+
+    def _has_prior_objective(self) -> bool:
+        """True when the conversation already carries an objective or subject.
+
+        Deterministic and read-only: reads the existing bounded conversation
+        state (no knowledge operation, no acquisition, no state change). Used so
+        a bare reference is interpreted as a FOLLOW_UP — resolvable by the
+        existing reference surface — rather than as an ambiguous request.
+        """
+        if self._state_manager is None:
+            return False
+        state = self._state_manager.state
+        for field in (
+            "current_objective",
+            "current_subject",
+            "current_task",
+            "current_investigation",
+        ):
+            if str(getattr(state, field, "") or "").strip():
+                return True
+        return bool(tuple(getattr(state, "captured_entities", ()) or ()))
+
+    def _active_knowledge_subject(self) -> str | None:
+        """The subject a knowledge operation should use right now (I3).
+
+        Deterministic and bounded, in priority order:
+
+          1. the most recent APPLIED correction's subject, when it differs from
+             the retained knowledge query (the user superseded the subject, so
+             the retained answer is stale), else
+          2. the retained knowledge query (``last_knowledge.query``), else
+          3. ``None`` (fail closed).
+
+        Read-only: it never performs a knowledge operation, acquires anything,
+        or changes state.
+        """
+        if self._state_manager is None:
+            return None
+        state = self._state_manager.state
+        recorded = (
+            state.last_knowledge
+            if isinstance(state.last_knowledge, dict)
+            else None
+        )
+        query = str((recorded or {}).get("query") or "").strip()
+        corrections = getattr(state, "corrections", ()) or ()
+        if corrections:
+            corrected = str(getattr(corrections[-1], "corrected", "") or "").strip()
+            if corrected and _normalized_subject(corrected) != _normalized_subject(
+                query
+            ):
+                return corrected
+        return query or None
+
+    def _knowledge_message_for(self, subject: str) -> Message | None:
+        """Answer a knowledge operation for ``subject`` and retain the result.
+
+        Uses the builtin service's local-first D3/D2 claim (the same path as the
+        validated-knowledge bridge) and records the answer into the existing
+        ``ConversationState.last_knowledge`` slot so the existing follow-up
+        surface can consume it. Nothing is invented; when no authorized
+        knowledge exists the retrieval's own honest outcome is reported.
+        """
+        if self._builtin_response is None:
+            return None
+        topic = knowledge_topic(subject)
+        if topic is None:
+            return None
+        message = self._builtin_response.match_knowledge_request(topic)
+        if message is not None:
+            self._record_knowledge_result(message)
+        return message
+
+    def _maybe_handle_knowledge_request(
+        self, text: str, spec: TaskSpec | None
+    ) -> Message | None:
+        """I3 — route an explicit research/knowledge request through D3.
+
+        A turn such as "Research the Europa Clipper mission." is primarily a
+        request for INFORMATION, so it enters the existing local-first knowledge
+        path instead of the generic work-acquisition flow (which could report a
+        completion without producing knowledge).
+
+        Claimed only when the knowledge bridge is actually wired, the turn is a
+        bounded single-clause research request, the subject is not an
+        underspecified generic one (the existing NLU-2 clarification keeps that
+        case), and a bare bounded reference can be resolved from the active
+        subject. Otherwise ``None`` — existing behaviour is unchanged.
+        """
+        if self._builtin_response is None:
+            return None
+        if self._builtin_response.validated_knowledge_provider is None:
+            return None
+        # An unresolved/ambiguous reference keeps the EXISTING governed
+        # clarification (the same deterministic intake ambiguity report the
+        # research bridge honours): the knowledge path never guesses a subject.
+        ambiguity = getattr(spec, "ambiguity", None)
+        if bool(getattr(spec, "needs_clarification", False)) or tuple(
+            getattr(ambiguity, "ambiguities", ()) or ()
+        ):
+            return None
+        objective = ""
+        if spec is not None:
+            objective = str(
+                getattr(spec, "intent", "") or getattr(spec, "goal", "") or ""
+            )
+        # A continuation / follow-up / reference role with prior context takes
+        # precedence over generic new-objective knowledge matching.
+        from atlas.conversation import semantic_frame as _frame
+
+        if _frame.interpret(
+            text, has_prior_objective=bool(self._active_knowledge_subject())
+        ).role is not _frame.SemanticRole.NEW_OBJECTIVE:
+            return None
+        raw_subject = research_request_subject(text)
+        if raw_subject is None:
+            # G1 — not a bounded research-cue request; the semantic frame may
+            # still recognize an ordinary knowledge request.
+            return self._frame_knowledge_message(text, objective, spec)
+
+        reference_resolved = False
+        if is_bounded_reference_subject(raw_subject):
+            active = self._active_knowledge_subject()
+            if active is None:
+                return None
+            raw_subject = substitute_reference_subject(raw_subject, active)
+            reference_resolved = True
+
+        if (
+            research_subject_gap(
+                objective or text, reference_resolved=reference_resolved
+            )
+            is not None
+        ):
+            return None
+
+        message = self._knowledge_message_for(raw_subject)
+        if message is not None:
+            return message
+
+        # G1 — semantic-frame knowledge seam: an ordinary knowledge request the
+        # bounded research cue vocabulary did not claim ("I'd like to know more
+        # about X", "What can you tell me about X?"). Guarded so every existing
+        # precedence survives (see _frame_knowledge_message).
+        return self._frame_knowledge_message(text, objective, spec)
+
+    def _maybe_handle_frame_clarification(self, text: str) -> Message | None:
+        """G1 — ask when the semantic frame says the request is ambiguous.
+
+        Only claims a turn the frame explicitly marked ``needs_clarification``
+        (a bare reference or an unresolved work/knowledge object with no prior
+        context). It never invents a subject and never routes work.
+        """
+        if self._builtin_response is None or not isinstance(text, str):
+            return None
+        from atlas.conversation import semantic_frame as _frame
+        from atlas.conversation.builtin_response import (
+            is_store_recall_shaped,
+            is_validated_knowledge_shaped,
+        )
+
+        # Only a SHORT bare-reference command asks for its subject here; a
+        # prose turn keeps its existing path, and a turn an existing surface
+        # already owns (store recall / validated-knowledge cue) keeps that
+        # surface.
+        if is_store_recall_shaped(text) or is_validated_knowledge_shaped(text):
+            return None
+        # A bounded knowledge follow-up keeps its existing (pinned) behaviour.
+        if any(
+            pattern.match(text.strip())
+            for pattern in (
+                self._KNOWLEDGE_FIND_RE,
+                self._KNOWLEDGE_SOURCE_RE,
+                self._KNOWLEDGE_CONTINUE_RE,
+            )
+        ):
+            return None
+        if len(_frame.tokens(text)) > 6:
+            return None
+        # G1/G2 — the frame must see the ESTABLISHED context, exactly as the
+        # knowledge path does: with an active objective/subject a bare reference
+        # is a FOLLOW_UP the existing reference surface resolves, NOT an
+        # ambiguous request. Without this the clarification seam preempted the
+        # existing reference answer.
+        frame = _frame.interpret(
+            text,
+            has_prior_objective=self._has_prior_objective(),
+            has_knowledge_context=bool(self._active_knowledge_subject()),
+        )
+        if not frame.needs_clarification:
+            return None
+        return Message(
+            role="assistant",
+            content=(
+                "I need a bit more detail before I can act on that:\n"
+                "- Which subject should I use?"
+            ),
+            metadata={
+                "frame_clarification": {
+                    "domain": frame.domain.value,
+                    "operation": frame.operation,
+                }
+            },
+        )
+
+    def _maybe_handle_compound_request(self, text: str) -> Message | None:
+        """G1 — boundedly handle a compound research request.
+
+        A compound whose LEADING subrequest is research/knowledge is answered
+        from the existing local-first knowledge path; every remaining bounded
+        subrequest is reported honestly as recognized-but-not-executed (and a
+        governance-sensitive clause is reported as requiring the existing OWNER
+        approval flow). Nothing is planned, dispatched, or executed here, and
+        the frame never grants authority.
+        """
+        if self._builtin_response is None or not isinstance(text, str):
+            return None
+        from atlas.conversation import semantic_frame as _frame
+
+        subs = _frame.decompose(text)
+        if len(subs) < 2:
+            return None
+        lead = subs[0]
+        if lead.domain != "knowledge" or lead.operation != "research":
+            return None
+        if lead.governance_sensitive:
+            return None
+        topic = knowledge_topic(lead.subject)
+        if topic is None:
+            return None
+        message = self._builtin_response.match_knowledge_request(topic)
+        if message is None:
+            return None
+        self._record_knowledge_result(message)
+
+        lines = [message.content, "", "Recognized additional subrequests:"]
+        for sub in subs[1:]:
+            if sub.governance_sensitive:
+                lines.append(
+                    f"- {sub.operation}: governance-sensitive — it requires the "
+                    "existing OWNER approval flow and was not executed."
+                )
+            elif sub.operation == "research":
+                lines.append(
+                    f"- {sub.operation}: a further research step; ask it as its "
+                    "own request for a separate answer."
+                )
+            else:
+                lines.append(
+                    f"- {sub.operation}: not available as a bounded conversational "
+                    "step; it was not executed."
+                )
+        metadata = dict(message.metadata or {})
+        metadata["compound"] = {"subrequests": [s.to_dict() for s in subs]}
+        return Message(role="assistant", content="\n".join(lines), metadata=metadata)
+
+    def _frame_knowledge_message(
+        self, text: str, objective: str, spec: TaskSpec | None = None
+    ) -> Message | None:
+        """G1 — route a KNOWLEDGE-classified turn into the existing D3 path.
+
+        Guards (each one preserves pinned behaviour):
+          * store-recall shaped and validated-knowledge-cue shaped turns keep
+            their existing surfaces;
+          * compound turns are REPRESENTED (subrequests) and not claimed here;
+          * comparisons keep their existing answerable path;
+          * the NLU-2 subject-gap gate still decides when a subject is too
+            thin to answer, and a turn with no usable subject fails closed.
+        """
+        if self._builtin_response is None:
+            return None
+        from atlas.conversation import semantic_frame as _frame
+        from atlas.conversation.builtin_response import (
+            is_compound_shaped,
+            is_store_recall_shaped,
+            is_validated_knowledge_shaped,
+        )
+
+        if is_store_recall_shaped(text) or is_validated_knowledge_shaped(text):
+            return None
+        # Only CASUAL-shaped turns are claimed here: a research-shaped task type
+        # already has its existing path (the bounded research cue vocabulary
+        # above, or the orchestration bridge with its own clarification), and
+        # that path must keep its pinned behaviour. A turn carrying a leading
+        # subordinate clause ("Before I decide what to test, find ...") also
+        # keeps its existing path.
+        task_type = str(getattr(getattr(spec, "task_type", None), "value", "") or "")
+        if task_type not in (
+            "", "conversation", "question", "unknown", "information_request",
+            "action_request",
+        ):
+            return None
+        if _SUBORDINATE_CLAUSE_RE.search(text):
+            return None
+        if is_compound_shaped(text) or len(_frame.decompose(text)) >= 2:
+            return None
+        frame = _frame.interpret(text)
+        if frame.domain is not _frame.SemanticDomain.KNOWLEDGE:
+            return None
+        if frame.operation not in ("research", "explain", "status"):
+            return None
+        if (
+            research_subject_gap(objective or text, reference_resolved=False)
+            is not None
+        ):
+            return None
+        topic = knowledge_topic(_frame.knowledge_subject(text))
+        if topic is None:
+            return None
+        message = self._builtin_response.match_knowledge_request(topic)
+        if message is not None:
+            self._record_knowledge_result(message)
+        return message
+
+    #: Evidence-driven improvement 1 — bare knowledge follow-ups. Whole-turn
+    #: anchored so they can never capture a topic-bearing request (e.g. "what
+    #: did you find about memory storage?" keeps its existing knowledge path).
+    _KNOWLEDGE_FIND_RE = re.compile(
+        r"^\s*(?:and\s+)?what\s+did\s+(?:you|we)\s+(?:find|learn|discover)"
+        r"\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+    _KNOWLEDGE_SOURCE_RE = re.compile(
+        r"^\s*(?:and\s+)?what\s+sources?\s+supports?\s+(?:that|this)\s*[.?]*\s*$"
+        r"|^\s*(?:and\s+)?what\s+(?:source|evidence)\s+supports?\s+(?:that|this)"
+        r"\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+    _KNOWLEDGE_CONTINUE_RE = re.compile(
+        r"^\s*(?:can\s+you\s+)?(?:continue|go\s+on|keep\s+going)\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+
+    #: I3 — follow-up forms that carry a TOPIC. Claimed only when that topic is
+    #: a bare bounded reference, so a real subject keeps its existing knowledge
+    #: path (and Improvement 1's contract is preserved verbatim).
+    _KNOWLEDGE_ABOUT_RE = re.compile(
+        r"^\s*(?:and\s+)?what\s+did\s+(?:you|we)\s+(?:find|learn|discover)\s+about\s+"
+        r"(?P<topic>.+?)\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+    _KNOWLEDGE_MORE_ABOUT_RE = re.compile(
+        r"^\s*(?:and\s+)?(?:tell\s+me\s+)?(?:more\s+)?about\s+"
+        r"(?P<topic>.+?)\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+    _KNOWLEDGE_WHAT_ABOUT_RE = re.compile(
+        r"^\s*(?:and\s+)?what\s+about\s+(?P<topic>.+?)\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+    #: G1 — the shared recall cue form carrying a BOUNDED REFERENCE
+    #: ("what do you know about that?") resolves against the retained/active
+    #: knowledge subject instead of the literal reference.
+    _KNOWLEDGE_KNOW_ABOUT_RE = re.compile(
+        r"^\s*(?:and\s+)?what\s+do\s+you\s+(?:know|remember)\s+about\s+"
+        r"(?P<topic>.+?)\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+
+    def _maybe_handle_knowledge_followup(self, text: str) -> Message | None:
+        """Resolve a knowledge follow-up against the retained result.
+
+        Only claims the turn when the immediately preceding knowledge answer was
+        retained (``ConversationState.last_knowledge``); otherwise returns
+        ``None`` so existing behaviour is unchanged. Read-only and bounded:
+        nothing is acquired, invented, or executed.
+
+        I3 adds two bounded behaviours on top of the unchanged replay:
+
+          * a topic-bearing follow-up whose topic is a bare bounded reference
+            ("what did you find about that?", "tell me more about that.")
+            resolves that reference from the active subject — the literal
+            pronoun is never passed to the knowledge operation; and
+          * when the active subject has been SUPERSEDED (the user corrected it),
+            the follow-up performs a fresh knowledge operation for the corrected
+            subject instead of replaying the stale answer.
+        """
+        if self._state_manager is None or not isinstance(text, str):
+            return None
+        recorded = self._state_manager.state.last_knowledge
+        if not isinstance(recorded, dict):
+            return None
+        stripped = text.strip()
+
+        kind: str | None = None
+        if self._KNOWLEDGE_FIND_RE.match(stripped):
+            kind = "find"
+        elif self._KNOWLEDGE_SOURCE_RE.match(stripped):
+            kind = "source"
+        elif self._KNOWLEDGE_CONTINUE_RE.match(stripped):
+            kind = "continue"
+
+        requested_subject: str | None = None
+        if kind is None:
+            for pattern in (
+                self._KNOWLEDGE_ABOUT_RE,
+                self._KNOWLEDGE_MORE_ABOUT_RE,
+                self._KNOWLEDGE_WHAT_ABOUT_RE,
+                self._KNOWLEDGE_KNOW_ABOUT_RE,
+            ):
+                match = pattern.match(stripped)
+                if match is None:
+                    continue
+                raw_topic = match.group("topic").strip()
+                if not is_bounded_reference_subject(raw_topic):
+                    return None
+                active = self._active_knowledge_subject()
+                if active is None:
+                    return None
+                requested_subject = substitute_reference_subject(raw_topic, active)
+                kind = "find"
+                break
+        if kind is None:
+            return None
+
+        # The corrected/active subject supersedes the retained answer: answer
+        # the actual question instead of replaying stale knowledge (I3, G-C).
+        target = requested_subject or self._active_knowledge_subject()
+        retained_query = str(recorded.get("query") or "")
+        if target and _normalized_subject(target) != _normalized_subject(
+            retained_query
+        ):
+            refreshed = self._knowledge_message_for(target)
+            if refreshed is not None:
+                return refreshed
+
+        return self._knowledge_followup_replay(kind, recorded)
+
+    def _knowledge_followup_replay(
+        self, kind: str, recorded: dict
+    ) -> Message | None:
+        """The unchanged (Improvement 1) replay of a retained knowledge answer."""
+        query = str(recorded.get("query") or "")
+        status = str(recorded.get("status") or "")
+        content = str(recorded.get("content") or "")
+
+        if kind == "find":
+            return Message(
+                role="assistant",
+                content=(
+                    f"Most recent knowledge result "
+                    f"(query '{query}', status {status}):\n\n{content}"
+                ),
+                metadata={
+                    "knowledge_followup": {
+                        "kind": "find",
+                        "query": query,
+                        "status": status,
+                    }
+                },
+            )
+
+        if kind == "source":
+            sources = tuple(
+                line.strip()
+                for line in content.splitlines()
+                if line.strip().lower().startswith("- source:")
+            )
+            if sources:
+                body = (
+                    "Sources attached to the most recent knowledge result:\n"
+                    + "\n".join(sources)
+                )
+            else:
+                body = (
+                    "The most recent knowledge result carries no authorized "
+                    "source provenance; I will not invent one."
+                )
+            return Message(
+                role="assistant",
+                content=body,
+                metadata={"knowledge_followup": {"kind": "source"}},
+            )
+
+        if kind == "continue":
+            return Message(
+                role="assistant",
+                content=(
+                    f"I resolved this against the most recent knowledge result "
+                    f"('{query}'). I do not autonomously continue research; tell "
+                    "me the next objective or source."
+                ),
+                metadata={
+                    "knowledge_followup": {"kind": "continue", "query": query}
+                },
+            )
+        return None
 
     def _build_conversation_context(self) -> ConversationContext:
         """Build the bounded, read-only context projection for this turn.
@@ -847,6 +1424,40 @@ class ConversationService:
         if capability_detail is not None:
             self._conversation.add_message(capability_detail)
             return capability_detail
+        # Evidence-driven improvement 1 — Atlas-informational self-knowledge
+        # topics and external-knowledge requests are claimed deterministically
+        # BEFORE the development/execution handlers, so an informational
+        # question cannot be answered as a development action.
+        evidence_self_knowledge = self._maybe_handle_evidence_self_knowledge(text)
+        if evidence_self_knowledge is not None:
+            self._conversation.add_message(evidence_self_knowledge)
+            return evidence_self_knowledge
+        external_knowledge = self._maybe_handle_external_knowledge(text)
+        if external_knowledge is not None:
+            self._conversation.add_message(external_knowledge)
+            return external_knowledge
+        # Evidence-Driven Improvement 3 — an explicit research/knowledge request
+        # is a request for INFORMATION, so it enters the existing local-first
+        # knowledge path (D3 → governed D2) instead of the generic work flow.
+        compound = self._maybe_handle_compound_request(text)
+        if compound is not None:
+            self._conversation.add_message(compound)
+            return compound
+        knowledge_request = self._maybe_handle_knowledge_request(text, spec)
+        if knowledge_request is not None:
+            self._conversation.add_message(knowledge_request)
+            return knowledge_request
+        # Evidence-driven improvement 1 — bare knowledge follow-ups resolve
+        # against the immediately preceding knowledge answer (read-only).
+        knowledge_followup = self._maybe_handle_knowledge_followup(text)
+        if knowledge_followup is not None:
+            self._conversation.add_message(knowledge_followup)
+            return knowledge_followup
+        # G1 — a frame-determined ambiguous request asks for its subject.
+        clarification = self._maybe_handle_frame_clarification(text)
+        if clarification is not None:
+            self._conversation.add_message(clarification)
+            return clarification
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -948,7 +1559,7 @@ class ConversationService:
                 return l5_response
         # Development semantics win — run it first and never reroute development
         # through orchestration.
-        development_response = self._maybe_handle_development_request(spec)
+        development_response = self._development_request_route(spec, text)
         if development_response is not None:
             self._conversation.add_message(development_response)
             return development_response
@@ -1167,6 +1778,43 @@ class ConversationService:
             self._conversation.add_message(capability_detail)
             yield capability_detail.content
             return
+        # Evidence-driven improvement 1 — Atlas-informational self-knowledge
+        # topics and external-knowledge requests (mirror of send()).
+        evidence_self_knowledge = self._maybe_handle_evidence_self_knowledge(text)
+        if evidence_self_knowledge is not None:
+            self._conversation.add_message(evidence_self_knowledge)
+            yield evidence_self_knowledge.content
+            return
+        external_knowledge = self._maybe_handle_external_knowledge(text)
+        if external_knowledge is not None:
+            self._conversation.add_message(external_knowledge)
+            yield external_knowledge.content
+            return
+        # Evidence-Driven Improvement 3 — research/knowledge requests (mirror of
+        # send(): same handler, same placement, same semantics).
+        compound = self._maybe_handle_compound_request(text)
+        if compound is not None:
+            self._conversation.add_message(compound)
+            yield compound.content
+            return
+        knowledge_request = self._maybe_handle_knowledge_request(text, spec)
+        if knowledge_request is not None:
+            self._conversation.add_message(knowledge_request)
+            yield knowledge_request.content
+            return
+        # Evidence-driven improvement 1 — bare knowledge follow-ups (mirror of
+        # send(): same handler, same placement, same semantics).
+        knowledge_followup = self._maybe_handle_knowledge_followup(text)
+        if knowledge_followup is not None:
+            self._conversation.add_message(knowledge_followup)
+            yield knowledge_followup.content
+            return
+        # G1 — frame-determined ambiguity asks for its subject (mirror of send()).
+        clarification = self._maybe_handle_frame_clarification(text)
+        if clarification is not None:
+            self._conversation.add_message(clarification)
+            yield clarification.content
+            return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -1281,7 +1929,7 @@ class ConversationService:
                 return
         # Development semantics win — run it first and never reroute development
         # through orchestration.
-        development_response = self._maybe_handle_development_request(spec)
+        development_response = self._development_request_route(spec, text)
         if development_response is not None:
             self._conversation.add_message(development_response)
             yield development_response.content
@@ -1972,6 +2620,40 @@ class ConversationService:
         self._record_pending_question(asked)
         return Message(role="assistant", content="\n".join(lines))
 
+    def _development_request_route(
+        self,
+        spec: TaskSpec | None,
+        text: str,
+    ) -> Message | None:
+        """Route a DEVELOPMENT_REQUEST through the governed paths.
+
+        G2 — an EXPLANATORY question about Atlas's own mechanism ("how would you
+        add a new capability?") is self-knowledge, not a development directive, so
+        the self-knowledge surface owns it and no development route is invoked.
+
+        G3 — every other DEVELOPMENT_REQUEST is offered to the EXISTING bounded
+        DevelopmentDriver (see :meth:`_maybe_handle_development_request`), after
+        the B3 clarification gate and after L5 antecedent resolution. An absent or
+        raising driver seam preserves the legacy F9 route verbatim.
+        """
+        if (
+            spec is not None
+            and spec.task_type is TaskType.DEVELOPMENT_REQUEST
+            and self._is_self_knowledge_explanation(text)
+        ):
+            return None
+        return self._maybe_handle_development_request(spec)
+
+    @staticmethod
+    def _is_self_knowledge_explanation(text: str) -> bool:
+        """True for an explanatory question about Atlas itself (G2).
+
+        Delegates to the SHARED bound used by the builtin classifier, so the two
+        seams can never disagree: the turn must lead with an interrogative and
+        the shared SemanticFrame must record the SELF_KNOWLEDGE domain.
+        """
+        return is_explanatory_self_knowledge(text)
+
     def _maybe_handle_development_request(
         self,
         spec: TaskSpec | None,
@@ -1990,7 +2672,7 @@ class ConversationService:
         if spec.needs_clarification:
             return self._clarification_message(spec)
 
-        if self._development_bridge is None:
+        if self._development_bridge is None and self._development_driver_bridge is None:
             return None
 
         # L5 — a reference-only development follow-up ("Develop that
@@ -2007,6 +2689,27 @@ class ConversationService:
                 spec, intent=resolved_antecedent, goal=resolved_antecedent
             )
         operand = spec.goal or spec.intent or None
+        # G3 — the governed self-development route: offer the (antecedent-resolved)
+        # request to the EXISTING bounded DevelopmentDriver, which owns gap
+        # assessment, deterministic authoring, the envelope-authorized sandbox
+        # phase, verification and promotion-request preparation. It never
+        # approves or promotes; an absent/raising seam falls through to the
+        # legacy F9 bridge verbatim, and the accepted-request bookkeeping the
+        # legacy path performs is preserved for every handled outcome.
+        driver_bridge = self._development_driver_bridge
+        if driver_bridge is not None:
+            try:
+                driven = driver_bridge(spec)
+            except Exception:
+                driven = None
+            if isinstance(driven, Message):
+                self._accept_development_request(operand)
+                return driven
+            if isinstance(driven, str) and driven.strip():
+                self._accept_development_request(operand)
+                return Message(role="assistant", content=driven)
+        if self._development_bridge is None:
+            return None
         result = self._development_bridge(spec)
         if isinstance(result, Message):
             self._accept_development_request(operand)

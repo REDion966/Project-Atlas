@@ -209,7 +209,15 @@ class TestNoProviderConfigured:
             assert attempts == [], "an outbound connection was attempted"
 
     def test_nlu2_research_routing_is_model_free(self, kernel):
-        """NLU-2: research routing runs without a model or a provider."""
+        """NLU-2: research routing runs without a model or a provider.
+
+        Reconciled (Evidence-Driven Improvement 3): the original assertion also
+        pinned the research turn to the orchestration bridge. Improvement 3
+        routes a single-clause research request through the existing local-first
+        knowledge path instead. The invariant this test exists for is unchanged
+        and still asserted: the turn is answered deterministically, with no
+        model, no provider content, and no outbound connection attempt.
+        """
         with model_free_environment() as attempts:
             message = _send(
                 kernel,
@@ -217,13 +225,17 @@ class TestNoProviderConfigured:
                 "atlas memory subsystem.",
             )
             metadata = message.metadata or {}
-            assert isinstance(metadata.get("orchestration"), dict)
             assert metadata.get("model_used") is not True
-            assert "Done:" in message.content or "Could not complete" in message.content
+            assert message.content.strip()
+            assert "provider" not in message.content.lower()
             assert attempts == []
 
     def test_nlu3_dimension_request_is_model_free(self, kernel):
-        """NLU-3: an enumerated-dimension request stays deterministic/honest."""
+        """NLU-3: an enumerated-dimension request stays deterministic/honest.
+
+        Reconciled (Evidence-Driven Improvement 3) — see the NLU-2 test above;
+        the deterministic/model-free invariant is unchanged.
+        """
         with model_free_environment() as attempts:
             message = _send(
                 kernel,
@@ -231,9 +243,9 @@ class TestNoProviderConfigured:
                 "ranking, and memory search of the atlas memory subsystem.",
             )
             metadata = message.metadata or {}
-            assert isinstance(metadata.get("orchestration"), dict)
             assert metadata.get("model_used") is not True
             assert message.content.strip()
+            assert "provider" not in message.content.lower()
             assert attempts == []
 
     def test_nlu4_entity_capture_is_model_free(self, kernel):
@@ -392,21 +404,27 @@ class TestProviderFailure:
             assert (message.metadata or {}).get("model_used") is False, text
 
     def test_raising_provider_keeps_research_governed(self, raising_kernel):
-        """A failing provider cannot manufacture a research result."""
+        """A failing provider cannot manufacture a research result.
+
+        Reconciled (Evidence-Driven Improvement 3): the original assertion also
+        required the orchestration report shape. Improvement 3 answers a
+        single-clause research request from the existing local-first knowledge
+        path, which reports the retrieval's own honest outcome when nothing is
+        validated. The invariant this test exists for is unchanged and still
+        asserted: the answer is a deterministic, governed, provider-free
+        outcome — never provider content, never a fabricated result.
+        """
         message = _fresh(raising_kernel).send(
             "Research the Samsung Galaxy S26 Ultra camera system."
         )
         metadata = message.metadata or {}
-        orchestration = metadata.get("orchestration")
-        assert isinstance(orchestration, dict)
-        assert orchestration.get("status") in ("completed", "failed", "partial")
         assert metadata.get("model_used") is not True
         lowered = message.content.lower()
-        # The answer is the deterministic orchestration report — an honest
-        # no-evidence failure for this subject, never provider content.
-        assert "could not complete" in lowered
-        assert "no_evidence" in lowered
         assert "provider" not in lowered
+        assert message.content.strip()
+        # Honest deterministic outcome (either the knowledge path's own
+        # no-match/insufficiency report or the existing governed report).
+        assert "no validated knowledge matched" in lowered or "could not complete" in lowered
 
     def test_no_exception_escapes_the_governed_path(self, raising_kernel):
         """Failure-proof: the whole NLU surface returns governed messages."""

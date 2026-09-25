@@ -314,12 +314,251 @@ _SELF_KNOWLEDGE_TOPICS: tuple[
 def _match_self_knowledge_topic(lowered: str) -> str | None:
     """Return the bounded self-knowledge topic for ``lowered``, or None.
 
-    A topic is claimed only when its cue pattern AND an Atlas self-reference are
-    both present, so a domain question about some other system is never captured.
+    A self-referential topic is claimed only when its cue pattern AND an Atlas
+    self-reference are both present, so a domain question about some other
+    system is never captured. Atlas-specific topics (request flow, development,
+    OWNER approval, sandbox, authorization boundary, extension points) name
+    Atlas-only concepts, so they do not require the generic self-reference.
     """
-    if not _SELF_REFERENCE_ANY_RE.search(lowered):
-        return None
     for topic, pattern, _anchors in _SELF_KNOWLEDGE_TOPICS:
+        if pattern.search(lowered) and _SELF_REFERENCE_ANY_RE.search(lowered):
+            return topic
+    for topic, pattern, _anchors in _SELF_KNOWLEDGE_TOPICS_ATLAS_SPECIFIC:
+        if pattern.search(lowered):
+            return topic
+    return None
+
+
+#: Evidence-driven self-knowledge topics whose cue patterns are Atlas-specific
+#: by construction (they name request flow / development / OWNER / sandbox /
+#: authorization / extension points). Anchors are verified present before any
+#: prose is emitted — the same contract as ``_SELF_KNOWLEDGE_TOPICS``.
+_SELF_KNOWLEDGE_TOPICS_ATLAS_SPECIFIC: tuple[
+    tuple[str, "re.Pattern[str]", tuple[str, ...]], ...
+] = (
+    (
+        "request flow",
+        re.compile(
+            r"\bhow\s+(?:does|do)\s+a\s+user\s+request\b"
+            r"|\buser\s+request\s+(?:travel|move|flow)\w*\b"
+            r"|\brequest\s+flow\b"
+            r"|\bbetween\s+conversation\s+intake\b"
+        ),
+        (
+            "atlas.conversation.conversation_service",
+            "atlas.conversation.engine",
+            "atlas.research.knowledge_decision",
+            "atlas.orchestration.work_orchestrator",
+        ),
+    ),
+    (
+        "development process",
+        re.compile(
+            r"\bdevelopment\s+(?:process|pipeline|lifecycle|flow|workflow)\b"
+            r"|\bwhat\s+happens\s+after\s+a\s+proposal\s+is\s+created\b"
+            r"|\bhow\s+would\s+you\s+develop\s+a\s+new\s+capabilit"
+        ),
+        (
+            "atlas.evolution.development_cycle",
+            "atlas.orchestration.development_orchestrator",
+            "atlas.evolution.promotion_gate",
+        ),
+    ),
+    (
+        "owner approval",
+        re.compile(
+            r"\bowner\s+approval\b"
+            r"|\bwhere\s+does\s+(?:the\s+)?owner\s+approv"
+            r"|\bwho\s+approves\b"
+            r"|\bapproval\s+boundary\b"
+        ),
+        ("atlas.evolution.approval_manager", "atlas.authority.service"),
+    ),
+    (
+        "sandbox execution",
+        re.compile(
+            r"\bsandbox\s+(?:execution|boundary|isolation|enforce\w*)\b"
+            r"|\bhow\s+is\s+sandbox"
+        ),
+        (
+            "atlas.evolution.autonomy.code_sandbox",
+            "atlas.evolution.self_development_loop",
+        ),
+    ),
+    (
+        "authorization boundary",
+        re.compile(
+            r"\bprevent\w*\b[^.?]{0,60}\bauthoriz\w*\b"
+            r"|\bauthoriz\w*\s+itself\b"
+            r"|\bself[-\s]?authoriz\w*\b"
+            r"|\bnatural[- ]language\b[^.?]{0,40}\bauthoriz\w*\b"
+        ),
+        ("atlas.authority.service", "atlas.kernel.atlas"),
+    ),
+    (
+        "extension points",
+        re.compile(
+            r"\bif\s+you\s+needed\s+a\s+new\s+capabilit"
+            r"|\bwhere\s+would\s+(?:a\s+new\s+capabilit\w*|it)\s+fit\b"
+            r"|\breuse\b[^.?]{0,40}\badd\s+a\s+capabilit"
+            r"|\bhow\s+would\s+you\s+verify\s+such\s+a\s+change\b"
+        ),
+        (
+            "atlas.reasoning.execution.registry",
+            "atlas.evolution.development_cycle",
+            "atlas.evolution.development_verification",
+        ),
+    ),
+)
+
+
+_ALL_SELF_KNOWLEDGE_TOPICS = (
+    _SELF_KNOWLEDGE_TOPICS + _SELF_KNOWLEDGE_TOPICS_ATLAS_SPECIFIC
+)
+
+#: G1 — the semantic frame's self-knowledge CONCEPT -> the EXISTING self-knowledge
+#: topic that owns it. The frame supplies the operational distinction; the
+#: existing verified-anchor topic renderers still produce the answer.
+_FRAME_CONCEPT_TOPICS: dict[str, str] = {
+    "evidence_failure": "evidence and failure behaviour",
+    "research_process": "research process",
+    "request_flow": "request flow",
+    "reference_resolution": "reference resolution",
+    "owner_approval": "owner approval",
+    "sandbox_execution": "sandbox execution",
+    "authorization_boundary": "authorization boundary",
+    "extension_points": "extension points",
+    "development_process": "development process",
+    "limitations": "current limitations",
+}
+
+
+def is_store_recall_shaped(text: str) -> bool:
+    """True when the turn is a bounded memory/knowledge-store recall cue."""
+    if not isinstance(text, str) or not text:
+        return False
+    return _RECALL_RE.search(text.lower()) is not None
+
+
+def is_validated_knowledge_shaped(text: str) -> bool:
+    """True when the turn matches an EXISTING validated-knowledge cue (either tier)."""
+    if not isinstance(text, str) or not text:
+        return False
+    return _match_validated_knowledge_cue(text.lower()) is not None
+
+
+#: G2 — leading interrogatives that mark an EXPLANATORY question rather than an
+#: imperative directive. Combined with the shared frame's SELF_KNOWLEDGE domain
+#: by :func:`is_explanatory_self_knowledge`.
+_EXPLANATION_LEADS_RE = re.compile(r"^(?:how|what|which|where|who|why)\b")
+
+
+def explanatory_self_knowledge_concept(text: str) -> str | None:
+    """G2 — the frame's self-knowledge CONCEPT for an explanatory question.
+
+    Uses the SHARED semantic frame (the single semantic source) instead of a new
+    cue list: the turn must LEAD with an interrogative AND the frame must record
+    the SELF_KNOWLEDGE domain. Returns that frame's concept, or ``None`` when the
+    turn is not an explanatory self-knowledge question (an imperative directive
+    such as "Add a new capability that ..." never matches, so the development
+    path keeps it).
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    if _EXPLANATION_LEADS_RE.match(text.strip().lower()) is None:
+        return None
+    from atlas.conversation import semantic_frame as _frame
+
+    frame = _frame.interpret(text)
+    if frame.domain is not _frame.SemanticDomain.SELF_KNOWLEDGE:
+        return None
+    return frame.concept or None
+
+
+def is_explanatory_self_knowledge(text: str) -> bool:
+    """G2 — True for an explanatory QUESTION about Atlas's own mechanism."""
+    return explanatory_self_knowledge_concept(text) is not None
+
+
+def is_compound_shaped(text: str) -> bool:
+    """True when the turn carries a second instruction after the first clause."""
+    if not isinstance(text, str) or not text:
+        return False
+    return _COMPOUND_CONNECTOR_RE.search(text.lower()) is not None
+
+
+#: Evidence-driven bounded component knowledge: a natural-language description
+#: of a responsibility resolves to the ACTUAL existing component (verified
+#: present before it is reported). This is metadata about existing components —
+#: not a second registry, database, or model.
+_COMPONENT_HINTS: tuple[tuple["re.Pattern[str]", str, str, str], ...] = (
+    (
+        re.compile(
+            r"\bknowledge\s+(?:decision|sufficienc\w*)\b"
+            r"|\bdecides?\s+whether\b[^.?]{0,40}\bexternal\s+knowledge\b"
+            r"|\bexternal\s+knowledge\s+(?:is\s+)?necessary\b"
+            r"|\bdecide\w*\b[^.?]{0,30}\bknowledge\b[^.?]{0,20}\bneed\w*\b"
+            r"|\bknow\w*\b[^.?]{0,20}\benough\b"
+        ),
+        "atlas.research.knowledge_decision",
+        "KnowledgeDecisionService",
+        "Decides knowledge sufficiency and integrates governed external "
+        "acquisition (D3). Reuses the existing validated-knowledge retriever "
+        "and the D2 acquisition boundary.",
+    ),
+    (
+        re.compile(
+            r"\bwork\s+orchestrat\w*\b"
+            r"|\bcoordinates?\s+work\s+execution\b"
+            r"|\bcoordinar?t\w*\s+work\s+execution\b"
+        ),
+        "atlas.orchestration.work_orchestrator",
+        "WorkOrchestrator",
+        "Coordinates one objective across the existing knowledge decision, "
+        "capability registry/dispatcher, and authorization boundary (D4).",
+    ),
+    (
+        re.compile(r"\bdevelopment\s+orchestrat\w*\b"),
+        "atlas.orchestration.development_orchestrator",
+        "DevelopmentOrchestrator",
+        "Coordinates the governed development lifecycle (D5) over the existing "
+        "proposal, OWNER approval, sandbox, verification, and promotion "
+        "components.",
+    ),
+    (
+        re.compile(
+            r"\bconversation\s+engine\b"
+            r"|\bhandles\s+conversation\b"
+            r"|\bconversation\s+system\b"
+        ),
+        "atlas.conversation.engine",
+        "ConversationEngine",
+        "Deterministic interpretation/orchestration boundary that projects a "
+        "bounded SemanticIntake (D1); it holds no authority.",
+    ),
+)
+
+
+def _match_component_hint(lowered: str) -> tuple[str, str, str] | None:
+    """Return ``(module_path, class_name, responsibility)`` or None.
+
+    Deterministic and bounded; the caller verifies the module is actually
+    present before reporting it.
+    """
+    for pattern, module, cls, responsibility in _COMPONENT_HINTS:
+        if pattern.search(lowered):
+            return (module, cls, responsibility)
+    return None
+
+
+def _match_atlas_specific_self_knowledge_topic(lowered: str) -> str | None:
+    """Return an Atlas-specific self-knowledge topic, or None.
+
+    Bounded to the evidence-driven topics that name Atlas-only concepts, so a
+    question such as "if you needed a new capability, where would it fit?" is
+    answered as self-knowledge rather than as a generic capability inventory.
+    """
+    for topic, pattern, _anchors in _SELF_KNOWLEDGE_TOPICS_ATLAS_SPECIFIC:
         if pattern.search(lowered):
             return topic
     return None
@@ -327,7 +566,7 @@ def _match_self_knowledge_topic(lowered: str) -> str | None:
 
 def _self_knowledge_anchors(topic: str) -> tuple[str, ...]:
     """Return the verified anchor module paths recorded for ``topic``."""
-    for name, _pattern, anchors in _SELF_KNOWLEDGE_TOPICS:
+    for name, _pattern, anchors in _ALL_SELF_KNOWLEDGE_TOPICS:
         if name == topic:
             return anchors
     return ()
@@ -343,6 +582,30 @@ _ARCHITECTURE_PARTS_RE = re.compile(
 _STATUS_RE = re.compile(
     r"\bstatus\b|how are you\b|are you (ok|okay|online|working|up|running)\b"
     r"|system (status|health)\b|how is atlas\b"
+)
+
+#: Evidence-driven external-knowledge phrasing about an EXTERNAL subject. The
+#: subject is extracted deterministically; Atlas-self subjects are excluded so
+#: "what is your status" stays Atlas status. This runs BEFORE ``_STATUS_RE`` so
+#: an external subject's "current status" is never answered as Atlas's status.
+_EXTERNAL_KNOWLEDGE_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"^\s*(?:what(?:'s| is)?\s+)?(?:the\s+)?(?:current\s+)?status\s+of\s+"
+        r"(?P<topic>.+?)\s*\??\s*$"
+    ),
+    re.compile(
+        r"^\s*what(?:'s| is)?\s+happening\s+(?:with|to)\s+(?P<topic>.+?)\s*\??\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:what(?:'s| is)?\s+)?(?:the\s+)?latest\s+"
+        r"(?:information|news|updates?|developments?)\s+"
+        r"(?:about|on|for|regarding)\s+(?P<topic>.+?)\s*\??\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:can\s+you\s+|please\s+|could\s+you\s+)?(?:find|get|tell\s+me)\s+"
+        r"(?:the\s+)?latest\s+(?:information|news|updates?|developments?)\s+"
+        r"(?:about|on|for|regarding)\s+(?P<topic>.+?)\s*\??\s*$"
+    ),
 )
 
 #: Deterministic memory/knowledge recall. Conservative trigger phrases
@@ -450,6 +713,135 @@ _MAX_VALIDATED_TOPIC_CHARS: int = 60
 
 #: C6.1 — bounded render bound for a validated claim statement.
 _MAX_VALIDATED_CLAIM_CHARS: int = 500
+
+
+# ---------------------------------------------------------------------------
+# Evidence-Driven Improvement 3 — explicit conversational research/knowledge
+# requests ("Research X.", "Can you look into X?", "Find information about X.").
+#
+# These are REQUESTS FOR INFORMATION, so they enter the SAME local-first
+# knowledge path as the validated-knowledge bridge (existing retrieval, then the
+# existing D3 knowledge decision which owns the governed D2 boundary). Inventory
+# only — no new engine, store, provider, or acquisition surface.
+# ---------------------------------------------------------------------------
+
+#: Bounded single-clause research/knowledge request forms. Anchored to the WHOLE
+#: turn, and the caller additionally declines a compound turn, so no instruction
+#: that continues after the subject is captured here.
+_RESEARCH_REQUEST_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*(?:can you\s+|could you\s+|please\s+|i'?d like you to\s+)?"
+        r"research\s+(?:about\s+|on\s+|into\s+)?(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+    re.compile(
+        r"^\s*i'?d\s+like\s+(?:some\s+)?research\s+(?:on|about|into)\s+"
+        r"(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:can you\s+|could you\s+|please\s+)?look\s+into\s+"
+        r"(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:can you\s+|could you\s+|please\s+)?find\s+(?:information|info)"
+        r"\s+(?:about|on)\s+(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:can you\s+|could you\s+|please\s+)?find\s+out\s+(?:about\s+)?"
+        r"(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:can you\s+|could you\s+|please\s+)?look\s+up\s+"
+        r"(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+    re.compile(
+        r"^\s*(?:can you\s+|could you\s+|please\s+)?search\s+for\s+"
+        r"(?P<topic>.+?)\s*[.!?]*\s*$"
+    ),
+)
+
+#: A redundant information lead inside a captured research subject
+#: ("search for information about X" -> "X").
+_INFORMATION_LEAD_RE = re.compile(r"^(?:information|info|knowledge|details?)\s+(?:about|on|for|regarding)\s+")
+
+#: A second-instruction connector marks a COMPOUND turn. Compound handling is
+#: out of scope for this improvement, so those turns keep their existing path.
+_COMPOUND_CONNECTOR_RE = re.compile(
+    r";"
+    r"|\b(?:and|then)\s+(?:also\s+)?"
+    r"(?:tell|summari[sz]e|explain|report|show|list|compare|check|verify|"
+    r"write|give|describe|analy[sz]e|investigate|find)\b"
+    r"|\balso\s+(?:tell|summari[sz]e|explain|report|show|list)\b"
+)
+
+#: Bounded demonstrative/possessive subjects that must be resolved from the
+#: active conversational subject instead of being passed literally.
+BOUNDED_REFERENCE_HEADS: frozenset[str] = frozenset(
+    {"that", "this", "it", "its", "these", "those", "the same"}
+)
+
+
+def knowledge_topic(text: str) -> str | None:
+    """Public bounded topic reduction (C6.1 rules; reused by I3).
+
+    Case-insensitive: the reduction is defined over the lowercase token form, so
+    the input is lowercased here (the existing internal callers already pass an
+    already-lowercased remainder).
+    """
+    if not isinstance(text, str):
+        return None
+    return _validated_knowledge_topic(text.lower())
+
+
+def research_request_subject(text: str) -> str | None:
+    """Return the bounded RAW subject of a research/knowledge request, or None.
+
+    ``None`` for a non-research turn and for a compound turn (a turn that
+    continues with a second instruction keeps its existing path). The returned
+    subject is the single-clause text after the request cue, BEFORE topic
+    reduction, so the caller can apply bounded reference substitution first.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    stripped = text.strip()
+    if _COMPOUND_CONNECTOR_RE.search(stripped.lower()):
+        return None
+    lowered = stripped.lower()
+    for pattern in _RESEARCH_REQUEST_RES:
+        match = pattern.search(lowered)
+        if match is None:
+            continue
+        topic = _INFORMATION_LEAD_RE.sub("", match.group("topic").strip()).strip()
+        return topic or None
+    return None
+
+
+def substitute_reference_subject(raw_subject: str, active_subject: str) -> str:
+    """Replace a leading bounded reference with the active subject.
+
+    Deterministic: the leading reference token (``that``/``this``/``it``/
+    ``its``/``the same``) is replaced by ``active_subject``; any trailing words
+    are kept ("its latest activity" -> "<active> latest activity"). Returns the
+    subject unchanged when it does not begin with a bounded reference.
+    """
+    if not isinstance(raw_subject, str) or not raw_subject.strip():
+        return raw_subject
+    tokens = raw_subject.split()
+    head = tokens[0].lower()
+    if head == "the" and len(tokens) > 1 and tokens[1].lower() == "same":
+        rest = tokens[2:]
+        return " ".join([active_subject, *rest]).strip()
+    rest = tokens[1:]
+    if head in BOUNDED_REFERENCE_HEADS or head in {"it", "its", "that", "this"}:
+        return " ".join([active_subject, *rest]).strip()
+    return raw_subject
+
+
+def is_bounded_reference_subject(raw_subject: str) -> bool:
+    """True when ``raw_subject`` begins with a bounded reference token."""
+    if not isinstance(raw_subject, str) or not raw_subject.strip():
+        return False
+    tokens = raw_subject.split()
+    return tokens[0].lower() in BOUNDED_REFERENCE_HEADS
 
 
 def _validated_knowledge_topic(remainder: str) -> str | None:
@@ -768,6 +1160,8 @@ class BuiltinResponseService:
         architecture_model_provider: Callable[[], Any] | None = None,
         validated_knowledge_provider: Callable[[str], Any] | None = None,
         knowledge_decision_provider: Callable[[str], Any] | None = None,
+        architecture_relationship_provider: Callable[[], Any] | None = None,
+        knowledge_status_provider: Callable[[str], Any] | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
@@ -794,6 +1188,21 @@ class BuiltinResponseService:
         #: validated claims — otherwise the existing (C6.1) outcome is rendered
         #: unchanged. External content it returns is data, never authority.
         self._knowledge_decision_provider = knowledge_decision_provider
+        #: G2 — optional zero-argument callable returning the SAME
+        #: ``ArchitectureModel`` built from the kernel's bounded, once-only
+        #: repository map (``Atlas.architecture_model()``). It is consulted ONLY
+        #: for an EXPLICIT named-target relationship question and only when the
+        #: cache-only snapshot carries no module evidence, so a casual
+        #: architecture question can never trigger a repository scan. Read-only
+        #: and fail-soft: absent, None, non-model, or raising all decline.
+        self._architecture_relationship_provider = architecture_relationship_provider
+        #: G2 — optional one-argument callable delegating to the EXISTING
+        #: knowledge-decision SERVICE (``KnowledgeDecisionService.decide``, the
+        #: same decision the ``answer_knowledge_question`` API seam uses). It is
+        #: consulted only to REPORT sufficiency and governed-acquisition status
+        #: for a knowledge question the local store could not answer. It grants
+        #: no authority, and its result is data, never instruction.
+        self._knowledge_status_provider = knowledge_status_provider
 
     def _resolve_service_names(self) -> tuple[str, ...] | None:
         """Resolve the container/service snapshot for the status answer.
@@ -836,6 +1245,14 @@ class BuiltinResponseService:
     def validated_knowledge_provider(self) -> Callable[[str], Any] | None:
         return self._validated_knowledge_provider
 
+    @property
+    def architecture_relationship_provider(self) -> Callable[[], Any] | None:
+        return self._architecture_relationship_provider
+
+    @property
+    def knowledge_status_provider(self) -> Callable[[str], Any] | None:
+        return self._knowledge_status_provider
+
     def handles(
         self,
         text: str,
@@ -870,6 +1287,46 @@ class BuiltinResponseService:
             intent, detail = classified
         else:
             intent, detail = classified, None
+        return self._build_message(intent, detail, message_count=message_count)
+
+    def match_self_knowledge_topic(self, text: str) -> Message | None:
+        """Evidence-driven: claim an Atlas-specific self-knowledge topic.
+
+        Deterministic, read-only, and provider-free: the topic's module anchors
+        are verified before any prose is emitted. Returns None when the turn is
+        not such a topic or no architecture model is available, so existing
+        behaviour then applies unchanged. Grants no authority.
+        """
+        if not isinstance(text, str) or self._resolve_architecture_model() is None:
+            return None
+        topic = _match_atlas_specific_self_knowledge_topic(text.strip().lower())
+        if topic is None:
+            return None
+        return self._build_message(BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+
+    def match_external_knowledge(self, text: str) -> Message | None:
+        """Evidence-driven: claim an external-knowledge request early.
+
+        Routes through the same local-first retrieval + D3 knowledge-decision
+        provider (and, when required and authorized, the D2 boundary) as the
+        validated-knowledge bridge — never a direct provider call. Returns None
+        when no provider is wired or the turn is not an external-knowledge
+        request, so existing behaviour then applies unchanged.
+        """
+        if not isinstance(text, str):
+            return None
+        detail = self._match_external_knowledge(text.strip().lower())
+        if detail is None:
+            return None
+        return self._build_message(BUILTIN_INTENT_VALIDATED_KNOWLEDGE, detail)
+
+    def _build_message(
+        self,
+        intent: str,
+        detail: Any,
+        message_count: int | None = None,
+    ) -> Message:
+        """Build a deterministic assistant Message for ``intent``/``detail``."""
         content = self._render(intent, message_count=message_count, detail=detail)
         metadata: dict[str, Any] = {
             "builtin_response": True,
@@ -1015,6 +1472,20 @@ class BuiltinResponseService:
                     validated = self._match_validated_knowledge(lowered)
                     if validated is not None:
                         return (BUILTIN_INTENT_VALIDATED_KNOWLEDGE, validated)
+                # G2 — an EXPLANATORY question about Atlas's own mechanism is
+                # self-knowledge even when Intake typed it as a development
+                # request ("how would you add a new capability?"). Narrow by
+                # construction: the turn must lead with an interrogative, the
+                # shared frame must record SELF_KNOWLEDGE, and the frame's
+                # concept must map onto an EXISTING verified-anchor topic (or the
+                # architecture surface); an imperative directive never matches.
+                concept = explanatory_self_knowledge_concept(text)
+                if concept is not None:
+                    topic = _FRAME_CONCEPT_TOPICS.get(concept)
+                    if topic is not None:
+                        return (BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+                    if concept in ("component", "architecture", "knowledge_sufficiency"):
+                        return (BUILTIN_INTENT_ARCHITECTURE, text)
                 return None
             if bool(getattr(spec, "needs_clarification", False)):
                 return None
@@ -1037,10 +1508,23 @@ class BuiltinResponseService:
         # a domain question about an external subject's capabilities is not an
         # Atlas self-capability question (C3 finding). The first-person aliases
         # below are unaffected.
+        # Evidence-driven: Atlas-specific self-knowledge topics (request flow /
+        # development / OWNER / sandbox / authorization boundary / extension
+        # points) are checked before the capability inventory so an
+        # extension-point question is not answered as a generic capability list.
+        atlas_topic = _match_atlas_specific_self_knowledge_topic(lowered)
+        if atlas_topic is not None and (
+            self._resolve_architecture_model() is not None
+        ):
+            return (BUILTIN_INTENT_SELF_KNOWLEDGE, atlas_topic)
         capabilities_word = _CAPABILITIES_RE.search(lowered) is not None
         if capabilities_word and not self._capabilities_intent_applies(
             lowered, context
         ):
+            capabilities_word = False
+        # G1 — a capability GAP request ("Atlas needs a new capability for X") is
+        # a development request, never an inventory request.
+        if capabilities_word and self._frame_is_development(text):
             capabilities_word = False
         if capabilities_word or _alias_hit(_CAPABILITY_ALIAS_RES, lowered):
             return BUILTIN_INTENT_CAPABILITIES
@@ -1079,6 +1563,21 @@ class BuiltinResponseService:
             self._resolve_architecture_model() is not None
         ):
             return (BUILTIN_INTENT_ARCHITECTURE, text)
+        # G1 — semantic-frame seam. Placed AFTER every self-knowledge /
+        # capability / help / identity / architecture surface above, so a frame
+        # classification can never steal a more specific existing route; it only
+        # claims the paraphrases those bounded surfaces left unclaimed, and the
+        # answer still comes from the existing topic renderer.
+        frame_intent = self._match_frame_self_or_capability(text, context)
+        if frame_intent is not None:
+            return frame_intent
+        # Evidence-driven: an EXTERNAL subject's "current status" (or equivalent
+        # external-knowledge phrasing) is not Atlas's own status. Route it to the
+        # governed knowledge path (D3 local-first; D2 acquisition when
+        # authorized) instead of the status report.
+        external_knowledge = self._match_external_knowledge(lowered)
+        if external_knowledge is not None:
+            return (BUILTIN_INTENT_VALIDATED_KNOWLEDGE, external_knowledge)
         if _STATUS_RE.search(lowered) or _alias_hit(
             _STATUS_ALIAS_RES, lowered
         ):
@@ -1122,6 +1621,87 @@ class BuiltinResponseService:
         if task_type in ("", "conversation", "unknown", "question"):
             return BUILTIN_INTENT_UNSUPPORTED
         return None
+
+    @staticmethod
+    def _frame_is_development(text: str) -> bool:
+        """G1 — does the semantic frame classify this turn as DEVELOPMENT?"""
+        from atlas.conversation import semantic_frame as _frame
+
+        return _frame.is_development_shaped(text)
+
+    def _match_frame_self_or_capability(
+        self, text: str, context: Any = None
+    ) -> str | tuple[str, object] | None:
+        """G1 — claim a SELF_KNOWLEDGE / CAPABILITIES turn from its semantic frame.
+
+        Additive and precedence-preserving by CONSTRUCTION: it is consulted only
+        after every existing self-knowledge / atlas-topic / capability / help /
+        identity / self-description / architecture surface, so it can only claim
+        turns those surfaces left unclaimed. The frame supplies the operational
+        concept; the EXISTING verified-anchor topic renderers produce the answer.
+
+        Returns ``None`` for every other domain, for a governance-sensitive
+        directive, and whenever the owning surface has no injected model.
+        """
+        from atlas.conversation import semantic_frame as _frame
+
+        if not isinstance(text, str) or not text.strip():
+            return None
+        frame = _frame.interpret(text)
+        if frame.governance_sensitive:
+            return None
+        # A turn the ESTABLISHED self-description surface already defines ("what
+        # Atlas does", "how does Atlas work") keeps that surface: it answers from
+        # the existing models when they are available and otherwise fails soft to
+        # the unsupported floor. The frame seam must never claim such a turn as a
+        # generic capability inventory.
+        lowered = canonicalize_surface(text).lower()
+        if _SELF_DESCRIPTION_RE.search(lowered):
+            return None
+        # A turn an EXISTING knowledge bridge already owns keeps that bridge
+        # (its cue tiers and renderings are pinned).
+        if is_validated_knowledge_shaped(text) or is_store_recall_shaped(text):
+            return None
+        if frame.domain is _frame.SemanticDomain.SELF_KNOWLEDGE:
+            if self._resolve_architecture_model() is None:
+                return None
+            topic = _FRAME_CONCEPT_TOPICS.get(frame.concept)
+            if topic is not None:
+                return (BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+            if frame.concept in ("component", "architecture", "knowledge_sufficiency"):
+                return (BUILTIN_INTENT_ARCHITECTURE, text)
+            # The generic "how do you work" concept stays UNROUTED: the existing
+            # self-description surface keeps its own bounded cues, so a broader
+            # question ("how does your memory system work?") still reaches its
+            # existing deterministic floor behaviour.
+            return None
+        if frame.domain is _frame.SemanticDomain.CAPABILITIES:
+            lowered = canonicalize_surface(text).lower()
+            if not self._capabilities_intent_applies(lowered, context):
+                return None
+            return BUILTIN_INTENT_CAPABILITIES
+        if frame.domain is _frame.SemanticDomain.STATUS:
+            # A paraphrase of the Atlas status question (an external subject's
+            # status is classified KNOWLEDGE and never reaches here).
+            return BUILTIN_INTENT_STATUS
+        return None
+
+    def match_knowledge_request(self, subject: str) -> Message | None:
+        """G1 — answer a knowledge request from the EXISTING local-first path.
+
+        The subject must already be a bounded, reference-resolved topic. The
+        answer comes from the existing validated-knowledge retrieval, then the
+        existing D3 knowledge-decision provider (which owns the governed D2
+        boundary); the retrieval's own honest outcome is reported verbatim.
+        """
+        if self._validated_knowledge_provider is None:
+            return None
+        if not isinstance(subject, str) or not subject.strip():
+            return None
+        resolved = self._knowledge_result(subject.strip(), require_items=False)
+        if resolved is None:
+            return None
+        return self._build_message(BUILTIN_INTENT_VALIDATED_KNOWLEDGE, resolved)
 
     def _match_capability_detail(self, lowered: str) -> str | None:
         """Resolve a named-capability reference, or None when unknown.
@@ -1183,6 +1763,42 @@ class BuiltinResponseService:
         if matched is None:
             return None
         query, explicit = matched
+        resolved = self._knowledge_result(query, require_items=not explicit)
+        if resolved is None:
+            return None
+        return resolved
+
+    def match_knowledge_request(self, subject: str) -> Message | None:
+        """Evidence-Driven Improvement 3 — answer a research/knowledge request.
+
+        ``subject`` is the bounded, reference-resolved subject of the turn. The
+        answer is produced by the SAME local-first path as the validated-
+        knowledge bridge: the existing retrieval first, then the existing D3
+        knowledge-decision provider (which owns the governed D2 boundary and is
+        consulted only when the local store has nothing). The retrieval's own
+        authoritative outcome is reported verbatim — including the honest
+        ``empty``/``store_unavailable`` outcome — so nothing is acquired,
+        inferred, or invented here, and no completion report is fabricated.
+        """
+        if self._validated_knowledge_provider is None:
+            return None
+        if not isinstance(subject, str) or not subject.strip():
+            return None
+        resolved = self._knowledge_result(subject.strip(), require_items=False)
+        if resolved is None:
+            return None
+        return self._build_message(BUILTIN_INTENT_VALIDATED_KNOWLEDGE, resolved)
+
+    def _knowledge_result(
+        self, query: str, *, require_items: bool
+    ) -> tuple[str, Any] | None:
+        """Resolve ``query`` local-first, then through D3/D2, or None.
+
+        Returns ``(query, result)``; ``result`` is the existing capability's own
+        result object. ``require_items`` fails closed for cues the existing
+        recall also claims (unchanged C6.1 behaviour), while an explicit
+        knowledge request reports the retrieval's own outcome even when empty.
+        """
         result = self._retrieve_validated_knowledge(query)
         if result is None:
             return None
@@ -1198,9 +1814,34 @@ class BuiltinResponseService:
             enriched = self._try_knowledge_decision(query)
             if enriched is not None and self._validated_knowledge_items(enriched):
                 result = enriched
-        if not explicit and not self._validated_knowledge_items(result):
+        if require_items and not self._validated_knowledge_items(result):
             return None
         return (query, result)
+
+    def _match_external_knowledge(self, lowered: str) -> tuple[str, Any] | None:
+        """Resolve an external-knowledge turn to ``(query, result)`` or None.
+
+        Uses the same local-first retrieval + D3/D2 knowledge-decision provider
+        as the validated-knowledge bridge. Atlas-self subjects are excluded, so
+        it cannot capture "what is your status".
+        """
+        if self._validated_knowledge_provider is None:
+            return None
+        for pattern in _EXTERNAL_KNOWLEDGE_RES:
+            match = pattern.search(lowered)
+            if match is None:
+                continue
+            topic = _validated_knowledge_topic(match.group("topic"))
+            if topic is None:
+                return None
+            result = self._retrieve_validated_knowledge(topic)
+            if result is None:
+                return None
+            enriched = self._try_knowledge_decision(topic)
+            if enriched is not None and self._validated_knowledge_items(enriched):
+                result = enriched
+            return (topic, result)
+        return None
 
     def _try_knowledge_decision(self, query: str) -> Any | None:
         """Consult the D3 knowledge-decision provider (fail-soft, read-only)."""
@@ -1379,6 +2020,19 @@ class BuiltinResponseService:
             established = getattr(state, "current_subject", None)
             if isinstance(established, str) and established.strip():
                 return established.strip()
+        # G1 — bounded structured-state candidates (LOWEST precedence, so every
+        # candidate above keeps its behaviour): the subject of the retained
+        # knowledge answer, then the active objective. Both are structured
+        # conversation state, which this surface is documented to consult.
+        if state is not None:
+            recorded = getattr(state, "last_knowledge", None)
+            if isinstance(recorded, dict):
+                query = recorded.get("query")
+                if isinstance(query, str) and query.strip():
+                    return query.strip()
+            objective = getattr(state, "current_objective", None)
+            if isinstance(objective, str) and objective.strip():
+                return objective.strip()
         return ""
 
     @staticmethod
@@ -1701,6 +2355,38 @@ class BuiltinResponseService:
             return None
         return model
 
+    def _resolve_relationship_model_for(self, query: str, model: Any) -> Any | None:
+        """G2 — bounded relationship snapshot for an EXPLICIT named target.
+
+        The cache-only model omits module-level facts until a repository map has
+        been built, so a dependency/impact question about a named module would
+        report only "none". This consults the injected relationship provider —
+        the SAME ``ArchitectureModel`` built from the kernel's bounded, once-only
+        repository map — and only when BOTH hold:
+
+        * the turn names an explicit dotted module/package target, and
+        * the cache-only model carries no module evidence.
+
+        A casual architecture question ("what are the main systems that make up
+        Atlas?") names no target, so no build is ever triggered for it. Fail-soft:
+        absent provider, None, non-model, or raising all return None and the
+        caller keeps the cache-only model.
+        """
+        provider = self._architecture_relationship_provider
+        if provider is None:
+            return None
+        if not isinstance(query, str) or not _ARCHITECTURE_TARGET_RE.search(query):
+            return None
+        if getattr(model, "module_count", 0):
+            return None
+        try:
+            candidate = provider()
+        except Exception:
+            return None
+        if candidate is None or not hasattr(candidate, "locate"):
+            return None
+        return candidate
+
     @staticmethod
     def _locate_architecture_target(model: Any, query: str) -> Any | None:
         """Resolve the first dotted module/package identifier in ``query``.
@@ -1827,6 +2513,80 @@ class BuiltinResponseService:
                     "the objective; otherwise no_evidence / no_relevant_evidence / "
                     "partial are reported.",
                 )
+            if topic == "request flow":
+                return (
+                    "A turn enters through ConversationService "
+                    "(Atlas.chat / Atlas.stream), which builds a bounded "
+                    "ConversationContext and runs the deterministic TaskIntake.",
+                    "The D1 ConversationEngine projects a bounded SemanticIntake; "
+                    "the existing routing cascade then applies reference "
+                    "resolution and the governed handlers.",
+                    "Knowledge-bearing turns consult the D3 "
+                    "KnowledgeDecisionService: existing validated knowledge first, "
+                    "then the governed D2 acquisition boundary (authorized hosts "
+                    "only).",
+                    "Read-only capability work is coordinated by the D4 "
+                    "WorkOrchestrator; governed development is coordinated by the "
+                    "D5 DevelopmentOrchestrator.",
+                    "Free-text conversation currently connects intake, knowledge "
+                    "decision, and the governed handlers; the D4/D5 orchestrators "
+                    "are reachable through their explicit kernel APIs, not as an "
+                    "automatic free-text path.",
+                )
+            if topic == "development process":
+                return (
+                    "A development objective is prepared by the existing "
+                    "DevelopmentDriver (gap assessment then a bounded proposal) as "
+                    "a DRAFT EvolutionProposal.",
+                    "It stops at the existing approval boundary (PENDING_APPROVAL). "
+                    "The D5 DevelopmentOrchestrator only coordinates; it never "
+                    "approves.",
+                    "After OWNER approval, implementation runs in the existing "
+                    "disposable sandbox (SelfDevelopmentLoop / CodeSandbox); the "
+                    "live repository is never modified.",
+                    "Verification (DevelopmentVerification) is required before "
+                    "promotion; promotion is OWNER-only through the existing "
+                    "PromotionGate / PromotionExecutor.",
+                )
+            if topic == "owner approval":
+                return (
+                    "OWNER approval is enforced by the existing authority "
+                    "boundary (AuthorityService + SessionManager) and recorded "
+                    "through the existing ApprovalManager.",
+                    "Approving is a separate explicit step from planning: a "
+                    "proposal can never approve itself, and approval alone never "
+                    "executes anything.",
+                )
+            if topic == "sandbox execution":
+                return (
+                    "Development implementation runs inside the existing "
+                    "disposable CodeSandbox via SelfDevelopmentLoop; the live "
+                    "repository is never modified.",
+                    "Only bounded, registered sandbox tools run; promotion to the "
+                    "live repository is a separate OWNER-only step.",
+                )
+            if topic == "authorization boundary":
+                return (
+                    "Natural-language interpretation never grants authority: the "
+                    "D1 SemanticIntake carries no authority field and records "
+                    "provenance authority as 'none'.",
+                    "Only the existing AuthorityService / SessionManager and "
+                    "ApprovalManager can authorize; approval requires an OWNER "
+                    "session and a fingerprint-bound proposal.",
+                )
+            if topic == "extension points":
+                return (
+                    "A new capability is registered through the existing "
+                    "CapabilityRegistry (the DEFAULT_HANDLERS / factory pattern); "
+                    "the existing CapabilityRouter and CapabilityDispatcher remain "
+                    "authoritative.",
+                    "Prefer reusing existing services (knowledge decision, "
+                    "capability registry/dispatcher, authority boundary) instead "
+                    "of adding parallel systems.",
+                    "Such a change is verified through the existing governed "
+                    "development lifecycle: proposal, OWNER approval, sandbox "
+                    "implementation, DevelopmentVerification, then promotion.",
+                )
         except Exception:  # noqa: BLE001 - never fabricate: emit no bullets
             return ()
         return ()
@@ -1887,11 +2647,36 @@ class BuiltinResponseService:
         model = self._resolve_architecture_model()
         if model is None:
             return self._render_unsupported()
+        # G2 — a RELATIONSHIP question about an EXPLICIT named target may use the
+        # bounded relationship snapshot, so dependency/impact facts are reported
+        # from the existing repository map instead of an empty "none". Casual
+        # architecture questions are unaffected (no target -> no build).
+        relationship_model = self._resolve_relationship_model_for(query, model)
+        if relationship_model is not None:
+            model = relationship_model
 
         lines = [
             "Atlas architecture self-knowledge "
             "(deterministic, read-only; no external AI model used):",
         ]
+
+        # Evidence-driven component identity: resolve an evidenced
+        # natural-language responsibility to the ACTUAL component. The module is
+        # verified present before it is reported; nothing is invented.
+        hint = _match_component_hint((query or "").lower())
+        if hint is not None:
+            module, cls, responsibility = hint
+            if self._verify_anchor(module):
+                lines.append(
+                    f"- Component: `{cls}` in `{module.replace('.', '/')}.py`"
+                )
+                lines.append(f"- Responsibility: {responsibility}")
+                lines.append("")
+                lines.append(
+                    "This is a bounded projection of Atlas's existing structural "
+                    "sources; nothing was modified."
+                )
+                return "\n".join(lines)
 
         located = self._locate_architecture_target(model, query)
         if located is not None:
@@ -2083,11 +2868,49 @@ class BuiltinResponseService:
         ]
         if message:
             lines.append(message)
+        lines.extend(self._knowledge_sufficiency_note(str(query)))
         lines.append(
             "Only claims an authorized source already SUPPORTED are reported; "
             "nothing is acquired, inferred, or invented for this answer."
         )
         return " ".join(lines)
+
+    def _knowledge_sufficiency_note(self, query: str) -> tuple[str, ...]:
+        """G2 — structured sufficiency/acquisition report for an unmatched query.
+
+        Consults the EXISTING knowledge-decision service (the same decision the
+        ``answer_knowledge_question`` API seam exposes) and renders ONLY its own
+        fields: sufficiency status, governed-acquisition status, and its own
+        message. Nothing is acquired, inferred, invented, or authorized here —
+        the note states the boundary and what would be required to answer.
+        Fail-soft: no provider, a raising provider, or an unusable result all
+        render nothing, so the existing (C6.1) answer is unchanged.
+        """
+        provider = self._knowledge_status_provider
+        if provider is None or not isinstance(query, str) or not query.strip():
+            return ()
+        try:
+            decision = provider(query.strip())
+        except Exception:
+            return ()
+        if decision is None:
+            return ()
+        status = getattr(decision, "status", "") or ""
+        status = str(getattr(status, "value", status) or "")
+        acquisition = str(getattr(decision, "acquisition_status", "") or "")
+        message = str(getattr(decision, "message", "") or "").strip()
+        lines = [
+            f"- Knowledge decision (D3): sufficiency {status or 'unsupported'}."
+        ]
+        if acquisition:
+            lines.append(f"- Governed acquisition: {acquisition}.")
+        if message:
+            lines.append(f"- Decision note: {message}")
+        lines.append(
+            "- Required to answer: validated claims from an authorized source; "
+            "none is invented or acquired on my own."
+        )
+        return tuple(lines)
 
     @staticmethod
     def _validated_knowledge_citations(item: Any) -> tuple[str, ...]:

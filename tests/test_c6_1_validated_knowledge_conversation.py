@@ -342,14 +342,26 @@ class TestExistingBehaviourProtection:
         )
         assert "confirmed registered capabilities" not in message.content.lower()
 
-    def test_ordinary_research_still_researches(self, kernel):
+    def test_ordinary_research_uses_the_knowledge_path(self, kernel):
+        """Reconciled (Evidence-Driven Improvement 3).
+
+        The original assertion pinned an ordinary research turn to the
+        orchestration bridge (``builtin_intent is None`` + ``orchestration``).
+        Improvement 3 deliberately changes that contract: a single-clause
+        research request is a request for INFORMATION and now enters the
+        existing local-first knowledge path (validated knowledge, then the D3
+        knowledge decision that owns the governed D2 boundary). The guarded
+        invariant is preserved: the turn must not produce a generic completion
+        report — it answers honestly from validated knowledge.
+        """
         message = _send(
             kernel,
             "Research the memory service, including memory storage of the "
             "atlas memory subsystem.",
         )
-        assert message.metadata.get("builtin_intent") is None
-        assert isinstance(message.metadata.get("orchestration"), dict)
+        assert message.metadata.get("builtin_intent") == BUILTIN_INTENT_VALIDATED_KNOWLEDGE
+        assert not isinstance(message.metadata.get("orchestration"), dict)
+        assert "Done:" not in message.content
 
     def test_store_recall_intent_is_unchanged_without_a_validated_match(self, kernel):
         for text in (

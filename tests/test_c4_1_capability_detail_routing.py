@@ -155,9 +155,17 @@ class TestInvestigationRoutingPreserved:
 
 class TestResearchRoutingPreserved:
     def test_research_request_not_capability_detail(self, kernel):
+        """Reconciled (Evidence-Driven Improvement 3).
+
+        The guarded invariant is unchanged and still asserted: a research
+        request is never captured by the capability-detail surface and never by
+        the investigation surface. Improvement 3 changed only WHERE it goes — a
+        single-clause research request is a request for information, so it now
+        reaches the existing local-first knowledge path instead of the
+        orchestration (research) bridge.
+        """
         message = _send(kernel, "Research the best camera sensors available today.")
         assert _intent(message) != "capability_detail"
         assert (message.metadata or {}).get("investigation") is None
-        # Research/information routing is retained: the turn reaches the
-        # orchestration (research) path, not the capability-detail surface.
-        assert isinstance((message.metadata or {}).get("orchestration"), dict)
+        assert _intent(message) == "validated_knowledge"
+        assert not isinstance((message.metadata or {}).get("orchestration"), dict)
