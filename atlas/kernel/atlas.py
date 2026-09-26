@@ -980,6 +980,72 @@ class Atlas:
             knowledge_query=knowledge_query,
         )
 
+    def _registered_package_names(self) -> tuple[str, ...]:
+        """Registered component package names (bounded, read-only)."""
+        names: set[str] = set()
+        try:
+            for component in self._component_registry.get_all():
+                package = str(getattr(component, "package", "") or "")
+                if package:
+                    names.add(package)
+        except Exception:
+            pass
+        return tuple(sorted(names))
+
+    def analyze_external_repository(
+        self,
+        target: str,
+        *,
+        ref: str = "",
+        keywords=(),
+        max_files: int = 200,
+    ) -> dict:
+        """Governed, read-only external-repository intelligence.
+
+        Acquires a BOUNDED set of files from a public GitHub repository using the
+        EXISTING research host authorization (``research.web_allowed_hosts``,
+        deny-by-default), parses them structurally with the EXISTING
+        ``RepositoryMap`` (symbols/imports/context), ranks relevant symbols, and
+        compares them against Atlas's capability/architecture evidence.
+
+        Returns a bounded, JSON-safe dict (acquisition summary, structural
+        analysis, comparison findings, and development EVIDENCE metadata). It
+        NEVER executes external code, never trusts it, never approves, promotes,
+        or mutates anything — findings are unvalidated evidence for the existing
+        governed development path only.
+        """
+        from atlas.research.external_repository import (
+            analyze_acquired_repository,
+            compare_with_atlas,
+            development_evidence,
+        )
+        from atlas.research.sources.github import GitHubRepositorySource
+        from atlas.research.sources.web import web_host_policy_from_hosts
+
+        terms = tuple(keywords or ())
+        hosts = self._config.get("research", "web_allowed_hosts", default=())
+        source = GitHubRepositorySource(
+            host_policy=web_host_policy_from_hosts(tuple(hosts or ()))
+        )
+        acquired = source.acquire(
+            target, ref=ref, keywords=terms, max_files=max_files
+        )
+        analysis = analyze_acquired_repository(acquired, keywords=terms)
+        comparison = compare_with_atlas(
+            analysis,
+            atlas_capability_names=self._registered_capability_names(),
+            atlas_packages=self._registered_package_names(),
+            keywords=terms,
+        )
+        return {
+            "acquisition": acquired.to_dict(),
+            "analysis": analysis.to_dict(),
+            "comparison": comparison.to_dict(),
+            "development_evidence": development_evidence(
+                analysis, comparison, request=str(target or "")
+            ),
+        }
+
     @property
     def knowledge_decision(self):
         """Return the kernel-owned KnowledgeDecisionService (D3).
@@ -1351,6 +1417,33 @@ class Atlas:
             ),
         )
         return response.text
+
+    def _development_repair_supplier(self):
+        """OPTIONAL bounded repair supplier for the SelfDevelopmentLoop.
+
+        Off by default (``None`` -> the loop's built-in metadata supplier is used
+        unchanged). When ``[development].model_assisted_authoring`` is enabled, a
+        bounded, untrusted corrective-change supplier rides the EXISTING
+        ``change_supplier`` seam: it may only propose a change that the loop
+        still applies inside a disposable sandbox and verifies. It mints no
+        authority and never promotes. Any wiring failure falls back to ``None``
+        (fail-closed).
+        """
+        try:
+            enabled = bool(
+                self._config.get(
+                    "development", "model_assisted_authoring", default=False
+                )
+            )
+            if not enabled:
+                return None
+            from atlas.evolution.development_repair import RepairChangeSupplier
+
+            return RepairChangeSupplier(
+                repair_model=self._model_assisted_authoring_model
+            )
+        except Exception:
+            return None
 
     def _build_task_intake(self):
         """Build the kernel-owned conversational intake.
@@ -4266,6 +4359,10 @@ class Atlas:
         self._self_development_loop = SelfDevelopmentLoop(
             planner=self._development_planner,
             learning_store=learning_memory,
+            # OPTIONAL bounded repair (Agent Workbench repair step). Off by
+            # default: ``None`` keeps the loop's built-in metadata supplier
+            # exactly as before. See ``_development_repair_supplier``.
+            change_supplier=self._development_repair_supplier(),
         )
 
         # --- Phase 16.7 / F11: Boot activation & SAFE_MODE recovery ---
@@ -4833,6 +4930,37 @@ class Atlas:
             capability_registry=self._capability_registry,
             tool_registry=self._tool_registry,
         )
+
+    def capability_contract(self, name: str):
+        """Deterministic capability-discovery answer for one name (read-only).
+
+        Reuses the canonical capability model (no second registry) and answers
+        "what is it / what does it accept / which component provides it / where
+        is its implementation / is it available / deterministic or
+        model-assisted". Descriptive only: it grants no execution authority and
+        never bypasses the ApprovalManager, the authorization boundary, or
+        sandbox verification.
+        """
+        from atlas.self_knowledge.capability_model import describe_capability
+
+        return describe_capability(
+            name,
+            component_registry=self._component_registry,
+            capability_registry=self._capability_registry,
+            tool_registry=self._tool_registry,
+        )
+
+    def repository_symbol(self, query: str, limit: int = 20):
+        """Deterministic, read-only lookup of a repository symbol (Stage A2).
+
+        Uses the kernel-cached repository map (built at most once per process,
+        never triggered here beyond that). Never writes, never calls a model.
+        Unknown symbols yield an empty tuple — nothing is inferred.
+        """
+        try:
+            return self.repository_map.find_symbol(query, limit=limit)
+        except Exception:
+            return ()
 
     def architecture_model(self):
         """Return the read-only architecture self-knowledge model (Phase 1.2).

@@ -337,4 +337,26 @@ CORE_COMPONENTS: list[ComponentMetadata] = [
         dependencies=["ai_service", "context_engine", "cognition_api"],
         provided_capabilities=["conversation_management", "chat", "stream"],
     ),
+    # ------------------------------------------------------------------
+    # External repository intelligence (governed GitHub / internet research)
+    # ------------------------------------------------------------------
+    ComponentMetadata(
+        name="external_repository_intelligence",
+        package="atlas.research",
+        module_path=(
+            "atlas.research.external_repository.analyze_acquired_repository"
+        ),
+        description=(
+            "Governed acquisition and deterministic structural analysis of "
+            "authorized external repositories (GitHub/internet), an "
+            "Atlas-vs-external comparison, and an unvalidated evidence "
+            "hand-off to the existing governed development path."
+        ),
+        version=1,
+        provided_capabilities=[
+            "external_repository.acquire",
+            "external_repository.analyze",
+            "external_repository.compare",
+        ],
+    ),
 ]

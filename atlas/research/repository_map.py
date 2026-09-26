@@ -1,8 +1,11 @@
 """Atlas Research — Repository Self-Knowledge Map — Stage A1.
 
 A read-only, machine-readable map of a Python repository: discovered
-modules, their AST-extracted import dependencies, and pure graph queries
-(forward deps, reverse deps, depth-bounded impact sets).
+modules, their AST-extracted import dependencies, structurally-extracted
+symbols (top-level classes/functions and their methods, with bounded
+signatures and a bounded name-reference count), and pure graph queries
+(forward deps, reverse deps, depth-bounded impact sets, deterministic symbol
+lookup, and bounded targeted symbol context).
 
 Design contract:
 
@@ -26,8 +29,10 @@ Pure logic. No AI. No gateway. No storage. No kernel access.
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 
 from atlas.research.source_catalog import LANGUAGE_BY_EXTENSION
@@ -60,15 +65,63 @@ MAX_FILE_BYTES: int = 1_000_000
 MAX_IMPORTS_PER_MODULE: int = 64
 DEFAULT_IMPACT_DEPTH: int = 3
 
+# --- Symbol-level structure (Stage A2) ------------------------------------
+# Aider-style structural intelligence, Atlas-native and deterministic: each
+# module's top-level classes/functions and their methods, with bounded
+# signatures and a bounded repo-wide name-reference count used only for
+# relevance ordering (never for semantics).
+MAX_SYMBOLS_PER_MODULE: int = 64
+MAX_SYMBOLS_TOTAL: int = 20000
+MAX_SIGNATURE_CHARS: int = 120
+MAX_SYMBOL_MATCHES: int = 50
+MAX_CONTEXT_SYMBOLS: int = 40
+MAX_REFERENCES: int = 1_000_000
+
 
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
 
 
+class SymbolKind(str, Enum):
+    """The structural kind of one extracted symbol."""
+
+    CLASS = "class"
+    FUNCTION = "function"
+    METHOD = "method"
+
+
+@dataclass(frozen=True)
+class SymbolInfo:
+    """One structurally-extracted definition (bounded; deterministic)."""
+
+    name: str
+    qualified: str
+    module: str
+    kind: SymbolKind
+    line: int
+    signature: str = ""
+    references: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "qualified": self.qualified,
+            "module": self.module,
+            "kind": self.kind.value,
+            "line": self.line,
+            "signature": self.signature,
+            "references": self.references,
+        }
+
+
 @dataclass(frozen=True)
 class ModuleInfo:
-    """One discovered Python module and its resolved import edges."""
+    """One discovered Python module and its resolved import edges.
+
+    ``symbols`` carries the module's structurally-extracted definitions
+    (top-level classes/functions and their methods), bounded and deterministic.
+    """
 
     module: str
     path: str
@@ -77,6 +130,7 @@ class ModuleInfo:
     line_count: int
     internal_imports: tuple[str, ...] = ()
     external_imports: tuple[str, ...] = ()
+    symbols: tuple[SymbolInfo, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -87,6 +141,7 @@ class ModuleInfo:
             "line_count": self.line_count,
             "internal_imports": list(self.internal_imports),
             "external_imports": list(self.external_imports),
+            "symbols": [s.to_dict() for s in self.symbols],
         }
 
 
@@ -100,6 +155,8 @@ class RepositoryMap:
     errors: tuple[str, ...] = ()
     truncated: bool = False
     metadata: dict = field(default_factory=dict)
+    #: Flat, deterministic symbol index (sorted by qualified name).
+    symbols: tuple[SymbolInfo, ...] = ()
 
     def _module_index(self) -> dict[str, ModuleInfo]:
         return {info.module: info for info in self.modules}
@@ -150,6 +207,79 @@ class RepositoryMap:
                 break
         return frozenset(affected)
 
+    # ------------------------------------------------------------------
+    # Symbol-level structure (deterministic; read-only)
+    # ------------------------------------------------------------------
+
+    def symbol_count(self) -> int:
+        return len(self.symbols)
+
+    def symbols_in_module(self, module: str) -> tuple[SymbolInfo, ...]:
+        """Structurally-extracted symbols defined by ``module`` (bounded)."""
+        return tuple(s for s in self.symbols if s.module == module)
+
+    def find_symbol(
+        self, query: str, limit: int = MAX_SYMBOL_MATCHES
+    ) -> tuple[SymbolInfo, ...]:
+        """Deterministic symbol lookup: exact qualified, exact name, then suffix.
+
+        Returns only symbols this repository actually defines, ranked by the
+        bounded reference count (then qualified name). An unknown query yields
+        an empty tuple — nothing is inferred.
+        """
+        text = (query or "").strip() if isinstance(query, str) else ""
+        if not text or not self.symbols:
+            return ()
+
+        def _ranked(items: list[SymbolInfo]) -> tuple[SymbolInfo, ...]:
+            return tuple(
+                sorted(items, key=lambda s: (-s.references, s.qualified))[: max(1, limit)]
+            )
+
+        exact = [s for s in self.symbols if s.qualified == text]
+        if exact:
+            return _ranked(exact)
+        named = [s for s in self.symbols if s.name == text]
+        if named:
+            return _ranked(named)
+        suffix = [s for s in self.symbols if s.qualified.endswith("." + text)]
+        if suffix:
+            return _ranked(suffix)
+        return ()
+
+    def important_symbols(self, limit: int = MAX_SYMBOL_MATCHES) -> tuple[SymbolInfo, ...]:
+        """The most reference-connected symbols (deterministic relevance order).
+
+        Relevance is evidence-only: the bounded repo-wide name-reference count
+        and the module's inbound-import degree. Never a semantic judgement.
+        """
+        reverse = self._reverse_index()
+
+        def key(s: SymbolInfo) -> tuple:
+            return (-s.references, -len(reverse.get(s.module, ())), s.qualified)
+
+        return tuple(sorted(self.symbols, key=key)[: max(1, limit)])
+
+    def context_for(
+        self, modules: object = (), max_symbols: int = MAX_CONTEXT_SYMBOLS
+    ) -> tuple[SymbolInfo, ...]:
+        """Bounded symbol slice for the given modules (targeted context).
+
+        With no modules supplied this degrades to :meth:`important_symbols`, so
+        a caller always receives a bounded, deterministic slice.
+        """
+        names = {
+            m for m in (modules or ()) if isinstance(m, str) and m
+        } if modules else set()
+        if not names:
+            return self.important_symbols(max_symbols)
+        selected = [s for s in self.symbols if s.module in names]
+        return tuple(
+            sorted(selected, key=lambda s: (-s.references, s.qualified))[
+                : max(1, max_symbols)
+            ]
+        )
+
     def module_count(self) -> int:
         return len(self.modules)
 
@@ -163,6 +293,7 @@ class RepositoryMap:
             "root_label": self.root_label,
             "module_count": self.module_count(),
             "edge_count": self.edge_count(),
+            "symbol_count": self.symbol_count(),
             "truncated": self.truncated,
             "error_count": len(self.errors),
             "modules": [info.to_dict() for info in self.modules],
@@ -217,7 +348,7 @@ class RepositoryMapBuilder:
 
         infos: list[ModuleInfo] = []
         errors: list[str] = []
-        parsed: list[tuple[ModuleInfo, list]] = []
+        parsed: list[tuple[ModuleInfo, ast.Module]] = []
 
         for relative in files:
             module_name = self._module_name(relative)
@@ -243,7 +374,7 @@ class RepositoryMapBuilder:
                 is_package=relative.name == "__init__.py",
                 line_count=len(text.splitlines()),
             )
-            parsed.append((info, self._extract_raw_imports(tree)))
+            parsed.append((info, tree))
 
         known = {info.module for info, _ in parsed}
         package_names: set[str] = set()
@@ -253,20 +384,33 @@ class RepositoryMapBuilder:
                 package_names.add(".".join(parts[:width]))
         internal_targets = known | package_names
 
+        # Bounded repo-wide name-reference frequency (one deterministic pass),
+        # used only to ORDER symbols by relevance — never for semantics.
+        name_freq: Counter[str] = Counter()
+        for _info, tree in parsed:
+            self._tally_names(tree, name_freq)
+
         final_infos: list[ModuleInfo] = []
-        for info, raw_imports in parsed:
+        all_symbols: list[SymbolInfo] = []
+        for info, tree in parsed:
             internal, external = self._resolve_imports(
-                info.module, raw_imports, internal_targets
+                info.module, self._extract_raw_imports(tree), internal_targets
             )
+            symbols = tuple(self._build_symbols(info.module, tree, name_freq))
+            all_symbols.extend(symbols)
             final_infos.append(
                 replace(
                     info,
                     internal_imports=tuple(sorted(internal)),
                     external_imports=tuple(sorted(external)),
+                    symbols=symbols,
                 )
             )
 
         final_infos.sort(key=lambda item: item.module)
+        all_symbols.sort(key=lambda item: item.qualified)
+        if len(all_symbols) > MAX_SYMBOLS_TOTAL:
+            all_symbols = all_symbols[:MAX_SYMBOLS_TOTAL]
         return RepositoryMap(
             built_at=datetime.now(),
             root_label=label,
@@ -276,7 +420,9 @@ class RepositoryMapBuilder:
             metadata={
                 "files_scanned": len(parsed) + len(errors),
                 "packages": sum(1 for item in final_infos if item.is_package),
+                "symbols": len(all_symbols),
             },
+            symbols=tuple(all_symbols),
         )
 
     def _discover(self) -> list[Path]:
@@ -339,6 +485,65 @@ class RepositoryMapBuilder:
                     raw.append((0, node.module))
         return raw[:MAX_IMPORTS_PER_MODULE]
 
+    @staticmethod
+    def _tally_names(tree: ast.Module, counter: "Counter[str]") -> None:
+        """Tally identifier occurrences (bounded, deterministic relevance signal)."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                counter[node.id] += 1
+            elif isinstance(node, ast.Attribute):
+                counter[node.attr] += 1
+
+    def _build_symbols(
+        self,
+        module: str,
+        tree: ast.Module,
+        name_freq: "Counter[str]",
+    ) -> list[SymbolInfo]:
+        """Extract top-level classes/functions (+ methods) with bounded signatures."""
+        out: list[SymbolInfo] = []
+
+        def _add(
+            name: str, kind: SymbolKind, line: int, signature: str, parent: str = ""
+        ) -> None:
+            qualified = f"{module}.{parent}.{name}" if parent else f"{module}.{name}"
+            out.append(
+                SymbolInfo(
+                    name=name,
+                    qualified=qualified,
+                    module=module,
+                    kind=kind,
+                    line=line,
+                    signature=signature,
+                    references=min(name_freq.get(name, 0), MAX_REFERENCES),
+                )
+            )
+
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, ast.ClassDef):
+                _add(node.name, SymbolKind.CLASS, node.lineno, _class_signature(node))
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        _add(
+                            sub.name,
+                            SymbolKind.METHOD,
+                            sub.lineno,
+                            _function_signature(sub),
+                            parent=node.name,
+                        )
+                        if len(out) >= MAX_SYMBOLS_PER_MODULE:
+                            break
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                _add(
+                    node.name,
+                    SymbolKind.FUNCTION,
+                    node.lineno,
+                    _function_signature(node),
+                )
+            if len(out) >= MAX_SYMBOLS_PER_MODULE:
+                break
+        return out[:MAX_SYMBOLS_PER_MODULE]
+
     def _resolve_imports(
         self,
         module: str,
@@ -385,3 +590,22 @@ def _longest_prefix_match(candidate: str, targets: set[str]) -> str:
         if prefix in targets:
             return prefix
     return ""
+
+
+def _function_signature(node: "ast.FunctionDef | ast.AsyncFunctionDef") -> str:
+    """Bounded, deterministic signature text for a function/method definition."""
+    prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
+    try:
+        args = ast.unparse(node.args)
+    except Exception:
+        args = ""
+    return (f"{prefix}({args})")[:MAX_SIGNATURE_CHARS]
+
+
+def _class_signature(node: ast.ClassDef) -> str:
+    """Bounded, deterministic base-class signature text for a class definition."""
+    try:
+        bases = ", ".join(ast.unparse(base) for base in node.bases)
+    except Exception:
+        bases = ""
+    return (f"({bases})" if bases else "")[:MAX_SIGNATURE_CHARS]

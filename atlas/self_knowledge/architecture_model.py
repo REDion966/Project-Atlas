@@ -15,7 +15,8 @@ Authoritative source mapping (which source is authoritative for what):
 * ``CapabilityModel`` (``atlas.self_knowledge.capability_model``) is authoritative
   for: which capabilities/tools exist and which components provide them.
 * ``RepositoryMap`` (``atlas.research.repository_map``) is authoritative for: which
-  repository modules exist, their paths, and their import-graph relationships.
+  repository modules exist, their paths, their import-graph relationships, and the
+  structurally-extracted symbols (classes/functions/methods) each module defines.
 
 The model reports only what those sources provide. It never infers a
 responsibility, interface, or data flow that no authoritative source records; an
@@ -123,6 +124,7 @@ class LocateResult:
     query: str
     found: bool
     matched_kind: str = "none"
+    symbol: str = ""
     components: tuple[str, ...] = ()
     packages: tuple[str, ...] = ()
     module_paths: tuple[str, ...] = ()
@@ -137,6 +139,7 @@ class LocateResult:
             "query": self.query,
             "found": self.found,
             "matched_kind": self.matched_kind,
+            "symbol": self.symbol,
             "components": list(self.components),
             "packages": list(self.packages),
             "module_paths": list(self.module_paths),
@@ -166,6 +169,8 @@ class ArchitectureModel:
     status_counts: tuple[tuple[str, int], ...]
     source_counts: tuple[tuple[str, int], ...]
     limitations: tuple[str, ...]
+    #: Structurally-extracted repository symbols (Stage A2); 0 without a map.
+    symbol_count: int = 0
     capability_index: tuple[tuple[str, tuple[str, ...]], ...] = ()
     repository_map: Any = None
 
@@ -180,6 +185,7 @@ class ArchitectureModel:
             "capability_entry_count": self.capability_entry_count,
             "module_count": self.module_count,
             "edge_count": self.edge_count,
+            "symbol_count": self.symbol_count,
             "status_counts": [list(x) for x in self.status_counts],
             "source_counts": [list(x) for x in self.source_counts],
             "limitations": list(self.limitations),
@@ -201,6 +207,7 @@ class ArchitectureModel:
             f"- Capability-model entries: {self.capability_entry_count}",
             f"- Repository modules: {self.module_count}",
             f"- Repository import edges: {self.edge_count}",
+            f"- Repository symbols: {self.symbol_count}",
             "- Component health: "
             + (
                 ", ".join(f"{k}={v}" for k, v in self.status_counts) or "(none)"
@@ -368,6 +375,47 @@ class ArchitectureModel:
                     ),
                 )
 
+            # Symbol-level structure (Stage A2): a class / function / method the
+            # repository actually defines. Evidence-only — the owning module and
+            # any component registered for that package; unknown symbols are not
+            # invented.
+            finder = getattr(repository_map, "find_symbol", None)
+            if callable(finder):
+                try:
+                    matches = tuple(finder(text))
+                except Exception:
+                    matches = ()
+                if matches:
+                    top = matches[0]
+                    symbol = _clean_text(getattr(top, "qualified", ""))
+                    module_name = _clean_text(getattr(top, "module", ""))
+                    parent = (
+                        module_name.rsplit(".", 1)[0]
+                        if "." in module_name
+                        else ""
+                    )
+                    related = (
+                        tuple(
+                            sorted(c.name for c in components if c.package == parent)
+                        )
+                        if parent
+                        else ()
+                    )
+                    return LocateResult(
+                        query=text,
+                        found=True,
+                        matched_kind="symbol",
+                        symbol=symbol,
+                        module=module_name,
+                        packages=(parent,) if parent else (),
+                        components=related,
+                        sources=(
+                            ArchitectureSource(
+                                ArchitectureSourceKind.REPOSITORY_MAP.value, symbol
+                            ),
+                        ),
+                    )
+
         return LocateResult(query=text, found=False, matched_kind="none")
 
 
@@ -443,6 +491,14 @@ class ArchitectureModelBuilder:
             capability_model, repository_map, components, modules
         )
 
+        symbol_count = 0
+        counter = getattr(repository_map, "symbol_count", None)
+        if callable(counter):
+            try:
+                symbol_count = int(counter())
+            except Exception:
+                symbol_count = 0
+
         return ArchitectureModel(
             subsystems=subsystems,
             components=component_entries,
@@ -451,6 +507,7 @@ class ArchitectureModelBuilder:
             capability_entry_count=len(capability_index),
             module_count=len(modules),
             edge_count=sum(len(m.internal_imports) for m in modules),
+            symbol_count=symbol_count,
             status_counts=status_counts,
             source_counts=source_counts,
             limitations=limitations,

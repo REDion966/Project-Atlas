@@ -41,6 +41,12 @@ from typing import Any
 #: interact with optional external AI models.
 _EXTERNAL_MODEL_PACKAGE_PREFIX = "atlas.ai"
 
+#: Bound on the declared tool input parameters exposed per entry (MCP-style
+#: input contract; tools are the only source that declares parameters today).
+_MAX_INPUTS: int = 32
+#: Bound on the declared implementation paths exposed per entry.
+_MAX_IMPLEMENTATIONS: int = 3
+
 
 class CapabilityKind(str, Enum):
     """Whether an entry is a capability or a registered tool."""
@@ -98,6 +104,13 @@ class CapabilityEntry:
     sources: tuple[CapabilitySource, ...] = ()
     health: tuple[tuple[str, str], ...] = ()
     limitations: tuple[str, ...] = ()
+    #: Declared description (component responsibility / tool description) when a
+    #: single unambiguous source declares one; "" when none/ambiguous.
+    description: str = ""
+    #: Declared implementation module path(s) from the providing component(s).
+    implementation: str = ""
+    #: Declared tool input contract: (name, type_hint, required) triples.
+    inputs: tuple[tuple[str, str, bool], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +122,9 @@ class CapabilityEntry:
             "sources": [s.to_dict() for s in self.sources],
             "health": [list(h) for h in self.health],
             "limitations": list(self.limitations),
+            "description": self.description,
+            "implementation": self.implementation,
+            "inputs": [list(i) for i in self.inputs],
         }
 
 
@@ -192,9 +208,29 @@ class CapabilityModel:
                 f"components={','.join(entry.components) or '-'} "
                 f"sources={sources}"
             )
+            if entry.description:
+                lines.append(f"    - description: {entry.description}")
+            if entry.implementation:
+                lines.append(f"    - implementation: {entry.implementation}")
+            if entry.inputs:
+                rendered = ", ".join(
+                    f"{name}:{type_hint}{'' if required else '?'}"
+                    for name, type_hint, required in entry.inputs
+                )
+                lines.append(f"    - inputs: {rendered}")
             for limitation in entry.limitations:
                 lines.append(f"    - limitation: {limitation}")
         return "\n".join(lines)
+
+    def find(self, name: str) -> "CapabilityEntry | None":
+        """Deterministic exact-name lookup of one entry (``None`` when absent)."""
+        text = (name or "").strip() if isinstance(name, str) else ""
+        if not text:
+            return None
+        for entry in self.entries:
+            if entry.name == text:
+                return entry
+        return None
 
 
 def _status_name(status: Any) -> str:
@@ -240,6 +276,9 @@ class CapabilityModelBuilder:
                     "sources": [],
                     "health": {},
                     "is_tool": False,
+                    "descriptions": set(),
+                    "implementations": set(),
+                    "inputs": (),
                 },
             )
 
@@ -252,11 +291,18 @@ class CapabilityModelBuilder:
                 package = str(getattr(component, "package", "") or "")
                 module_path = str(getattr(component, "module_path", "") or "")
                 status = _status_name(getattr(component, "status", None))
+                description = str(
+                    getattr(component, "description", "") or ""
+                ).strip()
                 for cap in tuple(getattr(component, "provided_capabilities", ()) or ()):
                     cap_name = str(cap)
                     item = _entry(cap_name)
                     item["components"][cname] = package
                     item["health"][cname] = status
+                    if description:
+                        item["descriptions"].add(description)
+                    if module_path:
+                        item["implementations"].add(module_path)
                     item["sources"].append(
                         CapabilitySource(
                             kind=CapabilitySourceKind.COMPONENT_REGISTRY.value,
@@ -292,6 +338,22 @@ class CapabilityModelBuilder:
                 category = str(getattr(tool, "category", "") or "")
                 item = _entry(tname)
                 item["is_tool"] = True
+                tool_description = str(
+                    getattr(tool, "description", "") or ""
+                ).strip()
+                if tool_description:
+                    item["descriptions"].add(tool_description)
+                item["inputs"] = tuple(
+                    (
+                        str(getattr(parameter, "name", "") or ""),
+                        str(getattr(parameter, "type_hint", "") or ""),
+                        bool(getattr(parameter, "required", False)),
+                    )
+                    for parameter in tuple(
+                        getattr(tool, "parameters", ()) or ()
+                    )
+                    if str(getattr(parameter, "name", "") or "")
+                )[:_MAX_INPUTS]
                 item["sources"].append(
                     CapabilitySource(
                         kind=CapabilitySourceKind.TOOL_REGISTRY.value,
@@ -331,6 +393,13 @@ class CapabilityModelBuilder:
                     "available evidence (no providing component or tool)."
                 )
 
+            # Declared description: only an UNAMBIGUOUS single source is used, so
+            # an entry is never given a description that contradicts another.
+            descriptions = sorted(item["descriptions"])
+            description = descriptions[0] if len(descriptions) == 1 else ""
+            implementations = sorted(item["implementations"])[:_MAX_IMPLEMENTATIONS]
+            implementation = ", ".join(implementations)
+
             entries.append(
                 CapabilityEntry(
                     name=name,
@@ -346,6 +415,9 @@ class CapabilityModelBuilder:
                     ),
                     health=health,
                     limitations=tuple(limitations),
+                    description=description,
+                    implementation=implementation,
+                    inputs=tuple(item["inputs"]),
                 )
             )
 
@@ -428,3 +500,32 @@ def build_capability_model(
         capability_registry=capability_registry,
         tool_registry=tool_registry,
     )
+
+
+def describe_capability(
+    name: str,
+    component_registry: Any,
+    capability_registry: Any | None = None,
+    tool_registry: Any | None = None,
+) -> dict[str, Any]:
+    """Bounded, deterministic capability-discovery answer for one name.
+
+    Reuses the canonical :class:`CapabilityModel` (no second registry): it
+    answers "what is it / what does it accept / which component provides it /
+    where is its implementation / is it available / is it deterministic or
+    model-assisted" from the EXISTING authoritative sources only. Metadata is
+    descriptive: it grants no execution authority and never bypasses the
+    ApprovalManager, the authorization boundary, or sandbox verification.
+    """
+    text = (name or "").strip() if isinstance(name, str) else ""
+    model = build_capability_model(
+        component_registry,
+        capability_registry=capability_registry,
+        tool_registry=tool_registry,
+    )
+    entry = model.find(text)
+    if entry is None:
+        return {"found": False, "name": text}
+    payload = entry.to_dict()
+    payload["found"] = True
+    return payload

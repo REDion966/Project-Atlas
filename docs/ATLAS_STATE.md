@@ -1269,6 +1269,63 @@ P18 — Controlled Autonomy.
   projection over the existing registries (classification, attribution,
   health, evidence-based limitations, stable ordering), exposed via a kernel
   accessor and the read-only `atlas capability` CLI. No competing registry.
+- **Repository symbol intelligence (external-mechanism adaptation, no new
+  subsystem)** — `atlas/research/repository_map.py` additionally extracts each
+  module's classes/functions/methods with bounded signatures plus a bounded
+  repo-wide reference count used ONLY for relevance ordering, and adds
+  deterministic `find_symbol` / `symbols_in_module` / `important_symbols` /
+  `context_for` queries. Integrated into `ArchitectureModel.locate` (symbol
+  matches), the architecture summary (`symbol_count`), and the kernel
+  (`Atlas.repository_symbol`). Deterministic, read-only, model-free; the
+  module-level import graph is unchanged.
+- **Capability contracts & discovery (external-mechanism adaptation)** —
+  `CapabilityModel` entries additionally expose the declared `description`,
+  `implementation` module path, and declared tool `inputs` projected from the
+  EXISTING `ComponentRegistry`/`ToolRegistry`, plus a deterministic
+  `describe_capability` discovery query exposed via `Atlas.capability_contract`.
+  Descriptive only: it grants no authority, bypasses no approval/authorization
+  boundary, and introduces no second registry.
+- **Agent Workbench — bounded governed repair (external-mechanism adaptation)**
+  — `atlas/evolution/development_repair.py` adds a drop-in `SelfDevelopmentLoop`
+  change supplier. It returns the EXISTING baseline workload unchanged, and —
+  only after a sandbox FAILURE and only when `[development].model_assisted_authoring`
+  is enabled — authors ONE bounded corrective change through the EXISTING,
+  boundary-validated `ModelAssistedChangeSupplier` (path confinement,
+  architecture-sensitive-prefix refusal, size/format bounds, fail-closed). It is
+  NOT a new loop: the existing loop still applies the change inside a disposable
+  `CodeSandbox`, verifies it, and never promotes. Deterministic-first,
+  model-optional; mints no authority. The workbench's other primitives (plan,
+  implement, sandbox, observe, diagnose, recover, verify, evidence) are the
+  existing `DevelopmentPlanner`/`CodeSandbox`/`DevelopmentVerification`/
+  `DevelopmentDiagnostic`/`DevelopmentRecovery`/`DevelopmentOutcome` surfaces —
+  extended, not duplicated.
+- **External repository intelligence (governed GitHub / internet research)** —
+  `atlas/research/sources/github.py` acquires a BOUNDED set of files from a
+  PUBLIC GitHub repository through GitHub's public API/raw endpoints, reusing
+  the EXISTING web safety layer (`WebSourceAdapter` + `WebHostPolicy`:
+  deny-by-default, scheme/SSRF/redirect/time/size bounds, path-traversal
+  rejection) — no token required, and external code is NEVER executed.
+  `atlas/research/external_repository.py` parses the acquired DATA with the
+  EXISTING `RepositoryMap` (modules/imports/symbols), ranks relevant symbols
+  (`context_for`/importance), and produces a structured Atlas-vs-external
+  comparison (`already_supported` / `partially_supported` / `potential_mechanism`
+  / `capability_gap` / `architectural_mismatch` / `insufficient_evidence` /
+  `not_applicable`) whose findings are ALL `unvalidated` and carry provenance.
+  A bounded `development_evidence` dict informs the EXISTING `DevelopmentDriver`
+  as EVIDENCE ONLY (never `scaffold`/`code_changes`). Exposed read-only via
+  `Atlas.analyze_external_repository(...)` and the
+  `external_repository_intelligence` component (capabilities
+  `external_repository.acquire/analyze/compare`). Hosts must be explicitly
+  allow-listed in `research.web_allowed_hosts` (deny-by-default).
+- **Model roles & hardware decision** — Atlas keeps its optional, opt-in model
+  roles as background suppliers only: LANGUAGE (`qwen3:8b`), CODING
+  (`qwen2.5-coder:7b`), EMBEDDING (`nomic-embed-text`), routed through the
+  existing `ModelProfile`/`AIService` seams. Qwen3-Coder-Next (80B MoE / 3B
+  active, 256K context) requires ~46–52 GB RAM+VRAM at Q4_K_M and is therefore
+  **architecturally relevant but hardware-inappropriate** for the current
+  RTX 3060 Ti 8 GB / 32 GB DDR4 host: it is documented and NOT installed, and no
+  existing model was replaced. External agent frameworks (Aider, MCP, OpenHands,
+  mini-SWE-agent, MiniMax Mini-Agent/Code) are referenced, not embedded.
 - **C6.1** — validated knowledge retrieval
   (`atlas/research/validated_retrieval.py`): SUPPORTED-only persisted
   research claims (identity, statement, validation status, confidences,
