@@ -1658,6 +1658,165 @@ here. The two are independent milestones that happen to share a label.
 
 ---
 
+## 34. Post-L10 Conversational Validation (C1 → C5) — COMPLETE
+
+Five owner-scoped conversational checkpoints were completed ADDITIVELY after L10 (the
+additive language roadmap) and the target-state gates G1 → G3. They introduce no new
+engine, planner, orchestrator, memory store, registry, or roadmap phase, and no model
+dependency: each correction extends an EXISTING representation or consumer.
+
+### 34.1 C1 — Conversation architecture research (COMPLETE)
+
+Mature agent/conversation architectures were reviewed as COMPARISON CRITERIA only
+(Anthropic, *Building Effective Agents*: workflows vs agents, routing, orchestrator-
+workers, evaluator-optimizer, environment ground truth, ACI; OpenAI Agents SDK
+sessions: bounded history retrieval, custom history merging, compaction for long
+conversations, approval interrupts, correction/undo). Atlas's real pipeline was traced
+end to end (`main.py` → `AtlasCLI` → `Atlas` → `ConversationService` →
+`ConversationEngine`/`TaskIntake` → `SemanticFrame` → conversation state/context →
+the routing cascade → consumers). **Finding: a standalone "conversation engine" is
+NOT justified** — `ConversationService` + `SemanticFrame` + `ConversationState`/
+`ConversationContext` + `TaskSpec`/`SemanticIntake` + the existing investigation and
+development cascade already own those responsibilities.
+
+Correction implemented: the read-only investigation receives a bounded **objective**
+derived from the shared frame (`SemanticFrame.operation_object`, the object of the
+operation that owns the turn) instead of re-deriving concepts from the whole sentence.
+The retained investigation target and every state contract are unchanged;
+`InvestigationService.investigate(..., objective=...)` falls back once to the previous
+whole-target concepts, so an objective can never degrade a report into "no evidence".
+Evidence: `tests/test_investigation_objective.py`.
+
+### 34.2 C2 — Conversation understanding gap (COMPLETE)
+
+The natural-language → meaning → task/goal boundary was traced for a corpus of
+realistic requests, and the failures were integration/precedence problems rather than
+missing architecture. Corrections, all inside the existing shared frame/lexicon:
+
+- the evidenced gap/insufficiency surface forms are reachable (`missing`, `lack`, and
+  the contraction `can't` → `cannot`), using the existing canonicalization maps;
+- `_is_recall` no longer treats the bare word "ask" plus a question mark as recall
+  (the pinned recall questions are preserved);
+- the knowledge-complement ("about") guard no longer blocks an Atlas-sufficiency
+  reading;
+- the response floor resolves an already-recognized `capability_gap`, `limitations`,
+  or `governed_lifecycle` meaning BEFORE the generic capability-inventory/help
+  patterns, so an Atlas-sufficiency question phrased with a research verb reaches the
+  existing gap surface instead of an empty knowledge-store miss.
+
+Evidence: `tests/test_semantic_gap_routing.py` (plus the pinned self-knowledge and
+real-world corpus suites).
+
+### 34.3 C3 — Conversation state & context (COMPLETE)
+
+The state layer was traced and verified sufficient: `ConversationState` /
+`ConversationStateManager` (immutable, single-valued facts — `current_subject`,
+`current_task`, `current_investigation`, `latest_result`, `last_operation`,
+`current_objective`, `subtasks`, `pending_question`, `pending_confirmation`,
+`development_intent`, captured entities, governance references), the bounded
+`ConversationContext` projection (10 messages), the conversation history bound
+(`history_limit = 20`), and the two-pass reference resolver.
+
+Verified by real-kernel multi-turn runs: structured state (not raw history) carries
+the referent across history rollover; a topic switch does not reuse the retained
+operation; an old governed operation is never re-executed for an unrelated turn.
+
+Correction implemented: a **bare-reference investigation follow-up** ("Investigate
+this further.") uses the retained `current_investigation` as its objective instead of
+re-deriving evidence from the literal words. A follow-up with no antecedent still
+fails closed (it asks which subject to use). Evidence:
+`tests/test_conversation_state_context.py`.
+
+### 34.4 C4 — Planning / orchestration & capability/tool selection (COMPLETE)
+
+The real selection authority was identified and verified: capability/tool registries
+(`CapabilityRegistry`, `ToolRegistry`, capability model/contracts) are authoritative
+for *what exists and how to invoke it*, while **conversational consumer selection is
+branch-driven** — the ordered `ConversationService` cascade over `TaskSpec` +
+`SemanticFrame` + the resolved reference. No registry-driven planner exists, and none
+was introduced.
+
+Correction implemented: an already-BOUND reference is now **answered** from the
+retained conversation fact by the existing reference renderer, before the
+research/knowledge/orchestration routes can reinterpret the turn as a new operation
+("What did you find?" after an investigation reports the retained result instead of
+asking for a target). The single-operation case is resolved by the retained
+`last_operation` (its recorded target proves the candidate fields are one referent),
+while a genuinely multi-referent turn still fails closed. The new step is guarded to
+informational, pure reference/follow-up turns, so governed requests carrying a bound
+reference keep their governed route, and it answers only — it never falls through to a
+provider. Evidence: `tests/test_checkpoint4_orchestration.py`.
+
+### 34.5 C5 — End-to-end conversational validation (COMPLETE)
+
+Nine scenario groups were executed against the REAL kernel with per-turn evidence
+(frame role/domain/operation, task type, resolved reference, state, route, consumer,
+evidence, `model_used`, governance): casual conversation; follow-up references;
+architecture questions; capability-gap questions (including an external-subject
+negative); research requests; technology evaluation; self-investigation; a governed
+investigation → findings → proposal flow; and a multi-step research → comparison →
+analysis → proposal sequence.
+
+Correction implemented: an external subject's insufficiency question ("What capability
+is that framework missing?") was answered from Atlas's own self-knowledge surface. The
+evidence/failure branch now applies the same external-subject guard the capability-gap
+branch already uses, so the turn degrades honestly (it asks which subject to use)
+instead of answering an external question with Atlas's own surfaces. Evidence:
+`tests/test_semantic_gap_routing.py` (external-subject negatives, end-to-end).
+
+### 34.6 Validated capabilities (as verified, not as intended)
+
+- deterministic conversational floor: greeting, identity, help, capability inventory,
+  capability detail, status, acknowledgements, bounded recall — model-free
+  (`model_used = false`);
+- self-knowledge / architecture / capability-gap surfaces reached from natural
+  language, with verified architectural anchors and honest scope boundaries;
+- capability contracts, repository-symbol intelligence, external-research,
+  evidence/trust, gap and governed-lifecycle self-knowledge topics;
+- read-only repository investigation with a bounded objective, deterministic evidence
+  selection and a governed `PROPOSED` proposal only;
+- conversation state/context: retained subject/result, bounded reference resolution
+  (findings/result, investigation, subject, task, development intent, captured
+  entities), fail-closed clarification when nothing is bound;
+- findings/result retrieval ("What did you find?", "What about the result?") answered
+  from retained state;
+- governed boundaries: investigation never modifies the repository; proposals require
+  explicit OWNER approval; execution stays sandboxed and separately authorized.
+
+### 34.7 Known limitations (classified, deliberately NOT implemented)
+
+- **Missing capabilities**: conversational comparison; analysis over a prior result;
+  proposal-from-evidence; true multi-step dependent execution (no sequencing,
+  dependency, or intermediate-evidence flow from conversation).
+- **Routing / integration limitations**: some research/evaluation requests whose local
+  validated knowledge is empty do not fall back to repository investigation; certain
+  retrieval phrasings ("What did the investigation find?") can be typed as a new
+  investigation; broad "capability" inventory matching can capture an architecture
+  question.
+- **State / context limitations**: investigation/result state is single-valued (no
+  result history); `pending_question` has no expiry; clarification answers are not
+  generally resumed into the original task; the possessive reference vocabulary is
+  bounded.
+- **Planning limitations**: `subtasks` / `current_objective` can represent work, but no
+  generic dependency or sequencing planner exists, so a compound request is not
+  equivalent to multi-step execution.
+- **Unsupported / unbound requests** remain fail-closed: they ask for the missing
+  subject or report honestly instead of guessing or invoking a model.
+
+These are recorded as bounded capabilities, not as governance defects.
+
+### 34.8 Principles preserved
+
+Atlas remains model-independent and deterministic-first: external models/providers are
+optional, never authoritative, never mandatory, and never invoked on the deterministic
+paths validated here. Governed execution, OWNER approval, sandbox verification, and
+fail-closed behaviour are unchanged, and no L11+ roadmap phase is created or implied.
+Future capability development (for example the missing capabilities listed in §34.7)
+remains **evidence-driven and separately authorized** — the validated gap is the
+evidence, not a mandate to build.
+
+---
+
 *Document created: 2026-08-02 · Authoritative re-write: 2026-08-08 (Track D
 implemented & runtime-integrated; schema v10; post-v0.19.1 / unreleased) ·
 Release update: 2026-08-09 (Track D released as v0.20; full suite verified:
@@ -1679,5 +1838,14 @@ understanding; G2 — deep self-knowledge + open-ended knowledge; G3 — governe
 self-development: conversational DEVELOPMENT_REQUEST routing through the EXISTING
 `DevelopmentDriver` with deterministic bounded scaffold derivation; §33; focused and
 regression suites green, no full-suite re-run; no G4 defined or authorized).
+Post-L10 conversational validation C1 → C5 reconciled: 2026-09-26 (checkpoint 1 —
+conversation architecture research and the investigation-objective correction;
+checkpoint 2 — understanding-gap routing corrections; checkpoint 3 — conversation
+state/context verification and the bounded follow-up correction; checkpoint 4 —
+orchestration/capability-selection trace and the resolved-reference consumer;
+checkpoint 5 — end-to-end real-kernel conversational validation and the
+external-subject self-knowledge guard. Focused and broader regression subsets were
+used (no full-suite re-run); the two documented pre-existing failures were reproduced
+against a pristine HEAD and remain unchanged; §34; no L11 defined or authorized).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

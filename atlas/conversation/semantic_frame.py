@@ -32,6 +32,7 @@ Boundaries (mandatory):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
@@ -379,6 +380,83 @@ def subject_span(text: Any) -> str:
     return " ".join(keep)[:_MAX_SUBJECT_CHARS]
 
 
+#: The verb class that OWNS each operation name returned by :func:`_operation_of`
+#: (the same classes, in the same priority order), so the object of a turn can be
+#: located from its operation instead of from the whole token stream.
+_VERBS_BY_OPERATION: dict[str, frozenset[str]] = {
+    "investigate": INVESTIGATE_VERBS,
+    "develop": DEVELOP_VERBS,
+    "compare": COMPARE_VERBS,
+    "research": RESEARCH_VERBS | LEARN_VERBS,
+    "explain": EXPLAIN_VERBS,
+    "act": ACT_VERBS,
+}
+
+#: Constraint / negation markers. They introduce a BOUNDARY CONDITION on the
+#: request ("investigate this without modifying anything"), not part of what the
+#: operation applies to, so they end the object span instead of becoming the
+#: objective.
+_OBJECT_META_BOUNDARY: frozenset[str] = frozenset(
+    {"without", "not", "never", "unless", "regardless"}
+)
+
+#: Tokens that END an operation's object span: a compound connector (the next
+#: clause), another operation verb (a second instruction), or a constraint
+#: marker.
+_OBJECT_BOUNDARY_WORDS: frozenset[str] = frozenset(
+    word for connector in COMPOUND_CONNECTORS for word in connector
+) | _OPERATION_VERBS | _OBJECT_META_BOUNDARY
+
+#: Surface words (kept verbatim) used to build an operation's object span.
+_SURFACE_WORD_RE = re.compile(r"[a-z0-9][a-z0-9._'-]*")
+
+
+def operation_object(text: Any) -> str:
+    """Return the bounded OBJECT of the operation that owns ``text``.
+
+    The frame already records WHICH operation owns a turn (``domain``/
+    ``operation``); this returns the bounded span that operation applies to
+    ("investigate **possible solutions**", "investigate **a new technology**"),
+    so a downstream capability can act on the request's objective instead of
+    re-deriving one from the whole sentence.
+
+    The span keeps the SURFACE words (``normalize_token`` is used only for the
+    class tests), so a consumer that matches repository text — the read-only
+    investigation — sees the words the user actually wrote ("failures", not the
+    stem "failure") and existing behaviour for well-formed targets is unchanged.
+
+    Representation only: it routes nothing, authorizes nothing, performs no I/O,
+    and returns ``""`` when the turn carries no owning operation — the caller
+    then keeps its existing behaviour unchanged.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return ""
+    surface = [tok for tok in _SURFACE_WORD_RE.findall(text.lower()) if tok]
+    if not surface:
+        return ""
+    lemmas = frozenset(normalize_token(tok) for tok in surface)
+    operation, _domain, _priority = _operation_of(lemmas)
+    verbs = _VERBS_BY_OPERATION.get(operation)
+    if not verbs:
+        return ""
+    start = next(
+        (i for i, tok in enumerate(surface) if normalize_token(tok) in verbs), None
+    )
+    if start is None:
+        return ""
+    keep: list[str] = []
+    for tok in surface[start + 1:]:
+        lemma = normalize_token(tok)
+        if lemma in _OBJECT_BOUNDARY_WORDS:
+            break
+        if lemma in _OBJECT_IGNORE or len(tok) < 3:
+            continue
+        keep.append(tok)
+        if len(keep) >= MAX_SUBJECT_TOKENS:
+            break
+    return " ".join(keep).strip(" \t.,;:!?'\"")[:_MAX_SUBJECT_CHARS]
+
+
 def knowledge_subject(text: Any) -> str:
     """Return the bounded KNOWLEDGE subject of ``text`` (operation verbs dropped).
 
@@ -488,7 +566,32 @@ def _is_recall(order: tuple[str, ...], lemmas: frozenset[str], raw: str) -> bool
         return False
     if has_any(lemmas, SELF_COMPONENT_CONCEPTS | SELF_ARCHITECTURE_CONCEPTS):
         return False
-    return has_any(lemmas, RECALL_VERBS | RECALL_NOUNS)
+    # "ask" alone is a prior-REQUEST reference ("I asked you to do something you
+    # cannot currently do"), not a recall of the conversation itself, so it does
+    # NOT count as a bare recall verb: it is recognized only when the turn asks
+    # ABOUT the asking ("what did I ask earlier?", "what did I ask you?") or
+    # names the conversation's own content (a recall noun). Every other recall
+    # verb ("discuss"/"talk"/"remember"/...) is unchanged.
+    if has_any(lemmas, RECALL_VERBS - {"ask"}):
+        return True
+    if _asks_about_the_conversation(order, lemmas):
+        return True
+    return has_any(lemmas, RECALL_NOUNS)
+
+
+def _asks_about_the_conversation(
+    order: tuple[str, ...], lemmas: frozenset[str]
+) -> bool:
+    """True for a question whose object is the conversation's own asks.
+
+    The wh-word must precede the verb ("what did I ask you?"); in a prior-REQUEST
+    reference the verb leads and any wh-word belongs to a later clause ("I asked
+    you to do something you cannot currently do. How would you ...?").
+    """
+    if "ask" not in lemmas or not lemmas & {"what", "which", "whether"}:
+        return False
+    ask_at = order.index("ask")
+    return any(token in {"what", "which", "whether"} for token in order[:ask_at])
 
 
 def _capability_frame(
@@ -687,9 +790,27 @@ def _self_knowledge_frame(
         concept_mechanism_q
     ) and not subject_q:
         return None
+    # The gap/insufficiency family's own vocabulary is an Atlas-internal
+    # SUFFICIENCY signal, so a turn carrying it asks about Atlas's own limits
+    # even when it also has an "about" complement ("... what can you do about
+    # it?"). Only this family is exempted from the knowledge-complement guard
+    # below; every other "about <subject>" knowledge question is unchanged.
+    sufficiency_subject = bool(
+        lemmas
+        & (
+            SELF_GAP_CONCEPTS
+            | SELF_EVIDENCE_CONCEPTS
+            | SELF_FAILURE_TRIGGERS
+            | _SELF_FAILURE_CONCEPTS
+        )
+    )
     # A knowledge question ABOUT a subject is not a self-knowledge question
     # ("what do we know about the investigation system?").
-    if lemmas & (RESEARCH_VERBS | LEARN_VERBS | RECALL_VERBS) and "about" in lemmas:
+    if (
+        lemmas & (RESEARCH_VERBS | LEARN_VERBS | RECALL_VERBS)
+        and "about" in lemmas
+        and not sufficiency_subject
+    ):
         return None
     if governance_q and not lemmas & {
         "change", "proposal", "sandbox", "capability", "development",
@@ -737,8 +858,41 @@ def _self_knowledge_frame(
         and has_any(lemmas, {"repository", "repo", "code", "research", "source"})
     ):
         return _self_frame("external_research", 0.84, "external-research-concept")
-    if lemmas & SELF_GAP_CONCEPTS and has_any(
-        lemmas, {"capability", "capabilities", "feature", "gap", "gaps"}
+    # The gap family's own vocabulary names the object, so a gap question needs
+    # no literal "gap" noun ("what you're missing", "which capabilities do you
+    # lack"), and a capability named as ABSENT ("a capability you do not have")
+    # is the same question. The gate above admits such a turn either through an
+    # Atlas self-reference or through the Atlas-internal subject question, so the
+    # external-subject guard below closes the remaining demonstrative case.
+    #
+    # An explicit governed ACTION request stays out of this informational family
+    # ("Could you investigate what's missing ... and develop it ..."): the same
+    # verb classes that keep a turn out of recall keep it out of the gap reading,
+    # so the existing investigation/development cascade keeps its precedence.
+    #
+    # A leading RESEARCH/INFORMATION verb is deliberately NOT enough to suppress
+    # it: "find out what Atlas is missing" asks about Atlas's OWN sufficiency,
+    # which the external-knowledge path cannot serve (it reported an empty
+    # validated-knowledge miss). The self-knowledge gate above has already
+    # required an Atlas self-reference, so an external subject is never claimed
+    # here ("find out what this library is missing" stays out).
+    governed_action = bool(lemmas & (DEVELOP_VERBS | INVESTIGATE_VERBS))
+    # An EXTERNAL subject must never be answered as Atlas's own gap: a third-person
+    # demonstrative/possessive bound to some other thing ("what capability is that
+    # framework missing?") is not a question about Atlas. Bounded to the case with
+    # NO Atlas self-reference, so every evidenced Atlas-sufficiency turn is kept.
+    external_subject = bool(
+        not self_ref and lemmas & {"that", "this", "these", "those", "its", "their"}
+    )
+    capability_absence = bool(
+        lemmas & {"capability", "capabilities", "feature"}
+        and lemmas
+        & {"not", "cannot", "without", "absent", "lack", "missing", "unable"}
+    )
+    if (
+        not governed_action
+        and not external_subject
+        and ((lemmas & SELF_GAP_CONCEPTS) or capability_absence)
     ):
         return _self_frame("capability_gap", 0.84, "gap-concept")
     if lemmas & SELF_EVIDENCE_TRUST_CONCEPTS and lemmas & {
@@ -763,7 +917,16 @@ def _self_knowledge_frame(
         return _self_frame("owner_approval", 0.9, "approval-concept")
     if lemmas & SELF_AUTHORIZATION_CONCEPTS:
         return _self_frame("authorization_boundary", 0.9, "authorization-concept")
-    if lemmas & SELF_EVIDENCE_CONCEPTS and lemmas & SELF_FAILURE_TRIGGERS:
+    # Checkpoint 5 — the same external-subject guard the gap branch uses: an
+    # insufficiency question about SOME OTHER thing ("what capability is that
+    # framework missing?") is not Atlas's own evidence/failure surface, and the
+    # gate above can be satisfied by the Atlas-internal subject question without
+    # any self-reference. (The limitations branch below already requires one.)
+    if (
+        lemmas & SELF_EVIDENCE_CONCEPTS
+        and lemmas & SELF_FAILURE_TRIGGERS
+        and not external_subject
+    ):
         return _self_frame("evidence_failure", 0.88, "evidence-concept")
     if "development" in lemmas:
         return _self_frame("development_process", 0.88, "development-concept")

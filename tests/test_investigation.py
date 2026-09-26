@@ -3869,3 +3869,74 @@ class TestReportClassification:
         """Verification cues remain VERIFICATION_REQUEST."""
         spec = TaskIntake().intake("verify the development")
         assert spec.task_type is TaskType.VERIFICATION_REQUEST
+
+
+class TestSingleRepositoryScanPerInvestigation:
+    """Regression — one investigation must scan the repository ONCE.
+
+    ``RepositoryMapBuilder.build()`` parses every module (including the bounded
+    symbol extraction), which is by far the most expensive stage of an
+    investigation. Subsystem discovery and relationship tracing each built
+    their OWN map, so a single investigation turn parsed the whole tree twice —
+    doubling CPU and peak memory for a byte-identical report, and making an
+    investigation look like a hang on a slow or large checkout. Both stages
+    must share the one map built by ``investigate``.
+    """
+
+    @staticmethod
+    def _repo(tmp_path) -> str:
+        package = tmp_path / "atlas"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "memory.py").write_text(
+            "from atlas.identity import Identity\n"
+            "\n"
+            "\n"
+            "class MemoryManager:\n"
+            "    def record(self):\n"
+            "        return Identity\n",
+            encoding="utf-8",
+        )
+        (package / "identity.py").write_text(
+            "class Identity:\n    pass\n", encoding="utf-8"
+        )
+        return str(tmp_path)
+
+    @staticmethod
+    def _count_builds(monkeypatch) -> dict:
+        from atlas.research.repository_map import RepositoryMapBuilder
+
+        calls = {"build": 0}
+        original = RepositoryMapBuilder.build
+
+        def counting_build(self):
+            calls["build"] += 1
+            return original(self)
+
+        monkeypatch.setattr(RepositoryMapBuilder, "build", counting_build)
+        return calls
+
+    def test_investigation_scans_the_repository_once(self, tmp_path, monkeypatch):
+        calls = self._count_builds(monkeypatch)
+
+        report = InvestigationService(self._repo(tmp_path)).investigate(
+            "Investigate the memory architecture"
+        )
+
+        assert calls["build"] == 1, (
+            "an investigation must build the repository map once, not per stage"
+        )
+        assert report.modification_status == "NONE"
+        assert "atlas.memory" in report.components
+
+    def test_stages_reuse_a_supplied_map(self, tmp_path, monkeypatch):
+        calls = self._count_builds(monkeypatch)
+
+        service = InvestigationService(self._repo(tmp_path))
+        repository_map = service._repository_map()
+        assert calls["build"] == 1
+
+        scope = service._discover_subsystem(("memory",), repository_map=repository_map)
+        service._trace_relationships(scope, repository_map=repository_map)
+
+        assert calls["build"] == 1, "a supplied repository map must not be rebuilt"

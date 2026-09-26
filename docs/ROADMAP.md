@@ -343,6 +343,19 @@ development should be driven by validated capability gaps rather than new
 mandatory phases. No G4, C10, L11 or further mandatory phase is defined or
 authorized.
 
+**Post-L10 conversational validation (C1 → C5) — COMPLETE (NOT a roadmap phase).**
+Five owner-scoped conversational checkpoints were completed additively after L10:
+architecture research and the investigation-objective correction (C1), understanding-gap
+routing corrections (C2), conversation state/context verification and the bounded
+follow-up correction (C3), the orchestration/capability-selection trace and the
+resolved-reference consumer (C4), and end-to-end real-kernel conversational validation
+(C5). No new engine, planner, orchestrator, memory store or registry was introduced,
+no model dependency was added, and the L0 → L10 language roadmap is unchanged. The
+validated capabilities and the classified remaining limitations are recorded in
+`docs/ATLAS_STATE.md` §34. Development of the remaining (missing) capabilities stays
+**evidence-driven and separately authorized**; this record neither authorizes nor
+schedules them.
+
 ---
 
 ## PROPOSED — not approved (do not implement)

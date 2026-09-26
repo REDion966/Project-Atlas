@@ -547,9 +547,14 @@ _FRAME_CONCEPT_TOPICS: dict[str, str] = {
     "model_independence": "model independence",
 }
 
-#: The bounded bridge's NEW subject families. They are resolved from the shared
+#: The bounded bridge's subject families. They are resolved from the shared
 #: frame BEFORE the narrower phrase-pattern surfaces, so a broad pattern cannot
-#: capture them as a different topic. Every pre-existing concept keeps its own
+#: capture them as a different topic. It carries the bridge's NEW families plus
+#: the three evidenced self-knowledge families the frame already recognizes but
+#: the generic capability-inventory/help regexes used to override ("What
+#: capabilities are you missing?" -> capability gap, "... about your
+#: limitations?" -> current limitations, "What happens before promotion?" ->
+#: governed lifecycle). Every other pre-existing concept keeps its own
 #: precedence (it is not in this set).
 _BRIDGE_CONCEPTS: frozenset[str] = frozenset(
     {
@@ -560,6 +565,7 @@ _BRIDGE_CONCEPTS: frozenset[str] = frozenset(
         "evidence_trust",
         "capability_gap",
         "governed_lifecycle",
+        "limitations",
         "model_independence",
     }
 )
@@ -1484,6 +1490,27 @@ class BuiltinResponseService:
         if topic is None:
             return None
         return self._build_message(BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+
+    def match_resolved_reference_answer(
+        self, text: str, spec: TaskSpec | None
+    ) -> Message | None:
+        """Checkpoint 4 — ANSWER from an already-bound reference.
+
+        Reuses the existing Stage A consumption of
+        ``spec.context["resolved_reference"]`` so a result/investigation
+        follow-up ("what did you find?") is answered from the retained
+        conversation fact by the existing reference renderer, instead of being
+        refused by the orchestration target gate or re-run as a new operation.
+
+        Returns ``None`` when no reference was bound, so every other route is
+        byte-for-byte unchanged. The referent was bound by the deterministic
+        resolver against :class:`ConversationState`; the value is restated
+        verbatim, nothing is re-resolved or guessed, and no authority is created.
+        """
+        detail = self._match_resolved_reference(spec)
+        if detail is None:
+            return None
+        return self._build_message(BUILTIN_INTENT_REFERENCE, detail)
 
     def match_external_knowledge(self, text: str) -> Message | None:
         """Evidence-driven: claim an external-knowledge request early.

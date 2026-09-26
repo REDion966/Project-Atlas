@@ -38,10 +38,13 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from atlas.conversation.message import Message
 from atlas.conversation.normalization import collapse_whitespace
+
+if TYPE_CHECKING:  # pragma: no cover - annotation-only import
+    from atlas.research.repository_map import RepositoryMap
 
 # ---------------------------------------------------------------------------
 # Stoplist for concept extraction. These are too generic to be useful search
@@ -107,12 +110,19 @@ class InvestigationReport:
     modification_status: str = "NONE"  # always NONE for investigation
     components: tuple[str, ...] = ()
     tests_inspected: tuple[str, ...] = ()
+    #: The bounded OBJECT the investigation actually searched for (the object of
+    #: the operation that owns the turn), when the caller supplied one. Empty
+    #: preserves the pre-existing whole-target behaviour exactly.
+    objective: str = ""
 
     def to_markdown(self) -> str:
         """Render the report as a conversational markdown summary."""
         lines: list[str] = []
         lines.append(f"## Investigation: {self.target}")
         lines.append("")
+        if self.objective:
+            lines.append(f"**Objective:** {self.objective}")
+            lines.append("")
         if self.diagnosis:
             lines.append(f"**Diagnosis:** {self.diagnosis}")
             lines.append("")
@@ -169,7 +179,7 @@ class InvestigationService:
         """
         self._root = Path(repo_root) if repo_root else Path.cwd()
 
-    def investigate(self, target: str) -> InvestigationReport:
+    def investigate(self, target: str, *, objective: str = "") -> InvestigationReport:
         """Investigate a named subsystem/issue in the repository.
 
         Uses content-driven subsystem discovery: the investigation target
@@ -177,36 +187,73 @@ class InvestigationService:
         evidence rather than hardcoded directory/pattern mapping.
 
         Args:
-            target: the investigation target (e.g. "memory architecture").
+            target: the investigation target (e.g. "memory architecture"). This
+                is the retained identity of the operation and is reported
+                unchanged.
+            objective: optional bounded OBJECT of the operation derived by the
+                calling layer from the EXISTING semantic frame (e.g. "possible
+                solutions", "new technology"). When present it selects the
+                evidence concepts instead of every token of the target, so a
+                conversational sentence does not turn its function words into
+                repository search terms. Empty (the default) preserves the
+                previous behaviour exactly.
 
         Returns:
             A structured InvestigationReport.
         """
         cleaned_target = self._clean_target(target)
 
-        # 1. Extract key concepts from the target.
-        concepts = self._extract_concepts(cleaned_target)
+        # 1. Extract key concepts: prefer the caller's bounded objective (the
+        # object of the operation that owns the turn), then fall back — in the
+        # pre-existing order — to the cleaned target and the raw target.
+        concepts = (
+            self._extract_concepts(self._clean_target(objective)) if objective else ()
+        )
+        if not concepts:
+            concepts = self._extract_concepts(cleaned_target)
         if not concepts:
             concepts = self._extract_concepts(target)
 
-        # 2. Discover the relevant subsystem from repository evidence.
-        scope = self._discover_subsystem(concepts)
+        # 2. Build the repository map ONCE for this turn. It is a pure function
+        # of the repository content, and every stage below reads the same
+        # snapshot; building it per stage scanned and parsed the whole tree
+        # repeatedly (the dominant cost of an investigation).
+        repository_map = self._repository_map()
 
-        # 3. Inspect implementation within the discovered scope.
+        # 3. Discover the relevant subsystem from repository evidence.
+        scope = self._discover_subsystem(concepts, repository_map=repository_map)
+        if not scope.modules and concepts != tuple(
+            self._extract_concepts(cleaned_target)
+        ):
+            # A faithful objective can be narrower than the repository's own
+            # vocabulary ("investigate what's missing" names no module). Fall
+            # back ONCE to the pre-existing whole-target concepts — reusing the
+            # map already built — so an objective can never degrade the report
+            # into "no evidence" when the target itself yields some.
+            fallback_concepts = self._extract_concepts(cleaned_target)
+            if fallback_concepts:
+                concepts = fallback_concepts
+                scope = self._discover_subsystem(
+                    concepts, repository_map=repository_map
+                )
+
+        # 4. Inspect implementation within the discovered scope.
         impl_findings, impl_files = self._inspect_implementation(
             scope, concepts
         )
 
-        # 4. Discover relevant tests/contracts.
+        # 5. Discover relevant tests/contracts.
         test_findings, test_files = self._discover_tests(scope)
 
-        # 5. Trace relationships between components.
-        relation_findings = self._trace_relationships(scope)
+        # 6. Trace relationships between components.
+        relation_findings = self._trace_relationships(
+            scope, repository_map=repository_map
+        )
 
         findings = impl_findings + test_findings + relation_findings
         affected_files = list(impl_files) + list(test_files)
 
-        # 6. Synthesize evidence-backed diagnosis and recommendation.
+        # 7. Synthesize evidence-backed diagnosis and recommendation.
         diagnosis = self._synthesize_findings(cleaned_target, scope, findings)
         recommendation = self._recommend_next_step(cleaned_target, scope, findings)
 
@@ -219,6 +266,7 @@ class InvestigationService:
             modification_status="NONE",
             components=tuple(scope.modules[:_MAX_RELEVANT_MODULES]),
             tests_inspected=tuple(scope.tests[:_MAX_TEST_FILES]),
+            objective=objective.strip(),
         )
 
     @staticmethod
@@ -275,22 +323,38 @@ class InvestigationService:
             seen[cleaned] = None
         return tuple(seen)
 
-    def _discover_subsystem(self, concepts: tuple[str, ...]) -> SubsystemScope:
+    def _repository_map(self) -> "RepositoryMap | None":
+        """Build the repository map once per investigation (read-only).
+
+        The map is a pure function of the repository content, so a single build
+        is shared by every stage of one investigation. It is by far the most
+        expensive step (it parses every module, including symbol extraction),
+        and rebuilding it per stage multiplied both CPU and peak memory for an
+        identical result. ``None`` preserves the existing fail-soft contract: a
+        map that cannot be built degrades the investigation to an empty scope
+        instead of failing the turn.
+        """
+        try:
+            from atlas.research.repository_map import RepositoryMapBuilder
+
+            return RepositoryMapBuilder(self._root).build()
+        except Exception:
+            return None
+
+    def _discover_subsystem(
+        self,
+        concepts: tuple[str, ...],
+        repository_map: "RepositoryMap | None" = None,
+    ) -> SubsystemScope:
         """Discover relevant modules/directories from repository evidence.
 
         Uses RepositoryMapBuilder (AST-based) to score modules by relevance
         to the investigation concepts. No hardcoded directory mapping.
         """
-        try:
-            from atlas.research.repository_map import RepositoryMapBuilder
+        repo_map = self._repository_map() if repository_map is None else repository_map
 
-            builder = RepositoryMapBuilder(self._root)
-            repo_map = builder.build()
-        except Exception:
-            # If repository map cannot be built, fall back to empty scope.
-            return SubsystemScope()
-
-        if not repo_map.modules:
+        if repo_map is None or not repo_map.modules:
+            # If the repository map cannot be built, fall back to empty scope.
             return SubsystemScope()
 
         # Score each module by relevance to the concepts.
@@ -434,7 +498,9 @@ class InvestigationService:
         return findings, files
 
     def _trace_relationships(
-        self, scope: SubsystemScope,
+        self,
+        scope: SubsystemScope,
+        repository_map: "RepositoryMap | None" = None,
     ) -> list[InvestigationFinding]:
         """Trace relationships between discovered components.
 
@@ -446,12 +512,8 @@ class InvestigationService:
         if not scope.modules:
             return findings
 
-        try:
-            from atlas.research.repository_map import RepositoryMapBuilder
-
-            builder = RepositoryMapBuilder(self._root)
-            repo_map = builder.build()
-        except Exception:
+        repo_map = self._repository_map() if repository_map is None else repository_map
+        if repo_map is None:
             return findings
 
         # Report dependencies for the top modules (bounded).

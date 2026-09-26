@@ -105,6 +105,14 @@ _CASUAL_TASK_TYPES: frozenset[TaskType] = frozenset(
     {TaskType.CONVERSATION, TaskType.UNKNOWN, TaskType.QUESTION}
 )
 
+#: Checkpoint 4 — task types whose turn is INFORMATIONAL, so an already-bound
+#: reference is answered from retained conversation state instead of being
+#: handed to a research/knowledge/orchestration route. Governed request types
+#: are deliberately absent: they keep their own governed route.
+_INFORMATIONAL_TASK_TYPES: frozenset[str] = frozenset(
+    {task.value for task in _CASUAL_TASK_TYPES} | {TaskType.INFORMATION_REQUEST.value}
+)
+
 #: L3 illocutions that describe something the user is asking FOR; a bare
 #: statement is not a reasoning request.
 _ELIGIBLE_ILLOCUTIONS: frozenset[str] = frozenset({"question", "request"})
@@ -722,6 +730,41 @@ class ConversationService:
         if self._builtin_response is None:
             return None
         return self._builtin_response.match_self_knowledge_topic(text)
+
+    def _maybe_answer_resolved_reference(
+        self, text: str, spec: TaskSpec | None
+    ) -> Message | None:
+        """Checkpoint 4 — answer a PURE reference turn from the bound referent.
+
+        The deterministic resolver has already bound the reference to a retained
+        :class:`ConversationState` fact; this surfaces that fact through the
+        existing reference renderer, before the research/knowledge/orchestration
+        routes can reinterpret the turn as a new operation.
+
+        Guarded twice, so nothing else can be captured:
+
+        * the frame must read the turn as a reference/follow-up (a turn that
+          introduces a new objective — "compare that with X" — is not one); and
+        * the intake type must be informational. A governed request that happens
+          to carry a bound reference ("Investigate this further.", "Develop that
+          capability.") keeps its own governed route.
+
+        Returns None whenever nothing was bound (fail-closed), so every other
+        turn is byte-for-byte unchanged.
+        """
+        if spec is None or self._builtin_response is None:
+            return None
+        from atlas.conversation import semantic_frame as _frame
+
+        frame = _frame.interpret(text)
+        if frame.role not in (
+            _frame.SemanticRole.REFERENCE,
+            _frame.SemanticRole.FOLLOW_UP,
+        ):
+            return None
+        if getattr(spec.task_type, "value", "") not in _INFORMATIONAL_TASK_TYPES:
+            return None
+        return self._builtin_response.match_resolved_reference_answer(text, spec)
 
     def _maybe_handle_external_knowledge(self, text: str) -> Message | None:
         """Evidence-driven: external-knowledge requests routed via D3/D2.
@@ -1432,6 +1475,17 @@ class ConversationService:
         if evidence_self_knowledge is not None:
             self._conversation.add_message(evidence_self_knowledge)
             return evidence_self_knowledge
+        # Checkpoint 4 — a bound reference is ANSWERED from the retained
+        # conversation fact by the existing reference surface, BEFORE any
+        # research/knowledge/orchestration route can reinterpret the turn as a
+        # new operation ("what did you find?" must not run a fresh search or
+        # demand a target). Narrow by construction: only a pure
+        # reference/follow-up turn carrying a resolved reference and no
+        # operation of its own; it never falls through to a provider.
+        reference_answer = self._maybe_answer_resolved_reference(text, spec)
+        if reference_answer is not None:
+            self._conversation.add_message(reference_answer)
+            return reference_answer
         external_knowledge = self._maybe_handle_external_knowledge(text)
         if external_knowledge is not None:
             self._conversation.add_message(external_knowledge)
@@ -2911,7 +2965,30 @@ class ConversationService:
         # investigation service can extract the real subject (e.g. "F17
         # failures") rather than the development-oriented intent extraction.
         target = original_text or spec.goal or spec.intent or "unspecified issue"
-        report = self._investigation_service.investigate(target)
+        # The shared semantic frame already records WHICH operation owns the
+        # turn; its bounded OBJECT (the thing the operation applies to) is passed
+        # through so the read-only investigation searches for the request's
+        # subject instead of turning every sentence token into a search term.
+        # Representation only: routing, governance and the retained target are
+        # unchanged, and an empty objective keeps the previous behaviour.
+        from atlas.conversation.semantic_frame import (
+            is_reference_or_follow_up,
+            operation_object,
+        )
+
+        objective = operation_object(original_text) if original_text else ""
+        if not objective and original_text and is_reference_or_follow_up(original_text):
+            # A bare-reference follow-up ("Investigate this further.") carries no
+            # object of its own: the retained investigation subject IS the
+            # referent, so the evidence search uses it instead of the literal
+            # words. The retained target and the state contracts are unchanged.
+            retained = (
+                self._state_manager.state.current_investigation
+                if self._state_manager is not None
+                else None
+            )
+            objective = retained or ""
+        report = self._investigation_service.investigate(target, objective=objective)
 
         # C3.3 — Retain the produced report (evidence only) so a later report
         # request can synthesize it deterministically without re-gathering.
@@ -2964,6 +3041,7 @@ class ConversationService:
         metadata: dict[str, Any] = {
             "investigation": {
                 "target": report.target,
+                "objective": report.objective,
                 "modification_status": report.modification_status,
                 "findings_count": len(report.findings),
                 "affected_files": list(report.affected_files),

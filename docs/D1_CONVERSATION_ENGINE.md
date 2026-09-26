@@ -147,3 +147,37 @@ Bounds and invariants (unchanged):
   the supported families stays unsupported.
 
 Evidence: `tests/test_self_knowledge_bridge.py`.
+
+## 9. Post-L10 conversational corrections (C1 → C5, bounded)
+
+Five conversational checkpoints were completed additively; each correction extends an
+EXISTING representation or consumer (no new engine/planner/registry/memory):
+
+- **Investigation objective.** The read-only investigation receives the bounded object
+  of the operation that owns the turn (`SemanticFrame.operation_object`) instead of
+  re-deriving search concepts from the whole sentence; the retained investigation
+  target and every state contract are unchanged, and an objective that yields no
+  evidence falls back once to the previous whole-target concepts.
+- **Understanding/routing.** Evidenced surface forms are reachable (`missing`, `lack`,
+  `can't` → `cannot`); `_is_recall` no longer treats the bare word "ask" plus a
+  question mark as recall; the knowledge-complement guard no longer blocks an
+  Atlas-sufficiency reading; and the floor resolves an already-recognized
+  `capability_gap` / `limitations` / `governed_lifecycle` meaning before the generic
+  capability-inventory/help patterns.
+- **State/context.** A bare-reference investigation follow-up ("Investigate this
+  further.") uses the retained `current_investigation` as its objective; with no
+  antecedent the turn still fails closed.
+- **Consumer selection.** An already-bound reference is ANSWERED from the retained
+  conversation fact by the existing reference renderer before the research/knowledge/
+  orchestration routes can reinterpret the turn as a new operation. The step is guarded
+  to informational, pure reference/follow-up turns, so governed requests keep their
+  route, a genuinely multi-referent turn still fails closed, and nothing falls through
+  to a provider.
+- **Validation.** Nine scenario groups were executed against the real kernel with
+  per-turn route/consumer/evidence/`model_used`/governance capture. Remaining
+  limitations are classified (missing capabilities, routing/integration, state/context,
+  planning) in `docs/ATLAS_STATE.md` §34.7 and are deliberately not implemented.
+
+Evidence: `tests/test_investigation_objective.py`,
+`tests/test_conversation_state_context.py`, `tests/test_checkpoint4_orchestration.py`,
+`tests/test_semantic_gap_routing.py`.

@@ -85,6 +85,10 @@ _IRREGULAR: dict[str, str] = {
     "proceed": "proceed",
     "need": "need",
     "agreed": "agree",
+    # "-ss" gerund whose rule-based "-ing" stem ("mis") is not a word in this
+    # vocabulary: the surface form IS the class entry (SELF_GAP_CONCEPTS,
+    # SELF_EVIDENCE_CONCEPTS and SELF_FAILURE_TRIGGERS all name "missing").
+    "missing": "missing",
 }
 
 #: Verbs whose "-ing"/"-ed" form drops a trailing "e" ("using" -> "use").
@@ -118,7 +122,11 @@ _CONTRACTIONS: dict[str, str] = {
     "didn't": "did not",
     "isn't": "is not",
     "aren't": "are not",
-    "can't": "can not",
+    # The insufficiency vocabulary is the one-word form ("cannot" is in
+    # SELF_EVIDENCE_CONCEPTS, SELF_FAILURE_TRIGGERS and _SELF_FAILURE_CONCEPTS),
+    # so the contraction normalizes to that same token instead of splitting into
+    # "can" + "not", which no class contains.
+    "can't": "cannot",
     "won't": "will not",
     "wouldn't": "would not",
     "couldn't": "could not",
@@ -371,7 +379,10 @@ SELF_EVIDENCE_TRUST_CONCEPTS: frozenset[str] = frozenset(
      "validated", "validation", "validat", "verif"}
 )
 SELF_GAP_CONCEPTS: frozenset[str] = frozenset(
-    {"gap", "gaps", "absent", "missing", "lacking"}
+    # "lack" is the tokenizer's lemma for both "lack" and "lacking", so the
+    # class names the lemma alongside the surface form (the convention this
+    # vocabulary already uses for e.g. "validat"/"verif").
+    {"gap", "gaps", "absent", "missing", "lack", "lacking"}
 )
 SELF_MODEL_CONCEPTS: frozenset[str] = frozenset(
     {"model", "models", "llm", "provider", "ollama", "qwen", "embedding"}

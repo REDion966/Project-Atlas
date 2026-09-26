@@ -244,6 +244,42 @@ _REFERENCE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = 
 )
 
 
+#: The field a reference category resolves to when its candidate fields
+#: provably belong to ONE retained operation (see
+#: :func:`_same_operation_primary`). Only categories with an evidenced
+#: single-referent shape are listed; every other category keeps the fail-closed
+#: ambiguity behaviour (a genuinely multi-referent turn still asks).
+_CATEGORY_PRIMARY_FIELD: dict[str, str] = {
+    "findings": "latest_result",
+}
+
+
+def _same_operation_primary(
+    category: str, candidates: list[str], state: ConversationState
+) -> Optional[str]:
+    """Return the single referent field when the candidates are one operation.
+
+    ``ConversationState.last_operation`` is the proof: when the retained
+    operation's recorded target equals one of the candidate values, the other
+    candidates are that same operation's own outcome ("what did you find?"
+    after an investigation: the investigation target AND its recorded result),
+    so there is no genuine ambiguity to clarify. Anything else stays ambiguous.
+    """
+    primary = _CATEGORY_PRIMARY_FIELD.get(category)
+    if primary is None or primary not in candidates:
+        return None
+    operation = getattr(state, "last_operation", None)
+    operand = getattr(operation, "operand", None) if operation is not None else None
+    if not operand:
+        return None
+    related = any(
+        candidate != primary
+        and str(getattr(state, candidate) or "") == operand
+        for candidate in candidates
+    )
+    return primary if related else None
+
+
 # ---------------------------------------------------------------------------
 # Phase 4 — bounded contextual reference resolution.
 #
@@ -611,6 +647,28 @@ class ConversationReferenceResolver:
                 resolved_field=field,
                 resolved_value=getattr(state, field),
                 reason=f"Unique {category} referent resolved to {field}.",
+            )
+
+        # Checkpoint 4 — when these candidate fields provably belong to ONE
+        # retained operation (:attr:`ConversationState.last_operation`), the
+        # multi-candidate report is not a genuine ambiguity: the retained
+        # operation's own recorded target IS one of the candidates, so the
+        # others are that same operation's outcome ("what did you find?" after
+        # an investigation). Resolving it is only safe now that a consumer for a
+        # bound findings reference exists (the informational reference answer
+        # surface); before that, the resolved turn fell through to the
+        # orchestration gate. Every other multi-candidate turn stays fail-closed.
+        primary = _same_operation_primary(category, candidates, state)
+        if primary is not None:
+            return ReferenceResolutionResult(
+                status=ReferenceResolutionStatus.RESOLVED,
+                query=query,
+                resolved_field=primary,
+                resolved_value=getattr(state, primary),
+                reason=(
+                    f"Single {category} referent: {primary} (retained operation "
+                    f"{state.last_operation.kind!r})."
+                ),
             )
 
         # Multiple plausible referents -> ambiguous, never guess.
