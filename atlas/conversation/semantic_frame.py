@@ -75,6 +75,12 @@ from atlas.conversation.lexicon import (
     SELF_SANDBOX_CONCEPTS,
     SELF_SUFFICIENCY_CONCEPTS,
     SELF_WORDS,
+    SELF_CAPABILITY_CONTRACT_CONCEPTS,
+    SELF_EVIDENCE_TRUST_CONCEPTS,
+    SELF_EXTERNAL_RESEARCH_CONCEPTS,
+    SELF_GAP_CONCEPTS,
+    SELF_MODEL_CONCEPTS,
+    SELF_REPOSITORY_CONCEPTS,
     has_any,
     normalize_token,
     tokens,
@@ -571,6 +577,42 @@ def _unresolved_object(lemmas: frozenset[str]) -> bool:
     return remaining <= REFERENCE_WORDS
 
 
+#: Lifecycle signal words (the governed development lifecycle stages Atlas owns).
+_LIFECYCLE_SIGNALS: frozenset[str] = frozenset(
+    {
+        "promotion", "promote", "promoted", "activation", "activate",
+        "activated", "integration", "integrate", "refresh",
+    }
+)
+#: Ordered-relationship context words ("what happens after X", "what before Y").
+_LIFECYCLE_CONTEXT: frozenset[str] = frozenset(
+    {
+        "after", "before", "next", "happen", "happens", "success",
+        "successful", "how", "what",
+    }
+)
+
+
+def _governed_lifecycle_q(lemmas: frozenset[str]) -> bool:
+    """True for an ordered-relationship question about the governed lifecycle."""
+    direct = bool(lemmas & _LIFECYCLE_SIGNALS)
+    verify_sequence = bool(
+        lemmas & {"verification", "verify", "verified"}
+        and lemmas & {"after", "before", "success", "successful", "next"}
+    )
+    return bool(
+        (direct or verify_sequence) and lemmas & _LIFECYCLE_CONTEXT
+    )
+
+
+def _implementation_location_q(lemmas: frozenset[str]) -> bool:
+    """True for "where can implementation happen?" (the sandbox boundary)."""
+    return bool(
+        lemmas & {"implement", "implementation", "code", "coding"}
+        and lemmas & {"where", "sandbox", "isolated", "safe", "safely"}
+    )
+
+
 def _self_knowledge_frame(
     order: tuple[str, ...], lemmas: frozenset[str], raw: str
 ) -> SemanticFrame | None:
@@ -608,26 +650,113 @@ def _self_knowledge_frame(
         and lemmas
         & {"work", "operate", "function", "behave", "happen", "decision", "decide"}
     )
+    # Bounded SUBJECT questions carry their own Atlas-only concept noun, so they
+    # need no second-person reference ("how are capability contracts structured?").
+    subject_q = bool(lemmas & {"how", "what", "which", "where", "who"}) and (
+        bool(lemmas & {"github", "internet", "download", "downloads"})
+        or (
+            "external" in lemmas
+            and has_any(lemmas, {"repository", "repo", "code", "research", "source"})
+        )
+        or (
+            lemmas & SELF_CAPABILITY_CONTRACT_CONCEPTS
+            and lemmas & {"capability", "capabilities"}
+        )
+        or (
+            lemmas & SELF_GAP_CONCEPTS
+            and lemmas & {"capability", "capabilities", "gap", "gaps"}
+        )
+        or (
+            lemmas & SELF_REPOSITORY_CONCEPTS
+            and lemmas & {"symbol", "symbols", "signature", "signatures"}
+        )
+        or (
+            lemmas & {"knowledge"}
+            and lemmas
+            & {"trust", "trusted", "untrusted", "validat", "provenance",
+               "useful", "usefulness"}
+        )
+        or (
+            lemmas & SELF_MODEL_CONCEPTS
+            and lemmas
+            & {"control", "authority", "authorize", "privileged", "independent",
+               "independence", "directly"}
+        )
+    ) or _governed_lifecycle_q(lemmas) or _implementation_location_q(lemmas)
     if not self_ref and not governance_q and not atlas_specific_q and not (
         concept_mechanism_q
-    ):
+    ) and not subject_q:
         return None
     # A knowledge question ABOUT a subject is not a self-knowledge question
     # ("what do we know about the investigation system?").
     if lemmas & (RESEARCH_VERBS | LEARN_VERBS | RECALL_VERBS) and "about" in lemmas:
         return None
     if governance_q and not lemmas & {
-        "change", "proposal", "sandbox", "capability", "development"
+        "change", "proposal", "sandbox", "capability", "development",
+        "promotion", "promote", "approval", "approve", "authorize",
+        "authority", "owner", "permission",
     }:
         return None
     # A topicless question ("what do you verify about?") must stay fail-closed.
     if "about" in lemmas and _unresolved_object(lemmas):
         return None
-    # A capability inventory question is not a self-knowledge question.
-    if lemmas & CAPABILITY_NOUNS and not lemmas & DEVELOP_VERBS:
+    # Bounded self-knowledge SUBJECT families that already exist inside Atlas and
+    # were previously unreachable from natural language. Selecting one exempts the
+    # turn from the capability-inventory guard below, because the question is
+    # ABOUT Atlas's own mechanism rather than about what Atlas can do.
+    new_subject = bool(
+        lemmas
+        & (
+            SELF_CAPABILITY_CONTRACT_CONCEPTS
+            | SELF_EXTERNAL_RESEARCH_CONCEPTS
+            | SELF_GAP_CONCEPTS
+            | SELF_EVIDENCE_TRUST_CONCEPTS
+            | SELF_REPOSITORY_CONCEPTS
+        )
+    ) or _governed_lifecycle_q(lemmas) or _implementation_location_q(lemmas)
+    if (
+        lemmas & CAPABILITY_NOUNS
+        and not lemmas & DEVELOP_VERBS
+        and not new_subject
+    ):
         return None
-    # G1 — fine-grained concepts, most-specific first, each mapping onto an
-    # EXISTING self-knowledge topic so the grounded response is preserved.
+    # Fine-grained concepts, most-specific first, each mapping onto an EXISTING
+    # self-knowledge topic so the grounded response is preserved.
+    if lemmas & SELF_CAPABILITY_CONTRACT_CONCEPTS:
+        return _self_frame("capability_contracts", 0.86, "contract-concept")
+    if (
+        "capability" in lemmas
+        and lemmas & SELF_MODEL_CONCEPTS
+        and has_any(lemmas, SELF_ARCHITECTURE_CONCEPTS)
+    ):
+        return _self_frame(
+            "capability_architecture_models", 0.86, "model-difference-concept"
+        )
+    if lemmas & {"github", "internet", "download", "downloads"} or (
+        "external" in lemmas
+        and has_any(lemmas, {"repository", "repo", "code", "research", "source"})
+    ):
+        return _self_frame("external_research", 0.84, "external-research-concept")
+    if lemmas & SELF_GAP_CONCEPTS and has_any(
+        lemmas, {"capability", "capabilities", "feature", "gap", "gaps"}
+    ):
+        return _self_frame("capability_gap", 0.84, "gap-concept")
+    if lemmas & SELF_EVIDENCE_TRUST_CONCEPTS and lemmas & {
+        "useful", "usefulness", "trust", "untrusted",
+        "provenance", "validat", "verif", "validation",
+    }:
+        return _self_frame("evidence_trust", 0.84, "trust-concept")
+    if _governed_lifecycle_q(lemmas):
+        return _self_frame("governed_lifecycle", 0.84, "lifecycle-concept")
+    if _implementation_location_q(lemmas):
+        return _self_frame("sandbox_execution", 0.84, "implementation-location-concept")
+    if lemmas & SELF_REPOSITORY_CONCEPTS and self_ref:
+        return _self_frame("repository_symbols", 0.86, "repository-concept")
+    if lemmas & SELF_MODEL_CONCEPTS and lemmas & {
+        "control", "authority", "authorize", "privileged", "independent",
+        "independence", "directly",
+    }:
+        return _self_frame("model_independence", 0.84, "model-concept")
     if lemmas & SELF_SANDBOX_CONCEPTS:
         return _self_frame("sandbox_execution", 0.9, "sandbox-concept")
     if lemmas & SELF_APPROVAL_CONCEPTS:

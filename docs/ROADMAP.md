@@ -330,6 +330,19 @@ roadmap phase. Details and evidence: `docs/ATLAS_STATE.md` §33.
 frozen Phase C (C0 → C9) roadmap, and the additive L0 → L10 language roadmap are
 unchanged by these gates.
 
+**Post-gate evidence-driven finalization (NOT a roadmap phase).** The
+Conversational Self-Knowledge Bridge was implemented additively as
+evidence-driven evolution/finalization work on top of the completed gates: it
+routes bounded natural-language questions about Atlas's OWN systems to EXISTING
+self-knowledge / capability / architecture / repository / research / development
+surfaces (see `docs/ATLAS_STATE.md` and `docs/D1_CONVERSATION_ENGINE.md` §8). It
+introduces no new engine, registry, repository map, memory store or authority
+system, and it performs no new mandatory phase. **The final roadmap remains
+COMPLETE**; Atlas is now entering real-world evidence-driven use, where future
+development should be driven by validated capability gaps rather than new
+mandatory phases. No G4, C10, L11 or further mandatory phase is defined or
+authorized.
+
 ---
 
 ## PROPOSED — not approved (do not implement)

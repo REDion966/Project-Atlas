@@ -1326,6 +1326,34 @@ P18 — Controlled Autonomy.
   RTX 3060 Ti 8 GB / 32 GB DDR4 host: it is documented and NOT installed, and no
   existing model was replaced. External agent frameworks (Aider, MCP, OpenHands,
   mini-SWE-agent, MiniMax Mini-Agent/Code) are referenced, not embedded.
+- **Conversational Self-Knowledge Bridge (bounded language → existing
+  self-knowledge)** — Atlas can map bounded natural-language questions about its
+  OWN systems onto EXISTING verified knowledge/self-knowledge surfaces:
+  natural language → `TaskIntake`/`TaskSpec` → the shared `SemanticFrame`'s
+  bounded semantic SUBJECT → self-knowledge topic routing → existing
+  capability/architecture/repository/research/development surfaces →
+  deterministic, evidence-backed response. It adds NO knowledge database, NO
+  second capability registry, NO second repository map and NO model dependency,
+  and answers only from existing surfaces / verified anchors. Supported bounded
+  subject families (semantic concept classes, so paraphrases converge):
+  capabilities; architecture/components; capability contracts;
+  repository-symbol intelligence; external repository/research; evidence/trust;
+  capability gaps; the governed development lifecycle (ordered: understand →
+  inspect/gap → research/evidence → design → sandbox → test → verification →
+  promotion request → OWNER authorization → activation → self-knowledge
+  refresh); sandbox/verification; governance/OWNER authorization;
+  promotion/activation; self-knowledge refresh; model independence. Explaining
+  that lifecycle conversationally does NOT execute or authorize it — the
+  conversation never bypasses governance. Immediate conversational continuity
+  ("What were we just talking about?") resolves from EXISTING structured
+  conversation state / prior turns (no new memory subsystem) and stays
+  fail-closed when no reliable antecedent exists. Deterministic with
+  `ai.external_providers = false`; external models remain optional, untrusted
+  interpretation aids with no authority. Verified limitations: the subject
+  vocabulary is bounded; context-dependent questions require a reliable
+  antecedent; free-form architecture reasoning outside the supported families
+  stays unsupported; model-assisted interpretation has not been shown to add
+  material benefit for these turns. Evidence: `tests/test_self_knowledge_bridge.py`.
 - **C6.1** — validated knowledge retrieval
   (`atlas/research/validated_retrieval.py`): SUPPORTED-only persisted
   research claims (identity, statement, validation status, confidences,

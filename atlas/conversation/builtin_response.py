@@ -409,6 +409,111 @@ _SELF_KNOWLEDGE_TOPICS_ATLAS_SPECIFIC: tuple[
             "atlas.evolution.development_verification",
         ),
     ),
+    # --- Bounded subject families reachable from natural language (bridge) ---
+    (
+        "capability contracts",
+        re.compile(
+            r"\bcapabilit\w*\s+contracts?\b"
+            r"|\bcapabilit\w*\s+(?:describ\w*|interfaces?|schemas?|metadata)\b"
+            r"|\bhow\s+are\s+(?:your|atlas'?s?)\s+capabilit\w*\s+described\b"
+        ),
+        (
+            "atlas.self_knowledge.capability_model",
+            "atlas.reasoning.execution.registry",
+            "atlas.kernel.atlas",
+        ),
+    ),
+    (
+        "capability and architecture models",
+        re.compile(
+            r"\bdifference\b[^.?]{0,40}\bcapabilit\w*\s+model\b"
+            r"|\bcapabilit\w*\s+model\b[^.?]{0,30}\barchitecture\s+model\b"
+        ),
+        (
+            "atlas.self_knowledge.capability_model",
+            "atlas.self_knowledge.architecture_model",
+        ),
+    ),
+    (
+        "repository symbol intelligence",
+        re.compile(
+            r"\bsymbols?\b[^.?]{0,40}\b(?:source|code|repository|codebase)\b"
+            r"|\bsignatures?\b[^.?]{0,40}\b(?:source|code)\b"
+            r"|\bhow\s+(?:do|does)\s+(?:you|atlas)\s+find\s+symbols?\b"
+        ),
+        (
+            "atlas.research.repository_map",
+            "atlas.self_knowledge.architecture_model",
+        ),
+    ),
+    (
+        "external repository research",
+        re.compile(
+            r"\bgithub\b"
+            r"|\bexternal\s+(?:repositor\w*|code|source)\b"
+            r"|\brepositor\w*\b[^.?]{0,30}\b(?:external|github)\b"
+        ),
+        (
+            "atlas.research.sources.github",
+            "atlas.research.external_repository",
+            "atlas.research.sources.web",
+        ),
+    ),
+    (
+        "evidence and trust",
+        re.compile(
+            r"\b(?:trust(?:ed|worthy)?|untrusted|provenance|useful(?:ness)?)\b"
+            r"|\bvalidated?\s+knowledge\b"
+            r"|\bunverified\b[^.?]{0,60}\b(?:trusted|knowledge)\b"
+        ),
+        (
+            "atlas.research.verifier",
+            "atlas.research.validated_retrieval",
+            "atlas.research.knowledge_decision",
+        ),
+    ),
+    (
+        "capability gap assessment",
+        re.compile(
+            r"\bcapabilit\w*\s+gaps?\b"
+            r"|\bdiscover\w*\b[^.?]{0,30}\bgaps?\b"
+            r"|\balready[\s-]?supported\b"
+        ),
+        (
+            "atlas.evolution.development_gap",
+            "atlas.evolution.development_driver",
+        ),
+    ),
+    (
+        "governed development lifecycle",
+        re.compile(
+            r"\bwhat\s+happens\s+(?:after|before|next)\b"
+            r"|\bafter\s+(?:successful\s+)?(?:verification|promotion|activation)\b"
+            r"|\bself[\s-]?knowledge\s+refresh\b|\bafter\s+integration\b"
+        ),
+        (
+            "atlas.evolution.development_driver",
+            "atlas.evolution.development_cycle",
+            "atlas.evolution.development_envelope",
+            "atlas.evolution.self_development_loop",
+            "atlas.evolution.development_verification",
+            "atlas.evolution.promotion_gate",
+            "atlas.evolution.promotion_executor",
+            "atlas.evolution.capability_activation",
+        ),
+    ),
+    (
+        "model independence",
+        re.compile(
+            r"\bexternal\s+(?:ai\s+)?model\w*\b"
+            r"|\bmodel\s+independen\w*\b"
+            r"|\bmake\s+you\s+model[\s-]?independent\b"
+        ),
+        (
+            "atlas.ai.ai_manager",
+            "atlas.evolution.model_assisted_supplier",
+        ),
+    ),
 )
 
 
@@ -430,7 +535,34 @@ _FRAME_CONCEPT_TOPICS: dict[str, str] = {
     "extension_points": "extension points",
     "development_process": "development process",
     "limitations": "current limitations",
+    # Bounded subject families that map onto EXISTING Atlas surfaces (their
+    # verified anchors + evidence-based bullets are defined below).
+    "capability_contracts": "capability contracts",
+    "capability_architecture_models": "capability and architecture models",
+    "repository_symbols": "repository symbol intelligence",
+    "external_research": "external repository research",
+    "evidence_trust": "evidence and trust",
+    "capability_gap": "capability gap assessment",
+    "governed_lifecycle": "governed development lifecycle",
+    "model_independence": "model independence",
 }
+
+#: The bounded bridge's NEW subject families. They are resolved from the shared
+#: frame BEFORE the narrower phrase-pattern surfaces, so a broad pattern cannot
+#: capture them as a different topic. Every pre-existing concept keeps its own
+#: precedence (it is not in this set).
+_BRIDGE_CONCEPTS: frozenset[str] = frozenset(
+    {
+        "capability_contracts",
+        "capability_architecture_models",
+        "repository_symbols",
+        "external_research",
+        "evidence_trust",
+        "capability_gap",
+        "governed_lifecycle",
+        "model_independence",
+    }
+)
 
 
 def is_store_recall_shaped(text: str) -> bool:
@@ -923,8 +1055,9 @@ _CONVERSATION_RECALL_ASSISTANT_RE = re.compile(
 
 #: "What were we discussing?" — recent conversation topic.
 _CONVERSATION_RECALL_TOPIC_RE = re.compile(
-    r"\bwhat (?:were|are) we (?:discussing|talking about|chatting about)\b"
-    r"|\bwhat did we discuss\b"
+    r"\bwhat (?:were|are) we (?:just |really |even )?"
+    r"(?:discussing|talking about|chatting about|on about)\b"
+    r"|\bwhat did we (?:just )?discuss\b"
     r"|\bwhat have we been (?:discussing|talking about)\b"
     r"|\bwhat was the recent (?:topic|subject)\b"
     r"|\bremind me what we (?:were discussing|discussed)\b"
@@ -1309,6 +1442,28 @@ class BuiltinResponseService:
             intent, detail = classified, None
         return self._build_message(intent, detail, message_count=message_count)
 
+    def _bridge_topic(self, text: str) -> str | None:
+        """The bounded self-knowledge bridge topic for ``text``, or ``None``.
+
+        Resolves ONLY the bridge's NEW subject families from the SHARED FRAME, so
+        the semantic source (never a broad phrase pattern) decides them. Every
+        pre-existing concept returns ``None`` here, so all existing surface
+        precedence is preserved exactly. Deterministic and model-free.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        if self._resolve_architecture_model() is None:
+            return None
+        from atlas.conversation import semantic_frame as _sf
+
+        frame = _sf.interpret(text)
+        if (
+            frame.domain is _sf.SemanticDomain.SELF_KNOWLEDGE
+            and frame.concept in _BRIDGE_CONCEPTS
+        ):
+            return _FRAME_CONCEPT_TOPICS.get(frame.concept)
+        return None
+
     def match_self_knowledge_topic(self, text: str) -> Message | None:
         """Evidence-driven: claim an Atlas-specific self-knowledge topic.
 
@@ -1319,7 +1474,13 @@ class BuiltinResponseService:
         """
         if not isinstance(text, str) or self._resolve_architecture_model() is None:
             return None
-        topic = _match_atlas_specific_self_knowledge_topic(text.strip().lower())
+        # The bounded bridge families take precedence over the broad phrase
+        # patterns, so the semantic source decides them consistently with
+        # ``_classify`` (e.g. "after external research finds something useful"
+        # is external research, not the narrower evidence/trust pattern).
+        topic = self._bridge_topic(text) or _match_atlas_specific_self_knowledge_topic(
+            text.strip().lower()
+        )
         if topic is None:
             return None
         return self._build_message(BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
@@ -1442,6 +1603,16 @@ class BuiltinResponseService:
         if spec is not None:
             task_type = getattr(spec.task_type, "value", "") or ""
             if task_type not in _BUILTIN_TASK_TYPES:
+                # Bounded self-knowledge bridge FIRST (see the main path): the new
+                # semantic subject families resolve from the shared frame before
+                # any narrower phrase pattern, so a broad pattern cannot capture
+                # them as a different topic. A LEADING research verb keeps its
+                # authority (the research/orchestration path owns it), exactly as
+                # the self-knowledge precedence below requires.
+                if not _LEADING_RESEARCH_RE.search(lowered):
+                    bridge_topic = self._bridge_topic(text)
+                    if bridge_topic is not None:
+                        return (BUILTIN_INTENT_SELF_KNOWLEDGE, bridge_topic)
                 # L9 — the bounded conversational-turn recall stays reachable
                 # for recall-eligible task types. Only an already-deterministic
                 # candidate is claimed; every other turn of these types is
@@ -1532,6 +1703,16 @@ class BuiltinResponseService:
         # development / OWNER / sandbox / authorization boundary / extension
         # points) are checked before the capability inventory so an
         # extension-point question is not answered as a generic capability list.
+        # Bounded self-knowledge bridge: the new semantic SUBJECT families are
+        # resolved from the SHARED FRAME first, so a broad phrase pattern cannot
+        # capture them as a narrower topic ("what happens next after external
+        # research finds something useful?"). Only the bridge families are
+        # claimed here; every pre-existing atlas-topic surface keeps its exact
+        # precedence below.
+        if not _LEADING_RESEARCH_RE.search(lowered):
+            bridge_topic = self._bridge_topic(text)
+            if bridge_topic is not None:
+                return (BUILTIN_INTENT_SELF_KNOWLEDGE, bridge_topic)
         atlas_topic = _match_atlas_specific_self_knowledge_topic(lowered)
         if atlas_topic is not None and (
             self._resolve_architecture_model() is not None
@@ -2509,6 +2690,113 @@ class BuiltinResponseService:
                     + ".",
                     "No evidence and no relevant evidence are never reported as success; "
                     "an authority/governance denial is represented as a rejected result.",
+                )
+            if topic == "capability contracts":
+                return (
+                    "Capabilities are DESCRIBED (never governed) by the canonical "
+                    "capability model, a read-only projection over the EXISTING "
+                    "ComponentRegistry, CapabilityRegistry and ToolRegistry.",
+                    "Each entry exposes identity, kind (capability/tool), declared "
+                    "description, implementation module (from the providing "
+                    "component), dependency (deterministic / external-model-"
+                    "dependent / unknown), availability, provenance, and the "
+                    "declared tool inputs.",
+                    "Discovery is read-only: `Atlas.capability_contract(name)` "
+                    "answers what it is / what it accepts / who provides it / where "
+                    "it is implemented / whether it is available — and grants NO "
+                    "execution authority.",
+                    "Contracts never bypass the ApprovalManager, the authorization "
+                    "boundary, or sandbox verification.",
+                )
+            if topic == "capability and architecture models":
+                return (
+                    "The CAPABILITY model is capability-centric: one entry per "
+                    "registered capability/tool, projected from the ComponentRegistry, "
+                    "CapabilityRegistry and ToolRegistry.",
+                    "The ARCHITECTURE model is structure-centric: components, "
+                    "packages/subsystems, module paths, declared dependencies and the "
+                    "capability index.",
+                    "Both are deterministic, read-only projections over the SAME "
+                    "authoritative registries (no second registry) and are rebuilt "
+                    "on demand.",
+                )
+            if topic == "repository symbol intelligence":
+                return (
+                    "`RepositoryMapBuilder` parses Python with the standard-library "
+                    "`ast` into modules, import edges, and symbols (top-level "
+                    "classes/functions/methods with bounded signatures).",
+                    "Each symbol carries a bounded repo-wide reference count used ONLY "
+                    "for relevance ordering; queries are find_symbol, "
+                    "symbols_in_module, important_symbols and context_for.",
+                    "It is deterministic, read-only and model-free; "
+                    "ArchitectureModel.locate() resolves symbols and "
+                    "Atlas.repository_symbol() exposes the lookup.",
+                )
+            if topic == "external repository research":
+                return (
+                    "`GitHubRepositorySource` acquires a BOUNDED set of files from a "
+                    "PUBLIC GitHub repository (metadata, default branch, recursive "
+                    "tree, raw files) through GitHub's public API/raw endpoints.",
+                    "It reuses the EXISTING web safety layer (WebSourceAdapter + "
+                    "WebHostPolicy): host authorization is deny-by-default, and "
+                    "external code is DATA that is never executed.",
+                    "`analyze_acquired_repository` parses the acquired files with the "
+                    "existing RepositoryMap, and `compare_with_atlas` returns findings "
+                    "that are ALL unvalidated — evidence, never authorization.",
+                )
+            if topic == "evidence and trust":
+                return (
+                    "External content is untrusted: extracted claims are verified by "
+                    "the existing ClaimVerifier, and only SUPPORTED claims become "
+                    "retrievable validated knowledge (ValidatedKnowledgeRetriever).",
+                    "Raw or unverified external information never becomes trusted "
+                    "knowledge; the knowledge-decision service reports sufficiency "
+                    "honestly rather than guessing.",
+                    "Research/comparison findings stay explicitly `unvalidated` until "
+                    "the existing evidence path validates them.",
+                )
+            if topic == "capability gap assessment":
+                return (
+                    "`assess_development_gap` classifies a request as already_supported "
+                    "/ missing_capability / missing_knowledge / unclear — "
+                    "deterministically and fail-closed.",
+                    "ALREADY_SUPPORTED requires substantial evidence (bounded "
+                    "token-overlap specificity), so one incidental shared word never "
+                    "masks a genuine gap.",
+                    "The DevelopmentDriver consumes the assessment; a genuine gap "
+                    "becomes an evidence-informed DevelopmentNeed.",
+                )
+            if topic == "governed development lifecycle":
+                return (
+                    "1. Understand → inspect → gap assessment: the request is "
+                    "understood and `assess_development_gap` classifies it.",
+                    "2. Research/evidence may be gathered; the requirement "
+                    "(DevelopmentNeed) is authored deterministically.",
+                    "3. Design/authoring produces a proposal that STOPS at "
+                    "PENDING_APPROVAL; the Development Envelope is disabled by default.",
+                    "4. Implementation happens ONLY inside a disposable sandbox "
+                    "(CodeSandbox + SelfDevelopmentLoop).",
+                    "5. Focused tests run in the sandbox and DevelopmentVerification "
+                    "verifies the result; a failing verification is NOT a success and "
+                    "is not promotable (fail-closed).",
+                    "6. A promotion REQUEST is prepared; nothing is approved, executed "
+                    "live, or promoted by the requester.",
+                    "7. Promotion is OWNER-only (PromotionGate → PromotionExecutor "
+                    "requires explicit OWNER authorization).",
+                    "8. After promotion, CapabilityActivator registers the capability "
+                    "and the self-knowledge inputs are refreshed.",
+                )
+            if topic == "model independence":
+                return (
+                    "The deterministic core never requires an external model: with "
+                    "`ai.external_providers = false` the ACTIVE provider is the local "
+                    "no-network tier.",
+                    "External models are OPTIONAL: enabling them only routes "
+                    "interpretation/authoring assistance, and their output is "
+                    "untrusted input — never authority.",
+                    "A model cannot approve, promote, activate, bypass the "
+                    "ApprovalManager, or mutate live Atlas; model-assisted authoring "
+                    "and repair remain opt-in and boundary-validated.",
                 )
             if topic == "current limitations":
                 bullets: list[str] = []

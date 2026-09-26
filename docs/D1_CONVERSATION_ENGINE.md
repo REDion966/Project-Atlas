@@ -106,3 +106,44 @@ identification/resolution stages.
   through existing orchestration — never through a new planner.
 - No D1 code enables external internet access or modifies the web allowlist
   (`research.web_allowed_hosts`); that remains D2 scope.
+
+## 8. Conversational self-knowledge bridge (bounded)
+
+Atlas can now map bounded natural-language questions about its OWN systems onto
+EXISTING verified self-knowledge surfaces. The conceptual path is:
+
+    natural language
+      -> TaskIntake / TaskSpec
+      -> shared SemanticFrame bounded semantic SUBJECT
+      -> self-knowledge topic routing
+      -> existing capability / architecture / repository / research /
+         development surfaces
+      -> deterministic, evidence-backed response
+
+Supported bounded subject families (semantic concept classes, so ordinary
+paraphrases converge): capabilities; architecture/components; capability
+contracts; repository-symbol intelligence; external repository/research;
+evidence/trust; capability gaps; the governed development lifecycle; sandbox/
+verification; governance/OWNER authorization; promotion/activation;
+self-knowledge refresh; model independence. The lifecycle answer reconstructs
+the ACTUAL order (understand -> inspect/gap -> research/evidence -> design ->
+sandbox -> test -> verification -> promotion request -> OWNER authorization ->
+activation -> self-knowledge refresh); explaining it conversationally does NOT
+execute or authorize it.
+
+Bounds and invariants (unchanged):
+
+- No new knowledge database, no second capability registry, no second repository
+  map, no new memory subsystem, no daemon. Answers come only from existing
+  surfaces and verified anchors.
+- Immediate conversational continuity ("What were we just talking about?")
+  resolves from EXISTING structured conversation state / prior turns; with no
+  reliable antecedent it stays fail-closed (clarify/refuse) — never fabricated.
+- Deterministic with `ai.external_providers=false`; external models remain
+  optional, untrusted interpretation aids with no authority, and cannot approve,
+  promote, activate, bypass verification, or mutate live Atlas.
+- Known bounded limits: the subject vocabulary is bounded; context-dependent
+  questions need a reliable antecedent; free-form architecture reasoning outside
+  the supported families stays unsupported.
+
+Evidence: `tests/test_self_knowledge_bridge.py`.

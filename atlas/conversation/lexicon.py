@@ -351,6 +351,32 @@ SELF_EXTENSION_CONCEPTS: frozenset[str] = frozenset(
      "fit", "test", "testing", "verify"}
 )
 
+#: Bounded semantic SUBJECT classes for self-knowledge families that already
+#: exist inside Atlas (see the existing self-knowledge surfaces) but were not
+#: reachable from natural language. Each class is a *subject family*, not a
+#: phrase list, so ordinary synonymy/paraphrase converges on the same concept.
+SELF_CAPABILITY_CONTRACT_CONCEPTS: frozenset[str] = frozenset(
+    {"contract", "contracts", "interface", "interfaces", "schema", "schemas",
+     "descriptor", "descriptors", "metadata"}
+)
+SELF_REPOSITORY_CONCEPTS: frozenset[str] = frozenset(
+    {"symbol", "symbols", "signature", "signatures", "module_map", "map"}
+)
+SELF_EXTERNAL_RESEARCH_CONCEPTS: frozenset[str] = frozenset(
+    {"github", "internet", "download", "downloads", "external", "acquire",
+     "acquisition", "web"}
+)
+SELF_EVIDENCE_TRUST_CONCEPTS: frozenset[str] = frozenset(
+    {"provenance", "trust", "trusted", "untrusted", "useful", "usefulness",
+     "validated", "validation", "validat", "verif"}
+)
+SELF_GAP_CONCEPTS: frozenset[str] = frozenset(
+    {"gap", "gaps", "absent", "missing", "lacking"}
+)
+SELF_MODEL_CONCEPTS: frozenset[str] = frozenset(
+    {"model", "models", "llm", "provider", "ollama", "qwen", "embedding"}
+)
+
 #: Governance-sensitive verb class. Recognizing these NEVER grants authority.
 GOVERNANCE_VERBS: frozenset[str] = frozenset(
     {"approve", "authorize", "authorise", "promote", "bypass", "skip", "grant",
