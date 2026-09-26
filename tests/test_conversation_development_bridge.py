@@ -183,17 +183,20 @@ class TestConversationalDevelopmentRouting:
         finally:
             atlas.shutdown()
 
-    def test_natural_develop_wording_reaches_governed_lifecycle(
+    def test_natural_develop_wording_with_incidental_overlap_is_prepared(
         self, monkeypatch, tmp_path
     ):
-        """A naturally phrased ("develop ...") request reaches the governed flow.
+        """An incidental capability-name overlap must not defeat a real request.
 
-        Reconciled (see the module docstring): the governed driver adjudicates the
-        gap FIRST, so this request — which already matches a registered capability —
-        is honestly reported as already supported instead of being prepared. The
-        invariants are unchanged: the builtin responder did not claim the turn, the
-        ApprovalManager was never called, nothing was executed/promoted/activated,
-        and no sandbox change reached the live repository.
+        Reconciled (G3 defect fix, see the module docstring): the word "task"
+        happens to overlap the placeholder capability name "task_execution", but
+        the request asks for a NEW capability (emailing when a long-running task
+        finishes). Lexical overlap is no longer read as functional equivalence,
+        so the governed driver prepares the request and stops at the Development
+        Envelope / approval boundary. The invariants are unchanged: the builtin
+        responder did not claim the turn, the ApprovalManager was never called,
+        nothing was executed/promoted/activated, and no sandbox change reached
+        the live repository.
         """
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
@@ -215,9 +218,12 @@ class TestConversationalDevelopmentRouting:
 
         # The builtin conversational responder must NOT have claimed the turn.
         assert message.metadata.get("builtin_intent") is None
-        # The EXISTING governed driver adjudicated the request and reported it.
-        assert driver.get("terminal") == "already_supported"
-        assert "already-registered capability" in message.content
+        # The EXISTING governed driver prepared the request instead of silently
+        # rejecting it as already supported.
+        assert driver.get("terminal") == "envelope_disabled"
+        assert driver.get("terminal") != "already_supported"
+        assert driver.get("proposal_id")
+        assert "PENDING_APPROVAL" in message.content
         assert "Nothing is approved, executed, or promoted" in message.content
         assert "Run status:" not in message.content
         # Nothing was executed/promoted/activated, and the sandbox change never

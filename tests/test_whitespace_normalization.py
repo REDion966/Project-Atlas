@@ -21,7 +21,7 @@ from atlas.conversation.development_need_dialogue import (
 )
 from atlas.conversation.investigation import InvestigationService
 from atlas.conversation.message import Message
-from atlas.conversation.normalization import collapse_whitespace
+from atlas.conversation.normalization import canonicalize_surface, collapse_whitespace
 from atlas.conversation.reference_resolution import (
     ConversationReferenceResolver,
     ReferenceResolutionStatus,
@@ -171,10 +171,47 @@ class TestReferenceConvergence(unittest.TestCase):
 
 
 class TestNegativesUnchanged(unittest.TestCase):
-    def test_punctuation_not_normalized(self):
+    def test_surface_punctuation_is_not_rewritten(self):
+        # L2.2 contract: the surface canonicalizer normalizes WHITESPACE only;
+        # interior punctuation is preserved verbatim (never rewritten into a
+        # different phrase).
+        self.assertEqual(canonicalize_surface("What, can you do?"), "What, can you do?")
+        self.assertEqual(canonicalize_surface("How, are things looking?"), "How, are things looking?")
+
+    def test_punctuation_variants_classify_like_their_canonical_form(self):
+        # Corrected contract (Step 1): interior PUNCTUATION must not change the
+        # intent. "What, can you do?" is the same usage question as
+        # "What can you do?" and is owned by the help surface, not by the
+        # capability inventory. Whitespace variants classify identically too.
         builtin = BuiltinResponseService()
-        for text in ("What, can you do?", "How, are things looking?"):
-            self.assertEqual(_intent(builtin, text), "unsupported", text)
+        expected = _intent(builtin, "What can you do?")
+        self.assertEqual(expected, "help")
+        for variant in (
+            "What, can you do?",
+            "what can you do?!",
+            "What  can  you  do?",
+            "What can you do???",
+        ):
+            with self.subTest(variant=variant):
+                self.assertEqual(_intent(builtin, variant), expected)
+
+    def test_status_question_variants_classify_like_their_canonical_form(self):
+        builtin = BuiltinResponseService()
+        expected = _intent(builtin, "How are things looking?")
+        self.assertEqual(expected, "status")
+        for variant in (
+            "How, are things looking?",
+            "how are things looking?!",
+            "How are things looking??",
+        ):
+            with self.subTest(variant=variant):
+                self.assertEqual(_intent(builtin, variant), expected)
+
+    def test_unaffected_unsupported_phrases_stay_unsupported(self):
+        builtin = BuiltinResponseService()
+        for text in ("blorptastic, quux!", "Tell me, a joke."):
+            with self.subTest(text=text):
+                self.assertEqual(_intent(builtin, text), "unsupported")
 
     def test_unsupported_paraphrase_remains_unsupported(self):
         builtin = BuiltinResponseService()

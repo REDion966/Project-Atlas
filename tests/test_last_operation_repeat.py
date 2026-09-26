@@ -8,7 +8,9 @@ cue-less repeat ("Check that again.") by referring to that record:
     ("check"/"run"/"do"/"repeat");
   * read-only operations are re-entered through their EXISTING handler;
   * governed/mutating operations are never silently re-executed or approved;
-  * with nothing retained, recognition fails closed (unchanged behavior).
+  * with nothing retained, recognition fails closed: the G1 semantic frame reads
+    the bare cue as an unresolved REFERENCE and the turn asks for its subject
+    (it is never guessed, routed, or answered from the literal phrase).
 
 No LLM, no embeddings, no new interpretation layer, no execution authority.
 """
@@ -359,14 +361,21 @@ class TestInvestigateThatAgain:
             "Investigate the memory architecture"
         )
 
-    def test_investigate_that_again_without_prior_operation_keeps_old_behavior(self):
-        # No retained operation -> recognition fails closed; the turn keeps its
-        # existing classification/routing (it is still an investigation turn).
+    def test_investigate_that_again_without_prior_operation_clarifies(self):
+        # No retained operation -> recognition fails closed. The G1 semantic
+        # frame reads the bare cue as an unresolved REFERENCE, so the turn asks
+        # for its subject instead of treating the literal phrase as the target
+        # of an investigation (nothing is guessed or routed).
         service = _service()
         message = service.send("Investigate that again.")
-        assert message.metadata["investigation"]["target"].startswith(
-            "Investigate that again"
-        )
+        assert message.metadata.get("frame_clarification") == {
+            "domain": "unsupported",
+            "operation": "reference",
+        }
+        assert "investigation" not in message.metadata
+        assert "Which subject should I use?" in message.content
+        assert service.state_manager.state.last_operation is None
+        assert _FailingAI.calls == 0
 
 
 # ---------------------------------------------------------------------------
@@ -408,10 +417,20 @@ class TestExistingBehaviorRegression:
         service = _service()
         assert service.send(text).metadata.get("builtin_intent") == expected
 
-    def test_check_that_again_without_operation_still_unsupported(self):
+    def test_check_that_again_without_operation_clarifies(self):
+        # With nothing retained, the fail-closed contract is a clarification
+        # request: the G1 frame marks the bare cue an unresolved REFERENCE and
+        # asks for its subject. It is not answered and invents no operand.
         service = _service()
         message = service.send("Check that again.")
-        assert message.metadata.get("builtin_intent") == "unsupported"
+        assert message.metadata.get("frame_clarification") == {
+            "domain": "unsupported",
+            "operation": "reference",
+        }
+        assert message.metadata.get("builtin_intent") is None
+        assert "Which subject should I use?" in message.content
+        assert service.state_manager.state.last_operation is None
+        assert _FailingAI.calls == 0
 
     def test_send_and_stream_parity_on_repeat(self):
         # The investigation report carries a timestamped proposal id, so compare

@@ -31,6 +31,10 @@ from atlas.evolution.development_envelope import (
     DevelopmentAuthority,
     DevelopmentEnvelope,
 )
+from atlas.evolution.development_gap import (
+    DevelopmentGapKind,
+    assess_development_gap,
+)
 from atlas.evolution.development_request_scaffold import (
     SCAFFOLD_PACKAGE,
     capability_slug,
@@ -109,6 +113,56 @@ class TestScaffoldDerivation:
         request = "add a capability that summarizes documents"
         first = scaffold_spec_for_request(request)
         second = scaffold_spec_for_request(request)
+        assert first == second
+
+
+# ---------------------------------------------------------------------------
+# Capability-gap adjudication evidence (G3 defect fix)
+# ---------------------------------------------------------------------------
+
+
+class TestCapabilityGapEvidence:
+    """Lexical overlap is NECESSARY but not SUFFICIENT for ALREADY_SUPPORTED.
+
+    A registered capability is honoured only when the overlap accounts for a
+    substantial share of the request's own words. An incidental shared token
+    inside a longer development request must not be read as functional
+    equivalence, so a legitimate new-capability request still reaches the
+    governed development path.
+    """
+
+    def test_genuine_existing_capability_request_is_already_supported(self):
+        gap = assess_development_gap(
+            "export the conversation history as markdown",
+            capability_names=["conversation_history_export"],
+        )
+        assert gap.kind is DevelopmentGapKind.ALREADY_SUPPORTED
+        assert gap.matched == ("conversation_history_export",)
+
+    def test_incidental_capability_token_overlap_is_not_already_supported(self):
+        gap = assess_development_gap(
+            "Add a capability that lets me export the conversation history "
+            "as markdown.",
+            capability_names=["conversation"],
+        )
+        assert gap.kind is not DevelopmentGapKind.ALREADY_SUPPORTED
+        assert gap.matched == ()
+
+    def test_short_invocation_shaped_overlap_is_still_supported(self):
+        # The existing (stricter) contract for short invocation-shaped requests
+        # is preserved.
+        gap = assess_development_gap(
+            "run the research pipeline", capability_names=["research.query"]
+        )
+        assert gap.kind is DevelopmentGapKind.ALREADY_SUPPORTED
+
+    def test_gap_adjudication_is_deterministic(self):
+        request = (
+            "Add a capability that lets me export the conversation history "
+            "as markdown."
+        )
+        first = assess_development_gap(request, capability_names=["conversation"])
+        second = assess_development_gap(request, capability_names=["conversation"])
         assert first == second
 
 
@@ -204,6 +258,35 @@ class TestConversationalGovernedSelfDevelopment:
         assert metadata["scaffold"]["capability_name"] == "scheduling"
         assert driver.get("terminal") == "envelope_disabled"
         assert "Outcome: envelope_disabled" in message.content
+
+    def test_conversation_history_export_reaches_the_governed_path(
+        self, monkeypatch, tmp_path
+    ):
+        """The Claude-reported request is not silently rejected as supported.
+
+        "conversation" overlaps a registered capability name, but the request is
+        for a NEW capability (markdown export of conversation history), so the
+        gap is MISSING_KNOWLEDGE and the governed driver prepares it instead of
+        terminating as ``already_supported``.
+        """
+        atlas = _started_atlas(monkeypatch, tmp_path)
+        try:
+            _stub_research(atlas)
+            message = atlas.chat(
+                "Add a capability that lets me export the conversation history "
+                "as markdown."
+            )
+            driver = dict(message.metadata or {}).get("development_driver") or {}
+            pending = atlas.pending_promotion_reviews()
+        finally:
+            atlas.shutdown()
+
+        assert driver.get("terminal") == "envelope_disabled"
+        assert driver.get("terminal") != "already_supported"
+        assert driver.get("proposal_id")
+        assert "PENDING_APPROVAL" in message.content
+        assert "Nothing is approved, executed, or promoted" in message.content
+        assert tuple(pending) == ()
 
     def test_default_envelope_executes_nothing_and_writes_nothing(
         self, monkeypatch, tmp_path

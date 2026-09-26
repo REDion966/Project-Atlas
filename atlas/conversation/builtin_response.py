@@ -1089,6 +1089,26 @@ def _alias_hit(
     """True when ``text`` matches one of the bounded alias patterns."""
     return any(pattern.search(text) for pattern in patterns)
 
+
+#: Classification must be INVARIANT under surface punctuation/formatting: a
+#: pause comma or a doubled "?" must not change which intent owns the turn
+#: ("What, can you do?" == "What can you do?"). The comparison form strips
+#: punctuation and collapses whitespace deterministically; these are the
+#: closed canonical phrases whose reading must therefore not depend on it.
+_PUNCTUATION_RE = re.compile(r"[^a-z0-9\s]+")
+_CANONICAL_HELP_PHRASES: frozenset[str] = frozenset({"what can you do"})
+#: Same invariance for the canonical status questions whose phrase patterns are
+#: otherwise punctuation-sensitive ("How are things looking?" vs "How, are
+#: things looking?").
+_CANONICAL_STATUS_PHRASES: frozenset[str] = frozenset(
+    {"how are you", "how are things looking", "how are things going"}
+)
+
+
+def _punctuation_insensitive(text: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace (deterministic)."""
+    return " ".join(_PUNCTUATION_RE.sub(" ", text.lower()).split())
+
 _MAX_TOOLS_LISTED = 20
 
 #: Bounds applied to the self-knowledge renderer so an architecture answer is a
@@ -1528,7 +1548,11 @@ class BuiltinResponseService:
             capabilities_word = False
         if capabilities_word or _alias_hit(_CAPABILITY_ALIAS_RES, lowered):
             return BUILTIN_INTENT_CAPABILITIES
-        if _HELP_RE.search(lowered):
+        # Formatting invariance: the canonical usage question is owned by help
+        # regardless of interior punctuation ("What, can you do?").
+        if _HELP_RE.search(lowered) or (
+            _punctuation_insensitive(lowered) in _CANONICAL_HELP_PHRASES
+        ):
             return BUILTIN_INTENT_HELP
         if _IDENTITY_RE.search(lowered) or _alias_hit(
             _IDENTITY_ALIAS_RES, lowered
@@ -1578,8 +1602,10 @@ class BuiltinResponseService:
         external_knowledge = self._match_external_knowledge(lowered)
         if external_knowledge is not None:
             return (BUILTIN_INTENT_VALIDATED_KNOWLEDGE, external_knowledge)
-        if _STATUS_RE.search(lowered) or _alias_hit(
-            _STATUS_ALIAS_RES, lowered
+        if (
+            _STATUS_RE.search(lowered)
+            or _alias_hit(_STATUS_ALIAS_RES, lowered)
+            or _punctuation_insensitive(lowered) in _CANONICAL_STATUS_PHRASES
         ):
             return BUILTIN_INTENT_STATUS
         # Conversational-turn recall (Phase 5) precedes store recall: it claims
@@ -1604,7 +1630,11 @@ class BuiltinResponseService:
         if _GREETING_RE.search(lowered):
             return BUILTIN_INTENT_GREETING
         # Bounded casual acknowledgement (L10). No action, no state change.
-        if _ACKNOWLEDGEMENT_RE.search(lowered):
+        # The shared semantic frame's acknowledgement class is honoured too, so
+        # the frame and the floor cannot disagree ("That makes sense.").
+        if _ACKNOWLEDGEMENT_RE.search(lowered) or self._frame_is_acknowledgement(
+            text
+        ):
             return (
                 BUILTIN_INTENT_ACKNOWLEDGEMENT,
                 "thanks" if _GRATITUDE_RE.search(lowered) else "acknowledged",
@@ -1628,6 +1658,15 @@ class BuiltinResponseService:
         from atlas.conversation import semantic_frame as _frame
 
         return _frame.is_development_shaped(text)
+
+    @staticmethod
+    def _frame_is_acknowledgement(text: str) -> bool:
+        """G1 — does the semantic frame classify this turn as an acknowledgement?"""
+        from atlas.conversation import semantic_frame as _frame
+
+        if not isinstance(text, str) or not text.strip():
+            return False
+        return _frame.interpret(text).role is _frame.SemanticRole.ACKNOWLEDGEMENT
 
     def _match_frame_self_or_capability(
         self, text: str, context: Any = None

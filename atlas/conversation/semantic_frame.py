@@ -32,7 +32,7 @@ Boundaries (mandatory):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -100,6 +100,18 @@ _ACK_SIGNALS: frozenset[str] = _ACK_WORDS
 #: Concrete work objects (a capability verb aimed at one is a WORK request).
 _WORK_OBJECTS: frozenset[str] = frozenset(
     {"this", "that", "it", "task", "problem", "issue", "objective", "goal", "job", "request"}
+)
+
+#: Assistance verbs. Bound to a CONCRETE object ("help me with scheduling"),
+#: they signal a request FOR ASSISTANCE with that object, not a question about
+#: Atlas's capability inventory; bare ("what can you help with") or generic
+#: ("which things can you help me with") they stay inventory questions.
+_ASSIST_VERBS: frozenset[str] = frozenset({"help", "support", "assist"})
+
+#: Generic placeholder objects that carry no specific subject, so an assistance
+#: frame aimed at one of them stays a capability-scope question.
+_GENERIC_OBJECTS: frozenset[str] = frozenset(
+    {"thing", "anything", "something", "everything", "nothing", "stuff", "matter", "case"}
 )
 
 #: Self-knowledge concepts for the evidence/failure/limitations family.
@@ -275,7 +287,17 @@ class SubRequest:
 
 @dataclass(frozen=True, slots=True)
 class SemanticFrame:
-    """Bounded, deterministic semantic interpretation of one turn."""
+    """Bounded, deterministic semantic interpretation of one turn.
+
+    Structured meaning (G1/Step 1): ``domain`` is the owning Atlas
+    capability, ``operation`` the requested intention, ``subject``/``concept``
+    the bounded entity slot, ``arguments`` the same evidence as explicit
+    ``(role, value)`` pairs, ``reference`` any bounded reference cue the turn
+    carried, and ``subrequests`` the bounded compound decomposition.
+    ``confidence``/``needs_clarification`` carry the uncertainty contract.
+    The representation is model-independent: it is produced deterministically
+    and carries no authority.
+    """
 
     role: SemanticRole = SemanticRole.NEW_OBJECTIVE
     domain: SemanticDomain = SemanticDomain.UNSUPPORTED
@@ -287,6 +309,10 @@ class SemanticFrame:
     governance_sensitive: bool = False
     confidence: float = 0.0
     evidence: tuple[str, ...] = field(default=())
+    #: Bounded entity/argument evidence as explicit ``(role, value)`` pairs.
+    arguments: tuple[tuple[str, str], ...] = ()
+    #: Bounded reference cue the turn carried (e.g. "that", "it", "previous").
+    reference: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Deterministic, JSON-safe serialization."""
@@ -301,6 +327,8 @@ class SemanticFrame:
             "governance_sensitive": self.governance_sensitive,
             "confidence": self.confidence,
             "evidence": list(self.evidence),
+            "arguments": [list(pair) for pair in self.arguments],
+            "reference": self.reference,
         }
 
 
@@ -476,6 +504,23 @@ def _capability_frame(
     # A capability verb aimed at a concrete work object is a WORK request.
     if lemmas & _WORK_OBJECTS:
         return None
+    # Assistance framing: a CAPABILITY_VERB bound to a concrete object
+    # ("can you help me with scheduling?", "could you support the loader?") is
+    # a request for assistance with that object, never a capability INVENTORY
+    # question. A bare "what can you help with" carries no object and keeps its
+    # inventory reading (and its dedicated alias).
+    if lemmas & _ASSIST_VERBS:
+        object_tokens = {
+            lemma
+            for lemma in lemmas
+            if lemma not in _OBJECT_IGNORE
+            and lemma not in _OPERATION_VERBS
+            and lemma not in CAPABILITY_VERBS
+            and lemma not in _ASSIST_VERBS
+            and lemma not in _GENERIC_OBJECTS
+        }
+        if object_tokens and not object_tokens <= REFERENCE_WORDS:
+            return None
     # A third-person/external possessive subject belongs to the external subject,
     # never to Atlas's own inventory (C3 finding, preserved).
     if lemmas & {"their", "his", "her"}:
@@ -859,7 +904,47 @@ def interpret(
     ``has_prior_objective`` / ``has_knowledge_context`` let CONTEXT influence the
     interpretation: a bare bounded reference is a FOLLOW_UP when there is prior
     context and an AMBIGUOUS clarification request when there is none.
+
+    The deterministic :func:`_interpret_core` produces the (role, domain,
+    operation) reading; this wrapper additionally attaches the bounded
+    structured-meaning evidence (``arguments`` / ``reference``) so callers get a
+    complete, model-independent representation without a second pass.
     """
+    return _enrich(_interpret_core(
+        text,
+        has_prior_objective=has_prior_objective,
+        has_knowledge_context=has_knowledge_context,
+    ), text)
+
+
+def _enrich(frame: SemanticFrame, text: Any) -> SemanticFrame:
+    """Attach the bounded ``arguments`` / ``reference`` evidence to ``frame``.
+
+    Purely additive: it never changes ``role``/``domain``/``operation``,
+    ``needs_clarification``, ``confidence``, or any routing decision, and it
+    grants no authority. ``reference`` is the strongest bounded reference cue
+    the turn actually carried (never a guess).
+    """
+    arguments: list[tuple[str, str]] = []
+    if frame.subject:
+        arguments.append(("subject", frame.subject))
+    if frame.concept:
+        arguments.append(("concept", frame.concept))
+    cues = sorted(frozenset(tokens(text)) & REFERENCE_WORDS)
+    return replace(
+        frame,
+        arguments=tuple(arguments),
+        reference=cues[0] if cues else "",
+    )
+
+
+def _interpret_core(
+    text: Any,
+    *,
+    has_prior_objective: bool = False,
+    has_knowledge_context: bool = False,
+) -> SemanticFrame:
+    """The deterministic frame rules (see :func:`interpret`)."""
     if not isinstance(text, str) or not text.strip():
         return SemanticFrame(evidence=("empty",))
     order = tokens(text)

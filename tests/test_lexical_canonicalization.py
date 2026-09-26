@@ -264,13 +264,32 @@ class TestEndToEndVariations(unittest.TestCase):
             "capabilities",
         )
 
-    def test_negative_and_boundary_cases_remain_unsupported(self):
-        for text in ("Check it.", "Look at that.", "The other one.", "Fix this."):
+    def test_bare_reference_boundary_cases_now_clarify(self):
+        # G1: a short cue-less reference is an unresolved REFERENCE, so the turn
+        # fails closed by asking for its subject (the frame's domain reflects the
+        # kind of object it could not resolve) rather than refusing flatly.
+        for text, domain, operation in (
+            ("Check it.", "knowledge", "research"),
+            ("Look at that.", "knowledge", "research"),
+            ("Fix this.", "work", "act"),
+        ):
             with self.subTest(text=text):
                 service = _service()
                 message = service.send(text)
-                self.assertEqual(_intent(message), "unsupported")
-                self.assertTrue(message.content)
+                self.assertIsNone(_intent(message))
+                self.assertEqual(
+                    (message.metadata or {}).get("frame_clarification"),
+                    {"domain": domain, "operation": operation},
+                )
+                self.assertIn("Which subject should I use?", message.content)
+                self.assertEqual(_FailingAI.calls, 0)
+                self.assertIsNone(service.state_manager.state.last_operation)
+
+    def test_non_reference_boundary_case_remains_unsupported(self):
+        service = _service()
+        message = service.send("The other one.")
+        self.assertEqual(_intent(message), "unsupported")
+        self.assertTrue(message.content)
 
     def test_no_overmatch_remains_unsupported(self):
         service = _service()
@@ -330,9 +349,18 @@ class TestReferenceRepeatConservation(unittest.TestCase):
         self.assertTrue(is_repeat_request("Could you check that again?"))
         self.assertTrue(is_repeat_request("check that again"))
 
-    def test_repeat_without_operation_still_fails_closed(self):
+    def test_repeat_without_operation_clarifies(self):
+        # With nothing retained, a cue-less repeat fails closed by asking for its
+        # subject (G1 frame: unresolved REFERENCE); no operand is invented.
         service = _service()
-        self.assertEqual(_intent(service.send("Could you check that again?")), "unsupported")
+        message = service.send("Could you check that again?")
+        self.assertIsNone(_intent(message))
+        self.assertEqual(
+            (message.metadata or {}).get("frame_clarification"),
+            {"domain": "unsupported", "operation": "reference"},
+        )
+        self.assertIn("Which subject should I use?", message.content)
+        self.assertEqual(_FailingAI.calls, 0)
 
     def test_repeat_after_governed_operation_reuses_existing_behavior(self):
         service = _service(investigation=True)

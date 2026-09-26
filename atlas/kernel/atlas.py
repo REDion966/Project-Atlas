@@ -1331,6 +1331,47 @@ class Atlas:
         )
         return response.text
 
+    def _intent_assist_model(self, prompt: str):
+        """Duck-typed model callable for the OPTIONAL language-understanding seam.
+
+        Backed by the EXISTING ``AIService`` (no new integration); used only by
+        :class:`~atlas.conversation.model_intent_parser.ModelIntentParser`, which
+        is itself wired only when external providers are explicitly enabled and
+        only consulted for turns the deterministic intake cannot type. The
+        result is untrusted text; it can never approve, execute, or promote.
+        """
+        response = self._ai_manager.service.chat(
+            [{"role": "user", "content": prompt}],
+            routing_context=RoutingRequest(
+                complexity=0.4,
+                latency_requirement="fast",
+                task_type="conversation",
+                context_size=len(prompt),
+                metadata={"source": "language_understanding"},
+            ),
+        )
+        return response.text
+
+    def _build_task_intake(self):
+        """Build the kernel-owned conversational intake.
+
+        Deterministic by default. When external providers are explicitly enabled
+        (``[ai].external_providers = true``), the EXISTING optional model-assisted
+        parsing seam is wired in — bounded to turns the deterministic intake
+        cannot type and to the closed, non-governed task-type vocabulary. Any
+        wiring failure falls back to the deterministic intake (fail-closed).
+        """
+        from atlas.conversation.task_intake import TaskIntake
+
+        try:
+            if not bool(getattr(self._ai_manager, "external_providers", False)):
+                return TaskIntake()
+            from atlas.conversation.model_intent_parser import ModelIntentParser
+
+            return TaskIntake(parser=ModelIntentParser(model=self._intent_assist_model))
+        except Exception:
+            return TaskIntake()
+
     @property
     def development_controller(self):
         """Return the kernel-owned DevelopmentCycleController (Phase F9)."""
@@ -2417,6 +2458,11 @@ class Atlas:
         Runs only inside ``promote_validated_change`` (OWNER-gated); the
         Development Envelope can never reach this path. Raises on any
         malformed/invalid declared capability so the executor fails closed.
+
+        Step 2 — after a successful activation the EXISTING self-knowledge
+        inputs are refreshed so the promoted capability is not left as a bare,
+        unattributed registry name (see
+        :meth:`_refresh_self_knowledge_after_activation`).
         """
         from atlas.evolution.capability_activation import CapabilityActivator
 
@@ -2425,7 +2471,103 @@ class Atlas:
             self._capability_registry,
             audit_recorder=self._record_activation_audit,
         )
-        return activator.activate(artifact)
+        activation = activator.activate(artifact)
+        self._refresh_self_knowledge_after_activation(artifact, activation)
+        return activation
+
+    def _refresh_self_knowledge_after_activation(self, artifact, activation) -> dict:
+        """Project an activated capability into the EXISTING self-knowledge inputs.
+
+        Reuses the existing ``project_evolved_capability`` projection: the
+        promoting module is registered as the HEALTHY provider component so the
+        capability model reports it honestly (deterministic dependency,
+        availability) instead of an unattributed ``UNKNOWN`` name. The cached
+        repository map is then refreshed so the new module becomes visible to the
+        architecture model. Never grants authority, never promotes, and is
+        fail-soft (activation has already succeeded, so a projection problem must
+        not fail an OWNER-approved promotion closed on a cosmetic step).
+        """
+        summary: dict[str, Any] = {
+            "projected": [],
+            "repository_map_refreshed": False,
+        }
+        try:
+            if not getattr(activation, "activated", False):
+                return summary
+            capabilities = tuple(getattr(activation, "capabilities", ()) or ())
+            if not capabilities:
+                return summary
+            from atlas.evolution.self_evolution import project_evolved_capability
+
+            modules = self._activation_code_modules(artifact)
+            for capability in capabilities:
+                module = self._activation_module_for_capability(artifact, modules, capability)
+                if module is None:
+                    continue
+                if project_evolved_capability(
+                    self._component_registry,
+                    module_path=module,
+                    capability_name=capability,
+                ) is not None:
+                    summary["projected"].append(capability)
+            try:
+                if self._repository_map is not None:
+                    self.refresh_repository_map()
+                    summary["repository_map_refreshed"] = True
+            except Exception:
+                pass
+            self._record_self_knowledge_refresh(summary)
+        except Exception:
+            pass
+        return summary
+
+    @staticmethod
+    def _activation_code_modules(artifact) -> tuple[str, ...]:
+        """Repository-relative non-test ``.py`` paths carried by an artifact."""
+        paths: list[str] = []
+        for entry in tuple(getattr(artifact, "files", ()) or ()):
+            path = str(getattr(entry, "path", "") or "").replace("\\", "/")
+            if path.endswith(".py") and not path.startswith("tests/"):
+                paths.append(path)
+        return tuple(paths)
+
+    @staticmethod
+    def _activation_module_for_capability(artifact, modules, capability) -> str | None:
+        """The artifact module that declares ``capability`` (bounded; else first)."""
+        for entry in tuple(getattr(artifact, "files", ()) or ()):
+            path = str(getattr(entry, "path", "") or "").replace("\\", "/")
+            if path not in modules:
+                continue
+            content = str(getattr(entry, "post_content", "") or "")
+            if "CAPABILITY_NAME" in content and capability in content:
+                return path
+        return modules[0] if modules else None
+
+    def _record_self_knowledge_refresh(self, summary: dict) -> None:
+        """Best-effort audit record for a post-activation self-knowledge refresh."""
+        try:
+            projected = tuple(summary.get("projected") or ())
+            if not projected:
+                return
+            memory = self._evolution_memory
+            if memory is None:
+                return
+            from atlas.evolution.models import EvolutionRecord
+
+            memory.store_record(
+                EvolutionRecord(
+                    record_id="capselfknow:" + "--".join(projected)[:80],
+                    event_type="capability_self_knowledge_refresh",
+                    description=(
+                        "Projected activated capabilities into the self-knowledge "
+                        "inputs: " + ", ".join(projected)
+                    ),
+                    related_ids=list(projected),
+                    metadata=dict(summary),
+                )
+            )
+        except Exception:
+            pass
 
     def _record_activation_audit(self, activation) -> str:
         """Best-effort activation audit record (existing memory architecture)."""
@@ -4431,6 +4573,10 @@ class Atlas:
             self._ai_manager.service,
             context_engine=context_engine,
             cognition_api=self._cognition_api,
+            # Step 1 — the kernel-owned intake. Deterministic by default; the
+            # OPTIONAL model-assisted parsing seam is wired only when external
+            # providers are explicitly enabled (see _build_task_intake).
+            task_intake=self._build_task_intake(),
             development_bridge=self._development_bridge,
             # G3 — the governed self-development route: a conversational
             # development request reaches the EXISTING bounded DevelopmentDriver

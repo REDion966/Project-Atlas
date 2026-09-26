@@ -7,6 +7,13 @@ missing (research is required). It reuses existing self-knowledge surfaces
 knowledge retriever; it fabricates nothing and fails closed to ``UNCLEAR`` on
 malformed input.
 
+Lexical overlap with a registered capability name is NECESSARY but NOT
+SUFFICIENT evidence of functional equivalence. A capability is reported
+``ALREADY_SUPPORTED`` only when the overlap accounts for a substantial share of
+the request's own words; an incidental shared word inside a longer request
+(for example "conversation" in "export the conversation history as markdown")
+is not read as "Atlas already does this".
+
 Pure logic: stdlib only. No AI, no network, no storage, no kernel.
 """
 
@@ -23,6 +30,15 @@ MIN_TOKEN_LENGTH: int = 3
 
 #: Maximum number of matched capability names recorded (boundedness).
 MAX_MATCHES: int = 10
+
+#: Minimum overlap evidence for capability matching. A capability name counts as
+#: a match only when the tokens it shares with the request account for at least
+#: ``MIN_OVERLAP_NUMERATOR / MIN_OVERLAP_DENOMINATOR`` of the request's own
+#: significant tokens. Token overlap is necessary but not sufficient proof of
+#: functional equivalence: a single incidental shared word inside a longer
+#: request is not evidence that Atlas already does what was asked.
+MIN_OVERLAP_NUMERATOR: int = 1
+MIN_OVERLAP_DENOMINATOR: int = 3
 
 
 class DevelopmentGapKind(str, Enum):
@@ -61,6 +77,23 @@ def _capability_tokens(name: Any) -> set[str]:
     return significant_tokens(name.replace(".", " ").replace("_", " "))
 
 
+def _is_equivalence_evidence(overlap: set[str], request_token_count: int) -> bool:
+    """Whether a capability-name ``overlap`` is strong enough evidence.
+
+    Deterministic and bounded: the shared tokens must account for at least
+    ``MIN_OVERLAP_NUMERATOR / MIN_OVERLAP_DENOMINATOR`` of the request's
+    significant tokens. This keeps genuine matches ("memory search" against
+    ``memory_search``) while refusing to read one incidental shared word inside
+    a longer request as functional equivalence.
+    """
+    if not overlap:
+        return False
+    return (
+        len(overlap) * MIN_OVERLAP_DENOMINATOR
+        >= request_token_count * MIN_OVERLAP_NUMERATOR
+    )
+
+
 def _knowledge_present(knowledge_retriever: Any, query: str) -> tuple[bool, str]:
     """Best-effort: does validated knowledge exist for ``query``?
 
@@ -97,10 +130,16 @@ def assess_development_gap(
     Rules (deterministic, fail-closed):
 
     * blank/malformed request or no significant tokens -> ``UNCLEAR``
-    * request tokens overlap a registered capability name -> ``ALREADY_SUPPORTED``
+    * the request's tokens substantially overlap a registered capability name
+      (the overlap covers at least a third of the request's own words) ->
+      ``ALREADY_SUPPORTED``
     * otherwise, if validated knowledge exists for the request ->
       ``MISSING_CAPABILITY`` (we know enough to build it, but lack the capability)
     * otherwise -> ``MISSING_KNOWLEDGE`` (research is required first)
+
+    Overlap alone is never treated as functional equivalence: an incidental
+    shared token inside a longer request leaves the gap ``MISSING_*`` so a
+    legitimate capability request can still reach the governed development path.
     """
     if not isinstance(request, str) or not request.strip():
         return DevelopmentGapAssessment(
@@ -121,11 +160,13 @@ def assess_development_gap(
             rationale="The request carried no matchable tokens.",
         )
 
+    request_token_count = len(tokens)
     matched: list[str] = []
     for raw_name in capability_names or ():
         if not isinstance(raw_name, str) or not raw_name:
             continue
-        if tokens & _capability_tokens(raw_name):
+        overlap = tokens & _capability_tokens(raw_name)
+        if _is_equivalence_evidence(overlap, request_token_count):
             if raw_name not in matched:
                 matched.append(raw_name)
 

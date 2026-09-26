@@ -91,6 +91,26 @@ class TaskType(Enum):
     UNKNOWN = "unknown"
 
 
+#: The task types an injected model-assisted parser may PROPOSE (Step 1).
+#: Governance/decision and lifecycle types are deliberately excluded: a model
+#: may never be able to steer Atlas into an approval, execution, rejection,
+#: planning, recovery, verification, or autonomy path by "understanding" a
+#: turn. Those remain reachable only through the deterministic intake (and
+#: their own governed, human-gated boundaries). The :class:`IntentParser`
+#: adapter shares this single closed vocabulary.
+MODEL_PROPOSABLE_TASK_TYPES: frozenset[str] = frozenset(
+    {
+        "conversation",
+        "question",
+        "information_request",
+        "action_request",
+        "development_request",
+        "investigation_request",
+        "unknown",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Cue vocabularies (deterministic, order-independent).
 # ---------------------------------------------------------------------------
@@ -1288,8 +1308,16 @@ class TaskIntake:
         fields: dict[str, Any] = {}
 
         task_type_raw = parsed.get("task_type")
-        if isinstance(task_type_raw, str) and task_type_raw in _TASK_TYPE_BY_VALUE:
-            fields["task_type"] = _TASK_TYPE_BY_VALUE[task_type_raw]
+        # Governance hardening: only the closed, non-governed task-type subset
+        # may be proposed by an injected model parser. A model can never steer
+        # Atlas into an approval/execution/autonomy classification.
+        if (
+            isinstance(task_type_raw, str)
+            and task_type_raw in MODEL_PROPOSABLE_TASK_TYPES
+        ):
+            candidate = _TASK_TYPE_BY_VALUE.get(task_type_raw)
+            if candidate is not None:
+                fields["task_type"] = candidate
 
         for key, limit in (
             ("intent", _MAX_INTENT_CHARS),

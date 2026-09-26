@@ -172,6 +172,14 @@ class DevelopmentDriver:
                 )
             if research_summary:
                 need_metadata["research"] = research_summary
+                # Step 2 — carry the acquired evidence (authorized sources) onto
+                # the governed development requirement, so the design is
+                # evidence-informed rather than a bare request. Only the sources
+                # the acquisition actually returned are attached; nothing is
+                # fabricated when research yields none.
+                sources = tuple(research_summary.get("sources") or ())
+                if sources and not need_metadata.get("sources"):
+                    need_metadata["sources"] = sources
 
         need = self._build_need(request, gap, need_metadata)
 
@@ -336,6 +344,7 @@ class DevelopmentDriver:
             target_components=tuple(metadata.get("target_components", ()) or ()),
             evidence_knowledge_ids=tuple(metadata.get("evidence_knowledge_ids", ()) or ()),
             research_question=request.strip(),
+            sources=tuple(metadata.get("sources", ()) or ()),
             metadata=dict(metadata),
         )
 
