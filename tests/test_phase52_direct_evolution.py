@@ -570,10 +570,18 @@ class TestDevelopmentDriver:
 def _make_atlas(tmp_path, monkeypatch):
     import atlas.kernel.atlas as kernel_mod
     from atlas.storage.research_storage import ResearchSQLiteStorage
+    from tests.safe_kernel_config import bound_configuration, write_safe_config
     from tests.test_durable_guided_improvement import _storage_class
 
     monkeypatch.setattr(
         "atlas.kernel.atlas.SQLiteEvolutionStorage", _storage_class(tmp_path)
+    )
+    # Build from a controlled safe config (no [development.envelope] table), so
+    # "the envelope is disabled by default" is the CODE default rather than
+    # whatever the operator's live config.toml currently sets.
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.Configuration",
+        bound_configuration(write_safe_config(tmp_path)),
     )
 
     class _TmpResearch(ResearchSQLiteStorage):

@@ -64,7 +64,7 @@ def _patch_default_db_paths(new_path: Path) -> list[tuple[type, object]]:
 
 
 @pytest.fixture(scope="module")
-def kernel():
+def kernel(safe_kernel_config):
     saved = _patch_default_db_paths(_TMP_DB)
     atlas = Atlas()
     atlas.start()

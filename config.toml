@@ -53,6 +53,13 @@ history_limit = 20
 [development]
 model_assisted_authoring = false
 
+[development.envelope]
+enabled = true
+allowed_operations = ["sandbox_development"]
+max_risk_level = "low"
+max_runs_per_window = 5
+window_seconds = 3600
+
 # Owner/authority foundation (P1/B1.1). Exactly one logical Owner, designated
 # explicitly by name. No authentication here; this only establishes the
 # owner's stable, highest-authority identity.
@@ -75,4 +82,4 @@ level = "INFO"
 # HTTP/HTTPS remain the only accepted schemes, and all SSRF protections
 # (private/loopback/link-local/metadata ranges, redirect revalidation,
 # size/time bounds) stay mandatory regardless of entries.
-web_allowed_hosts = []
+web_allowed_hosts = ["api.github.com", "raw.githubusercontent.com"]

@@ -174,10 +174,18 @@ class TestCapabilityGapEvidence:
 def _started_atlas(monkeypatch, tmp_path):
     import atlas.kernel.atlas as kernel_mod
     from atlas.storage.research_storage import ResearchSQLiteStorage
+    from tests.safe_kernel_config import bound_configuration, write_safe_config
     from tests.test_durable_guided_improvement import _storage_class
 
     monkeypatch.setattr(
         "atlas.kernel.atlas.SQLiteEvolutionStorage", _storage_class(tmp_path)
+    )
+    # Build from a controlled safe config (no [development.envelope] table), so
+    # "the driver stops at the envelope boundary" is the CODE default rather
+    # than whatever the operator's live config.toml currently sets.
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.Configuration",
+        bound_configuration(write_safe_config(tmp_path)),
     )
 
     class _TmpResearch(ResearchSQLiteStorage):

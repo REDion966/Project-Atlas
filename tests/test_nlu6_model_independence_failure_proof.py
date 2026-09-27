@@ -123,8 +123,13 @@ def _isolated_storage():
 
 
 @pytest.fixture(scope="module")
-def kernel():
-    """One fully-wired kernel: no external provider configured (default)."""
+def kernel(safe_kernel_config):
+    """One fully-wired kernel: no external provider configured (default).
+
+    ``safe_kernel_config`` builds the kernel from a controlled temp config, so
+    "no external provider configured" is the CODE default rather than whatever
+    the operator's live config.toml currently says.
+    """
     from atlas.kernel.atlas import Atlas
 
     atlas = Atlas()
@@ -136,7 +141,7 @@ def kernel():
 
 
 @pytest.fixture(scope="module")
-def raising_kernel():
+def raising_kernel(safe_kernel_config):
     """A kernel whose active provider ALWAYS raises (provider failure state)."""
     from atlas.kernel.atlas import Atlas
 

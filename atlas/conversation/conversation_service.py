@@ -766,6 +766,58 @@ class ConversationService:
             return None
         return self._builtin_response.match_resolved_reference_answer(text, spec)
 
+    def _maybe_handle_evidence_gap_analysis(self, text: str) -> Message | None:
+        """Analyze the retained investigation findings for concrete gaps.
+
+        Consumes ONLY the retained :class:`InvestigationReport` evidence through
+        the existing deterministic ``EvidenceGapAnalyzer``. Read-only and
+        model-free: it gathers no new evidence, never re-investigates, never
+        mutates the retained investigation/result state, and never authorizes,
+        approves, executes, or promotes anything.
+
+        Fail-closed: a recognized analysis request with no retained
+        investigation report is told the antecedent is missing instead of
+        silently running a fresh investigation on the literal words. Every
+        other turn returns ``None`` so the existing cascade is unchanged.
+        """
+        from atlas.conversation.evidence_gap_analysis import (
+            EvidenceGapAnalyzer,
+            is_evidence_gap_analysis_request,
+        )
+
+        if not is_evidence_gap_analysis_request(text):
+            return None
+
+        report = self._last_investigation_report
+        if report is None:
+            return Message(
+                role="assistant",
+                content=(
+                    "There is no retained investigation to analyze. Please "
+                    "investigate a subject first, then ask me to analyze the "
+                    "findings. No new investigation was started."
+                ),
+                metadata={"gap_analysis": {"status": "no_investigation"}},
+            )
+
+        analysis = EvidenceGapAnalyzer().analyze(report)
+        return Message(
+            role="assistant",
+            content=analysis.to_markdown(),
+            metadata={
+                "gap_analysis": {
+                    "status": "complete",
+                    "target": analysis.target,
+                    "objective": analysis.objective,
+                    "gap_count": len(analysis.gaps),
+                    "insufficient_evidence": analysis.insufficient_evidence,
+                    "evidence_basis": list(analysis.evidence_basis),
+                    "modification_status": analysis.modification_status,
+                    "gaps": [gap.to_dict() for gap in analysis.gaps],
+                },
+            },
+        )
+
     def _maybe_handle_external_knowledge(self, text: str) -> Message | None:
         """Evidence-driven: external-knowledge requests routed via D3/D2.
 
@@ -1486,6 +1538,16 @@ class ConversationService:
         if reference_answer is not None:
             self._conversation.add_message(reference_answer)
             return reference_answer
+        # Evidence gap analysis — a bounded request to analyze the retained
+        # investigation findings reaches the EXISTING deterministic
+        # EvidenceGapAnalyzer over the retained InvestigationReport. Read-only,
+        # model-free and state-preserving: it never re-investigates, never
+        # overwrites the retained investigation/result, and never authorizes,
+        # approves, or executes anything.
+        gap_analysis = self._maybe_handle_evidence_gap_analysis(text)
+        if gap_analysis is not None:
+            self._conversation.add_message(gap_analysis)
+            return gap_analysis
         external_knowledge = self._maybe_handle_external_knowledge(text)
         if external_knowledge is not None:
             self._conversation.add_message(external_knowledge)
@@ -1838,6 +1900,13 @@ class ConversationService:
         if evidence_self_knowledge is not None:
             self._conversation.add_message(evidence_self_knowledge)
             yield evidence_self_knowledge.content
+            return
+        # Evidence gap analysis (mirror of send(): same handler, same
+        # placement, same semantics). Read-only and state-preserving.
+        gap_analysis = self._maybe_handle_evidence_gap_analysis(text)
+        if gap_analysis is not None:
+            self._conversation.add_message(gap_analysis)
+            yield gap_analysis.content
             return
         external_knowledge = self._maybe_handle_external_knowledge(text)
         if external_knowledge is not None:

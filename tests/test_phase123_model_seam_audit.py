@@ -23,6 +23,7 @@ from atlas.evolution.model_assisted_supplier import (
     ORIGIN_MODEL_ASSISTED_DRAFT,
     ModelAssistedChangeSupplier,
 )
+from tests.safe_kernel_config import write_safe_config
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -129,12 +130,20 @@ class TestPhase123ExternalModelSeamAudit:
         assert reply.text  # served by the local deterministic tier
         assert reply.provider == AIManager.LOCAL_PROVIDER_NAME
 
-    def test_seam_defaults_are_safe_in_config(self):
-        config = (_ROOT / "config.toml").read_text(encoding="utf-8")
-        assert "external_providers = false" in config
-        assert "allow_fallback = false" in config
-        assert "model_assisted_authoring = false" in config
-        assert "web_allowed_hosts = []" in config
+    def test_seam_defaults_are_safe_in_config(self, tmp_path):
+        # Verify the CODE's safe defaults, NOT the operator's live config.toml:
+        # a config that sets no opt-in must resolve to every seam being off.
+        from atlas.config.configuration import Configuration
+
+        configuration = Configuration(str(write_safe_config(tmp_path)))
+        configuration.load()
+        settings = configuration.settings
+
+        assert settings.ai.external_providers is False
+        assert settings.ai.allow_fallback is False
+        assert settings.development.model_assisted_authoring is False
+        assert settings.research.web_allowed_hosts == ()
+        assert settings.development.envelope is None
 
     def test_kernel_gates_the_model_supplier_on_the_config_flag(self):
         source = (_ROOT / "atlas/kernel/atlas.py").read_text(encoding="utf-8")

@@ -32,6 +32,14 @@ class Configuration:
             data = tomllib.load(file)
 
         api_keys_data = data.get("api_keys", {})
+        development_data = data.get("development", {})
+        if not isinstance(development_data, dict):
+            development_data = {}
+        # The bounded Development Envelope table ([development.envelope]) is
+        # passed through verbatim to DevelopmentEnvelope.from_mapping, which
+        # owns validation and stays fail-closed. An absent table resolves to
+        # None (the disabled policy) exactly as before.
+        raw_envelope = development_data.get("envelope")
 
         self._settings = AtlasSettings(
             application=ApplicationSettings(
@@ -73,9 +81,10 @@ class Configuration:
             ),
             development=DevelopmentSettings(
                 model_assisted_authoring=bool(
-                    data.get("development", {}).get(
-                        "model_assisted_authoring", False
-                    )
+                    development_data.get("model_assisted_authoring", False)
+                ),
+                envelope=(
+                    dict(raw_envelope) if isinstance(raw_envelope, dict) else None
                 ),
             ),
             authority=AuthoritySettings(

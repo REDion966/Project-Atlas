@@ -38,7 +38,7 @@ def _patch_default_db_paths(new_path: Path) -> list[tuple[type, object]]:
 
 
 @pytest.fixture(scope="module")
-def kernel():
+def kernel(safe_kernel_config):
     tmp = Path(tempfile.mkdtemp(prefix="evi1_"))
     saved = _patch_default_db_paths(tmp / "atlas_experience.db")
     fact = tmp / "device.md"

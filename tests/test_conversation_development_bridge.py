@@ -69,7 +69,15 @@ def _started_atlas(monkeypatch, tmp_path):
         _storage_class(tmp_path),
     )
     from atlas.kernel.atlas import Atlas
+    from tests.safe_kernel_config import bound_configuration, write_safe_config
 
+    # Build from a controlled safe config (no [development.envelope] table), so
+    # "the driver stops at the envelope boundary" is the CODE default rather
+    # than whatever the operator's live config.toml currently sets.
+    monkeypatch.setattr(
+        "atlas.kernel.atlas.Configuration",
+        bound_configuration(write_safe_config(tmp_path)),
+    )
     atlas = Atlas()
     atlas.start()
     return atlas

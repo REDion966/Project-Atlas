@@ -5,6 +5,7 @@ Strongly typed configuration objects.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -87,9 +88,20 @@ class DevelopmentSettings:
     the existing ``DeterministicChangeSupplier`` and no model-assisted
     authoring occurs unless explicitly enabled. Owner approval, sandbox-only
     execution, verification, and promotion review remain mandatory.
+
+    ``envelope`` carries the parsed ``[development.envelope]`` table — the
+    bounded Development Envelope policy (``enabled`` bool,
+    ``allowed_operations`` list[str], ``max_risk_level`` str,
+    ``max_runs_per_window`` int, ``window_seconds`` int, plus the optional
+    ``authorization_ttl_minutes`` / ``policy_ref``). ``None`` (the default,
+    when the table is absent) preserves the existing fail-closed behaviour:
+    ``DevelopmentEnvelope.from_mapping(None)`` resolves to the disabled policy.
+    The mapping is passed through VERBATIM to the existing
+    ``DevelopmentEnvelope.from_mapping`` contract, which owns all validation.
     """
 
     model_assisted_authoring: bool = False
+    envelope: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)

@@ -1785,9 +1785,12 @@ instead of answering an external question with Atlas's own surfaces. Evidence:
 
 ### 34.7 Known limitations (classified, deliberately NOT implemented)
 
-- **Missing capabilities**: conversational comparison; analysis over a prior result;
-  proposal-from-evidence; true multi-step dependent execution (no sequencing,
-  dependency, or intermediate-evidence flow from conversation).
+- **Missing capabilities** (as classified during C1–C5): conversational comparison;
+  analysis over a prior result; proposal-from-evidence; true multi-step dependent
+  execution (no sequencing, dependency, or intermediate-evidence flow from
+  conversation). A bounded, read-only *evidence-gap analysis* over a retained
+  investigation report has since been added additively (§34.9); `gap → proposal`
+  remains deliberately undelivered.
 - **Routing / integration limitations**: some research/evaluation requests whose local
   validated knowledge is empty do not fall back to repository investigation; certain
   retrieval phrasings ("What did the investigation find?") can be typed as a new
@@ -1814,6 +1817,25 @@ fail-closed behaviour are unchanged, and no L11+ roadmap phase is created or imp
 Future capability development (for example the missing capabilities listed in §34.7)
 remains **evidence-driven and separately authorized** — the validated gap is the
 evidence, not a mandate to build.
+
+### 34.9 Additive bounded evidence-gap analysis (post-L10, not a roadmap phase)
+
+A deterministic, read-only, model-independent `EvidenceGapAnalyzer`
+(`atlas/conversation/evidence_gap_analysis.py`) consumes ONLY the structured
+evidence of an already-produced `InvestigationReport` and reports the concrete
+**evidence gaps** that evidence demonstrates for the components the investigation
+actually identified (a component with no attributable evidence, or one with
+implementation evidence but no test evidence). Every gap cites the actual report
+findings it rests on, separates the observed fact from the bounded
+interpretation, and an evidence base that cannot support a conclusion is reported
+as `insufficient_evidence` rather than fabricating a gap. The analyzer gathers no
+new evidence, mutates nothing, calls no model, creates no proposal, and
+authorizes nothing.
+
+It is reached from conversation only for a bounded "analyze the findings" request
+made over a **retained** investigation report; with no retained evidence the turn
+fails closed. `gap → proposal`, proposal-from-analysis, and true multi-step
+dependent execution remain deliberately undeveloped and evidence-driven.
 
 ---
 
