@@ -577,6 +577,26 @@ _UTTERANCE_REQUEST_FRAMES: tuple[str, ...] = (
     "will you",
 )
 
+#: Bounded CONVERSATIONAL imperative openers (Step 1 — Open-Ended Conversation).
+#: A natural conversational request that names no Atlas operation ("Tell me a
+#: short story about a lighthouse.", "Describe how tides work.") is a REQUEST,
+#: not a bare statement. Kept separate from the pre-existing request frames so
+#: those semantics are untouched; matched at the START of the utterance only.
+_UTTERANCE_CONVERSATIONAL_REQUEST_FRAMES: tuple[str, ...] = (
+    "tell me",
+    "give me",
+    "show me",
+    "describe",
+    "summarise",
+    "summarize",
+    "walk me through",
+    "talk me through",
+    "help me understand",
+    "talk about",
+    "chat about",
+)
+
+
 #: Bounded request modals (checked inside the leading window only).
 _UTTERANCE_REQUEST_MODALS: frozenset[str] = frozenset(
     {"should", "needs", "need", "want", "wish", "please", "useful"}
@@ -895,6 +915,12 @@ def _utterance_illocution(normalized: str, operation_index: int | None) -> Illoc
     if tokens and tokens[0] in _UTTERANCE_QUESTION_WORDS:
         return Illocution.QUESTION
     for frame in _UTTERANCE_REQUEST_FRAMES:
+        if lowered.startswith(frame):
+            return Illocution.REQUEST
+    # Step 1 — a natural conversational imperative that names no Atlas
+    # operation is a request, so it reaches the existing bounded model seam
+    # instead of being refused as a bare statement.
+    for frame in _UTTERANCE_CONVERSATIONAL_REQUEST_FRAMES:
         if lowered.startswith(frame):
             return Illocution.REQUEST
     if operation_index == 0:

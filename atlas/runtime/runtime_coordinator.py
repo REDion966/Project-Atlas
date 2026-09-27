@@ -404,7 +404,7 @@ class RuntimeCoordinator:
                 status=StageStatus.SKIPPED,
             )
 
-        context = {
+        context: dict[str, Any] = {
             "user_input": state.user_input,
             "has_history": hasattr(self._conversation_service, "history"),
         }
@@ -416,6 +416,12 @@ class RuntimeCoordinator:
             except Exception:
                 context["history_length"] = 0
 
+        # Step 1 — Open-Ended Conversation: expose a BOUNDED, read-only window of
+        # the recent turns so the optional model prompt carries multi-turn
+        # context. Reuses the existing bounded ConversationContext projection;
+        # the current user turn is never duplicated.
+        context["recent_turns"] = self._bounded_recent_turns(state.user_input)
+
         state.conversation_context = context
 
         return StageResult(
@@ -424,6 +430,40 @@ class RuntimeCoordinator:
             data=context,
             confidence=1.0,
         )
+
+    def _bounded_recent_turns(self, current_user_input: str) -> list[dict[str, str]]:
+        """Bounded recent-turn transcript for the model prompt, or ``[]``.
+
+        Step 1 — Open-Ended Conversation. Duck-typed and fail-soft: reads the
+        conversation this coordinator was already given, projects it through the
+        EXISTING bounded ``build_conversation_context`` (<= MAX_CONTEXT_TURNS
+        turns, each truncated), and drops a trailing user turn that is the
+        CURRENT turn so the prompt never duplicates it. Read-only: it is
+        context for the optional model, never authority.
+        """
+        conversation = getattr(self._conversation_service, "conversation", None)
+        messages = getattr(conversation, "messages", None)
+        if not messages:
+            return []
+        turns = list(messages)
+        last = turns[-1]
+        if (
+            getattr(last, "role", "") == "user"
+            and getattr(last, "content", "") == current_user_input
+        ):
+            turns = turns[:-1]
+        if not turns:
+            return []
+        from atlas.conversation.conversation_context import (
+            build_conversation_context,
+        )
+
+        snapshot = build_conversation_context(turns)
+        return [
+            {"role": turn.role, "content": turn.content}
+            for turn in snapshot.recent_turns
+            if turn.role in ("user", "assistant") and turn.content
+        ]
 
     # ------------------------------------------------------------------
     # Stage 2: Memory Retrieval
@@ -1477,14 +1517,30 @@ class RuntimeCoordinator:
         return "\n".join(lines)
 
     def _build_conversation_section(self, state: CognitionState) -> str:
-        """Build conversation context."""
+        """Build conversation context (bounded recent turns + message count).
+
+        Step 1 — renders the bounded recent-turn window captured by the
+        CONVERSATION_CONTEXT stage so a model-backed answer has multi-turn
+        context. Still bounded, still data-only.
+        """
         ctx = state.conversation_context
         if not ctx:
             return ""
         history_len = ctx.get("history_length", 0)
+        recent = ctx.get("recent_turns") or []
+        lines = ["## Conversation Context"]
+        for turn in recent:
+            role = str(turn.get("role", "")).strip()
+            content = str(turn.get("content", "")).strip()
+            if role and content:
+                lines.append(f"{role}: {content}")
         if history_len:
-            return f"## Conversation Context\nCurrent conversation has {history_len} previous messages."
-        return ""
+            lines.append(
+                f"Current conversation has {history_len} previous messages."
+            )
+        if len(lines) == 1 and not history_len:
+            return ""
+        return "\n".join(lines)
 
     def _build_memory_section(self, state: CognitionState) -> str:
         """Build memory retrieval results."""
