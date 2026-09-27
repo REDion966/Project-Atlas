@@ -253,6 +253,13 @@ class ConversationState:
     # conversation-scoped FACTS only; never authority, never a second store.
     last_knowledge: Optional[dict[str, Any]] = None
 
+    # Step 2 — Goal-Centered Orchestration: a bounded, authority-free record of
+    # the ACTIVE conversational goal/plan (objective, ordered steps, per-step
+    # status, bounded result references, current step, completion state). It is
+    # representation only: execution stays with the existing OrchestrationExecutor
+    # and every governed boundary is unchanged. Not an event store or workflow DB.
+    current_plan: Optional[dict[str, Any]] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -298,6 +305,11 @@ class ConversationState:
             "last_knowledge": (
                 dict(self.last_knowledge)
                 if isinstance(self.last_knowledge, dict)
+                else None
+            ),
+            "current_plan": (
+                dict(self.current_plan)
+                if isinstance(self.current_plan, dict)
                 else None
             ),
             "turn_id": self.turn_id,

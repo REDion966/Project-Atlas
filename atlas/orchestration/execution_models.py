@@ -86,12 +86,19 @@ class ExecutionStep:
 
     Attributes:
         step_id: Stable unique id within the run.
-        kind: The step kind (CAPABILITY / TOOL / WORKSPACE / RESEARCH / GOAL).
+        kind: The step kind (CAPABILITY / TOOL / WORKSPACE / RESEARCH / GOAL /
+            INVESTIGATION / ANALYSIS).
         target: Registered capability or tool name (or workspace/research
             action key).
         inputs: Explicit parameter dict for the step (data only).
         depends_on: Step IDs that must complete before this step.
         description: Human-readable description.
+        carry_from: Step 2 — explicit, bounded RESULT CARRY. The listed step
+            IDs' COMPLETED, bounded outputs are made available to this step
+            under ``inputs["carry"]`` (a bounded, data-only snapshot keyed by
+            step id). Empty means no carry. A carried result is DATA only and
+            can never grant authority; if a source step did not complete, the
+            carrying step does not execute (fail closed).
     """
 
     step_id: str
@@ -100,6 +107,7 @@ class ExecutionStep:
     inputs: dict[str, Any] = field(default_factory=dict)
     depends_on: tuple[str, ...] = ()
     description: str = ""
+    carry_from: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +117,7 @@ class ExecutionStep:
             "inputs": dict(self.inputs),
             "depends_on": tuple(self.depends_on),
             "description": self.description,
+            "carry_from": tuple(self.carry_from),
         }
 
 

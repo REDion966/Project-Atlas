@@ -113,6 +113,22 @@ _INFORMATIONAL_TASK_TYPES: frozenset[str] = frozenset(
     {task.value for task in _CASUAL_TASK_TYPES} | {TaskType.INFORMATION_REQUEST.value}
 )
 
+#: Step 2 — bounded, explicit status forms for the ACTIVE goal/plan. A turn is
+#: answered from retained plan state ONLY when the whole (normalized) turn is
+#: exactly one of these; every other turn keeps its existing route unchanged.
+_GOAL_STATUS_FORMS: frozenset[str] = frozenset(
+    {
+        "plan status",
+        "goal status",
+        "what is the plan status",
+        "what is the goal status",
+        "what s the plan status",
+        "what s the goal status",
+        "continue the plan",
+        "continue the goal",
+    }
+)
+
 #: L3 illocutions that describe something the user is asking FOR; a bare
 #: statement is not a reasoning request.
 _ELIGIBLE_ILLOCUTIONS: frozenset[str] = frozenset({"question", "request"})
@@ -440,6 +456,7 @@ class ConversationService:
         proposal_change_supplier: Any | None = None,
         development_driver_bridge: Callable[..., Any] | None = None,
         autonomy_check: Callable[..., AutonomyDecisionProtocol] | None = None,
+        goal_orchestration_resolver: Callable[..., Any] | None = None,
     ):
         """
         Initialize the conversation service.
@@ -564,6 +581,12 @@ class ConversationService:
         #: legacy route verbatim. It grants no authority here and never promotes.
         self._development_driver_bridge = development_driver_bridge
         self._orchestration_resolver = orchestration_resolver
+        #: Step 2 — optional duck-typed bridge that SEQUENCES a bounded
+        #: multi-step goal through the EXISTING OrchestrationExecutor. Signature:
+        #: ``(text, steps, session_context) -> Message | None``. Kernel-owned and
+        #: duck-typed (this module never imports atlas.orchestration). Absent or
+        #: raising keeps every existing route verbatim; it grants no authority.
+        self._goal_orchestration_resolver = goal_orchestration_resolver
         self._fallback_resolver = fallback_resolver
         self._builtin_response = builtin_response
         self._provider_call_timeout_s = (
@@ -1091,6 +1114,130 @@ class ConversationService:
         metadata["compound"] = {"subrequests": [s.to_dict() for s in subs]}
         return Message(role="assistant", content="\n".join(lines), metadata=metadata)
 
+    # ------------------------------------------------------------------
+    # Step 2 — Goal-Centered Orchestration (bounded two-stage slice)
+    # ------------------------------------------------------------------
+
+    def _maybe_handle_goal_request(self, text: str) -> Message | None:
+        """Sequence a bounded multi-stage conversational goal.
+
+        Builds a SMALL ordered plan from the EXISTING semantic decomposition
+        (``SemanticFrame.decompose`` — no new parser or planner) and hands it to
+        the kernel-owned bridge, which runs it through the EXISTING
+        ``OrchestrationExecutor``. The bounded plan and its per-step statuses are
+        retained in ``ConversationState.current_plan`` so a later turn can
+        continue the goal. This layer never dispatches, authorizes, or executes
+        anything itself, and it claims a turn ONLY when the existing
+        decomposition yields at least two composable steps.
+        """
+        if self._goal_orchestration_resolver is None or not isinstance(text, str):
+            return None
+        from atlas.orchestration.goal_plan import build_goal_plan
+
+        try:
+            steps = build_goal_plan(text)
+        except Exception:  # fail-soft: any failure keeps existing routing
+            return None
+        if not steps:
+            return None
+        try:
+            message = self._goal_orchestration_resolver(
+                text, steps, self._last_session_context
+            )
+        except Exception:  # fail-soft: the bridge never breaks conversation
+            return None
+        if not isinstance(message, Message):
+            return None
+        self._retain_goal_plan(text, steps, message)
+        return message
+
+    def _retain_goal_plan(
+        self,
+        text: str,
+        steps: tuple[Any, ...],
+        message: Message,
+    ) -> None:
+        """Retain a BOUNDED, authority-free record of the active goal/plan.
+
+        Representation only (objective, ordered steps, per-step status, bounded
+        references, current step). Never an event store or workflow database.
+        """
+        if self._state_manager is None:
+            return
+        metadata = message.metadata if isinstance(message.metadata, dict) else {}
+        run = metadata.get("orchestration")
+        statuses: dict[str, dict[str, str]] = {}
+        run_state = ""
+        if isinstance(run, dict):
+            run_state = str(run.get("status", ""))[:32]
+            for entry in run.get("steps") or ():
+                if isinstance(entry, dict) and isinstance(entry.get("step_id"), str):
+                    statuses[entry["step_id"]] = {
+                        "state": str(entry.get("state", ""))[:32],
+                        "error": str(entry.get("error", ""))[:160],
+                    }
+        bounded_steps: list[dict[str, Any]] = []
+        current_step: str | None = None
+        for step in tuple(steps)[:8]:
+            info = statuses.get(step.step_id, {})
+            state = info.get("state", "")
+            if current_step is None and state != "completed":
+                current_step = step.step_id
+            bounded_steps.append(
+                {
+                    "step_id": step.step_id,
+                    "kind": getattr(getattr(step, "kind", None), "value", ""),
+                    "target": str(getattr(step, "target", ""))[:200],
+                    "carry_from": list(getattr(step, "carry_from", ()))[:4],
+                    "state": state,
+                    "error": info.get("error", ""),
+                }
+            )
+        self._state_manager.update(
+            current_plan={
+                "objective": str(text).strip()[:400],
+                "steps": bounded_steps,
+                "current_step": current_step,
+                "state": run_state,
+            }
+        )
+
+    def _maybe_handle_goal_followup(self, text: str) -> Message | None:
+        """Report the ACTIVE goal/plan from retained state (read-only).
+
+        Only a bounded, explicit status form is recognized, and the reply is
+        built from the retained bounded plan — it starts no new operation. With
+        no active plan the turn keeps its existing route (fail closed).
+        """
+        if self._state_manager is None or not isinstance(text, str):
+            return None
+        from atlas.conversation.normalization import (
+            canonicalize_surface,
+            collapse_whitespace,
+        )
+
+        normalized = collapse_whitespace(canonicalize_surface(text)).lower().strip()
+        if normalized not in _GOAL_STATUS_FORMS:
+            return None
+        plan = self._state_manager.state.current_plan
+        if not isinstance(plan, dict) or not plan.get("steps"):
+            return None
+        lines = [f"Active goal: {plan.get('objective', '')}", "Plan status:"]
+        for step in list(plan.get("steps") or ())[:8]:
+            if not isinstance(step, dict):
+                continue
+            lines.append(
+                f"- {step.get('step_id')}: {step.get('kind')} "
+                f"{step.get('target')} — {step.get('state') or 'pending'}"
+            )
+        lines.append(f"Current step: {plan.get('current_step') or 'none'}")
+        lines.append(f"Goal state: {plan.get('state') or 'in_progress'}")
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={"goal_plan": dict(plan)},
+        )
+
     def _frame_knowledge_message(
         self, text: str, objective: str, spec: TaskSpec | None = None
     ) -> Message | None:
@@ -1548,6 +1695,19 @@ class ConversationService:
         if gap_analysis is not None:
             self._conversation.add_message(gap_analysis)
             return gap_analysis
+        # Step 2 — Goal-Centered Orchestration. Narrowly guarded: a bounded
+        # multi-stage goal (the existing decomposition composes >=2 steps)
+        # sequences through the EXISTING kernel-owned OrchestrationExecutor, and
+        # an EXACT bounded status form with an active plan is answered from the
+        # retained plan. Anything else returns None and keeps its existing route.
+        goal_response = self._maybe_handle_goal_request(text)
+        if goal_response is not None:
+            self._conversation.add_message(goal_response)
+            return goal_response
+        goal_followup = self._maybe_handle_goal_followup(text)
+        if goal_followup is not None:
+            self._conversation.add_message(goal_followup)
+            return goal_followup
         external_knowledge = self._maybe_handle_external_knowledge(text)
         if external_knowledge is not None:
             self._conversation.add_message(external_knowledge)
@@ -1907,6 +2067,17 @@ class ConversationService:
         if gap_analysis is not None:
             self._conversation.add_message(gap_analysis)
             yield gap_analysis.content
+            return
+        # Step 2 — Goal-Centered Orchestration (mirror of send()).
+        goal_response = self._maybe_handle_goal_request(text)
+        if goal_response is not None:
+            self._conversation.add_message(goal_response)
+            yield goal_response.content
+            return
+        goal_followup = self._maybe_handle_goal_followup(text)
+        if goal_followup is not None:
+            self._conversation.add_message(goal_followup)
+            yield goal_followup.content
             return
         external_knowledge = self._maybe_handle_external_knowledge(text)
         if external_knowledge is not None:

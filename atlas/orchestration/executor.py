@@ -60,6 +60,14 @@ _DENIED_PREFIXES: tuple[str, ...] = (
     "schedule.",
 )
 
+#: Step 2 — bounds on the carried result payload. A carried result is DATA
+#: only (never authority) and is structurally bounded so a later step can never
+#: receive unbounded upstream output.
+_MAX_CARRY_SOURCES: int = 4
+_MAX_CARRY_FINDINGS: int = 8
+_MAX_CARRY_COMPONENTS: int = 8
+_MAX_CARRY_TEXT: int = 240
+
 
 @dataclass(frozen=True, slots=True)
 class _AuthOutcome:
@@ -86,6 +94,8 @@ class OrchestrationExecutor:
         workspace_service: Any | None = None,
         research_service: Any | None = None,
         authority_service: AuthorityService | None = None,
+        investigation_service: Any | None = None,
+        investigation_synthesizer: Any | None = None,
     ) -> None:
         self._capability_registry = capability_registry
         self._capability_dispatcher = capability_dispatcher
@@ -93,6 +103,10 @@ class OrchestrationExecutor:
         self._workspace_service = workspace_service
         self._research_service = research_service
         self._authority_service = authority_service
+        # Step 2 — the two explicit typed step kinds. Each is ONE named,
+        # injected, read-only seam; no generic callable is ever accepted.
+        self._investigation_service = investigation_service
+        self._investigation_synthesizer = investigation_synthesizer
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -183,7 +197,11 @@ class OrchestrationExecutor:
             kind=step.kind,
             target=step.target,
             state=ExecutionState.PENDING,
-            metadata={"inputs": dict(step.inputs), "depends_on": tuple(step.depends_on)},
+            metadata={
+                "inputs": dict(step.inputs),
+                "depends_on": tuple(step.depends_on),
+                "carry_from": tuple(step.carry_from),
+            },
         )
         if not isinstance(step.target, str) or not step.target.strip():
             return self._failure(
@@ -229,6 +247,10 @@ class OrchestrationExecutor:
             return self._workspace_service is not None
         if step.kind is NodeKind.RESEARCH:
             return self._research_service is not None
+        if step.kind is NodeKind.INVESTIGATION:
+            return self._investigation_service is not None
+        if step.kind is NodeKind.ANALYSIS:
+            return self._investigation_synthesizer is not None
         return False
 
     @staticmethod
@@ -299,8 +321,20 @@ class OrchestrationExecutor:
                 terminal_authority_failure = True
                 break
 
+            # --- Result carry (Step 2): explicit, bounded, data-only ---
+            carry, carry_error = self._resolve_carry(step, results)
+            if carry_error:
+                results[idx] = self._failure(
+                    step, ExecutionState.FAILED, "dependency_failed", carry_error
+                )
+                executed.add(step.step_id)
+                if not request.continue_on_failure:
+                    self._stop_after_failure(results, executed, deps_map)
+                    break
+                continue
+
             # --- Execute the step (PENDING → RUNNING → terminal) ---
-            results[idx] = self._execute_step(step, request)
+            results[idx] = self._execute_step(step, request, carry)
             executed.add(step.step_id)
             executed_count += 1
 
@@ -386,10 +420,37 @@ class OrchestrationExecutor:
             authority=authority,
         )
 
+    def _resolve_carry(
+        self,
+        step: StepExecutionResult,
+        results: list[StepExecutionResult],
+    ) -> tuple[dict[str, dict], str]:
+        """Bounded, explicit result carry for one step (Step 2).
+
+        Returns ``(carry, error)``. ``carry`` maps each requested source step id
+        to that step's COMPLETED, bounded, JSON-safe output. A requested source
+        that did not complete yields an error, so the carrying step fails closed
+        and never fabricates downstream evidence. The carried payload is DATA
+        only and can never grant authority.
+        """
+        metadata = step.metadata if isinstance(step.metadata, dict) else {}
+        sources = tuple(metadata.get("carry_from", ()) or ())
+        if not sources:
+            return ({}, "")
+        by_id = {r.step_id: r for r in results}
+        carry: dict[str, dict] = {}
+        for source_id in sources[:_MAX_CARRY_SOURCES]:
+            source = by_id.get(source_id)
+            if source is None or source.state is not ExecutionState.COMPLETED:
+                return ({}, f"carried step did not complete: {source_id}")
+            carry[source_id] = _bounded_payload(source.output)
+        return (carry, "")
+
     def _execute_step(
         self,
         step: StepExecutionResult,
         request: ExecutionRequest,
+        carry: dict[str, dict] | None = None,
     ) -> StepExecutionResult:
         kind = step.kind
         target = step.target
@@ -398,6 +459,8 @@ class OrchestrationExecutor:
         authority = session_context.authority.value if session_context else None
 
         inputs = dict(step.metadata.get("inputs", {}) or {})
+        if carry:
+            inputs["carry"] = dict(carry)
         params = self._attributed_inputs(step, inputs, session_context)
 
         start = time.perf_counter()
@@ -410,6 +473,10 @@ class OrchestrationExecutor:
                 result = self._dispatch_workspace(step, params)
             elif kind is NodeKind.RESEARCH:
                 result = self._dispatch_research(step, params)
+            elif kind is NodeKind.INVESTIGATION:
+                result = self._dispatch_investigation(step, params)
+            elif kind is NodeKind.ANALYSIS:
+                result = self._dispatch_analysis(step, params)
             else:
                 result = {"success": False, "error": f"unsupported step kind: {kind.value}"}
         except Exception as exc:  # defensive — seams never raise, but fail closed
@@ -606,6 +673,80 @@ class OrchestrationExecutor:
         }
 
     # ------------------------------------------------------------------
+    # Step 2 — explicit typed conversational step kinds
+    # ------------------------------------------------------------------
+
+    def _dispatch_investigation(self, step: StepExecutionResult, params: dict) -> dict:
+        """Read-only repository investigation via the EXISTING seam.
+
+        Model-free, read-only, and bounded. A report with NO evidence at all
+        (no components and no findings) is reported as NO_EVIDENCE rather than
+        success, so a later step never synthesizes from nothing.
+        """
+        service = self._investigation_service
+        if service is None:
+            return {
+                "success": False,
+                "error": "investigation service not wired (fails closed)",
+            }
+        objective = params.get("objective")
+        objective = objective if isinstance(objective, str) else ""
+        try:
+            report = service.investigate(step.target, objective=objective)
+        except Exception as exc:  # defensive — the seam is read-only
+            return {"success": False, "error": f"investigation failed: {exc}"}
+        payload = _investigation_report_snapshot(report)
+        if not payload.get("components") and not payload.get("findings"):
+            return {
+                "success": False,
+                "error": "investigation produced no evidence for the requested objective",
+                "output": payload,
+                "failure_kind": StepFailureKind.NO_EVIDENCE.value,
+            }
+        return {
+            "success": True,
+            "output": payload,
+            "error": "",
+            "metadata": {"kind": "investigation"},
+        }
+
+    def _dispatch_analysis(self, step: StepExecutionResult, params: dict) -> dict:
+        """Deterministic synthesis over a CARRIED investigation result.
+
+        Consumes ONLY the bounded, data-only snapshot carried from the prior
+        step (``inputs["carry"]``); it never gathers evidence and never
+        fabricates. Exactly one carried source is required (fail closed).
+        """
+        synthesizer = self._investigation_synthesizer
+        if synthesizer is None:
+            return {
+                "success": False,
+                "error": "investigation synthesizer not wired (fails closed)",
+            }
+        carry = params.get("carry")
+        if not isinstance(carry, dict) or len(carry) != 1:
+            return {
+                "success": False,
+                "error": "analysis requires exactly one carried result (fail-closed)",
+            }
+        report = _report_from_snapshot(next(iter(carry.values())))
+        if report is None:
+            return {
+                "success": False,
+                "error": "carried result is not an investigation report (fail-closed)",
+            }
+        try:
+            synthesis = synthesizer.synthesize(report)
+        except Exception as exc:
+            return {"success": False, "error": f"synthesis failed: {exc}"}
+        return {
+            "success": True,
+            "output": _synthesis_snapshot(synthesis),
+            "error": "",
+            "metadata": {"kind": "analysis"},
+        }
+
+    # ------------------------------------------------------------------
     # Attribution helpers
     # ------------------------------------------------------------------
 
@@ -730,3 +871,134 @@ def _safe_snapshot(value: Any) -> Any:
         return str(value)
     except Exception:
         return "<unserializable>"
+
+
+# ---------------------------------------------------------------------------
+# Step 2 — bounded result/evidence projections (data only; never authority)
+# ---------------------------------------------------------------------------
+
+
+def _bounded_text(value: Any, limit: int = _MAX_CARRY_TEXT) -> str:
+    """Bounded, control-free text for a carried field."""
+    return value.strip()[:limit] if isinstance(value, str) else ""
+
+
+def _bounded_str_list(value: Any, limit: int = _MAX_CARRY_COMPONENTS) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = _bounded_text(item)
+        if text:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _bounded_payload(value: Any) -> dict:
+    """Bounded, JSON-safe view of one step's output (never raises)."""
+    snapshot = _safe_snapshot(value)
+    return snapshot if isinstance(snapshot, dict) else {"result": snapshot}
+
+
+def _investigation_report_snapshot(report: Any) -> dict:
+    """Bounded, JSON-safe projection of an InvestigationReport (the carry)."""
+    findings: list[dict] = []
+    for finding in tuple(getattr(report, "findings", ()) or ())[:_MAX_CARRY_FINDINGS]:
+        findings.append(
+            {
+                "category": _bounded_text(getattr(finding, "category", ""), 64),
+                "description": _bounded_text(getattr(finding, "description", "")),
+                "evidence": _bounded_text(getattr(finding, "evidence", "")),
+                "location": _bounded_text(getattr(finding, "location", "")),
+            }
+        )
+    return {
+        "target": _bounded_text(getattr(report, "target", "")),
+        "objective": _bounded_text(getattr(report, "objective", "")),
+        "diagnosis": _bounded_text(getattr(report, "diagnosis", "")),
+        "recommended_next_step": _bounded_text(
+            getattr(report, "recommended_next_step", "")
+        ),
+        "modification_status": _bounded_text(
+            getattr(report, "modification_status", ""), 32
+        ),
+        "components": _bounded_str_list(getattr(report, "components", ())),
+        "affected_files": _bounded_str_list(getattr(report, "affected_files", ())),
+        "findings": findings,
+    }
+
+
+def _report_from_snapshot(snapshot: Any) -> Any:
+    """Rebuild a bounded InvestigationReport from a carried snapshot, or None.
+
+    Fail-closed: a snapshot that is not a bounded investigation projection
+    returns ``None`` so the analysis step never invents a report.
+    """
+    if not isinstance(snapshot, dict) or "target" not in snapshot:
+        return None
+    if "findings" not in snapshot and "components" not in snapshot:
+        return None
+    from atlas.conversation.investigation import (
+        InvestigationFinding,
+        InvestigationReport,
+    )
+
+    findings: list[Any] = []
+    raw = snapshot.get("findings")
+    if isinstance(raw, list):
+        for entry in raw[:_MAX_CARRY_FINDINGS]:
+            if not isinstance(entry, dict):
+                continue
+            findings.append(
+                InvestigationFinding(
+                    category=_bounded_text(entry.get("category"), 64),
+                    description=_bounded_text(entry.get("description")),
+                    evidence=_bounded_text(entry.get("evidence")),
+                    location=_bounded_text(entry.get("location")),
+                )
+            )
+    return InvestigationReport(
+        target=_bounded_text(snapshot.get("target")),
+        objective=_bounded_text(snapshot.get("objective")),
+        findings=tuple(findings),
+        diagnosis=_bounded_text(snapshot.get("diagnosis")),
+        affected_files=tuple(_bounded_str_list(snapshot.get("affected_files"))),
+        recommended_next_step=_bounded_text(snapshot.get("recommended_next_step")),
+        modification_status="NONE",
+        components=tuple(_bounded_str_list(snapshot.get("components"))),
+    )
+
+
+def _synthesis_snapshot(synthesis: Any) -> dict:
+    """Bounded, JSON-safe projection of an InvestigationSynthesis."""
+    ranked: list[dict] = []
+    for item in tuple(getattr(synthesis, "ranked_components", ()) or ())[
+        :_MAX_CARRY_COMPONENTS
+    ]:
+        ranked.append(
+            {
+                "component": _bounded_text(getattr(item, "component", "")),
+                "score": int(getattr(item, "score", 0) or 0),
+            }
+        )
+    return {
+        "target": _bounded_text(getattr(synthesis, "target", "")),
+        "finding_count": int(getattr(synthesis, "finding_count", 0) or 0),
+        "component_count": int(getattr(synthesis, "component_count", 0) or 0),
+        "recommended_focus": _bounded_text(
+            getattr(synthesis, "recommended_focus", "")
+        ),
+        "recommended_reason": _bounded_text(
+            getattr(synthesis, "recommended_reason", "")
+        ),
+        "summary": _bounded_text(getattr(synthesis, "summary", "")),
+        "insufficient_evidence": bool(
+            getattr(synthesis, "insufficient_evidence", False)
+        ),
+        "modification_status": _bounded_text(
+            getattr(synthesis, "modification_status", ""), 32
+        ),
+        "ranked_components": ranked,
+    }

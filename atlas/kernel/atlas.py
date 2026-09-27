@@ -25,6 +25,7 @@ from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.development_need_detector import AdvisorySignal
 from atlas.conversation.investigation import InvestigationService
+from atlas.conversation.investigation_synthesis import InvestigationSynthesizer
 from atlas.conversation.message import Message
 from atlas.cognition.api import CognitionAPI
 from atlas.events.event_bus import EventBus
@@ -1554,6 +1555,35 @@ class Atlas:
         except Exception:
             pass
         return orchestration_result_to_message(result, intent=spec.intent)
+
+    def _goal_orchestration_bridge(self, text, steps, session_context=None):
+        """Step 2 — run a bounded multi-stage goal through the EXISTING executor.
+
+        The ordered steps are composed by the conversation layer from the
+        EXISTING semantic decomposition; this bridge only attributes the run to
+        the EXISTING session and executes it via the kernel-owned
+        ``OrchestrationExecutor``. It never approves, authorizes, or executes
+        governed development, and it never derives authority from text.
+        """
+        from atlas.orchestration.execution_models import ExecutionRequest
+        from atlas.orchestration.reporting import orchestration_result_to_message
+
+        executor = getattr(self, "_orchestration_executor", None)
+        if executor is None or not steps:
+            return None
+
+        request_session = session_context
+        if request_session is None:
+            request_session = getattr(self, "_session_context", None)
+
+        result = executor.execute(
+            ExecutionRequest(
+                steps=tuple(steps),
+                session_context=request_session,
+                max_steps=4,
+            )
+        )
+        return orchestration_result_to_message(result, intent=text)
 
     def _registered_tool_targets(self) -> set[str]:
         """Return the set of registered tool names (bounded, deterministic)."""
@@ -4694,6 +4724,11 @@ class Atlas:
             proposal_change_supplier=self._proposal_change_supplier,
             autonomy_check=self._autonomy_check,
             entity_catalog=entity_catalog,
+            # Step 2 — the bounded multi-stage goal route: the conversation
+            # layer composes an ordered plan from existing semantics; this
+            # kernel-owned bridge runs it through the EXISTING
+            # OrchestrationExecutor. Duck-typed; grants no authority.
+            goal_orchestration_resolver=self._goal_orchestration_bridge,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).
@@ -4738,6 +4773,10 @@ class Atlas:
             workspace_service=None,
             research_service=self._acquisition_service,
             authority_service=self._authority_service,
+            # Step 2 — the two explicit typed conversational step kinds. Both
+            # are existing, read-only, model-free seams.
+            investigation_service=InvestigationService(),
+            investigation_synthesizer=InvestigationSynthesizer(),
         )
 
         # --- Phase 13.2: Register core components in the registry ---

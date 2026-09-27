@@ -37,6 +37,12 @@ class NodeKind(str, Enum):
     B2.1 emits only ``CAPABILITY``. ``TOOL``, ``WORKSPACE``, ``RESEARCH``,
     and ``GOAL`` are future node kinds, defined here as the minimal
     structural boundary for B2.2 but never emitted by the planner.
+
+    Step 2 — Goal-Centered Orchestration adds two EXPLICIT, typed step kinds
+    so a bounded conversational goal can be sequenced over existing
+    capabilities (the InvestigationService and the deterministic
+    InvestigationSynthesizer). They are not a generic "run anything" escape
+    hatch: each kind maps to one named, injected, governed seam.
     """
 
     CAPABILITY = "capability"
@@ -44,6 +50,11 @@ class NodeKind(str, Enum):
     WORKSPACE = "workspace"
     RESEARCH = "research"
     GOAL = "goal"
+    #: Read-only repository investigation (existing InvestigationService).
+    INVESTIGATION = "investigation"
+    #: Deterministic synthesis over a carried investigation result (existing
+    #: InvestigationSynthesizer). Consumes the previous step's bounded output.
+    ANALYSIS = "analysis"
 
 
 class EdgeKind(str, Enum):
