@@ -412,7 +412,20 @@ was demonstrated:
   UNRESOLVED, restates the active subject when one exists, records a bounded
   `reference_clarification`, and never invents a referent, executes, approves or
   contacts a model. Remaining limitations are recorded in
-  `docs/ATLAS_STATE.md` §34.13. **Step 8 is NOT STARTED.**
+  `docs/ATLAS_STATE.md` §34.13.
+- **Step 8 — Conversational world state** — the multi-turn baseline showed
+  Atlas already retained the ACTIVE context and the most recent result, but did
+  not distinguish ACTIVE from HISTORICAL conversational state: after a topic
+  switch a prior topic still competed as an active contextual candidate (so a
+  plain pronoun reference went ambiguous and fell to the floor), and returning to
+  an earlier topic was not representable. One bounded, authority-free
+  `ConversationWorld` (active topic + bounded prior-topic history + most recent
+  unresolved reference) is now carried on the existing `ConversationState`, with
+  deterministic transitions, superseded topics excluded from the contextual
+  candidate set, and one topic-return handler. Representation only — no routing,
+  approval, execution, promotion, permission or model change. Remaining
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.14. **Steps 1 → 8 are
+  COMPLETE. Step 9 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

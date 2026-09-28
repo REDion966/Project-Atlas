@@ -33,6 +33,10 @@ from atlas.conversation.reference_resolution import (
     ConversationReferenceResolver,
     is_repeat_request,
 )
+from atlas.conversation.world_state import (
+    MAX_WORLD_TOPICS,
+    match_topics,
+)
 from atlas.conversation.research_objective import research_subject_gap
 from atlas.conversation.entity_capture import CapturedEntity, capture_named_entities
 from atlas.conversation.development_outcome_reporter import (
@@ -753,6 +757,39 @@ class ConversationService:
                 "content": content[:600],
             }
         )
+        # Step 8 — a knowledge turn establishes the queried subject as the ACTIVE
+        # world topic (a topic switch demotes the previous active topic to
+        # bounded history). Facts only; no authority, no execution.
+        self._observe_world_topic(
+            metadata.get("validated_query"), "knowledge", result_ref=""
+        )
+
+    def _observe_world_topic(
+        self,
+        label: Any,
+        kind: str,
+        *,
+        result_ref: Any = "",
+    ) -> None:
+        """Record a bounded conversational world topic (Step 8). Fail-soft.
+
+        Conversation-scoped, deterministic representation only. A blank label or
+        a missing state manager is ignored, so this can never break a turn and
+        never invents state.
+        """
+        if self._state_manager is None:
+            return
+        if not isinstance(label, str) or not label.strip():
+            return
+        try:
+            self._state_manager.observe_world_topic(
+                label.strip(),
+                kind,
+                result_ref=result_ref if isinstance(result_ref, str) else "",
+                turn_index=len(self._conversation.messages),
+            )
+        except Exception:  # fail-soft: world-state recording never breaks a turn
+            return
 
     def _maybe_handle_capability_detail_request(self, text: str) -> Message | None:
         """C4.1 — honour an explicit ``explain <name>`` request for a
@@ -1102,6 +1139,96 @@ class ConversationService:
         re.IGNORECASE,
     )
 
+    #: Step 8 — bounded "return to a prior topic" surface. These name a TOPIC the
+    #: conversation has already covered ("go back to the storage layer"), so the
+    #: world state can reactivate it. A pure reference target ("go back to that")
+    #: is deliberately excluded — that shape belongs to the existing Step 7
+    #: reference surface.
+    _TOPIC_RETURN_RE = re.compile(
+        r"^\s*(?:let'?s\s+|let\s+us\s+|please\s+|can\s+we\s+|could\s+we\s+)?"
+        r"(?:go\s+back\s+to|back\s+to|return\s+to|switch\s+back\s+to|revisit"
+        r"|re-?examine)\s+(?P<target>.+?)\s*[.!?]*\s*$",
+        re.IGNORECASE,
+    )
+
+    #: Bounded reference targets that are NOT a named prior topic; they keep the
+    #: existing Step 7 reference handler (never claimed as a topic return).
+    _TOPIC_RETURN_REFERENCE_TARGETS: frozenset[str] = frozenset(
+        {
+            "that", "this", "it", "them", "those", "these", "the one", "the ones",
+            "the other", "the previous one", "the last one", "the first one",
+            "the second one", "the other one", "the current one",
+        }
+    )
+
+    def _maybe_handle_topic_return(self, text: str) -> Message | None:
+        """Step 8 — return to a topic the conversation already covered.
+
+        Claims ONLY a bounded return form naming a specifically matching PRIOR
+        topic in the world state. It REACTIVATES that topic (making it the active
+        context, demoting the previously active one to bounded history) and
+        restates it. It never executes, approves, invents a topic, or contacts a
+        model, and it fails closed (``None``) when nothing matches — so every
+        existing route is unchanged.
+        """
+        if self._state_manager is None or not isinstance(text, str):
+            return None
+        match = self._TOPIC_RETURN_RE.match(text.strip())
+        if match is None:
+            return None
+        target = match.group("target").strip(" \t.,!?;:")
+        if not target:
+            return None
+        from atlas.conversation.normalization import collapse_whitespace
+
+        if collapse_whitespace(target).lower() in self._TOPIC_RETURN_REFERENCE_TARGETS:
+            return None
+
+        world = self._state_manager.state.world
+        if world is None or not world.topics:
+            return None
+        matches = match_topics(world, target)
+        if not matches:
+            return None
+        if len(matches) > 1:
+            lines = [
+                f"More than one topic in this conversation matches '{target}':",
+            ]
+            lines.extend(f"- {topic.label}" for topic in matches[:MAX_WORLD_TOPICS])
+            lines.append("Tell me which one you mean. Nothing was executed.")
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "world_state": {
+                        "status": "ambiguous",
+                        "requested": target,
+                        "candidates": [topic.label for topic in matches],
+                    }
+                },
+            )
+
+        reactivated = self._state_manager.reactivate_world_topic(target)
+        if not reactivated:
+            return None
+        topic = matches[0]
+        return Message(
+            role="assistant",
+            content=(
+                f"Returning to a prior topic: '{reactivated}' "
+                f"({topic.kind}). It is the active context again. Nothing was "
+                "executed or authorized."
+            ),
+            metadata={
+                "world_state": {
+                    "status": "reactivated",
+                    "topic": reactivated,
+                    "kind": topic.kind,
+                    "active_topic": reactivated,
+                }
+            },
+        )
+
     def _maybe_handle_ordinal_reference(self, text: str) -> Message | None:
         """Step 7 — represent an UNRESOLVED earlier-item reference honestly.
 
@@ -1148,6 +1275,13 @@ class ConversationService:
                 "please name the item you want."
             )
         lines.append("Nothing was invented or executed.")
+        # Step 8 — keep the unresolved reference visibly unresolved in the world
+        # state; it is NEVER promoted to the active topic. Fail-soft.
+        if self._state_manager is not None:
+            try:
+                self._state_manager.record_unresolved_reference(text.strip())
+            except Exception:
+                pass
         return Message(
             role="assistant",
             content="\n".join(lines),
@@ -1409,6 +1543,18 @@ class ConversationService:
                 "state": run_state,
             }
         )
+        # Step 8 — the goal's objective becomes the ACTIVE world topic. A later
+        # topic demotes it to bounded history; the retained plan is unchanged.
+        self._observe_world_topic(str(objective).strip(), "goal")
+        # ...and a GENUINELY finished goal is marked COMPLETE (distinct from
+        # ACTIVE) so completed work is never re-read as the active context.
+        if run_state == "completed" and self._state_manager is not None:
+            try:
+                self._state_manager.mark_world_topic_complete(
+                    str(objective).strip()
+                )
+            except Exception:
+                pass
 
     def _maybe_handle_goal_resume(self, text: str) -> Message | None:
         """Step 2 — RESUME the retained, unfinished plan from a later turn.
@@ -1957,6 +2103,14 @@ class ConversationService:
         if reference_answer is not None:
             self._conversation.add_message(reference_answer)
             return reference_answer
+        # Step 8 — returning to a topic the conversation already covered. Claims
+        # ONLY a bounded return form naming a matching PRIOR topic in the world
+        # state; it reactivates that topic (never executes, never invents one)
+        # and fails closed otherwise, so every existing route is unchanged.
+        topic_return = self._maybe_handle_topic_return(text)
+        if topic_return is not None:
+            self._conversation.add_message(topic_return)
+            return topic_return
         # Evidence gap analysis — a bounded request to analyze the retained
         # investigation findings reaches the EXISTING deterministic
         # EvidenceGapAnalyzer over the retained InvestigationReport. Read-only,
@@ -2351,6 +2505,14 @@ class ConversationService:
         if evidence_self_knowledge is not None:
             self._conversation.add_message(evidence_self_knowledge)
             yield evidence_self_knowledge.content
+            return
+        # Step 8 — returning to a prior topic (mirror of send(): same handler,
+        # same placement, same semantics). Reactivates a matching prior topic;
+        # never executes and fails closed.
+        topic_return = self._maybe_handle_topic_return(text)
+        if topic_return is not None:
+            self._conversation.add_message(topic_return)
+            yield topic_return.content
             return
         # Evidence gap analysis (mirror of send(): same handler, same
         # placement, same semantics). Read-only and state-preserving.
@@ -3548,6 +3710,12 @@ class ConversationService:
                 current_investigation=report.target,
                 latest_result=report.diagnosis,
             )
+        # Step 8 — the investigation target becomes the ACTIVE world topic (a
+        # topic switch demotes the previous active topic to bounded history, so a
+        # prior topic stops competing as active context). Representation only.
+        self._observe_world_topic(
+            report.target, "investigation", result_ref=report.diagnosis
+        )
 
         # Build the base investigation report content.
         content_parts = [report.to_markdown()]

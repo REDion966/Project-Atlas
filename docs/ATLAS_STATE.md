@@ -1839,6 +1839,100 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.14 Step 8 — Conversational world state: bounded active vs historical context
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 8 advanced the
+conversation layer from resolving individual references to maintaining the
+**relevant state of an ongoing conversation** — a bounded, deterministic
+*conversational world state* — and using it consistently across turns.
+
+**What the baseline showed (measured through the real Atlas/kernel, not
+assumed).** The existing `ConversationState` already retained a great deal:
+`current_subject`, `current_investigation`, `latest_result`,
+`relevant_prior_action`, `last_operation`, `captured_entities`,
+`current_objective`, `subtasks`, `corrections`, `last_knowledge` and the Step 2
+`current_plan`. The reference machinery already resolved
+pronoun/demonstrative/location and most-recent-result references and the Step 7
+unresolved-earlier-item representation already worked. Those were **not
+rebuilt**. The demonstrated gaps were:
+
+  * **active vs historical not distinguished** — after `"Investigate the
+    conversation state handling."` → `"Now investigate the knowledge decision
+    service."`, the plain follow-up `"What does it do?"` fell all the way to the
+    generic unsupported floor: the prior topic's turn still competed as an active
+    contextual candidate, so the resolver reported the reference *ambiguous* even
+    though one topic was unambiguously current;
+  * **prior topics not represented / topic return unsupported** — `"Go back to
+    the conversation state handling."` was mis-routed to the knowledge path
+    (a bogus empty answer for the literal phrase) because there was no
+    representation of the topics the conversation had covered;
+  * **completed work not distinct from active work**, and no record that a
+    reference had been left unresolved.
+
+**What was implemented (smallest coherent model).**
+- `atlas/conversation/world_state.py`: two bounded, immutable, authority-free
+  value objects — `WorldTopic` (`label`, `kind`, `turn_index`, `status`
+  `active|superseded|completed`, `result_ref`) and `ConversationWorld`
+  (`active_topic`, `active_kind`, `turn_index`, bounded ordered `topics`
+  most-recent-first, `unresolved_reference`) — plus pure deterministic
+  transitions `observe_topic` (new topic / continuation / topic switch, demoting
+  the previous active topic to bounded history), `reactivate_topic` (return to a
+  prior topic, fail-closed unless exactly one matches), `complete_topic`
+  (completion distinct from active) and `mark_unresolved_reference`. At most
+  `MAX_WORLD_TOPICS` (6) topics are retained; every field is length-capped.
+- `atlas/conversation/conversation_state.py`: a single new
+  `ConversationState.world` field (`ConversationWorld` or `None`) with
+  `to_dict`/rebuild round-tripping and manager lifecycle methods
+  (`observe_world_topic`, `reactivate_world_topic`, `mark_world_topic_complete`,
+  `record_unresolved_reference`). The existing manager remains the single owner
+  and serialization point — this is representation, not a second store.
+- `atlas/conversation/reference_resolution.py`: the bounded contextual candidate
+  set now **excludes SUPERSEDED (historical) topics**, so a prior topic stops
+  leaking into the current turn and the active topic wins. A state with no world
+  (or no superseded topics) is byte-for-byte unchanged.
+- `atlas/conversation/conversation_service.py`: bounded observations at the
+  existing hops — a completed read-only **investigation** and a **knowledge**
+  answer each establish the ACTIVE topic (a switch demotes the previous one to
+  history; an investigation also carries its result reference); a fully
+  **completed** Step 2 goal is marked COMPLETE (distinct from active); the Step 7
+  earlier-item handler records its reference as UNRESOLVED (never promoted to a
+  topic); and one new handler `_maybe_handle_topic_return` recognizes a bounded
+  `"go back to <named topic>"` / `"return to …"` / `"revisit …"` form, makes the
+  matching prior topic active again, and restates it — else it fails closed to
+  the existing route.
+
+Scope: representation only. No new engine, planner, scheduler, store, approval or
+promotion mechanism; no routing/authority/permission change; no model or network
+call; every governed and fail-closed boundary is preserved.
+
+**Validation.** `tests/test_step8_conversational_world_state.py` — 43 focused
+tests (model creation/update/bounds/serialization; topic match/reactivate,
+fail-closed on no-match and on ambiguity; manager lifecycle, isolation and clear;
+service observation, topic switch, pronoun-after-switch, topic return, unknown
+target, unsupported-request non-clobber, unresolved-not-promoted, knowledge
+topic, stream parity, no-authority; Step 5/6/7 preservation; real-kernel
+multi-turn world-state continuity, unresolved-reference persistence and
+failed-request non-clobber). Relevant subsystem regressions were green — Step 2
+orchestration, Steps 5/6/7, reference resolution/consumption/exposure/stream
+parity, conversation state/context, L4/L5 retention, L7 cognition floor, builtin
+state answers, self-knowledge bridge, G1/G1-routing/G2/G3 gates, open-ended
+conversation, NLU-4/NLU-5 entities, target-state and architecture-import
+guards. The same four pre-existing failures documented elsewhere were reproduced
+against a pristine HEAD and remain unchanged (they are NOT caused by Step 8). No
+full-suite re-run.
+
+**Known limitations (truthful).** The world state tracks work topics
+(investigations, knowledge queries, completed goals) plus the corrected reading
+carried by a correction that performs work; a purely textual correction is still
+represented only by the existing `ConversationState.corrections` record. A
+reference that returns to a topic whose kind is *not* an investigation (e.g. a
+knowledge query) is represented (the topic is reactivated) but is not
+independently consumable by the reference-restatement surface, which stays
+bound to the existing stored slots. Topic matching is bounded normalized
+equality/containment — never fuzzy or semantic. These remain evidence-driven,
+separately authorized work — no L11+/G4/C10 phase or Step 9 is created or
+implied.
+
 ### 34.13 Step 7 — Context & reference understanding across turns
 
 **Status: COMPLETE (additive, not a roadmap phase).** A multi-turn baseline
@@ -2195,5 +2289,33 @@ resolved because no numbered history is retained; one phrasing is owned by anoth
 existing surface; plural pronouns without a bounded intent still reach the Step 5
 floor); §34.13; the next step (Step 8) is NOT STARTED and remains
 evidence-driven).
+Step 8 conversational world state reconciled: 2026-09-28 (multi-turn baseline
+through the real kernel confirmed the existing `ConversationState` and reference
+machinery already retained/resolved the ACTIVE context and the most recent
+result; the demonstrated gap was that ACTIVE and HISTORICAL conversational state
+were not distinguished — after a topic switch a prior topic's turn still
+competed as an active contextual candidate, so a plain pronoun reference went
+AMBIGUOUS and fell to the generic floor, and returning to an earlier topic was
+not representable. Minimal change: a bounded, authority-free
+`ConversationWorld`/`WorldTopic` representation (`atlas/conversation/world_state.py`)
+carried on the existing `ConversationState` as one `world` field, with
+deterministic transitions (new topic / continuation / switch / return /
+completion / unresolved reference), SUPERSEDED topics excluded from the bounded
+contextual reference candidate set, bounded observations at the existing
+investigation/knowledge/goal hops, a completed goal marked COMPLETE (distinct
+from active), and one `_maybe_handle_topic_return` handler wired after the
+existing reference surfaces; no new engine/planner/scheduler/store/authority, no
+permission expansion, no routing/approval/execution/promotion change, no model
+dependency. 43 focused tests plus relevant subsystem regressions green (Steps
+2/5/6/7, reference resolution/consumption/exposure/stream parity, conversation
+state/context, L4/L5 retention, L7 floor, builtin answers, self-knowledge bridge,
+G1/G1-routing/G2/G3, open-ended conversation, NLU-4/5, architecture-import
+guards); the four pre-existing failures were reproduced against a pristine HEAD
+and remain unchanged; no full-suite re-run; known limitations recorded in §34.14
+(purely textual corrections are represented by the existing `Correction` records
+rather than as a world topic; a return to a non-investigation topic is
+represented but not independently consumable by the reference-restatement
+surface; topic matching is bounded equality/containment, never fuzzy); §34.14;
+Steps 1 → 8 are COMPLETE and Step 9 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

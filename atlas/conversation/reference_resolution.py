@@ -356,6 +356,26 @@ def _subject_key(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
+def _superseded_topic_keys(state: ConversationState | None) -> frozenset[str]:
+    """Return the normalized keys of the SUPERSEDED (historical) topics.
+
+    Step 8 — a topic the conversation has moved on from must not compete as the
+    active referent. Absent/blank world state yields an empty set, so every
+    existing resolution keeps precedence and nothing is filtered.
+    """
+    world = getattr(state, "world", None)
+    if world is None:
+        return frozenset()
+    keys: set[str] = set()
+    for topic in getattr(world, "topics", ()) or ():
+        if getattr(topic, "status", "") == "active":
+            continue
+        key = _subject_key(getattr(topic, "label", "") or "")
+        if key:
+            keys.add(key)
+    return frozenset(keys)
+
+
 def _context_subject_candidates(
     context: Any,
     state: ConversationState | None,
@@ -372,13 +392,24 @@ def _context_subject_candidates(
     order; bounded count.
     """
     query_key = _subject_key(query)
+    superseded = _superseded_topic_keys(state)
     candidates: list[tuple[str, str]] = []
 
     def _add(field: str, value: Any) -> None:
         if isinstance(value, str):
             text = value.strip()
-            if text and _subject_key(text) != query_key:
-                candidates.append((field, text))
+            if not text:
+                return
+            key = _subject_key(text)
+            if key == query_key:
+                return
+            # Step 8 — a SUPERSEDED (historical) topic must not compete as the
+            # active referent: the conversation has moved on from it, and its
+            # turn is noise for the CURRENT topic. Only filtered when a world
+            # state explicitly recorded it as historical.
+            if key in superseded:
+                return
+            candidates.append((field, text))
 
     if state is not None:
         _add(

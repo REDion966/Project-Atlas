@@ -29,6 +29,13 @@ from typing import Any, Optional
 import uuid
 
 from atlas.conversation.entity_capture import CapturedEntity
+from atlas.conversation.world_state import (
+    ConversationWorld,
+    complete_topic,
+    mark_unresolved_reference,
+    observe_topic,
+    reactivate_topic,
+)
 
 #: Bound applied to a retained governed-operation operand.
 _MAX_OPERATION_OPERAND_CHARS: int = 500
@@ -260,6 +267,14 @@ class ConversationState:
     # and every governed boundary is unchanged. Not an event store or workflow DB.
     current_plan: Optional[dict[str, Any]] = None
 
+    # Step 8 — bounded conversational WORLD STATE: the ACTIVE topic (and what
+    # kind of thing it is), the bounded ordered history of PRIOR topics, and the
+    # most recent unresolved reference. It separates ACTIVE from HISTORICAL
+    # context so prior topics stop leaking into the current turn and returning to
+    # an earlier topic is representable. Representation only: never authority,
+    # never a second persistence mechanism, never a durable memory store.
+    world: Optional[ConversationWorld] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -310,6 +325,11 @@ class ConversationState:
             "current_plan": (
                 dict(self.current_plan)
                 if isinstance(self.current_plan, dict)
+                else None
+            ),
+            "world": (
+                self.world.to_dict()
+                if isinstance(self.world, ConversationWorld)
                 else None
             ),
             "turn_id": self.turn_id,
@@ -392,6 +412,15 @@ class ConversationStateManager:
         # Retained knowledge fact must stay a plain dict (or None).
         if not isinstance(merged.get("last_knowledge"), dict):
             merged["last_knowledge"] = None
+        # Step 8 — rebuild the bounded world state so a to_dict round-trip
+        # preserves its typed value (fail closed to None on malformed input).
+        raw_world = merged.get("world")
+        if isinstance(raw_world, ConversationWorld):
+            merged["world"] = raw_world
+        elif isinstance(raw_world, dict):
+            merged["world"] = ConversationWorld.from_dict(raw_world)
+        else:
+            merged["world"] = None
         self._state = ConversationState(**merged)
         return self._state
 
@@ -547,3 +576,72 @@ class ConversationStateManager:
             )
         bounded = tuple(list(ordered.values())[-max(1, limit):])
         return self.update(captured_entities=bounded)
+
+    # ------------------------------------------------------------------
+    # Step 8 — conversational world-state lifecycle
+    # ------------------------------------------------------------------
+
+    def _world(self) -> ConversationWorld:
+        """Return the retained world state, or a fresh empty one."""
+        return self._state.world or ConversationWorld()
+
+    def observe_world_topic(
+        self,
+        label: str,
+        kind: str,
+        *,
+        result_ref: str = "",
+        turn_index: int = 0,
+    ) -> ConversationState:
+        """Establish ``label`` as the ACTIVE topic, demoting any prior one.
+
+        Bounded, deterministic and authority-free: it records a fact from
+        conversation/system evidence, never a guess. A blank label is ignored
+        (fail closed).
+        """
+        return self.update(
+            world=observe_topic(
+                self._world(),
+                label,
+                kind,
+                result_ref=result_ref,
+                turn_index=turn_index,
+            )
+        )
+
+    def reactivate_world_topic(self, query: str) -> Optional[str]:
+        """Make a matching PRIOR topic ACTIVE again; return its label or ``None``.
+
+        Fails closed unless exactly one topic matches. When the reactivated topic
+        is an investigation, the retained ``current_investigation`` slot is moved
+        to it too, so the active state stays internally consistent. History is
+        preserved (the previously active topic is demoted, not erased).
+        """
+        world = self._state.world
+        if world is None:
+            return None
+        updated = reactivate_topic(world, query)
+        if updated is None:
+            return None
+        fields: dict[str, Any] = {"world": updated}
+        if updated.active_kind == "investigation":
+            fields["current_investigation"] = updated.active_topic
+        self.update(**fields)
+        return updated.active_topic
+
+    def mark_world_topic_complete(self, label: str) -> ConversationState:
+        """Mark a topic COMPLETE (distinct from ACTIVE); history is preserved.
+
+        Used when a goal genuinely finishes, so completed work is never re-read
+        as the active context. A blank/unknown label is ignored (fail closed).
+        """
+        world = self._state.world
+        if world is None:
+            return self._state
+        return self.update(world=complete_topic(world, label))
+
+    def record_unresolved_reference(self, text: str) -> ConversationState:
+        """Record the most recent UNRESOLVED reference (never a topic)."""
+        return self.update(
+            world=mark_unresolved_reference(self._world(), text)
+        )
