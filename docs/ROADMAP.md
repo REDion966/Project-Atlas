@@ -506,7 +506,20 @@ was demonstrated:
   every existing surface declined (gated on Atlas having no model-backed open
   conversation), and every knowledge answer carries the need as additive
   metadata. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.21.
-  **Steps 1 → 15 are COMPLETE. Step 16 is NOT STARTED.**
+- **Step 16 — Autonomous research** — the real-kernel baseline showed the
+  authorized acquisition machinery already worked (deny-by-default denied with
+  nothing fetched; the F8 pipeline produced claims, sources and source evidence)
+  but there was no seam connecting the Step 15 knowledge need to research and no
+  structured research result, and the existing statuses could not distinguish an
+  unavailable source from an insufficient result from a failed/blocked one. A
+  bounded, deterministic, model-free orchestration now decides actionability,
+  formulates a bounded request, executes through the EXISTING governed D2
+  boundary and maps its result into ONE `ResearchOutcome` (closed status set,
+  source identity and raw evidence preserved for the later provenance step,
+  `established` only when validated claims were actually produced). It enables no
+  source, unlocks no network access, persists and promotes nothing, and consults
+  no model. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.22.
+  **Steps 1 → 16 are COMPLETE. Step 17 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

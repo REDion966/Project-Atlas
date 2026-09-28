@@ -1839,6 +1839,92 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.22 Step 16 — Autonomous research: acting on an actionable knowledge need
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 16 built the smallest
+evidence-driven, deterministic, model-independent capability that lets Atlas ACT
+on an actionable knowledge need by researching through the EXISTING authorized
+acquisition machinery, and return ONE structured research result. It reuses the
+existing mechanisms rather than rebuilding them: the governed D2 boundary
+(`atlas.research.external_acquisition`, which owns the deny-by-default host
+policy) and the existing F8 pipeline (`InformationAcquisitionService` /
+`ConcreteResearchCoordinator`). It performs research/acquisition execution and
+reporting ONLY — no source evaluation/provenance system (Step 17), no knowledge
+representation/learning (Step 18), no temporal/refresh work (Steps 19-20), no
+continuous monitoring, no capability-gap detection, no self-development.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+authorized machinery already worked and was NOT rebuilt: the D2 boundary
+returned `no_authorized_source` with the denied hosts recorded and **nothing
+fetched**, and the F8 service produced `ok` with claims, sources,
+`source_evidence` and report ids. But there was **no seam connecting the Step 15
+`KnowledgeNeed` to research** (`Atlas` had no such API and no research-result
+type existed), and the existing statuses could not distinguish "unavailable
+source" from "insufficient result" from "failed/blocked" in one place tied to
+the need.
+
+**What was implemented (one bounded orchestration over existing machinery).**
+- `atlas/research/research_outcome.py` (new): `ResearchStatus` (`not_needed` /
+  `researched` / `no_authorized_source` / `insufficient` / `failed` /
+  `unknown`), `ResearchMechanism` (`none` / `existing_validated_knowledge` /
+  `governed_external_acquisition`), a bounded `ResearchRequest` (the request
+  formulated from the need: objective, query, need kind/status, freshness, and
+  the candidate/authorized/denied URLs), `ResearchSourceEvidence` (per-source
+  identity + claim counts) and an immutable, length-bounded `ResearchOutcome`
+  that preserves source identity and raw evidence for the later provenance step
+  and states `established` (true only when research actually produced validated
+  claims). `map_acquisition_result(...)` is a pure, deterministic mapping of the
+  EXISTING `ExternalAcquisitionResult`; `ResearchOrchestrator.research(need, ...)`
+  decides actionability, formulates the request, executes through the existing
+  boundary, and maps the outcome — never raising, never guessing.
+- `atlas/kernel/atlas.py`: `Atlas.research_knowledge_need(text, candidate_urls)`
+  composes the EXISTING Step 15 detection with the EXISTING governed boundary;
+  `Atlas.research_orchestrator` is wired to `Atlas.external_acquisition`, so the
+  authorization boundary is the same one the CLI and the knowledge decision use.
+
+**Bounded, deny-by-default and model-independent by construction.** No source is
+enabled and no network access is unlocked here: an unlisted host is denied by the
+existing policy **before any I/O**, and a request with no authorized candidate
+reaches nothing. The research decision and its mapping are pure functions of the
+need plus the acquisition result — no AI, no clock, no storage. `researched`
+requires validated claims to actually have been established; an authorized source
+that establishes nothing is `insufficient`; a denied or failed attempt claims
+nothing. Research that succeeded is **not** persisted, promoted or turned into
+knowledge by this step (the existing governed ingest path remains the only
+persistence boundary), and no model decides whether research is valid. A
+genuinely non-need (satisfied / ambiguous / unsupported-capability) is never
+researched, and an unavailable `research` capability fails closed.
+
+**Validation.** `tests/test_step16_autonomous_research.py` — 31 focused tests
+(pure outcome mapping incl. deny/insufficient/failed/unrecognised and
+determinism; actionability, request formulation and boundedness; the REAL
+production D2 stack over a pointer-free fake transport proving a denied host
+fetches *nothing* while an authorized host researches once and preserves source
+identity/evidence; and real-kernel validation of deny-by-default on an unseen
+request, existing-validated-knowledge short-circuiting, an authorized
+kernel-level research success with no network, orchestrator↔boundary wiring,
+conversation↔kernel agreement, no authority/persistence/mutation, Steps 1-15
+preservation and send/stream parity). Relevant subsystem regressions were green
+(Steps 13-15, the kernel suite, the D2/F8/web-allowlist/source-discovery/
+acquisition-need/strategy/planning/authorized-boundary suites and the C6/D3/D4
+knowledge suites). The pre-existing failures documented elsewhere were reproduced
+against a pristine HEAD and remain unchanged — they are NOT caused by Step 16.
+No full-suite re-run.
+
+**Known limitations (truthful).** Research reaches external sources only through
+the configured `research.web_allowed_hosts` allowlist; with the default empty
+allowlist every attempt is `no_authorized_source` (nothing is fetched), so
+`actionable` needs require the OWNER to authorize a source first — this step
+never authorizes one, and `no_authorized_source` means the OWNER authorization is
+missing, not that research is impossible. `insufficient` vs `failed` is derived
+from whether the existing boundary attached an inner acquisition result (the
+source was reached) or the path itself failed. The research capability remains
+governed (`knowledge_acquisition` requires the existing OWNER approval boundary)
+and this step adds no authority. Source evaluation, provenance scoring, knowledge
+representation/learning, freshness/refresh and monitoring remain evidence-driven,
+separately authorized work — no Step 17 implementation or later phase is created
+or implied.
+
 ### 34.21 Step 15 — Autonomous knowledge need detection: a structured, bounded need
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 15 built the smallest
@@ -3119,7 +3205,29 @@ were reproduced against a pristine HEAD and remain unchanged; no full-suite
 re-run; known limitations recorded in §34.21 (recognition is deliberately narrow;
 goal-claimed phrasings keep their route; deny-by-default means every detected need
 is unsatisfiable without OWNER authorization; detection only — no research,
-acquisition, storage/learning or capability-gap detection); §34.21; Steps 1 → 15
-are COMPLETE and Step 16 is NOT STARTED and remains evidence-driven).
+acquisition, storage/learning or capability-gap detection); §34.21).
+Step 16 autonomous research added: 2026-09-28 (the real-kernel baseline showed the
+EXISTING authorized acquisition machinery already worked — deny-by-default denied
+with nothing fetched, and the F8 pipeline produced claims/sources/source_evidence
+— but there was NO seam connecting the Step 15 knowledge need to research and no
+structured research result, and the existing statuses could not distinguish
+unavailable source vs insufficient result vs failed/blocked). Minimal change: one
+new pure module (`atlas/research/research_outcome.py`) decides actionability,
+formulates a bounded research request, executes through the EXISTING governed D2
+boundary and maps the EXISTING `ExternalAcquisitionResult` into ONE bounded
+`ResearchOutcome` (closed status set, source identity + raw evidence preserved for
+the later provenance step, `established` true only when validated claims were
+actually produced); `Atlas.research_knowledge_need()` composes the existing
+Step 15 detection with `Atlas.external_acquisition` as the single authorization
+boundary (no source enabled, no network unlocked, nothing persisted or promoted,
+no model consulted). 31 focused tests plus relevant research/knowledge/kernel
+regressions green; the pre-existing failures were reproduced against a pristine
+HEAD and remain unchanged; no full-suite re-run; known limitations recorded in
+§34.22 (only the configured allowlist is reachable, so default deny-by-default
+yields no_authorized_source and needs OWNER authorization; insufficient vs failed
+is derived from whether the boundary attached an inner acquisition result;
+governed knowledge_acquisition still requires OWNER approval; no source
+evaluation/provenance, representation/learning or refresh); §34.22; Steps 1 → 16
+are COMPLETE and Step 17 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

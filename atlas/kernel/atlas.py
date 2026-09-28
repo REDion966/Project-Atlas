@@ -483,6 +483,9 @@ class Atlas:
         # --- D3: conversation <-> knowledge integration (lazy) ---
         self._knowledge_decision: Any | None = None
 
+        # --- Step 16: bounded autonomous research over the D2 boundary (lazy) ---
+        self._research_orchestrator: Any | None = None
+
         # --- D4: self-directed work orchestration (lazy) ---
         self._work_orchestrator: Any | None = None
 
@@ -1171,6 +1174,48 @@ class Atlas:
             capability=capability,
             capability_state=state,
             capability_reason=reason,
+        )
+
+    @property
+    def research_orchestrator(self):
+        """Step 16 — the bounded research orchestrator over the EXISTING boundary.
+
+        Executes an actionable knowledge need through the EXISTING governed
+        external-acquisition boundary (D2), which owns the deny-by-default host
+        policy; it enables no source, unlocks no network access, persists and
+        promotes nothing, and consults no model.
+        """
+        if self._research_orchestrator is None:
+            from atlas.research.research_outcome import ResearchOrchestrator
+
+            self._research_orchestrator = ResearchOrchestrator(
+                external_acquirer=self.external_acquisition,
+                capability_state_provider=self._research_capability_state,
+            )
+        return self._research_orchestrator
+
+    def _research_capability_state(self) -> str:
+        """Step-13 state of the operational ``research`` capability (fail-soft)."""
+        try:
+            entry = self.capability_model().find("research")
+        except Exception:
+            return ""
+        return str(getattr(entry, "state", "") or "") if entry is not None else ""
+
+    def research_knowledge_need(self, text: str, candidate_urls=()):
+        """Step 16 — research an ACTIONABLE knowledge need (structured result).
+
+        Composes the EXISTING Step 15 detection (``knowledge_need``) with the
+        EXISTING governed acquisition boundary, and returns ONE bounded
+        ``ResearchOutcome``. Deterministic and model-free: it decides whether to
+        research, formulates a bounded request, and reports exactly what the
+        authorized path returned. It never enables a source, never bypasses the
+        deny-by-default policy or the OWNER, never persists/promotes acquired
+        knowledge, and never claims knowledge research did not establish.
+        """
+        need = self.knowledge_need(text)
+        return self.research_orchestrator.research(
+            need, candidate_urls=tuple(candidate_urls or ())
         )
 
     @property
@@ -5441,6 +5486,7 @@ class Atlas:
         self._self_management_review = None
         self._external_acquirer = None
         self._knowledge_decision = None
+        self._research_orchestrator = None
         self._work_orchestrator = None
         self._development_run_orchestrator = None
         self._boot_activation = None
