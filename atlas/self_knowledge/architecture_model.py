@@ -118,6 +118,70 @@ class SubsystemEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class CapabilityArchitectureEntry:
+    """Architecture/ownership view of one capability (Step 14, immutable).
+
+    The capability-centric join: which component(s) own/provide the capability
+    (empty for an operational capability, which is owned by the conversation
+    route its evidence names), its grounded state (Step 13), and its declared
+    operations/category. It reuses the EXISTING capability model — no second
+    source of truth.
+    """
+
+    name: str
+    kind: str
+    state: str
+    availability: str
+    governed: bool
+    governing: str = ""
+    components: tuple[str, ...] = ()
+    category: str = ""
+    operations: tuple[str, ...] = ()
+    owner_evidence: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "kind": self.kind,
+            "state": self.state,
+            "availability": self.availability,
+            "governed": self.governed,
+            "governing": self.governing,
+            "components": list(self.components),
+            "category": self.category,
+            "operations": list(self.operations),
+            "owner_evidence": list(self.owner_evidence),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GovernanceBoundary:
+    """One grounded governance boundary (a governed capability; immutable)."""
+
+    capability: str
+    governing: str
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "capability": self.capability,
+            "governing": self.governing,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeBoundary:
+    """Bounded, grounded statement of what architecture info is known/unknown."""
+
+    known: tuple[str, ...] = ()
+    unknown: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"known": list(self.known), "unknown": list(self.unknown)}
+
+
+@dataclass(frozen=True, slots=True)
 class LocateResult:
     """Evidence-only answer to "where does this capability/module live?"."""
 
@@ -173,6 +237,14 @@ class ArchitectureModel:
     symbol_count: int = 0
     capability_index: tuple[tuple[str, tuple[str, ...]], ...] = ()
     repository_map: Any = None
+    #: Step 14 — the capability↔architecture join (ownership + grounded state).
+    capabilities: tuple[CapabilityArchitectureEntry, ...] = ()
+    #: Step 14 — grounded governance boundaries (the governed capabilities).
+    governance: tuple[GovernanceBoundary, ...] = ()
+    #: Step 14 — what architecture information is known vs unknown.
+    knowledge_boundary: Optional[KnowledgeBoundary] = None
+    #: Step 14 — count of capabilities whose state could not be established.
+    unknown_state_count: int = 0
 
     # ------------------------------------------------------------------
     # Serialization / rendering
@@ -186,11 +258,19 @@ class ArchitectureModel:
             "module_count": self.module_count,
             "edge_count": self.edge_count,
             "symbol_count": self.symbol_count,
+            "unknown_state_count": self.unknown_state_count,
             "status_counts": [list(x) for x in self.status_counts],
             "source_counts": [list(x) for x in self.source_counts],
             "limitations": list(self.limitations),
             "subsystems": [s.to_dict() for s in self.subsystems],
             "components": [c.to_dict() for c in self.components],
+            "capabilities": [c.to_dict() for c in self.capabilities],
+            "governance": [g.to_dict() for g in self.governance],
+            "knowledge_boundary": (
+                self.knowledge_boundary.to_dict()
+                if self.knowledge_boundary is not None
+                else None
+            ),
         }
 
     def to_markdown(self) -> str:
@@ -245,6 +325,37 @@ class ArchitectureModel:
             )
             for limitation in component.limitations:
                 lines.append(f"    - limitation: {limitation}")
+
+        if self.governance:
+            lines.append("")
+            lines.append("## Governance boundaries")
+            for boundary in self.governance:
+                lines.append(
+                    f"- `{boundary.capability}` governing={boundary.governing}"
+                    + (f" — {boundary.reason}" if boundary.reason else "")
+                )
+
+        if self.capabilities:
+            lines.append("")
+            lines.append("## Capabilities (ownership + state)")
+            for capability in self.capabilities:
+                owner = (
+                    ", ".join(capability.components)
+                    or ", ".join(capability.owner_evidence)
+                    or "(no registered owner)"
+                )
+                lines.append(
+                    f"- `{capability.name}` [{capability.kind}] state="
+                    f"{capability.state} owner={owner}"
+                )
+
+        if self.knowledge_boundary is not None:
+            lines.append("")
+            lines.append("## Knowledge boundary")
+            for known in self.knowledge_boundary.known:
+                lines.append(f"- known: {known}")
+            for unknown in self.knowledge_boundary.unknown:
+                lines.append(f"- unknown: {unknown}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -499,6 +610,22 @@ class ArchitectureModelBuilder:
             except Exception:
                 symbol_count = 0
 
+        # Step 14 — the capability↔architecture join and the grounded
+        # governance boundaries, both derived from the SAME capability model
+        # (no second source of truth).
+        capabilities, governance, unknown_state_count = self._capability_join(
+            capability_model
+        )
+        knowledge_boundary = self._knowledge_boundary(
+            components=components,
+            capability_model=capability_model,
+            modules=modules,
+            capabilities=capabilities,
+            governance=governance,
+            unknown_state_count=unknown_state_count,
+            limitations=limitations,
+        )
+
         return ArchitectureModel(
             subsystems=subsystems,
             components=component_entries,
@@ -513,6 +640,10 @@ class ArchitectureModelBuilder:
             limitations=limitations,
             capability_index=tuple(sorted(capability_index.items())),
             repository_map=repository_map if modules else None,
+            capabilities=capabilities,
+            governance=governance,
+            knowledge_boundary=knowledge_boundary,
+            unknown_state_count=unknown_state_count,
         )
 
     # ------------------------------------------------------------------
@@ -552,6 +683,124 @@ class ArchitectureModelBuilder:
             )
             index[name] = members
         return index
+
+    @staticmethod
+    def _capability_join(
+        capability_model: Any | None,
+    ) -> "tuple[tuple[CapabilityArchitectureEntry, ...], tuple[GovernanceBoundary, ...], int]":
+        """Join capability ownership + grounded state from the capability model.
+
+        Reuses the EXISTING capability model (Steps 12-13) — it never invents an
+        owner, a state or a governance boundary. Returns the bounded capability
+        entries, the grounded governance boundaries, and the count of
+        capabilities whose state could not be established.
+        """
+        if capability_model is None:
+            return (), (), 0
+        entries = getattr(capability_model, "entries", None)
+        if not entries:
+            return (), (), 0
+
+        capabilities: list[CapabilityArchitectureEntry] = []
+        governance: list[GovernanceBoundary] = []
+        unknown_state = 0
+        for entry in entries:
+            name = _clean_text(getattr(entry, "name", ""))
+            if not name:
+                continue
+            state = _clean_text(getattr(entry, "state", ""), 32) or "unknown"
+            if state == "unknown":
+                unknown_state += 1
+            governing = _clean_text(getattr(entry, "governing", ""), 64)
+            # Owner evidence: a registered component is named by the source
+            # reference; an operational capability has no component, so its
+            # source DETAIL (the backing route/module) is the owner evidence.
+            evidence: set[str] = set()
+            for source in getattr(entry, "sources", ()) or ():
+                kind = _clean_text(getattr(source, "kind", ""), 64)
+                if kind == "operational_capability":
+                    value = _clean_text(getattr(source, "detail", ""), 120)
+                else:
+                    value = _clean_text(getattr(source, "reference", ""), 120)
+                if value:
+                    evidence.add(value)
+            owner_evidence = tuple(sorted(evidence))[:4]
+            components = tuple(
+                sorted(
+                    {
+                        str(component)
+                        for component in (getattr(entry, "components", ()) or ())
+                        if str(component)
+                    }
+                )
+            )
+            capabilities.append(
+                CapabilityArchitectureEntry(
+                    name=name,
+                    kind=str(
+                        getattr(getattr(entry, "kind", None), "value", "") or ""
+                    ),
+                    state=state,
+                    availability=str(
+                        getattr(
+                            getattr(entry, "availability", None), "value", ""
+                        )
+                        or ""
+                    ),
+                    governed=bool(governing),
+                    governing=governing,
+                    components=components,
+                    category=_clean_text(getattr(entry, "category", ""), 64),
+                    operations=tuple(
+                        str(op)
+                        for op in (getattr(entry, "operations", ()) or ())
+                        if str(op)
+                    )[:8],
+                    owner_evidence=owner_evidence,
+                )
+            )
+            if governing:
+                governance.append(
+                    GovernanceBoundary(
+                        capability=name,
+                        governing=governing,
+                        reason=_clean_text(getattr(entry, "reason", "")),
+                    )
+                )
+        return tuple(capabilities), tuple(governance), unknown_state
+
+    @staticmethod
+    def _knowledge_boundary(
+        *,
+        components: list[Any],
+        capability_model: Any | None,
+        modules: list[Any],
+        capabilities: "tuple[CapabilityArchitectureEntry, ...]",
+        governance: "tuple[GovernanceBoundary, ...]",
+        unknown_state_count: int,
+        limitations: tuple[str, ...],
+    ) -> KnowledgeBoundary:
+        """State what the model KNOWS and what it does NOT (grounded)."""
+        known: list[str] = [
+            f"{len(components)} registered component(s) with a declared entry module",
+            f"{len(modules)} repository module(s) with static import edges"
+            if modules
+            else "0 repository modules (map unavailable)",
+            f"{len(capabilities)} capability/tool entr(ies) joined from the capability model",
+            f"{len(governance)} governed capability(ies) with an evidence-derived governing condition",
+        ]
+        unknown: list[str] = list(limitations)
+        if unknown_state_count:
+            unknown.append(
+                f"{unknown_state_count} capability(ies) with insufficient state "
+                "evidence (state=unknown)."
+            )
+        if capability_model is None:
+            unknown.append(
+                "Capability↔architecture ownership join omitted (capability model "
+                "unavailable)."
+            )
+        return KnowledgeBoundary(known=tuple(known[:8]), unknown=tuple(unknown[:12]))
 
     @staticmethod
     def _collect_modules(repository_map: Any | None) -> list[Any]:

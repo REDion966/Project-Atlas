@@ -5213,10 +5213,11 @@ class Atlas:
 
         return build_architecture_model(
             component_registry=self._component_registry,
-            # Structural projection only: the architecture model maps
-            # capabilities to providing COMPONENTS, which operational
-            # capabilities (no providing component) do not have.
-            capability_model=self.capability_model(include_operational=False),
+            # Step 14 — the UNIFIED capability model, so the architecture view
+            # joins capability ownership AND grounded state (Steps 12-13)
+            # consistently. Operational capabilities contribute ownership
+            # evidence rather than a providing component.
+            capability_model=self.capability_model(),
             repository_map=self.repository_map,
         )
 
@@ -5234,7 +5235,7 @@ class Atlas:
 
         return build_architecture_model(
             component_registry=self._component_registry,
-            capability_model=self.capability_model(include_operational=False),
+            capability_model=self.capability_model(),
             repository_map=self._repository_map,
         )
 

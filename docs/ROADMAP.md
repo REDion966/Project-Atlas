@@ -480,8 +480,20 @@ was demonstrated:
   is now exposed consistently through the kernel contract and a bounded
   conversation state-question surface; an external-model-dependent capability is
   truthfully unavailable without a provider. Remaining limitations are recorded
-  in `docs/ATLAS_STATE.md` §34.19. **Steps 1 → 13 are COMPLETE. Step 14 is NOT
-  STARTED.**
+  in `docs/ATLAS_STATE.md` §34.19.
+- **Step 14 — Architecture self-understanding** — the real-kernel baseline
+  showed the existing architecture model gave component/subsystem/module/
+  dependency facts but no capability ownership join, no governance boundaries and
+  no known/unknown statement, and the conversation mis-routed architecture
+  questions (implementation → investigation, ownership → knowledge retrieval,
+  responsibility → a spurious symbol, governance → unsupported). The existing
+  architecture model is now joined with the unified capability model into one
+  consistent view — capability ownership (component or backing route), grounded
+  governance boundaries and a bounded known/unknown architecture knowledge
+  boundary — and bounded conversation architecture questions are answered from
+  that join, failing closed on unresolved names. Remaining limitations are
+  recorded in `docs/ATLAS_STATE.md` §34.20. **Steps 1 → 14 are COMPLETE. Step 15
+  is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

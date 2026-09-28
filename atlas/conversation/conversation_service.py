@@ -821,6 +821,21 @@ class ConversationService:
             return None
         return self._builtin_response.match_capability_state_question(text)
 
+    def _maybe_handle_architecture_question(self, text: str) -> Message | None:
+        """Step 14 — answer a bounded architecture self-understanding question.
+
+        Delegates to the builtin service, whose single authoritative matcher
+        answers ONLY a bounded ownership / component-responsibility /
+        governance-boundary / known-unknown form from the SAME architecture and
+        capability models the kernel exposes. A named form that does not resolve
+        declines, so an ordinary request keeps its existing route (an architecture
+        question is never turned into an operational one); nothing is executed,
+        authorized or mutated.
+        """
+        if self._builtin_response is None:
+            return None
+        return self._builtin_response.match_architecture_question(text)
+
     def _maybe_handle_capability_detail_request(self, text: str) -> Message | None:
         """C4.1 — honour an explicit ``explain <name>`` request for a
         REGISTERED capability/tool before generic investigation/research cue
@@ -2434,6 +2449,16 @@ class ConversationService:
         if capability_state is not None:
             self._conversation.add_message(capability_state)
             return capability_state
+        # Step 14 — a bounded architecture self-understanding question
+        # ("which component owns X?", "what is the responsibility of the X
+        # component?", "what are your governance boundaries?", "what
+        # architecture information do you not know?") is answered from the SAME
+        # architecture/capability models BEFORE an operational route can
+        # misinterpret it. Unresolvable targets decline (fail-closed).
+        architecture_question = self._maybe_handle_architecture_question(text)
+        if architecture_question is not None:
+            self._conversation.add_message(architecture_question)
+            return architecture_question
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests are claimed deterministically
         # BEFORE the development/execution handlers, so an informational
@@ -2872,6 +2897,13 @@ class ConversationService:
         if capability_state is not None:
             self._conversation.add_message(capability_state)
             yield capability_state.content
+            return
+        # Step 14 — mirror of send(): a bounded architecture self-understanding
+        # question is answered from the SAME architecture/capability models.
+        architecture_question = self._maybe_handle_architecture_question(text)
+        if architecture_question is not None:
+            self._conversation.add_message(architecture_question)
+            yield architecture_question.content
             return
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests (mirror of send()).

@@ -226,6 +226,57 @@ _STATE_INVENTORY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ---------------------------------------------------------------------------
+# Step 14 — bounded architecture self-understanding questions
+#
+# Ownership, component-responsibility, governance-boundary and
+# known/unknown-architecture questions, answered from the SAME authoritative
+# sources the architecture/capability models already project. A named form
+# resolves its target and DECLINES (fail-closed) when the target does not
+# resolve, so an ordinary request is never hijacked.
+# ---------------------------------------------------------------------------
+
+_ARCH_OWNER_RE = re.compile(
+    r"^\s*(?:which|what)\s+(?:registered\s+)?(?:component|module|subsystem)\s+"
+    r"(?:owns?|provides?|implements?|is\s+responsible\s+for)\s+"
+    r"(?P<name>.{1,60}?)[?.!]*\s*$",
+    re.IGNORECASE,
+)
+_ARCH_WHO_PROVIDES_RE = re.compile(
+    r"^\s*who\s+provides\s+(?P<name>.{1,60}?)[?.!]*\s*$", re.IGNORECASE
+)
+_ARCH_WHERE_IMPL_RE = re.compile(
+    r"^\s*where\s+is\s+(?:the\s+)?(?P<name>.{1,60}?)\s+"
+    r"(?:capabilit(?:y|ies)\s+)?(?:implemented|defined|owned|provided)\b[?.!]*\s*$",
+    re.IGNORECASE,
+)
+_ARCH_RESPONSIBILITY_RE = re.compile(
+    r"^\s*what\s+(?:is\s+)?(?:the\s+)?responsibilit(?:y|ies)\s+of\s+(?:the\s+)?"
+    r"(?P<name>.{1,60}?)[?.!]*\s*$",
+    re.IGNORECASE,
+)
+_ARCH_COMPONENT_DO_RE = re.compile(
+    r"^\s*what\s+does\s+(?:the\s+)?(?P<name>.{1,60}?)\s+component\s+do\b[?.!]*\s*$",
+    re.IGNORECASE,
+)
+_ARCH_GOVERNANCE_RE = re.compile(
+    r"^\s*(?:what|which)\s+(?:are\s+)?(?:your\s+)?governance\s+boundar(?:y|ies)\b.*$"
+    r"|^\s*which\s+capabilit(?:y|ies)\s+(?:are\s+)?governed\b.*$",
+    re.IGNORECASE,
+)
+_ARCH_KNOWLEDGE_BOUNDARY_RE = re.compile(
+    r"^\s*what\s+architecture\s+information\s+do\s+you\s+(not\s+)?"
+    r"(?:actually\s+|really\s+|even\s+)?know\b.*$"
+    r"|^\s*what\s+do\s+you\s+(not\s+)?(?:actually\s+|really\s+|even\s+)?know\s+"
+    r"about\s+your\s+architecture\b.*$",
+    re.IGNORECASE,
+)
+
+#: Bounded label used when an architecture question names a component-like
+#: target that does NOT resolve (reported honestly rather than guessed).
+_ARCH_COMPONENT_QUALIFIERS: tuple[str, ...] = ("component", "module", "subsystem")
+
+
 def _normalized_state(raw: str) -> str | None:
     """Map a bounded state phrase to a canonical capability-state value."""
     text = " ".join(str(raw or "").lower().split())
@@ -1875,15 +1926,27 @@ class BuiltinResponseService:
         return " ".join(words).strip()
 
     def _find_state_entry(self, name: str) -> Any | None:
-        """Resolve ``name`` to a unified-model entry, or ``None`` (fail-closed)."""
+        """Resolve ``name`` to a unified-model entry, or ``None`` (fail-closed).
+
+        Resolution order: an exact/normalized name in the unified capability
+        model (which also covers COMPONENT-PROVIDED capabilities that are not
+        CapabilityRegistry handlers), a registered capability/tool name, then an
+        operational capability (by id or alias). An unknown name returns ``None``
+        — a capability is never invented.
+        """
         model = self._capability_model()
-        resolved = self._resolve_detail_name(name)
-        if resolved is not None:
-            entry = model.find(resolved) if model is not None else None
-            if entry is not None:
-                return entry
         if model is not None:
             entry = model.find(name)
+            if entry is not None:
+                return entry
+            normalized = re.sub(r"\s+", "_", (name or "").strip().lower())
+            for candidate in getattr(model, "entries", ()) or ():
+                value = str(getattr(candidate, "name", "") or "")
+                if value.lower().replace(" ", "_") == normalized:
+                    return candidate
+        resolved = self._resolve_detail_name(name)
+        if resolved is not None and model is not None:
+            entry = model.find(resolved)
             if entry is not None:
                 return entry
         # Last resort: an operational alias (e.g. "investigation" -> investigate).
@@ -2001,6 +2064,275 @@ class BuiltinResponseService:
                         str(getattr(entry, "name", "") or "") for entry in matching
                     ],
                 },
+            },
+        )
+
+    def match_architecture_question(self, text: str) -> Message | None:
+        """Answer a bounded architecture self-understanding question (Step 14).
+
+        Answers ONLY the bounded forms it recognises, from the SAME authoritative
+        sources the architecture/capability models project:
+
+          * capability ownership / implementation ("which component owns X?",
+            "where is X implemented?", "who provides X?");
+          * component responsibility ("what is the responsibility of the X
+            component?", "what does the X component do?");
+
+        ``governance boundaries`` and ``known/unknown architecture information``
+        are answered from the same models. A named form whose target does NOT
+        resolve returns ``None`` (fail closed), so an ordinary request keeps its
+        existing route; a component-shaped question naming no registered
+        component is reported honestly rather than resolved to a spurious symbol.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        lowered = re.sub(r"\s+", " ", text).strip().lower()
+
+        if _ARCH_GOVERNANCE_RE.match(lowered):
+            return self._render_governance_boundaries()
+
+        boundary = _ARCH_KNOWLEDGE_BOUNDARY_RE.match(lowered)
+        if boundary is not None:
+            only_not = bool(boundary.group(1) or boundary.group(2))
+            return self._render_knowledge_boundary(only_not=only_not)
+
+        for pattern in (_ARCH_OWNER_RE, _ARCH_WHO_PROVIDES_RE, _ARCH_WHERE_IMPL_RE):
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            name = self._clean_state_name(match.group("name"))
+            if not name:
+                continue
+            entry = self._find_state_entry(name)
+            if entry is not None:
+                return self._render_capability_ownership(entry)
+
+        for pattern in (_ARCH_RESPONSIBILITY_RE, _ARCH_COMPONENT_DO_RE):
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            name = self._clean_component_name(match.group("name"))
+            if not name:
+                continue
+            component = self._find_component_entry(name)
+            if component is not None:
+                return self._render_component_responsibility(component)
+            if self._resolve_architecture_model() is not None:
+                return self._render_unknown_component(name)
+        return None
+
+    @staticmethod
+    def _clean_component_name(raw: str) -> str:
+        """Normalize a captured component name (drop determiner/qualifier)."""
+        text = (raw or "").strip().strip("?.!.,;:'\"()")
+        if text.lower().startswith("the "):
+            text = text[4:].strip()
+        words = text.split()
+        while words and words[-1].lower() in _ARCH_COMPONENT_QUALIFIERS:
+            words.pop()
+        return " ".join(words).strip()
+
+    def _find_component_entry(self, name: str) -> Any | None:
+        """Resolve ``name`` to an ArchitectureModel component entry, or None."""
+        model = self._resolve_architecture_model()
+        if model is None:
+            return None
+        key = (name or "").strip().lower()
+        normalized = key.replace(" ", "_")
+        for component in getattr(model, "components", ()) or ():
+            comp_name = str(getattr(component, "name", "") or "")
+            if comp_name.lower() in (key, normalized):
+                return component
+        for component in getattr(model, "components", ()) or ():
+            for attr in ("module_path", "package"):
+                value = str(getattr(component, attr, "") or "").lower()
+                if value and (value == normalized or value.endswith("." + normalized)):
+                    return component
+        return None
+
+    def _capability_module_paths(self, components: "tuple[str, ...]") -> "list[str]":
+        model = self._resolve_architecture_model()
+        if model is None or not components:
+            return []
+        wanted = {c.lower() for c in components}
+        paths: list[str] = []
+        for component in getattr(model, "components", ()) or ():
+            if str(getattr(component, "name", "") or "").lower() in wanted:
+                path = str(getattr(component, "module_path", "") or "")
+                if path and path not in paths:
+                    paths.append(path)
+        return paths
+
+    def _render_capability_ownership(self, entry: Any) -> Message:
+        """Report where a capability is owned/implemented (grounded)."""
+        fields = self._state_fields(entry)
+        name = fields["name"]
+        components = tuple(getattr(entry, "components", ()) or ())
+        module_paths = self._capability_module_paths(components)
+        lines = []
+        if components:
+            lines.append(f"`{name}` is provided by component(s): " + ", ".join(components) + ".")
+            if module_paths:
+                lines.append("Entry module(s): " + ", ".join(module_paths) + ".")
+        else:
+            evidence = [
+                str(getattr(source, "detail", "") or "")
+                for source in (getattr(entry, "sources", ()) or ())
+                if str(getattr(source, "kind", "")) == "operational_capability"
+            ]
+            evidence = [item for item in evidence if item]
+            lines.append(
+                f"`{name}` is an OPERATIONAL capability: no registered component "
+                "provides it; it is owned by the existing conversation route."
+            )
+            if evidence:
+                lines.append("Backing route: " + "; ".join(evidence) + ".")
+        lines.append(f"Current state: {fields['state'] or 'unknown'}.")
+        operations = tuple(getattr(entry, "operations", ()) or ())
+        if operations:
+            lines.append("Supports: " + ", ".join(f"`{op}`" for op in operations) + ".")
+        lines.append(
+            "This is a bounded projection of Atlas's existing registries; "
+            "nothing was executed or modified."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {
+                    "kind": "ownership",
+                    "capability": name,
+                    "components": list(components),
+                    "state": fields["state"],
+                },
+            },
+        )
+
+    def _render_component_responsibility(self, component: Any) -> Message:
+        """Report a registered component's declared responsibility (grounded)."""
+        name = str(getattr(component, "name", "") or "")
+        package = str(getattr(component, "package", "") or "")
+        module_path = str(getattr(component, "module_path", "") or "")
+        responsibility = str(getattr(component, "responsibility", "") or "")
+        status = str(getattr(component, "status", "") or "")
+        provided = tuple(getattr(component, "provided_capabilities", ()) or ())
+        lines = [f"Component `{name}`:"]
+        lines.append(f"- Responsibility: {responsibility or '(no responsibility declared)'}")
+        if package:
+            lines.append(f"- Package: `{package}`")
+        if module_path:
+            lines.append(f"- Entry module: `{module_path}`")
+        lines.append(f"- Health: {status or 'unknown'}")
+        if provided:
+            lines.append(
+                "Provided capabilities: "
+                + ", ".join(f"`{cap}`" for cap in provided[:_MAX_ARCHITECTURE_RELATIONS])
+            )
+        lines.append(
+            "This is a bounded projection of Atlas's existing component registry; "
+            "nothing was executed or modified."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {"kind": "component", "component": name},
+            },
+        )
+
+    def _render_unknown_component(self, name: str) -> Message:
+        """Report, honestly, that no registered component matches ``name``."""
+        return Message(
+            role="assistant",
+            content=(
+                f"I have no registered component named '{name}'. The component "
+                "registry is authoritative for which components exist, so I will "
+                "not describe one that is not registered."
+            ),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {"kind": "component", "component": "", "found": False},
+            },
+        )
+
+    def _render_governance_boundaries(self) -> Message:
+        """Report the grounded governance boundaries (governed capabilities)."""
+        entries = self._operational_capability_entries()
+        governed = [
+            entry
+            for entry in entries
+            if str(getattr(entry, "governing", "") or "")
+        ]
+        lines = [
+            "Atlas governance boundaries (deterministic, read-only; grounded in "
+            "the capability model):",
+        ]
+        if not governed:
+            lines.append("- No governed capability is currently recorded.")
+        else:
+            lines.append(
+                f"{len(governed)} capability(ies) require an explicit OWNER "
+                "approval boundary before they can act:"
+            )
+            for entry in governed[:_MAX_ARCHITECTURE_RELATIONS]:
+                name = str(getattr(entry, "name", "") or "")
+                governing = str(getattr(entry, "governing", "") or "")
+                lines.append(f"- `{name}` (governing: {governing})")
+        lines.append(
+            "Approval is always a separate, explicit OWNER decision, and it never "
+            "executes anything by itself."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {
+                    "kind": "governance",
+                    "governed": [
+                        str(getattr(entry, "name", "") or "") for entry in governed
+                    ],
+                },
+            },
+        )
+
+    def _render_knowledge_boundary(self, *, only_not: bool = False) -> Message:
+        """Report what architecture information is known vs unknown (grounded)."""
+        model = self._resolve_architecture_model()
+        if model is None:
+            return self._render_unsupported()
+        boundary = getattr(model, "knowledge_boundary", None)
+        known = tuple(getattr(boundary, "known", ()) or ()) if boundary else ()
+        unknown = tuple(getattr(boundary, "unknown", ()) or ()) if boundary else ()
+        lines = [
+            "Atlas architecture knowledge boundary (deterministic, read-only):",
+        ]
+        if not only_not and known:
+            lines.append("Known:")
+            lines.extend(f"- {item}" for item in known[:_MAX_ARCHITECTURE_LIMITATIONS])
+        if unknown:
+            lines.append("Unknown / not represented:")
+            lines.extend(f"- {item}" for item in unknown[:_MAX_ARCHITECTURE_LIMITATIONS])
+        if only_not and not unknown:
+            lines.append("- (nothing recorded as unknown)")
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {"kind": "knowledge_boundary"},
             },
         )
 

@@ -1839,6 +1839,93 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.20 Step 14 — Architecture self-understanding: one capability ↔ architecture view
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 14 built the smallest
+evidence-driven, deterministic, model-independent capability that lets Atlas
+understand and describe its OWN architecture from authoritative internal
+evidence — and it reconciles the EXISTING architecture and capability models
+(Steps 12-13) rather than creating a parallel source of truth.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+existing `ArchitectureModel` (Phase 1.2) already projected components,
+subsystems, module counts, static import edges and an evidence-only `locate()`
+— and was **not rebuilt**. But it had no capability OWNERSHIP join, no governance
+boundaries and no explicit known/unknown statement, and the conversation
+mis-routed architecture questions:
+
+  * `"Where is the investigation capability implemented?"` ran a real read-only
+    investigation (operational capabilities were invisible to the architecture
+    model, so the question never reached it);
+  * `"Which component owns memory_search?"` ran a knowledge retrieval;
+  * `"What is the responsibility of the kernel component?"` resolved to a
+    SPURIOUS repository symbol (`tests.test_c3_...`) rather than reporting that no
+    such component is registered;
+  * `"What are your governance boundaries?"` was unsupported;
+  * `"What architecture information do you not know?"` ran a knowledge retrieval.
+
+**What was implemented (smallest coherent architecture self-understanding).**
+- `atlas/self_knowledge/architecture_model.py`: the EXISTING model is extended
+  additively with the capability↔architecture JOIN derived from the SAME
+  capability model — `capabilities` (`CapabilityArchitectureEntry`: name, kind,
+  grounded `state`, availability, governed/governing, owning component(s) or, for
+  an operational capability, its backing-route evidence, category, operations),
+  `governance` (`GovernanceBoundary`: the governed capabilities and their
+  evidence-derived governing condition), `unknown_state_count`, and a bounded
+  `knowledge_boundary` (`known` vs `unknown`, grounded in the model's own
+  limitations and counts). Rendering and `to_dict` expose the new sections; the
+  EXISTING component/subsystem/module/dependency facts and the two pinned scope
+  limitations are preserved verbatim.
+- `atlas/kernel/atlas.py`: `architecture_model()` / the conversational snapshot
+  now consume the UNIFIED capability model, so capability OWNERSHIP, state and
+  governance are consistent between the architecture view, `capability_contract`,
+  the CLI and the conversation (no duplicated authority).
+- `atlas/conversation/builtin_response.py` + `conversation_service.py`: one
+  bounded architecture-question surface (`match_architecture_question`) answers
+  capability ownership / implementation ("which component owns X?", "where is X
+  implemented?", "who provides X?"), component responsibility ("what is the
+  responsibility of the X component?", "what does the X component do?"),
+  governance boundaries and known/unknown architecture information — from the
+  SAME models. A named form whose target does NOT resolve returns `None` (fail
+  closed, so an ordinary request keeps its route); a component-shaped question
+  naming no registered component is reported honestly instead of being resolved
+  to a spurious symbol.
+
+Representation only: no new engine/registry/store/planner/execution, no model
+call, no speculative dependency inference, and no arbitrary-file architectural
+truth; every claim comes from the existing registries/repository map/capability
+model, and insufficient evidence fails closed or reports `unknown`.
+
+**Validation.** `tests/test_step14_architecture_self_understanding.py` — 27
+focused tests (the capability↔architecture join for a registered and an
+operational capability; grounded governance boundaries; the bounded knowledge
+boundary; the unknown-state count; determinism/serialization; Step 12/13
+preservation; the conversation ownership / implementation / responsibility /
+governance / knowledge-boundary answers and their precision — non-architecture
+requests and unknown names are never hijacked; contract↔architecture agreement;
+real-kernel join, ownership, component responsibility, governance, knowledge
+boundary, honest unknown component, send/stream parity and
+no-authority/repository-untouched validation). Relevant subsystem regressions
+were green — the architecture model and its pinned scope limitations, the
+capability model/contracts, the CLI capability surface, the Step 12 and Step 13
+suites, the builtin/self-knowledge bridge surfaces, the G2 relationship gate,
+conversation service, semantic-gap routing, open-ended conversation, Steps 5-11,
+the kernel suite and the import scans. The pre-existing failures documented
+elsewhere were reproduced against a pristine HEAD and remain unchanged — they are
+NOT caused by Step 14. No full-suite re-run.
+
+**Known limitations (truthful).** The architecture model still does not represent
+component-level interfaces/contracts or runtime state/data-flow (the same two
+pinned scope boundaries; declared contracts remain available through the
+existing capability-contracts surface), and 702 repository modules are not
+described by any registered component. Capability ownership for a REGISTERED
+capability is a component; for an OPERATIONAL capability it is the backing
+conversation route (there is no component). The request-flow description remains
+the existing anchor-verified self-knowledge topic rather than a derived flow
+graph (no authoritative flow declaration exists). These remain evidence-driven,
+separately authorized work — no L11+/G4/C10 phase or Step 15 is created or
+implied.
+
 ### 34.19 Step 13 — Capability state & self-knowledge: grounded, evidence-derived state
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 13 built the next
@@ -2891,5 +2978,31 @@ not derived from test coverage or promotion history; the prerequisite set is an
 explicit grounded list; no retired state is used; only the bounded
 state-question forms are recognised); §34.19; Steps 1 → 13 are COMPLETE and
 Step 14 is NOT STARTED and remains evidence-driven).
+Step 14 architecture self-understanding reconciled: 2026-09-28 (the real-kernel
+baseline showed the existing ArchitectureModel already gave component/subsystem/
+module/dependency facts and an evidence-only locate() — NOT rebuilt — but it had
+no capability OWNERSHIP join, no governance boundaries and no known/unknown
+statement, and the conversation mis-routed architecture questions (a capability
+implementation question ran an investigation, an ownership question ran a
+knowledge retrieval, a component-responsibility question resolved to a spurious
+repository symbol, governance boundaries were unsupported). Minimal change: the
+architecture model is extended additively with a capability↔architecture JOIN
+(ownership + grounded state, reusing the SAME capability model), grounded
+governance boundaries and a bounded known/unknown knowledge boundary; the kernel
+architecture accessors consume the UNIFIED capability model so ownership/state/
+governance stay consistent; and one bounded conversation architecture-question
+surface answers ownership/implementation/responsibility/governance/known-unknown
+from the same models, declining unresolved names (fail closed) and reporting an
+unregistered component honestly instead of a spurious symbol. 27 focused tests
+plus relevant subsystem regressions green (architecture model + its pinned scope
+limitations, capability model/contracts, CLI capability surface, Step 12/13
+suites, builtin/self-knowledge bridge, G2 relationship gate, conversation
+service, semantic-gap routing, open-ended conversation, Steps 5-11, kernel suite,
+import scans); the pre-existing failures were reproduced against a pristine HEAD
+and remain unchanged; no full-suite re-run; known limitations recorded in §34.20
+(no component-level interfaces/contracts or runtime state/data-flow; 702 modules
+undescribed by a component; request flow remains the existing self-knowledge
+topic); §34.20; Steps 1 → 14 are COMPLETE and Step 15 is NOT STARTED and remains
+evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
