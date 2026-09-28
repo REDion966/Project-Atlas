@@ -60,6 +60,31 @@ governance — its own governed development.
     from the request's own words. The Development Envelope stays disabled by
     default, promotion remains OWNER-only, and nothing is approved, executed, or
     promoted by conversation.
+- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 4)** — additive,
+  model-independent, and owner-gated; no new engine, planner, scheduler or store
+  was introduced, and no later step is defined (see `docs/ATLAS_STATE.md` §34.10):
+  - **Step 1** — open-ended conversation over the existing provider seam, with
+    Atlas (not any model) remaining the authority.
+  - **Step 2** — goal-centered orchestration: compound requests sequence as
+    bounded multi-step goals over existing services through the existing
+    `OrchestrationExecutor`, with bounded data-only result carry, bounded retained
+    plan state and multi-turn plan resumption.
+  - **Step 3** — evidence → self-development: a validated evidence gap
+    (`untested_component`) becomes a development need, resolves to the component's
+    real source file through the existing self-knowledge, and is carried by the
+    existing development lifecycle through OWNER development approval, sandbox
+    execution, verification, promotion review, a separate OWNER promotion approval
+    and the existing `PromotionExecutor`.
+  - **Step 4** — continuous self-improvement validation: the complete loop was
+    validated with real-kernel evidence across two isolated Atlas instances over
+    persisted state (the promoted change is observed by a fresh investigation, the
+    original gap is no longer reported, and no redundant development is created); a
+    control run without the promotion still reports the gap. **Step 4 required no
+    production change.**
+  - The validated loop is the demonstrated evidence-gap remedy class
+    (`untested_component` → deterministic coverage module), **not** unrestricted
+    autonomous self-development. **The next step is NOT STARTED** and stays
+    evidence-driven.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
 - **Latest verified full-suite baseline (historical, not re-run for the Phase 3–5

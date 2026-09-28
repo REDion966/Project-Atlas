@@ -356,6 +356,44 @@ validated capabilities and the classified remaining limitations are recorded in
 **evidence-driven and separately authorized**; this record neither authorizes nor
 schedules them.
 
+**Post-L10 evidence-driven step arc (Steps 1 → 4) — COMPLETE (NOT a roadmap
+phase).** Four additive steps were completed after L10 and after the C1 → C5
+conversational validation, each authorized only after the actual capability gap
+was demonstrated:
+
+- **Step 1 — Open-ended conversation** — the existing cognition/model provider
+  seam serves genuinely open conversational turns; Atlas remains the authority and
+  the deterministic path is unchanged.
+- **Step 2 — Goal-centered orchestration** — compound requests sequence as
+  bounded multi-step goals over **existing** services through the EXISTING
+  `OrchestrationExecutor` (explicit typed step kinds, bounded data-only result
+  carry, bounded retained plan state, multi-turn plan resumption).
+- **Step 3 — Evidence → self-development** — a validated evidence gap
+  (`untested_component`) becomes a `DevelopmentNeed`, the component is resolved to
+  its real source file through the EXISTING self-knowledge, one deterministic
+  bounded remedy is authored through the EXISTING `ChangeSupplier` seam, and the
+  EXISTING development lifecycle carries it through OWNER development approval,
+  sandbox execution, verification, promotion review, a separate OWNER promotion
+  approval and the existing `PromotionExecutor`.
+- **Step 4 — Continuous self-improvement validation** — the complete loop was
+  validated with real-kernel evidence across two isolated Atlas instances sharing
+  persisted state: after promotion a fresh investigation observes the promoted
+  change, the original gap is no longer reported, and no redundant development is
+  created (a control run without the promotion still reports the gap). Step 4
+  required **no production change**.
+
+None of these steps introduced a new engine, planner, scheduler, orchestration
+engine, memory store, approval system, promotion system or model dependency, and
+none expanded a permission boundary. Governance is unchanged: development approval
+and promotion approval remain separate OWNER decisions, unapproved development
+does not execute, promotion before approval is refused, verification is required,
+execution stays sandboxed, live writes stay controlled through `PromotionExecutor`,
+and invalid or insufficient-evidence paths fail closed. The validated loop is the
+demonstrated evidence-gap remedy class, **not** unrestricted autonomous
+self-development. **The next step is NOT STARTED** and remains evidence-driven:
+further evolution requires validated evidence of the next justified capability
+gap. See `docs/ATLAS_STATE.md` §34.10.
+
 ---
 
 ## PROPOSED — not approved (do not implement)

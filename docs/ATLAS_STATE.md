@@ -88,6 +88,7 @@ mechanism by which Atlas may change its own operational state.
 | Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) at its established evidence boundary (§31), extended by the additive **Phase 1 → Phase 5 direct-evolution program** (§32) |
 | Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
 | Target-state gates | **G1 COMPLETE · G2 COMPLETE · G3 COMPLETE (Governed Self-Development)** — owner-scoped, additive gates on top of the frozen roadmap and the direct-evolution program; deterministic-first, model-independent, no new engine/planner/router/store/authority — see §33. **No G4 is defined or authorized.** |
+| Post-L10 evidence-driven step arc | **Step 1 → Step 4 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10. **The next step is NOT STARTED**: development stays evidence-driven and separately authorized. |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
@@ -1834,8 +1835,91 @@ authorizes nothing.
 
 It is reached from conversation only for a bounded "analyze the findings" request
 made over a **retained** investigation report; with no retained evidence the turn
-fails closed. `gap → proposal`, proposal-from-analysis, and true multi-step
-dependent execution remain deliberately undeveloped and evidence-driven.
+fails closed. The analyzer itself remains read-only; the later, separately
+authorized step arc that connects such a gap to governed development and
+promotion is recorded in §34.10.
+
+### 34.10 Post-L10 evidence-driven step arc (Steps 1 → 4) — COMPLETE
+
+Four additive, evidence-driven steps were completed after L10. None of them is a
+numbered roadmap phase, none introduces a new engine, planner, scheduler,
+orchestration engine, memory store, approval system or promotion system, and none
+creates or implies an L11+ / G4 / C10 phase.
+
+**Step 1 — Open-ended conversation (COMPLETE).** The existing cognition/model
+provider seam is used for genuinely open conversational turns, with Atlas (not any
+model) remaining the authority: model output is text only, carries no execution
+authority, and the deterministic path is unchanged. Committed at `1132565`.
+
+**Step 2 — Goal-centered orchestration (COMPLETE).** A compound request can be
+sequenced as a bounded multi-step goal over **existing** services through the
+EXISTING `OrchestrationExecutor`, with explicit typed step kinds and named
+injected seams: `INVESTIGATION → ANALYSIS`,
+`INVESTIGATION → EVIDENCE_GAP_ANALYSIS`, `KNOWLEDGE → RESEARCH_ANALYSIS`. Result
+carry between steps is data-only and bounded (`ExecutionStep.carry_from`, bounded
+per-category findings/components/text), the retained plan is the bounded
+`ConversationState.current_plan` (no second persistence mechanism), and
+multi-turn **plan resumption** re-runs only the incomplete steps while seeding
+already-completed ones so their retained bounded result is reused. Composition is
+deterministic, D3/local-first knowledge governance is preserved, and every
+unknown/insufficient/unwired path fails closed. Committed at `40d1740` and
+`e137905`.
+
+**Step 3 — Evidence → self-development (COMPLETE).** For the demonstrated remedy
+class (`ConcreteGap` category `untested_component`), a validated evidence gap now
+reaches the governed development lifecycle without any new development mechanism:
+
+```
+validated ConcreteGap (from a real InvestigationReport via EvidenceGapAnalyzer)
+  → DevelopmentNeed                (atlas/evolution/evidence_development.py)
+  → component resolved to its real source file
+                                  (EXISTING ArchitectureModel / repository map)
+  → one deterministic, bounded remedy: a pytest coverage module for that
+    component, authored through the EXISTING ChangeSupplier seam
+  → EXISTING DevelopmentCycleController → EvolutionProposal + ApprovalRequest
+  → PENDING_APPROVAL               (STOP — nothing is approved here)
+  → OWNER development approval     (existing ApprovalManager / kernel gate)
+  → EXISTING sandbox execution + DevelopmentVerification (VERIFIED required)
+  → EXISTING promotion review
+  → OWNER promotion approval       (separate decision)
+  → EXISTING PromotionExecutor     (the only live-repository writer)
+  → persisted proposal/promotion state
+```
+
+Two existing defects were corrected on this seam: an already-prepared
+(evidence-generated) proposal can now enter the existing governed lifecycle
+without re-deriving a different proposal, and the orchestrator's promotion gate
+now compares the EXISTING `VerificationStatus` value correctly (a genuinely
+`VERIFIED` run previously read as unverified), so a review opened by the
+coordinator is actionable. Committed at `2476035`.
+
+**Step 4 — Continuous self-improvement validation (COMPLETE; no production
+change).** `tests/test_continuous_self_improvement_validation.py` validates the
+whole loop across **two isolated Atlas instances over the same persisted
+`EvolutionStorage`**: evidence → gap → OWNER-approved development → sandbox →
+`VERIFIED` → OWNER-approved promotion → persisted state → a new instance
+re-evaluating the same need → the promoted change is observed by Atlas's own
+evidence pipeline (a real `test` finding naming the component) → the original gap
+is no longer reported → no redundant development proposal is created. A control
+run **without** the promotion still reports the gap and creates a second
+proposal, establishing that the closure was caused by the improvement rather than
+evaluation drift.
+
+**Scope (explicit).** This is the validated path for the demonstrated evidence-gap
+remedy class (`untested_component` → deterministic coverage module). It is **not**
+unrestricted autonomous self-development, and it is not a claim that Atlas can
+autonomously create arbitrary new capabilities. The capability-activation leg of
+self-knowledge remains covered separately by the existing capability-promotion
+tests; the Step 4 loop used the coverage-remedy class, which declares no
+capability. Governance boundaries demonstrated by the tests: development approval
+and promotion approval are separate OWNER decisions, unapproved development does
+not execute, promotion before approval is refused, verification is required,
+execution stays sandboxed, live writes stay controlled through
+`PromotionExecutor`, no permission boundary was expanded, invalid/unknown/
+insufficient-evidence/unsupported paths fail closed, and no model or provider
+call is required anywhere in this path. **The next step is NOT STARTED** —
+further evolution requires validated evidence identifying the next justified
+capability gap.
 
 ---
 
@@ -1869,5 +1953,27 @@ checkpoint 5 — end-to-end real-kernel conversational validation and the
 external-subject self-knowledge guard. Focused and broader regression subsets were
 used (no full-suite re-run); the two documented pre-existing failures were reproduced
 against a pristine HEAD and remain unchanged; §34; no L11 defined or authorized).
+Post-L10 evidence-driven step arc reconciled: 2026-09-28 (Step 1 open-ended
+conversation `1132565`; Step 2 goal-centered orchestration `40d1740` + `e137905`
+(three two-stage sequences, bounded carry, bounded retained plan, multi-turn plan
+resumption); Step 3 evidence → self-development `2476035`
+(`atlas/evolution/evidence_development.py`; validated `untested_component` gap →
+`DevelopmentNeed` → resolved real source file → deterministic bounded coverage
+remedy through the EXISTING `ChangeSupplier` seam → EXISTING development lifecycle
+→ OWNER development approval → sandbox execution → `VERIFIED` → promotion review →
+separate OWNER promotion approval → EXISTING `PromotionExecutor`; plus the
+already-prepared-proposal entry and the verification-status comparison correction);
+Step 4 continuous self-improvement validation `2476035`
+(`tests/test_continuous_self_improvement_validation.py`; two isolated Atlas
+instances over the same persisted `EvolutionStorage` — the promoted change is
+observed by a fresh investigation, the original gap is no longer reported and no
+redundant development is created, with a no-promotion control establishing causal
+closure; **no production change required**). Focused suites only (Step 3 slices 34 +
+20 + 5, Step 4 5; relevant Step 2/evidence regressions green); no full-suite re-run;
+no new engine/planner/scheduler/store/authority, no permission expansion, no model
+dependency; the validated loop is the demonstrated evidence-gap remedy class, not
+unrestricted autonomous self-development; the capability-activation leg remains
+covered separately by the existing capability-promotion tests; §34.10; the next step
+is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
