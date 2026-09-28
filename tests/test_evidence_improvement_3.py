@@ -193,6 +193,9 @@ def test_compound_research_is_not_captured(kernel):
     knowledge path, and the remaining bounded subrequest is reported honestly as
     recognized-but-not-executed. The guarded invariant — no generic "Done" and no
     fabricated completion — is preserved and now asserted explicitly.
+
+    Step 2 leaves this turn on that path: the second clause ("summarize what you
+    find") is not an explanation operation, so no orchestration plan is composed.
     """
     _fresh(kernel)
     message = _send(kernel, f"Research the {SUBJECT} and summarize what you find.")

@@ -65,8 +65,34 @@ _DENIED_PREFIXES: tuple[str, ...] = (
 #: receive unbounded upstream output.
 _MAX_CARRY_SOURCES: int = 4
 _MAX_CARRY_FINDINGS: int = 8
+#: Overall bound on carried findings. Findings are bounded PER CATEGORY up to
+#: ``_MAX_CARRY_FINDINGS`` (see :func:`_bounded_findings`): a single global cap
+#: silently drops whole evidence categories (e.g. every ``test`` finding in a
+#: reference-heavy report), which would make a downstream coverage judgement
+#: fail closed on evidence that the investigation actually gathered.
+_MAX_CARRY_FINDINGS_TOTAL: int = 24
 _MAX_CARRY_COMPONENTS: int = 8
 _MAX_CARRY_TEXT: int = 240
+
+
+def _bounded_findings(findings: Any) -> list[Any]:
+    """Bound carried findings PER CATEGORY (deterministic, input order).
+
+    Keeps at most ``_MAX_CARRY_FINDINGS`` findings per category and at most
+    ``_MAX_CARRY_FINDINGS_TOTAL`` overall, so no evidence category is starved
+    while the carry stays strictly bounded.
+    """
+    per_category: dict[str, int] = {}
+    selected: list[Any] = []
+    for finding in tuple(findings or ()):
+        category = str(getattr(finding, "category", "") or "")
+        if per_category.get(category, 0) >= _MAX_CARRY_FINDINGS:
+            continue
+        per_category[category] = per_category.get(category, 0) + 1
+        selected.append(finding)
+        if len(selected) >= _MAX_CARRY_FINDINGS_TOTAL:
+            break
+    return selected
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +122,8 @@ class OrchestrationExecutor:
         authority_service: AuthorityService | None = None,
         investigation_service: Any | None = None,
         investigation_synthesizer: Any | None = None,
+        knowledge_decision: Any | None = None,
+        evidence_gap_analyzer: Any | None = None,
     ) -> None:
         self._capability_registry = capability_registry
         self._capability_dispatcher = capability_dispatcher
@@ -103,10 +131,20 @@ class OrchestrationExecutor:
         self._workspace_service = workspace_service
         self._research_service = research_service
         self._authority_service = authority_service
-        # Step 2 — the two explicit typed step kinds. Each is ONE named,
-        # injected, read-only seam; no generic callable is ever accepted.
+        # Step 2 — the explicit typed step kinds. Each is ONE named, injected,
+        # read-only seam; no generic callable is ever accepted.
         self._investigation_service = investigation_service
         self._investigation_synthesizer = investigation_synthesizer
+        #: Step 2 (research slice) — the EXISTING D3 KnowledgeDecisionService,
+        #: whose ``retrieve_with_acquisition`` is the SAME local-first seam the
+        #: conversational knowledge path uses (validated knowledge first; the
+        #: governed D2 acquisition boundary only when insufficient). Wiring this
+        #: means the research step cannot bypass D3 / local-first governance.
+        self._knowledge_decision = knowledge_decision
+        #: Step 2 (gap slice) — the EXISTING EvidenceGapAnalyzer, the SAME
+        #: deterministic, read-only analyzer the conversational gap route uses.
+        #: Its input is the bounded investigation snapshot a prior step carried.
+        self._evidence_gap_analyzer = evidence_gap_analyzer
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -137,7 +175,15 @@ class OrchestrationExecutor:
             )
 
         steps = self._resolve_steps(request)
-        if not steps:
+        # Step 2 (plan resumption) — seed ONLY already-COMPLETED step results.
+        # They are never re-executed, but they let a resumed downstream step
+        # satisfy its ``depends_on`` and consume the SAME carried result.
+        seeded = tuple(
+            r
+            for r in tuple(request.completed_steps or ())
+            if getattr(getattr(r, "state", None), "value", "") == "completed"
+        )
+        if not steps and not seeded:
             return self._assemble(
                 ExecutionStatus.EMPTY,
                 request,
@@ -151,7 +197,7 @@ class OrchestrationExecutor:
         # --- Pre-validate every step (no execution yet) ---
         validated = [self._validate_step(step) for step in steps]
 
-        results = self._run(validated, deps_map, request, started)
+        results = self._run([*seeded, *validated], deps_map, request, started)
         status = self._overall_status(results)
         return self._assemble(status, request, results, "", started)
 
@@ -251,6 +297,14 @@ class OrchestrationExecutor:
             return self._investigation_service is not None
         if step.kind is NodeKind.ANALYSIS:
             return self._investigation_synthesizer is not None
+        if step.kind is NodeKind.KNOWLEDGE:
+            return self._knowledge_decision is not None
+        if step.kind is NodeKind.RESEARCH_ANALYSIS:
+            # A pure, deterministic projection over the CARRIED validated
+            # evidence: there is no service to wire and nothing to gather.
+            return True
+        if step.kind is NodeKind.EVIDENCE_GAP_ANALYSIS:
+            return self._evidence_gap_analyzer is not None
         return False
 
     @staticmethod
@@ -477,6 +531,12 @@ class OrchestrationExecutor:
                 result = self._dispatch_investigation(step, params)
             elif kind is NodeKind.ANALYSIS:
                 result = self._dispatch_analysis(step, params)
+            elif kind is NodeKind.KNOWLEDGE:
+                result = self._dispatch_knowledge(step, params)
+            elif kind is NodeKind.RESEARCH_ANALYSIS:
+                result = self._dispatch_research_analysis(step, params)
+            elif kind is NodeKind.EVIDENCE_GAP_ANALYSIS:
+                result = self._dispatch_evidence_gap_analysis(step, params)
             else:
                 result = {"success": False, "error": f"unsupported step kind: {kind.value}"}
         except Exception as exc:  # defensive — seams never raise, but fail closed
@@ -746,6 +806,158 @@ class OrchestrationExecutor:
             "metadata": {"kind": "analysis"},
         }
 
+    def _dispatch_knowledge(
+        self, step: StepExecutionResult, params: dict
+    ) -> dict:
+        """Local-first knowledge retrieval via the EXISTING D3 seam.
+
+        Uses ``KnowledgeDecisionService.retrieve_with_acquisition`` — validated
+        knowledge first, and the governed D2 acquisition boundary ONLY when the
+        local store is insufficient. This is the SAME path the conversational
+        knowledge bridge uses, so D3 / local-first governance is not bypassed.
+        No validated evidence -> NO_EVIDENCE (fail closed), never a fabrication.
+        """
+        decision = self._knowledge_decision
+        if decision is None:
+            return {
+                "success": False,
+                "error": "knowledge decision service not wired (fails closed)",
+            }
+        question = params.get("question")
+        if not isinstance(question, str) or not question.strip():
+            return {"success": False, "error": "knowledge step requires a 'question'"}
+        try:
+            result = decision.retrieve_with_acquisition(question)
+        except Exception as exc:  # defensive — the seam fails closed itself
+            return {"success": False, "error": f"knowledge retrieval failed: {exc}"}
+        items = tuple(getattr(result, "items", ()) or ()) if result is not None else ()
+        status = (
+            str(getattr(getattr(result, "status", None), "value", "") or "")
+            if result is not None
+            else ""
+        )
+        if result is None or not items:
+            return {
+                "success": False,
+                "error": (
+                    "no validated knowledge is available for the request "
+                    f"(local-first; status: {status or 'empty'})"
+                ),
+                "failure_kind": StepFailureKind.NO_EVIDENCE.value,
+                "output": {"question": question, "validated_status": status},
+            }
+        return {
+            "success": True,
+            "output": _knowledge_snapshot(question, result),
+            "error": "",
+            "metadata": {"kind": "knowledge", "validated_status": status},
+        }
+
+    def _dispatch_research_analysis(
+        self, step: StepExecutionResult, params: dict
+    ) -> dict:
+        """Deterministic, evidence-based analysis over CARRIED validated evidence.
+
+        Consumes ONLY the bounded, data-only snapshot the prior KNOWLEDGE step
+        produced (``inputs["carry"]``); it gathers no evidence and invents none.
+        A carried snapshot without validated claims fails closed (NO_EVIDENCE),
+        so a conclusion is never fabricated. Raw research text is data, never
+        authority.
+        """
+        carry = params.get("carry")
+        if not isinstance(carry, dict) or len(carry) != 1:
+            return {
+                "success": False,
+                "error": "research analysis requires exactly one carried result (fail-closed)",
+            }
+        snapshot = next(iter(carry.values()))
+        if not isinstance(snapshot, dict):
+            return {
+                "success": False,
+                "error": "carried result is malformed (fail-closed)",
+            }
+        question = _bounded_text(snapshot.get("question")) or _bounded_text(step.target)
+        items = _carried_knowledge_items(snapshot)
+        if not items:
+            return {
+                "success": False,
+                "error": "carried result contains no validated evidence (fail-closed)",
+                "failure_kind": StepFailureKind.NO_EVIDENCE.value,
+                "output": {
+                    "question": question,
+                    "validated_status": _bounded_text(snapshot.get("validated_status"), 32),
+                },
+            }
+        from atlas.research.technology_analysis import (
+            build_research_conclusion,
+            profile_from_validated_items,
+        )
+
+        profile = profile_from_validated_items(question, items)
+        conclusion = build_research_conclusion(question, (profile,))
+        return {
+            "success": True,
+            "output": _research_conclusion_snapshot(conclusion, profile),
+            "error": "",
+            "metadata": {"kind": "research_analysis"},
+        }
+
+    def _dispatch_evidence_gap_analysis(
+        self, step: StepExecutionResult, params: dict
+    ) -> dict:
+        """Deterministic evidence-gap analysis over a CARRIED investigation result.
+
+        Consumes ONLY the bounded, data-only snapshot the prior INVESTIGATION
+        step produced (``inputs["carry"]``) — rebuilt through the SAME bounded
+        reconstruction the analysis step uses — and then runs the EXISTING
+        ``EvidenceGapAnalyzer``. It gathers no evidence, mutates nothing and
+        never invents a gap. A carried result that is not a bounded
+        investigation projection, or evidence that cannot support a coverage
+        judgement, fails closed as NO_EVIDENCE.
+        """
+        analyzer = self._evidence_gap_analyzer
+        if analyzer is None:
+            return {
+                "success": False,
+                "error": "evidence gap analyzer not wired (fails closed)",
+            }
+        carry = params.get("carry")
+        if not isinstance(carry, dict) or len(carry) != 1:
+            return {
+                "success": False,
+                "error": (
+                    "evidence gap analysis requires exactly one carried result "
+                    "(fail-closed)"
+                ),
+            }
+        report = _report_from_snapshot(next(iter(carry.values())))
+        if report is None:
+            return {
+                "success": False,
+                "error": "carried result is not an investigation report (fail-closed)",
+            }
+        try:
+            analysis = analyzer.analyze(report)
+        except Exception as exc:  # defensive — the analyzer itself never raises
+            return {"success": False, "error": f"gap analysis failed: {exc}"}
+        snapshot = _gap_analysis_snapshot(analysis)
+        if snapshot["insufficient_evidence"]:
+            return {
+                "success": False,
+                "error": (
+                    "the carried investigation evidence cannot support a "
+                    "coverage judgement (insufficient evidence)"
+                ),
+                "failure_kind": StepFailureKind.NO_EVIDENCE.value,
+                "output": snapshot,
+            }
+        return {
+            "success": True,
+            "output": snapshot,
+            "error": "",
+            "metadata": {"kind": "evidence_gap_analysis"},
+        }
+
     # ------------------------------------------------------------------
     # Attribution helpers
     # ------------------------------------------------------------------
@@ -905,7 +1117,7 @@ def _bounded_payload(value: Any) -> dict:
 def _investigation_report_snapshot(report: Any) -> dict:
     """Bounded, JSON-safe projection of an InvestigationReport (the carry)."""
     findings: list[dict] = []
-    for finding in tuple(getattr(report, "findings", ()) or ())[:_MAX_CARRY_FINDINGS]:
+    for finding in _bounded_findings(getattr(report, "findings", ())):
         findings.append(
             {
                 "category": _bounded_text(getattr(finding, "category", ""), 64),
@@ -948,7 +1160,7 @@ def _report_from_snapshot(snapshot: Any) -> Any:
     findings: list[Any] = []
     raw = snapshot.get("findings")
     if isinstance(raw, list):
-        for entry in raw[:_MAX_CARRY_FINDINGS]:
+        for entry in raw[:_MAX_CARRY_FINDINGS_TOTAL]:
             if not isinstance(entry, dict):
                 continue
             findings.append(
@@ -969,6 +1181,176 @@ def _report_from_snapshot(snapshot: Any) -> Any:
         modification_status="NONE",
         components=tuple(_bounded_str_list(snapshot.get("components"))),
     )
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _CarriedCitation:
+    """Bounded, duck-typed provenance reference carried between steps."""
+
+    source_uri: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class _CarriedKnowledgeItem:
+    """Bounded, duck-typed view of one validated item carried between steps.
+
+    Mirrors the EXISTING ``ValidatedKnowledgeItem`` surface the technology
+    analysis consumes (statement / validation_status / verification_score /
+    claim_confidence / citations). Data only; never authority.
+    """
+
+    statement: str = ""
+    validation_status: str = ""
+    verification_score: float = 0.0
+    claim_confidence: float = 0.0
+    citations: tuple = ()
+
+
+def _knowledge_snapshot(question: str, result: Any) -> dict:
+    """Bounded, JSON-safe projection of one validated-knowledge result."""
+    claims: list[dict] = []
+    sources: list[str] = []
+    for item in tuple(getattr(result, "items", ()) or ())[:_MAX_CARRY_FINDINGS]:
+        citations: list[dict] = []
+        for citation in tuple(getattr(item, "citations", ()) or ())[
+            :_MAX_CARRY_COMPONENTS
+        ]:
+            uri = _bounded_text(getattr(citation, "source_uri", ""))
+            if uri:
+                citations.append({"source_uri": uri})
+                if uri not in sources:
+                    sources.append(uri)
+        claims.append(
+            {
+                "statement": _bounded_text(getattr(item, "statement", "")),
+                "validation_status": _bounded_text(
+                    getattr(item, "validation_status", ""), 32
+                ),
+                "verification_score": _safe_float(
+                    getattr(item, "verification_score", 0.0)
+                ),
+                "claim_confidence": _safe_float(
+                    getattr(item, "claim_confidence", 0.0)
+                ),
+                "citations": citations,
+            }
+        )
+    return {
+        "question": _bounded_text(question),
+        "validated_status": str(
+            getattr(getattr(result, "status", None), "value", "") or ""
+        ),
+        "claim_count": len(claims),
+        "claims": claims,
+        "sources": sources[:_MAX_CARRY_COMPONENTS],
+    }
+
+
+def _carried_knowledge_items(snapshot: dict) -> tuple[_CarriedKnowledgeItem, ...]:
+    """Bounded validated items rebuilt from a carried knowledge snapshot."""
+    claims = snapshot.get("claims")
+    if not isinstance(claims, list):
+        return ()
+    items: list[_CarriedKnowledgeItem] = []
+    for claim in claims[:_MAX_CARRY_FINDINGS]:
+        if not isinstance(claim, dict):
+            continue
+        statement = _bounded_text(claim.get("statement"))
+        if not statement:
+            continue
+        citations = tuple(
+            _CarriedCitation(source_uri=_bounded_text(entry.get("source_uri")))
+            for entry in (claim.get("citations") or [])
+            if isinstance(entry, dict) and _bounded_text(entry.get("source_uri"))
+        )
+        items.append(
+            _CarriedKnowledgeItem(
+                statement=statement,
+                validation_status=_bounded_text(claim.get("validation_status"), 32),
+                verification_score=_safe_float(claim.get("verification_score")),
+                claim_confidence=_safe_float(claim.get("claim_confidence")),
+                citations=citations,
+            )
+        )
+    return tuple(items)
+
+
+def _research_conclusion_snapshot(conclusion: Any, profile: Any) -> dict:
+    """Bounded, JSON-safe projection of a ResearchConclusion + its profile."""
+    verified = [
+        _bounded_text(getattr(fact, "statement", ""))
+        for fact in tuple(getattr(profile, "facts", ()) or ())
+        if getattr(getattr(fact, "state", None), "value", None) == "verified"
+    ]
+    return {
+        "question": _bounded_text(getattr(conclusion, "question", "")),
+        "strength": str(getattr(getattr(conclusion, "strength", None), "value", "")),
+        "summary": _bounded_text(getattr(conclusion, "summary", "")),
+        "verified_fact_count": len([v for v in verified if v]),
+        "supporting_evidence": _bounded_str_list(
+            getattr(conclusion, "supporting_evidence", ())
+        ),
+        "contradictions": _bounded_str_list(
+            getattr(conclusion, "contradictions", ())
+        ),
+        "uncertainties": _bounded_str_list(getattr(conclusion, "uncertainties", ())),
+        "modification_status": "NONE",
+    }
+
+
+def _gap_analysis_snapshot(analysis: Any) -> dict:
+    """Bounded, JSON-safe projection of a GapAnalysisReport (data only)."""
+    gaps: list[dict] = []
+    for gap in tuple(getattr(analysis, "gaps", ()) or ())[:_MAX_CARRY_FINDINGS]:
+        citations: list[dict] = []
+        for citation in tuple(getattr(gap, "evidence", ()) or ())[
+            :_MAX_CARRY_COMPONENTS
+        ]:
+            citations.append(
+                {
+                    "category": _bounded_text(getattr(citation, "category", ""), 64),
+                    "description": _bounded_text(
+                        getattr(citation, "description", "")
+                    ),
+                    "location": _bounded_text(getattr(citation, "location", "")),
+                }
+            )
+        gaps.append(
+            {
+                "gap_id": _bounded_text(getattr(gap, "gap_id", ""), 32),
+                "category": str(getattr(getattr(gap, "category", None), "value", "")),
+                "component": _bounded_text(getattr(gap, "component", "")),
+                "observation": _bounded_text(getattr(gap, "observation", "")),
+                "interpretation": _bounded_text(getattr(gap, "interpretation", "")),
+                "sufficiency": str(
+                    getattr(getattr(gap, "sufficiency", None), "value", "")
+                ),
+                "evidence": citations,
+            }
+        )
+    return {
+        "target": _bounded_text(getattr(analysis, "target", "")),
+        "objective": _bounded_text(getattr(analysis, "objective", "")),
+        "gap_count": len(gaps),
+        "gaps": gaps,
+        "insufficient_evidence": bool(
+            getattr(analysis, "insufficient_evidence", False)
+        ),
+        "summary": _bounded_text(getattr(analysis, "summary", "")),
+        "evidence_basis": _bounded_str_list(
+            getattr(analysis, "evidence_basis", ()), 8
+        ),
+        "finding_count": int(getattr(analysis, "finding_count", 0) or 0),
+        "component_count": int(getattr(analysis, "component_count", 0) or 0),
+        "modification_status": "NONE",
+    }
 
 
 def _synthesis_snapshot(synthesis: Any) -> dict:

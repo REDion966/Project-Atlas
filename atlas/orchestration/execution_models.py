@@ -270,6 +270,11 @@ class ExecutionRequest:
         continue_on_failure: When False (default), the run stops at the
             first failed step. Authority failures are ALWAYS terminal.
         metadata: Additional context.
+        completed_steps: Step 2 (plan resumption) — already-COMPLETED step
+            results carried into this run. They are NEVER executed again; they
+            seed the run so a resumed downstream step can still satisfy its
+            ``depends_on`` and consume the SAME bounded result through
+            ``carry_from``. Non-completed entries are ignored (fail closed).
     """
 
     plan: OrchestrationPlan | None = None
@@ -279,6 +284,7 @@ class ExecutionRequest:
     max_steps: int = 10
     continue_on_failure: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    completed_steps: tuple[StepExecutionResult, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.max_steps, int) or self.max_steps < 1:

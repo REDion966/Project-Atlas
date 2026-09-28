@@ -124,8 +124,28 @@ _GOAL_STATUS_FORMS: frozenset[str] = frozenset(
         "what is the goal status",
         "what s the plan status",
         "what s the goal status",
+    }
+)
+
+#: Step 2 (plan resumption) — bounded, explicit resumption forms. These are
+#: ADDITIVE to the existing continuation semantics (``TurnRole.CONTINUATION``,
+#: which already covers "continue" / "go on" / "keep going" / "carry on"): a
+#: turn matching one of these, with an UNFINISHED retained plan, continues it.
+_GOAL_RESUME_FORMS: frozenset[str] = frozenset(
+    {
         "continue the plan",
         "continue the goal",
+        "resume the plan",
+        "resume the goal",
+        "complete the goal",
+        "finish the plan",
+        "finish the goal",
+        "finish the remaining step",
+        "finish the remaining steps",
+        "go ahead with the remaining step",
+        "go ahead with the remaining steps",
+        "carry out the remaining step",
+        "do the remaining step",
     }
 )
 
@@ -457,6 +477,7 @@ class ConversationService:
         development_driver_bridge: Callable[..., Any] | None = None,
         autonomy_check: Callable[..., AutonomyDecisionProtocol] | None = None,
         goal_orchestration_resolver: Callable[..., Any] | None = None,
+        goal_resume_resolver: Callable[..., Any] | None = None,
     ):
         """
         Initialize the conversation service.
@@ -587,6 +608,12 @@ class ConversationService:
         #: duck-typed (this module never imports atlas.orchestration). Absent or
         #: raising keeps every existing route verbatim; it grants no authority.
         self._goal_orchestration_resolver = goal_orchestration_resolver
+        #: Step 2 (plan resumption) — optional duck-typed bridge that CONTINUES
+        #: the retained unfinished plan through the EXISTING executor.
+        #: Signature: ``(plan_state, session_context) -> Message | None``.
+        #: Kernel-owned and duck-typed; absent or raising keeps every existing
+        #: route verbatim and grants no authority.
+        self._goal_resume_resolver = goal_resume_resolver
         self._fallback_resolver = fallback_resolver
         self._builtin_response = builtin_response
         self._provider_call_timeout_s = (
@@ -1151,56 +1178,149 @@ class ConversationService:
         self._retain_goal_plan(text, steps, message)
         return message
 
+    @staticmethod
+    def _plan_step_field(step: Any, name: str, default: Any = None) -> Any:
+        """Read one bounded field from a plan step (an ExecutionStep or a dict)."""
+        if isinstance(step, dict):
+            return step.get(name, default)
+        return getattr(step, name, default)
+
     def _retain_goal_plan(
         self,
-        text: str,
-        steps: tuple[Any, ...],
+        objective: str,
+        plan_steps: Any,
         message: Message,
     ) -> None:
-        """Retain a BOUNDED, authority-free record of the active goal/plan.
+        """Retain a BOUNDED, authority-free record of the ACTIVE goal/plan.
 
-        Representation only (objective, ordered steps, per-step status, bounded
-        references, current step). Never an event store or workflow database.
+        Representation only: objective, ordered steps (id / kind / target /
+        bounded inputs / dependency + carry references), per-step status and the
+        bounded OUTPUT of completed steps, the current step, and the run state.
+        The retained inputs + outputs are what let a later turn RESUME the
+        unfinished steps without rebuilding the plan or repeating completed work.
+        Never an event store, workflow database, or second persistence mechanism.
         """
         if self._state_manager is None:
             return
         metadata = message.metadata if isinstance(message.metadata, dict) else {}
         run = metadata.get("orchestration")
-        statuses: dict[str, dict[str, str]] = {}
+        results: dict[str, dict[str, Any]] = {}
         run_state = ""
         if isinstance(run, dict):
             run_state = str(run.get("status", ""))[:32]
             for entry in run.get("steps") or ():
                 if isinstance(entry, dict) and isinstance(entry.get("step_id"), str):
-                    statuses[entry["step_id"]] = {
+                    output = entry.get("output")
+                    results[entry["step_id"]] = {
                         "state": str(entry.get("state", ""))[:32],
                         "error": str(entry.get("error", ""))[:160],
+                        "output": dict(output) if isinstance(output, dict) else {},
                     }
         bounded_steps: list[dict[str, Any]] = []
         current_step: str | None = None
-        for step in tuple(steps)[:8]:
-            info = statuses.get(step.step_id, {})
-            state = info.get("state", "")
+        for step in tuple(plan_steps or ())[:8]:
+            step_id = str(self._plan_step_field(step, "step_id", "") or "")
+            if not step_id:
+                continue
+            info = results.get(step_id, {})
+            state = str(info.get("state", "") or "")
             if current_step is None and state != "completed":
-                current_step = step.step_id
+                current_step = step_id
+            inputs = self._plan_step_field(step, "inputs", {})
+            depends_on = self._plan_step_field(step, "depends_on", ())
+            carry_from = self._plan_step_field(step, "carry_from", ())
             bounded_steps.append(
                 {
-                    "step_id": step.step_id,
-                    "kind": getattr(getattr(step, "kind", None), "value", ""),
-                    "target": str(getattr(step, "target", ""))[:200],
-                    "carry_from": list(getattr(step, "carry_from", ()))[:4],
+                    "step_id": step_id,
+                    "kind": str(
+                        getattr(self._plan_step_field(step, "kind"), "value", "")
+                        or self._plan_step_field(step, "kind", "")
+                    )[:32],
+                    "target": str(self._plan_step_field(step, "target", ""))[:200],
+                    "inputs": dict(inputs) if isinstance(inputs, dict) else {},
+                    "depends_on": [
+                        d for d in (depends_on or ()) if isinstance(d, str)
+                    ][:4],
+                    "carry_from": [
+                        c for c in (carry_from or ()) if isinstance(c, str)
+                    ][:4],
                     "state": state,
-                    "error": info.get("error", ""),
+                    "error": str(info.get("error", "") or ""),
+                    "output": dict(info.get("output", {}) or {}),
                 }
             )
         self._state_manager.update(
             current_plan={
-                "objective": str(text).strip()[:400],
+                "objective": str(objective).strip()[:400],
                 "steps": bounded_steps,
                 "current_step": current_step,
                 "state": run_state,
             }
         )
+
+    def _maybe_handle_goal_resume(self, text: str) -> Message | None:
+        """Step 2 — RESUME the retained, unfinished plan from a later turn.
+
+        Claimed only when ALL of the following hold, else ``None`` (fail closed
+        to the existing route):
+
+          * a bounded continuation/resumption turn was recognized (the existing
+            ``TurnRole.CONTINUATION`` semantics, or an explicit bounded form);
+          * ``ConversationState.current_plan`` holds a genuinely INCOMPLETE plan
+            (run state ``partial``/``failed`` and at least one step not
+            ``completed``).
+
+        The kernel-owned bridge re-runs ONLY the incomplete steps, seeding the
+        already-completed ones so their bounded result is reused through the
+        existing ``carry_from`` — the completed work is never repeated.
+        """
+        if self._goal_resume_resolver is None or self._state_manager is None:
+            return None
+        if not isinstance(text, str) or not self._is_goal_resume_request(text):
+            return None
+        plan = self._state_manager.state.current_plan
+        if not isinstance(plan, dict) or not plan.get("steps"):
+            return None
+        if str(plan.get("state") or "") not in ("partial", "failed"):
+            return None
+        plan_steps = [s for s in (plan.get("steps") or []) if isinstance(s, dict)]
+        if not plan_steps or all(
+            str(s.get("state") or "") == "completed" for s in plan_steps
+        ):
+            return None
+        try:
+            message = self._goal_resume_resolver(plan, self._last_session_context)
+        except Exception:  # fail-soft: the bridge never breaks conversation
+            return None
+        if not isinstance(message, Message):
+            return None
+        self._retain_goal_plan(
+            str(plan.get("objective") or text), plan_steps, message
+        )
+        return message
+
+    @staticmethod
+    def _is_goal_resume_request(text: str) -> bool:
+        """True when the turn deterministically asks to CONTINUE the active goal.
+
+        Reuses the EXISTING bounded continuation semantics (``TurnRole`` derived
+        from the shared semantic frame) plus a small explicit resumption form
+        set. A plain statement is never matched.
+        """
+        from atlas.conversation.turn_role import TurnRole, detect_turn_role
+
+        try:
+            if detect_turn_role(text, has_prior_objective=True) is TurnRole.CONTINUATION:
+                return True
+        except Exception:
+            pass
+        from atlas.conversation.normalization import (
+            canonicalize_surface,
+            collapse_whitespace,
+        )
+
+        normalized = collapse_whitespace(canonicalize_surface(text)).lower().strip()
+        return normalized in _GOAL_RESUME_FORMS
 
     def _maybe_handle_goal_followup(self, text: str) -> Message | None:
         """Report the ACTIVE goal/plan from retained state (read-only).
@@ -1704,6 +1824,12 @@ class ConversationService:
         if goal_response is not None:
             self._conversation.add_message(goal_response)
             return goal_response
+        # Step 2 — resume the retained UNFINISHED plan (only a bounded
+        # continuation turn with an incomplete plan is claimed).
+        goal_resume = self._maybe_handle_goal_resume(text)
+        if goal_resume is not None:
+            self._conversation.add_message(goal_resume)
+            return goal_resume
         goal_followup = self._maybe_handle_goal_followup(text)
         if goal_followup is not None:
             self._conversation.add_message(goal_followup)
@@ -2073,6 +2199,11 @@ class ConversationService:
         if goal_response is not None:
             self._conversation.add_message(goal_response)
             yield goal_response.content
+            return
+        goal_resume = self._maybe_handle_goal_resume(text)
+        if goal_resume is not None:
+            self._conversation.add_message(goal_resume)
+            yield goal_resume.content
             return
         goal_followup = self._maybe_handle_goal_followup(text)
         if goal_followup is not None:

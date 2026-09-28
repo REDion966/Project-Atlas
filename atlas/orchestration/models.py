@@ -55,6 +55,20 @@ class NodeKind(str, Enum):
     #: Deterministic synthesis over a carried investigation result (existing
     #: InvestigationSynthesizer). Consumes the previous step's bounded output.
     ANALYSIS = "analysis"
+    #: Local-first knowledge retrieval with a governed acquisition fallback
+    #: (the EXISTING D3 KnowledgeDecisionService.retrieve_with_acquisition).
+    #: This is the seam the conversational knowledge path itself uses, so no
+    #: D3 / local-first governance is bypassed.
+    KNOWLEDGE = "knowledge"
+    #: Deterministic, evidence-based analysis over the VALIDATED evidence a
+    #: prior KNOWLEDGE step carried, concluded with the EXISTING
+    #: technology-analysis surface. Pure, read-only and fail-closed.
+    RESEARCH_ANALYSIS = "research_analysis"
+    #: Deterministic evidence-gap analysis over the investigation result a prior
+    #: INVESTIGATION step carried (the EXISTING EvidenceGapAnalyzer). Derives
+    #: concrete, citation-backed gaps from the report's OWN evidence; gathers
+    #: nothing and fabricates nothing. Pure, read-only and fail-closed.
+    EVIDENCE_GAP_ANALYSIS = "evidence_gap_analysis"
 
 
 class EdgeKind(str, Enum):

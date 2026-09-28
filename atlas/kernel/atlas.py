@@ -24,6 +24,7 @@ from atlas.conversation.conversation_service import ConversationService
 from atlas.conversation.development_intake import task_spec_to_development_need
 from atlas.conversation.development_need_coordinator import DevelopmentNeedCoordinator
 from atlas.conversation.development_need_detector import AdvisorySignal
+from atlas.conversation.evidence_gap_analysis import EvidenceGapAnalyzer
 from atlas.conversation.investigation import InvestigationService
 from atlas.conversation.investigation_synthesis import InvestigationSynthesizer
 from atlas.conversation.message import Message
@@ -1584,6 +1585,36 @@ class Atlas:
             )
         )
         return orchestration_result_to_message(result, intent=text)
+
+    def _goal_resume_bridge(self, plan_state, session_context=None):
+        """Step 2 (plan resumption) — continue the RETAINED unfinished steps.
+
+        Rebuilds ONLY the incomplete steps of the retained bounded plan (using
+        the retained per-step inputs / dependency / carry references) and seeds
+        the already-COMPLETED steps, so their bounded result is reused through
+        the EXISTING ``carry_from`` mechanism and completed work is never
+        repeated. Fail-closed: an inconsistent/unknown retained plan returns
+        ``None`` (the turn keeps its existing route). No authority is created
+        and no governed boundary is touched.
+        """
+        from atlas.orchestration.goal_plan import resume_execution_request
+        from atlas.orchestration.reporting import orchestration_result_to_message
+
+        executor = getattr(self, "_orchestration_executor", None)
+        if executor is None:
+            return None
+
+        request_session = session_context
+        if request_session is None:
+            request_session = getattr(self, "_session_context", None)
+
+        request = resume_execution_request(plan_state, request_session)
+        if request is None:
+            return None
+        result = executor.execute(request)
+        return orchestration_result_to_message(
+            result, intent=str(plan_state.get("objective") or "")
+        )
 
     def _registered_tool_targets(self) -> set[str]:
         """Return the set of registered tool names (bounded, deterministic)."""
@@ -4729,6 +4760,9 @@ class Atlas:
             # kernel-owned bridge runs it through the EXISTING
             # OrchestrationExecutor. Duck-typed; grants no authority.
             goal_orchestration_resolver=self._goal_orchestration_bridge,
+            # Step 2 — resume a RETAINED unfinished plan through the same
+            # executor (completed steps seeded, never repeated).
+            goal_resume_resolver=self._goal_resume_bridge,
         )
         # P2/B2.4 — wire orchestration experience capture through the
         # existing ExperienceAccumulator (no schema/migration, no tick change).
@@ -4773,10 +4807,21 @@ class Atlas:
             workspace_service=None,
             research_service=self._acquisition_service,
             authority_service=self._authority_service,
-            # Step 2 — the two explicit typed conversational step kinds. Both
-            # are existing, read-only, model-free seams.
+            # Step 2 — the explicit typed conversational step kinds. All are
+            # existing, read-only, model-free seams.
             investigation_service=InvestigationService(),
             investigation_synthesizer=InvestigationSynthesizer(),
+            # The EXISTING D3 knowledge decision seam (local-first validated
+            # knowledge; the governed D2 acquisition boundary only when the
+            # local store is insufficient). This is the SAME path the
+            # conversational knowledge bridge uses, so the research step cannot
+            # bypass D3 / local-first governance.
+            knowledge_decision=self.knowledge_decision,
+            # Step 2 (gap slice) — the EXISTING deterministic, read-only
+            # evidence-gap analyzer, the SAME one the conversational gap route
+            # uses. It consumes only the bounded investigation snapshot a prior
+            # step carried; it gathers nothing and grants no authority.
+            evidence_gap_analyzer=EvidenceGapAnalyzer(),
         )
 
         # --- Phase 13.2: Register core components in the registry ---

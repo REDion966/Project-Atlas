@@ -139,7 +139,8 @@ class TestPlanComposition:
         for text in (
             "Hello Atlas.",
             "Investigate the memory architecture.",
-            "Research vector databases and then compare them with Atlas storage.",
+            # Two evidence-gathering clauses with no explanation clause.
+            "Research vector databases and then research graph databases.",
             "",
             "...",
         ):
