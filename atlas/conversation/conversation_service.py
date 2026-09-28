@@ -1090,6 +1090,76 @@ class ConversationService:
             },
         )
 
+    #: Step 7 — bounded ORDINAL / earlier-item reference surface. These name an
+    #: item in a LIST of earlier things; Atlas retains the ACTIVE context (and the
+    #: single most recent result), not a numbered history, so such a reference can
+    #: only be answered by saying so — never by guessing which one was meant.
+    _ORDINAL_REFERENCE_RE = re.compile(
+        r"\b(?:the\s+)?(?:previous|last|former|earlier|first|second|third|other)\s+"
+        r"(?:one|ones|result|investigation|answer|subject|topic|item|thing)\b"
+        r"|\bthe\s+one\s+(?:we|i)\s+(?:discussed|talked\s+about|mentioned|looked\s+at)\b"
+        r"|\b(?:go\s+back|back)\s+to\s+(?:that|the\s+one)\b",
+        re.IGNORECASE,
+    )
+
+    def _maybe_handle_ordinal_reference(self, text: str) -> Message | None:
+        """Step 7 — represent an UNRESOLVED earlier-item reference honestly.
+
+        Claims ONLY a turn that names an item in a list of earlier things (the
+        bounded surface above) after the existing reference surfaces have already
+        declined it, and asks which item is meant instead of guessing. The active
+        context, when there is one, is restated so the question is answerable, and
+        nothing is executed, authorized or invented.
+
+        Returns ``None`` for every other turn, so no existing route changes.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        if self._ORDINAL_REFERENCE_RE.search(text.strip()) is None:
+            return None
+
+        active = ""
+        try:
+            active = str(self._active_knowledge_subject() or "").strip()
+        except Exception:
+            active = ""
+        has_context = False
+        try:
+            has_context = bool(self._has_prior_objective())
+        except Exception:
+            has_context = bool(active)
+
+        lines = [
+            "I cannot tell which earlier item you mean: I keep the ACTIVE "
+            "conversation context and the most recent result, not a numbered list "
+            "of everything we have covered.",
+        ]
+        if active:
+            lines.append(f"The active subject is '{active[:160]}'.")
+            lines.append("Name the item you want (or say 'the current one') and I will use it.")
+        elif has_context:
+            lines.append(
+                "Tell me which subject or result you mean, or repeat the item's "
+                "name, and I will use that."
+            )
+        else:
+            lines.append(
+                "There is no earlier subject or result in this conversation yet, so "
+                "please name the item you want."
+            )
+        lines.append("Nothing was invented or executed.")
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "reference_clarification": {
+                    "requested": "earlier_item",
+                    "active_subject": active[:160],
+                    "has_prior_context": has_context,
+                }
+            },
+        )
+
     def _maybe_handle_multi_intent(self, text: str) -> Message | None:
         """Step 6 — answer every understood intent and REPORT the unhandled one.
 
@@ -1949,6 +2019,12 @@ class ConversationService:
         if multi_intent is not None:
             self._conversation.add_message(multi_intent)
             return multi_intent
+        # Step 7 — an earlier-item reference the existing surfaces could not
+        # resolve is represented honestly instead of guessing.
+        ordinal_reference = self._maybe_handle_ordinal_reference(text)
+        if ordinal_reference is not None:
+            self._conversation.add_message(ordinal_reference)
+            return ordinal_reference
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -2334,6 +2410,12 @@ class ConversationService:
         if multi_intent is not None:
             self._conversation.add_message(multi_intent)
             yield multi_intent.content
+            return
+        # Step 7 — mirror of send().
+        ordinal_reference = self._maybe_handle_ordinal_reference(text)
+        if ordinal_reference is not None:
+            self._conversation.add_message(ordinal_reference)
+            yield ordinal_reference.content
             return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.

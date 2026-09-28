@@ -88,7 +88,7 @@ mechanism by which Atlas may change its own operational state.
 | Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) at its established evidence boundary (§31), extended by the additive **Phase 1 → Phase 5 direct-evolution program** (§32) |
 | Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
 | Target-state gates | **G1 COMPLETE · G2 COMPLETE · G3 COMPLETE (Governed Self-Development)** — owner-scoped, additive gates on top of the frozen roadmap and the direct-evolution program; deterministic-first, model-independent, no new engine/planner/router/store/authority — see §33. **No G4 is defined or authorized.** |
-| Post-L10 evidence-driven step arc | **Step 1 → Step 6 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation; natural-language understanding (unseen phrasing → bounded semantic meaning, with truthful unknown/out-of-scope representation); intent & goal understanding (bounded multi-intent decomposition with every understood intent answered and every unhandled intent reported) — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10, §34.11 and §34.12. **The next step (Step 7) is NOT STARTED**: development stays evidence-driven and separately authorized. |
+| Post-L10 evidence-driven step arc | **Step 1 → Step 7 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation; natural-language understanding; intent & goal understanding (bounded multi-intent handling); context & reference understanding (existing references preserved, unresolved earlier-item references represented instead of guessed) — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10, §34.11, §34.12 and §34.13. **The next step (Step 8) is NOT STARTED**: development stays evidence-driven and separately authorized. |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
@@ -1839,6 +1839,55 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.13 Step 7 — Context & reference understanding across turns
+
+**Status: COMPLETE (additive, not a roadmap phase).** A multi-turn baseline
+through the real kernel showed the EXISTING reference machinery already resolves
+the common context-dependent expressions against the retained conversation state
+— `"What does it do?"`, `"And that?"`, `"Tell me more about that."`, `"Where is it
+implemented?"`, `"Go back to that."` all resolve to the active subject, and
+`"What did you find?"` resolves to the most recent result. Those were **not**
+rebuilt.
+
+**The demonstrated gap.** The ORDINAL / earlier-item class — `"What about the
+previous one?"`, `"And the second one?"` — names an item in a LIST of earlier
+things. Atlas retains the ACTIVE context and the single most recent result, not a
+numbered history, and such a turn previously fell through to the generic floor:
+the reference was neither resolved nor represented, so the user could not tell
+whether Atlas had chosen a referent.
+
+**What was implemented (smallest coherent change).** One bounded handler in
+`atlas/conversation/conversation_service.py`
+(`_maybe_handle_ordinal_reference`, wired into `send` and `stream` **after** the
+existing reference/knowledge/clarification surfaces so every existing route keeps
+precedence): for a bounded earlier-item reference surface (`the previous/last/
+earlier/first/second/third one|result|subject|…`) it reports the reference as
+**UNRESOLVED**, restates the active subject when one exists (otherwise asks for
+the item by name), records a bounded
+`metadata["reference_clarification"] = {requested, active_subject,
+has_prior_context}` for audit, and states that nothing was invented or executed.
+No referent is ever invented; nothing is executed, approved or authorized; no
+model is contacted.
+
+**Validation.** `tests/test_step7_context_and_reference.py` — 13 passed (five
+unresolved earlier-item forms; no-context and with-context replies; no authority
+metadata; ordinary turns not claimed; existing demonstrative references and the
+Step 5/Step 6 paths untouched; real-kernel continuity → result → unresolved
+earlier-item sequence; topic-change safety; live repository untouched). Relevant
+regressions: **615 passed, 1 skipped** (Step 2 orchestration, Steps 5 and 6,
+reference resolution, conversation state/context, L7 floor, builtin answers,
+self-knowledge bridge, G1/G1-routing/G2 gates, open-ended conversation).
+Real-kernel validation: **18/18 checks**.
+
+**Known limitations (truthful).** Ordinal references are represented, not
+resolved, because Atlas deliberately retains only the active context and the most
+recent result (accumulating an unbounded numbered history is not implemented); one
+phrasing (`"Tell me about the one we discussed earlier."`) is owned by another
+existing kernel surface rather than by this handler; and plural pronoun targets
+(`"they"`) with no bounded intent still reach the Step 5 floor. These remain
+evidence-driven, separately authorized work — no L11+/G4/C10 or Step 8+ phase is
+created or implied.
+
 ### 34.12 Step 6 — Intent & goal understanding: bounded multi-intent requests
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 6 addressed the
@@ -2127,5 +2176,24 @@ known limitations recorded in §34.12 (clauses with no bounded frame reading are
 not split; a leading research/goal clause is still owned by the existing goal
 route; intents without a bounded coordinator are not split); §34.12; the next step
 (Step 7) is NOT STARTED and remains evidence-driven).
+Step 7 context & reference understanding reconciled: 2026-09-28 (multi-turn
+baseline through the real kernel confirmed the EXISTING reference machinery already
+resolves pronouns/demonstratives/location and most-recent-result references against
+the retained conversation state; the demonstrated gap was the ORDINAL/earlier-item
+class — "What about the previous one?", "And the second one?" — which fell to the
+generic floor without being resolved or represented. Minimal change: one bounded
+handler (`_maybe_handle_ordinal_reference`, wired after the existing
+reference/knowledge/clarification surfaces) that reports the reference as
+UNRESOLVED, restates the active subject when one exists, records a bounded
+`metadata["reference_clarification"]`, and never invents a referent, executes,
+approves or contacts a model. 13 focused tests passed plus 615 relevant
+regressions (Step 2 orchestration, Steps 5/6, reference resolution, conversation
+state/context, L7 floor, builtin answers, self-knowledge bridge, G1/G2, open-ended
+conversation); 18/18 real-kernel validation checks; no full-suite re-run; known
+limitations recorded in §34.13 (ordinal references are represented rather than
+resolved because no numbered history is retained; one phrasing is owned by another
+existing surface; plural pronouns without a bounded intent still reach the Step 5
+floor); §34.13; the next step (Step 8) is NOT STARTED and remains
+evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
