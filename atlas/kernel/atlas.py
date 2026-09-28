@@ -1202,11 +1202,11 @@ class Atlas:
                 execution_runner=lambda session, proposal_id: (
                     self.run_development_execution(session, proposal_id)
                 ),
-                promotion_reviewer=lambda session, run_result, proposal_id: (
-                    self.submit_development_for_promotion_review(
-                        session, run_result, proposal_id=proposal_id
-                    )
-                ),
+                # The orchestrator's review must be ACTIONABLE: the existing
+                # ``_prepare_promotion_request`` captures the promotion artifact
+                # and bounded change manifest exactly as the driver path does,
+                # so the review can later be OWNER-approved and promoted.
+                promotion_reviewer=self._prepare_orchestrated_promotion_review,
                 promotion_executor=lambda session, request_id: (
                     self.promote_validated_change(session, request_id)
                 ),
@@ -1256,6 +1256,48 @@ class Atlas:
             objective,
             session_context=session_context,
             metadata=dict(metadata or {}),
+        )
+
+    def run_development_for_prepared_proposal(
+        self,
+        proposal_id: str,
+        session_context=None,
+        objective: str = "",
+    ):
+        """Drive an ALREADY-PREPARED persisted proposal (D5 API seam).
+
+        The proposal-driven counterpart of ``run_development_objective``,
+        reusing the SAME kernel-owned ``DevelopmentOrchestrator`` and its
+        EXISTING injected seams: read-only approval check, OWNER-gated sandbox
+        execution, verification gate, promotion review/executor and
+        self-knowledge snapshot. Only the objective-driven preparation step is
+        skipped, so a proposal that already exists — for example the one
+        produced from validated evidence by
+        ``propose_development_from_evidence_gap`` — reaches the same governed
+        stages without a second path.
+
+        Nothing is approved, authorized, executed or promoted by this method
+        itself. An unknown proposal id returns ``None`` (fail-closed: there is
+        nothing to drive).
+        """
+        memory = self._evolution_memory
+        proposal = None
+        if memory is not None:
+            try:
+                proposal = memory.get_proposal(proposal_id)
+            except Exception:
+                proposal = None
+        if proposal is None:
+            return None
+        return self.development_orchestrator.run(
+            objective or str(getattr(proposal, "title", "") or ""),
+            session_context=(
+                session_context if session_context is not None else self._session_context
+            ),
+            prepared_proposal_id=str(getattr(proposal, "proposal_id", "") or proposal_id),
+            prepared_proposal_status=str(
+                getattr(getattr(proposal, "status", None), "name", "") or ""
+            ),
         )
 
     def run_information_acquisition(
@@ -1322,6 +1364,7 @@ class Atlas:
             CompositeChangeSupplier,
             ScaffoldChangeSupplier,
         )
+        from atlas.evolution.evidence_development import EvidenceChangeSupplier
 
         model_supplier = None
         if bool(
@@ -1335,10 +1378,17 @@ class Atlas:
         # ChangeSupplier seam: explicitly supplied content, then the bounded
         # scaffold author, then (opt-in only) the non-authoritative model
         # supplier. No new synthesis surface is introduced.
+        # Step 3 — the evidence-directed author is registered in the SAME
+        # composite, after the existing deterministic authors and before the
+        # opt-in model author. The three deterministic suppliers are keyed on
+        # disjoint metadata (``code_changes`` / ``scaffold`` / ``evidence_change``)
+        # so existing behaviour is unchanged. It is model-free and writes only
+        # inside the bounded proposal payload.
         change_supplier = CompositeChangeSupplier(
             [
                 DeterministicChangeSupplier(),
                 ScaffoldChangeSupplier(),
+                EvidenceChangeSupplier(),
                 model_supplier,
             ]
         )
@@ -2187,6 +2237,37 @@ class Atlas:
         memory.update_proposal_status(proposal_id, ProposalStatus.APPROVED)
         return proposal
 
+    def propose_development_from_evidence_gap(self, report, *, gap_id: str = ""):
+        """Step 3 — turn ONE validated evidence gap into a governed draft proposal.
+
+        Converts a validated ``ConcreteGap`` from an existing
+        ``GapAnalysisReport`` into an existing ``DevelopmentNeed``, resolves its
+        component to its real source file through the EXISTING architecture
+        self-knowledge, and hands the need to the EXISTING
+        ``DevelopmentCycleController`` — which authors through the existing
+        ``ChangeSupplier`` seam and submits to the EXISTING ``ApprovalManager``.
+
+        It STOPS at ``PENDING_APPROVAL``: nothing is approved, authorized,
+        executed, verified, promoted or written to the repository, and no model
+        is called. Fail-closed outcomes carry a truthful ``reason``.
+
+        Returns an ``EvidenceDevelopmentOutcome`` (never raises), or ``None``
+        when the kernel's development cycle is not initialized.
+        """
+        from atlas.evolution.evidence_development import development_need_from_gap
+
+        controller = getattr(self, "_development_controller", None)
+        if controller is None:
+            return None
+        outcome = development_need_from_gap(
+            report,
+            gap_id=gap_id,
+            architecture=self.architecture_model(),
+        )
+        if outcome.need is None:
+            return outcome
+        return outcome.with_cycle(controller.run_development_cycle(outcome.need))
+
     def run_development_execution(
         self, session_context, proposal_id: str, *, allow_envelope: bool = False
     ):
@@ -2837,6 +2918,28 @@ class Atlas:
         )
         version = VersionManager(storage=storage).record_version(request, receipt)
         return str(getattr(version, "manifest_id", "") or "")
+
+    def _prepare_orchestrated_promotion_review(
+        self, session_context, run_result, proposal_id: str = ""
+    ):
+        """Open an ACTIONABLE promotion review for an orchestrated run.
+
+        Performs the EXISTING OWNER authorization check and then reuses the
+        EXISTING ``_prepare_promotion_request`` so the review carries the
+        captured promotion artifact and bounded change manifest — exactly the
+        mechanism the driver path already uses. Without the registered
+        artifact the review could be listed but never approved or promoted.
+
+        It never approves, promotes or writes to the repository; the returned
+        object exposes only the existing review identity.
+        """
+        from types import SimpleNamespace
+
+        self._require_development_authority(session_context, action="promotion_review")
+        request_id = self._prepare_promotion_request(
+            SimpleNamespace(proposal_id=proposal_id, metadata={}), run_result
+        )
+        return SimpleNamespace(request_id=request_id)
 
     def _prepare_promotion_request(self, proposal, run_result):
         """Capture the artifact and open a promotion review (no mutation)."""

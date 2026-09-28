@@ -3,8 +3,10 @@
 A bounded, deterministic coordinator that connects D4 self-directed work
 orchestration to the EXISTING governed development lifecycle:
 
-    objective
-      -> investigation / gap assessment + proposal   (existing DevelopmentDriver)
+    objective or ALREADY-PREPARED proposal
+      -> investigation / gap assessment + proposal   (existing DevelopmentDriver;
+                                                      skipped when a prepared
+                                                      proposal id is supplied)
       -> OWNER approval                              (existing approval mechanism)
       -> sandbox implementation                      (existing SelfDevelopmentLoop/CodeSandbox)
       -> verification                                (existing DevelopmentVerification)
@@ -147,11 +149,20 @@ class DevelopmentOrchestrator:
         *,
         session_context: Any | None = None,
         metadata: dict[str, Any] | None = None,
+        prepared_proposal_id: str = "",
+        prepared_proposal_status: str = "",
     ) -> DevelopmentRun:
         """Run ONE bounded governed development lifecycle for ``objective``.
 
         The orchestrator never grants approval: it reads the EXISTING approval
         state and stops at ``AWAITING_OWNER`` when approval is absent.
+
+        ``prepared_proposal_id`` drives a proposal that ALREADY EXISTS (for
+        example one prepared from validated evidence) instead of preparing a
+        new one from the objective: only the objective-driven preparation step
+        is skipped, and every later stage is the identical existing sequence.
+        The proposal's own status is never trusted for approval — the EXISTING
+        approval state is read through ``approval_checker`` either way.
         """
         transitions: list[tuple[str, str]] = []
 
@@ -168,30 +179,39 @@ class DevelopmentOrchestrator:
                 error="A non-empty development objective is required.",
             )
 
-        # 1. Investigation / gap assessment + proposal (existing driver).
-        _step(DevelopmentState.INVESTIGATING, "gap assessment + proposal preparation")
-        try:
-            prepared = self._driver(objective_text, metadata or {})
-        except Exception as exc:  # fail closed
-            _step(DevelopmentState.FAILED, f"driver error: {type(exc).__name__}")
-            return self._finish(
-                run_id, objective_text, DevelopmentState.FAILED, transitions,
-                error=f"Proposal preparation failed: {type(exc).__name__}.",
-            )
-        proposal_id = _bounded(getattr(prepared, "proposal_id", ""), 128)
-        if not proposal_id:
-            detail = _bounded(getattr(prepared, "detail", ""), 200)
-            _step(DevelopmentState.FAILED, "no proposal produced")
-            return self._finish(
-                run_id, objective_text, DevelopmentState.FAILED, transitions,
-                error=detail or "No development proposal could be prepared.",
-                report=(
-                    "I could not prepare a governed development proposal for "
-                    "that objective."
-                ),
-            )
-        proposal_status = _bounded(getattr(prepared, "terminal", ""), 64) or "pending"
-        _step(DevelopmentState.PROPOSAL_CREATED, proposal_id)
+        prepared_id = _bounded(prepared_proposal_id, 128)
+        if prepared_id:
+            # 1. An ALREADY-PREPARED proposal (e.g. prepared from validated
+            # evidence): the objective-driven preparation step is skipped and
+            # the identical governed sequence below runs unchanged.
+            proposal_id = prepared_id
+            proposal_status = _bounded(prepared_proposal_status, 64) or "pending"
+            _step(DevelopmentState.PROPOSAL_CREATED, proposal_id)
+        else:
+            # 1. Investigation / gap assessment + proposal (existing driver).
+            _step(DevelopmentState.INVESTIGATING, "gap assessment + proposal preparation")
+            try:
+                prepared = self._driver(objective_text, metadata or {})
+            except Exception as exc:  # fail closed
+                _step(DevelopmentState.FAILED, f"driver error: {type(exc).__name__}")
+                return self._finish(
+                    run_id, objective_text, DevelopmentState.FAILED, transitions,
+                    error=f"Proposal preparation failed: {type(exc).__name__}.",
+                )
+            proposal_id = _bounded(getattr(prepared, "proposal_id", ""), 128)
+            if not proposal_id:
+                detail = _bounded(getattr(prepared, "detail", ""), 200)
+                _step(DevelopmentState.FAILED, "no proposal produced")
+                return self._finish(
+                    run_id, objective_text, DevelopmentState.FAILED, transitions,
+                    error=detail or "No development proposal could be prepared.",
+                    report=(
+                        "I could not prepare a governed development proposal for "
+                        "that objective."
+                    ),
+                )
+            proposal_status = _bounded(getattr(prepared, "terminal", ""), 64) or "pending"
+            _step(DevelopmentState.PROPOSAL_CREATED, proposal_id)
 
         # 2. OWNER approval boundary (READ-ONLY: the orchestrator never approves).
         approved = False
@@ -232,12 +252,19 @@ class DevelopmentOrchestrator:
         verification_status = _name(getattr(verification, "status", ""))
 
         # 4. Verification gate (mandatory before promotion).
+        # The status arrives either as a plain string or as the EXISTING
+        # ``VerificationStatus`` enum, whose ``.name`` is upper-case
+        # ("VERIFIED"). Compare case-insensitively so a genuinely verified run
+        # is never misread as unverified.
+        verification_ok = verification_status.lower() == "verified"
+        verification_bad = verification_status.lower() in (
+            "failed", "unverified", "inconclusive",
+        )
         _step(DevelopmentState.VERIFYING, verification_status or execution_status)
-        if execution_status != "SUCCESS" or verification_status != "verified":
+        if execution_status != "SUCCESS" or not verification_ok:
             failed_state = (
                 DevelopmentState.VERIFICATION_FAILED
-                if verification_status in ("failed", "unverified", "inconclusive")
-                or execution_status == "SUCCESS"
+                if verification_bad or execution_status == "SUCCESS"
                 else DevelopmentState.FAILED
             )
             _step(failed_state, "verification not satisfied")
