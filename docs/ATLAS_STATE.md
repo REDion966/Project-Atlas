@@ -88,7 +88,7 @@ mechanism by which Atlas may change its own operational state.
 | Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) at its established evidence boundary (§31), extended by the additive **Phase 1 → Phase 5 direct-evolution program** (§32) |
 | Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
 | Target-state gates | **G1 COMPLETE · G2 COMPLETE · G3 COMPLETE (Governed Self-Development)** — owner-scoped, additive gates on top of the frozen roadmap and the direct-evolution program; deterministic-first, model-independent, no new engine/planner/router/store/authority — see §33. **No G4 is defined or authorized.** |
-| Post-L10 evidence-driven step arc | **Step 1 → Step 4 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10. **The next step is NOT STARTED**: development stays evidence-driven and separately authorized. |
+| Post-L10 evidence-driven step arc | **Step 1 → Step 5 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation; natural-language understanding (unseen phrasing → bounded semantic meaning, with truthful unknown/out-of-scope representation) — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10 and §34.11. **The next step is NOT STARTED**: development stays evidence-driven and separately authorized. |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
@@ -1839,6 +1839,67 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.11 Step 5 — Natural-language understanding: unseen phrasing → bounded meaning
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 5 advanced the
+conversation layer from bounded pattern handling toward scalable interpretation
+of *previously unseen* human language, and made the existing semantic
+classification visible as truthful conversational meaning.
+
+**What already existed (verified by the Step 5 baseline, not assumed).** The
+shared G1 semantic layer (`atlas/conversation/semantic_frame.py`, over the word
+CLASSES in `atlas/conversation/lexicon.py`) already turns ordinary utterances
+into a bounded, inspectable frame — role, domain (the owning capability),
+operation, bounded subject, bounded compound decomposition — and several
+genuinely unseen paraphrases already route correctly (`"Spill the beans on what
+you're capable of."` → capabilities; `"Which modules make up your conversation
+side?"` → architecture self-knowledge; `"Investigate the conversation state
+handling and then explain what we should do next."` → the Step 2 orchestration
+slice). Ambiguity already reaches the existing clarification seam (`"Handle it."`
+→ a bounded request for more detail), and references/follow-ups already resolve
+against the retained conversation state. No new engine was added for those.
+
+**The concrete capability gap the baseline demonstrated.** A turn the shared
+frame could not map to ANY bounded operation was answered with the
+*model-unavailable* floor text (`"I operate deterministically without an external
+AI model, so I cannot answer that conversationally yet…"`). That misreported an
+**out-of-scope** request as a **missing-model** problem, discarded the
+interpretation the semantic layer had just computed (domain `unsupported`,
+confidence `0.0`, bounded subject), and said nothing about what the turn *was* or
+what Atlas *can* do — the representation of unknown/unsupported input was the
+one part of the acceptance surface that was genuinely missing.
+
+**What was implemented (smallest coherent change).** One module-level renderer
+`uninterpreted_notice(text)` in `atlas/conversation/builtin_response.py` plus a
+single branch in `BuiltinResponseService.respond`: when the intent is
+`unsupported` **and** the shared frame shows the turn names no bounded operation
+(`domain == unsupported` and no operation), the reply states what was read
+(bounded subject), that the request is out of scope rather than a missing-model
+problem, restates the bounded capability surface, records the bounded
+interpretation in `metadata["frame_interpretation"]`, and states that nothing was
+executed. Every other unsupported shape keeps its previous notice verbatim, and
+the streaming path is consistent because `respond_stream` delegates to `respond`.
+Scope: interpretation only — no routing, no approval, no execution, no promotion,
+no model call, no authority, no new engine/planner/store.
+
+**Validation.** `tests/test_step5_natural_language_understanding.py` — 32 focused
+tests: truthful representation of unseen out-of-scope wording (content + bounded
+`frame_interpretation` metadata + bounded length + determinism), bounded meaning
+for unseen paraphrases (domain/operation/confidence/evidence, non-governance-
+sensitive), ambiguity → clarification, context-sensitive references, the
+preserved unsupported intent/metadata contract, absence of any authority surface,
+and real-kernel turns for all of the above. Prior-slice behaviour was unpinned by
+nothing: the affected subsystem regressions (L7 cognition floor, builtin state
+answers, conversation service, self-knowledge bridge, G1/G2 gates, open-ended
+conversation, evidence-gap routing) remained green.
+
+**Known limitations (truthful).** The uninterpreted notice is bounded to
+out-of-scope/unknown wording; a *partially* understood multi-intent turn can
+still answer only its first clause without reporting the unhandled part, and
+correction phrasing beyond the existing bounded markers is not recognised. These
+remain evidence-driven, separately authorized work — no L11+/G4/C10 phase is
+created or implied, and nothing beyond Step 5 was implemented.
+
 ### 34.10 Post-L10 evidence-driven step arc (Steps 1 → 4) — COMPLETE
 
 Four additive, evidence-driven steps were completed after L10. None of them is a
@@ -1975,5 +2036,22 @@ dependency; the validated loop is the demonstrated evidence-gap remedy class, no
 unrestricted autonomous self-development; the capability-activation leg remains
 covered separately by the existing capability-promotion tests; §34.10; the next step
 is NOT STARTED and remains evidence-driven).
+Step 5 natural-language understanding reconciled: 2026-09-28 (baseline measured
+against the real kernel with unseen phrasing: unseen paraphrases already route
+through the shared G1 semantic frame, ambiguity already reaches the clarification
+seam, and references already resolve; the demonstrated gap was that a turn mapping
+to no bounded operation was answered with the model-unavailable floor text,
+misreporting an out-of-scope request as a missing-model problem and discarding the
+computed interpretation. Minimal change: `uninterpreted_notice()` in
+`atlas/conversation/builtin_response.py` plus one `respond` branch, surfaced only
+when the frame shows no bounded operation, with a bounded
+`metadata["frame_interpretation"]` record; every other unsupported shape keeps its
+notice verbatim and the streaming path is consistent. 32 focused tests plus the
+L7 floor/builtin/conversation-service/self-knowledge-bridge/G1–G2/open-ended/
+evidence-gap subsystem regressions green; no full-suite re-run; interpretation
+only — no routing, approval, execution, promotion, permission or model change;
+known limitations recorded in §34.11 (partial multi-intent answers and correction
+phrasing beyond the existing bounded markers remain evidence-driven work); §34.11;
+the next step is NOT STARTED).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

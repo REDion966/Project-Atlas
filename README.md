@@ -60,9 +60,10 @@ governance — its own governed development.
     from the request's own words. The Development Envelope stays disabled by
     default, promotion remains OWNER-only, and nothing is approved, executed, or
     promoted by conversation.
-- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 4)** — additive,
+- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 5)** — additive,
   model-independent, and owner-gated; no new engine, planner, scheduler or store
-  was introduced, and no later step is defined (see `docs/ATLAS_STATE.md` §34.10):
+  was introduced, and no later step is defined (see `docs/ATLAS_STATE.md` §34.10
+  and §34.11):
   - **Step 1** — open-ended conversation over the existing provider seam, with
     Atlas (not any model) remaining the authority.
   - **Step 2** — goal-centered orchestration: compound requests sequence as
@@ -81,6 +82,14 @@ governance — its own governed development.
     original gap is no longer reported, and no redundant development is created); a
     control run without the promotion still reports the gap. **Step 4 required no
     production change.**
+  - **Step 5** — natural-language understanding: the shared semantic layer
+    interprets genuinely unseen phrasing into a bounded frame (role, owning
+    domain, operation, subject) over word classes rather than literals, and an
+    unhandled turn whose frame names no bounded operation now answers with what
+    was read, states that the request is out of scope rather than a missing model,
+    restates the bounded capability surface and records the interpretation —
+    instead of reporting it as a model-unavailable problem. Interpretation only:
+    no routing, approval, execution, promotion, permission or model change.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module), **not** unrestricted
     autonomous self-development. **The next step is NOT STARTED** and stays

@@ -1296,6 +1296,74 @@ def _format_names(names: object) -> str:
     return ", ".join(items)
 
 
+#: The bounded capability surface restated by the uninterpreted-request notice
+#: (the SAME bounded set the existing unsupported floor has always listed).
+_UNINTERPRETED_SURFACE: str = (
+    "greeting, help, identity ('who are you'), capabilities ('what can you "
+    "do'), capability detail ('explain <name>'), status, memory/knowledge "
+    "recall ('do you remember <topic>'), and commands ('what commands can I "
+    "use')"
+)
+
+#: Bound applied to the restated subject in the uninterpreted notice.
+_MAX_UNINTERPRETED_SUBJECT_CHARS: int = 120
+
+
+def uninterpreted_interpretation(text: str) -> tuple[str, dict[str, Any]] | None:
+    """Step 5 — surface the SHARED semantic reading of a turn it cannot map.
+
+    Uses the EXISTING shared semantic frame (G1, ``semantic_frame.interpret``) to
+    decide. Returns ``(block, metadata)`` ONLY when the frame shows the turn names
+    no bounded operation (``domain == unsupported`` and no operation) — i.e.
+    genuinely unknown or out-of-scope wording — and ``None`` otherwise.
+
+    The returned block states what was read (the bounded subject), that the
+    request is out of scope rather than a missing-model problem, and that no
+    approval, authorization or change is involved. It is PREPENDED to the
+    existing unsupported notice (never replacing it), so every pinned contract —
+    including the bounded capability surface and the fail-closed wording — is
+    preserved exactly.
+
+    Interpretation only: no routing, approval, execution, promotion or mutation,
+    no model call, no authority. Pure (a function of the text only), so the
+    conversation path and the bare builtin path render identically.
+    """
+    from atlas.conversation import semantic_frame as _sf
+
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        frame = _sf.interpret(text)
+    except Exception:  # defensive — interpretation never raises by contract
+        return None
+    if frame.domain is not _sf.SemanticDomain.UNSUPPORTED or frame.operation:
+        return None
+
+    subject = (frame.subject or "").strip()[:_MAX_UNINTERPRETED_SUBJECT_CHARS]
+    lines = ["I could not map that request to anything I can do."]
+    if subject:
+        lines.append(f"The closest subject I read was '{subject}'.")
+    lines.append(
+        "That is an out-of-scope request rather than a missing-model problem: my "
+        "bounded operations are the same with or without one, and no external AI "
+        "model was contacted."
+    )
+    lines.append(
+        "This is interpretation only: no approval, no authorization, and no "
+        "change was made."
+    )
+    return "\n".join(lines), {
+        "frame_interpretation": {
+            "role": frame.role.value,
+            "domain": frame.domain.value,
+            "operation": frame.operation,
+            "subject": subject,
+            "confidence": float(frame.confidence),
+            "needs_clarification": bool(frame.needs_clarification),
+        }
+    }
+
+
 class BuiltinResponseService:
     """Deterministic built-in conversational responder.
 
@@ -1446,6 +1514,13 @@ class BuiltinResponseService:
             intent, detail = classified
         else:
             intent, detail = classified, None
+        if intent == BUILTIN_INTENT_UNSUPPORTED:
+            # Step 5 — when the SHARED semantic frame shows the turn maps to no
+            # bounded operation, answer with the interpretation-aware notice
+            # instead of the model-unavailable floor text.
+            interpreted = self._uninterpreted_response(text)
+            if interpreted is not None:
+                return interpreted
         return self._build_message(intent, detail, message_count=message_count)
 
     def _bridge_topic(self, text: str) -> str | None:
@@ -2299,6 +2374,35 @@ class BuiltinResponseService:
         if len(body) > _MAX_REFERENCE_CHARS:
             body = body[:_MAX_REFERENCE_CHARS].rstrip() + "..."
         return f"{label} {body}"
+
+    def _uninterpreted_response(self, text: str) -> Message | None:
+        """Step 5 — surface the SHARED semantic interpretation of an unhandled turn.
+
+        Returns a message whose content PREPENDS the bounded semantic reading to
+        the existing unsupported notice, when the EXISTING frame shows that the
+        turn maps to no bounded operation (unknown / out-of-scope wording).
+        Returns ``None`` for every other unsupported shape, so the existing
+        unsupported notice is kept verbatim and all pinned behaviour is unchanged.
+
+        Interpretation only: it never routes, approves, executes, promotes or
+        mutates anything, it calls no model, and it grants no authority. The
+        bounded interpretation is recorded in the message metadata for audit.
+        """
+        notice = uninterpreted_interpretation(text)
+        if notice is None:
+            return None
+        block, extra = notice
+        metadata: dict[str, Any] = {
+            "builtin_response": True,
+            "builtin_intent": BUILTIN_INTENT_UNSUPPORTED,
+            "model_used": False,
+        }
+        metadata.update(extra)
+        return Message(
+            role="assistant",
+            content=f"{block}\n\n{self._render_unsupported()}",
+            metadata=metadata,
+        )
 
     def _render(
         self,

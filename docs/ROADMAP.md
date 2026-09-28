@@ -356,8 +356,8 @@ validated capabilities and the classified remaining limitations are recorded in
 **evidence-driven and separately authorized**; this record neither authorizes nor
 schedules them.
 
-**Post-L10 evidence-driven step arc (Steps 1 → 4) — COMPLETE (NOT a roadmap
-phase).** Four additive steps were completed after L10 and after the C1 → C5
+**Post-L10 evidence-driven step arc (Steps 1 → 5) — COMPLETE (NOT a roadmap
+phase).** Five additive steps were completed after L10 and after the C1 → C5
 conversational validation, each authorized only after the actual capability gap
 was demonstrated:
 
@@ -381,6 +381,18 @@ was demonstrated:
   change, the original gap is no longer reported, and no redundant development is
   created (a control run without the promotion still reports the gap). Step 4
   required **no production change**.
+- **Step 5 — Natural-language understanding** — the shared G1 semantic layer
+  (word classes, not literal phrases) already interprets genuinely unseen phrasing
+  into a bounded frame and routes it; Step 5 closed the demonstrated
+  representation gap by surfacing that interpretation for unknown/out-of-scope
+  turns: an unhandled turn whose frame names no bounded operation now answers with
+  what was read, states that the request is out of scope rather than a missing
+  model, restates the bounded capability surface, records the bounded
+  interpretation for audit, and states that nothing was executed. Interpretation
+  only — no routing, approval, execution, promotion, permission or model change.
+  Known limitations (partial multi-intent answers; correction phrasing beyond the
+  existing bounded markers) remain evidence-driven work. See
+  `docs/ATLAS_STATE.md` §34.11.
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and
