@@ -88,7 +88,7 @@ mechanism by which Atlas may change its own operational state.
 | Current state | **Post-Roadmap Operational State** — Phase C evidence-driven evolution (C0 → C9) at its established evidence boundary (§31), extended by the additive **Phase 1 → Phase 5 direct-evolution program** (§32) |
 | Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
 | Target-state gates | **G1 COMPLETE · G2 COMPLETE · G3 COMPLETE (Governed Self-Development)** — owner-scoped, additive gates on top of the frozen roadmap and the direct-evolution program; deterministic-first, model-independent, no new engine/planner/router/store/authority — see §33. **No G4 is defined or authorized.** |
-| Post-L10 evidence-driven step arc | **Step 1 → Step 5 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation; natural-language understanding (unseen phrasing → bounded semantic meaning, with truthful unknown/out-of-scope representation) — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10 and §34.11. **The next step is NOT STARTED**: development stays evidence-driven and separately authorized. |
+| Post-L10 evidence-driven step arc | **Step 1 → Step 6 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation; natural-language understanding (unseen phrasing → bounded semantic meaning, with truthful unknown/out-of-scope representation); intent & goal understanding (bounded multi-intent decomposition with every understood intent answered and every unhandled intent reported) — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10, §34.11 and §34.12. **The next step (Step 7) is NOT STARTED**: development stays evidence-driven and separately authorized. |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
@@ -1839,6 +1839,62 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.12 Step 6 — Intent & goal understanding: bounded multi-intent requests
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 6 addressed the
+limitation §34.11 recorded as truthfully open: *"a partially understood
+multi-intent turn can still answer only its first clause without reporting the
+unhandled part."*
+
+**What the baseline showed (measured, not assumed).** The limitation was NOT a
+language, intent-classification or routing failure — it was a **goal
+decomposition** failure. `semantic_frame.decompose` requires every clause to name
+a recognised operation, so `decompose("Tell me what you can do and also where the
+conversation service lives.")` returned **one** sub-request: the genuine second
+reading was never split, and the turn was then answered by whichever surface
+matched the first clause, silently discarding the rest. Single-intent turns, the
+Step 5 uninterpreted floor, ambiguity clarification and the Step 2 goal
+orchestration were all verified to already work and were left untouched.
+
+**What was implemented (smallest coherent extension).**
+- `atlas/conversation/semantic_frame.py`: new `split_intents(text)` — a bounded
+  coordinator split (`and also`, `and then`, `as well as`, `also`, `plus`, `and`;
+  word CLASSES, longest first, at most 4 readings) that reads each clause with the
+  EXISTING `interpret` and keeps only clauses that yield a bounded reading
+  (domain, operation, subject or a bounded role). It is a *separate* function:
+  `decompose` — and therefore Step 2 goal planning — is byte-for-byte unchanged.
+- `atlas/conversation/conversation_service.py`: one handler
+  (`_maybe_handle_multi_intent`, wired into `send` and `stream` **after** the
+  compound/knowledge/clarification surfaces so every existing route keeps
+  precedence) that answers each understood clause through the EXISTING builtin
+  surface, reports every clause it cannot map as explicitly *not attempted*,
+  states that nothing was executed or authorized, and records a bounded
+  `metadata["multi_intent"]` = {handled, unhandled} for audit. Governed clauses
+  are never answered by this path. It declines (returns ``None``) for
+  single-intent turns and when nothing is understood, so the Step 5 floor still
+  owns unknown wording.
+
+**Validation.** `tests/test_step6_intent_and_goal_understanding.py` — 19 passed,
+1 skipped (bounded coordinator splits; unseen second clauses; clauses the frame
+cannot read are never invented; `decompose` unchanged; per-clause answering;
+unhandled-portion reporting; no authority metadata; governance clauses not
+answered; real-kernel turns). Relevant regressions green (Steps 2 and 5 suites,
+L7 cognition floor, builtin state answers, conversation service, self-knowledge
+bridge, G1/G1-routing/G2/G3 gates, open-ended conversation, evidence-gap
+routing). Real-kernel validation: **21/21 checks** — three unseen multi-intent
+requests each answered their understood clause and reported their unhandled
+clause; single-intent routing, Step 2 orchestration, the Step 5 floor, ambiguity
+clarification and governance all preserved; no approval or promotion created.
+
+**Known limitations (truthful).** Only clauses the shared frame can read count as
+separate intents, so a clause with no bounded reading at all (e.g. "who are you"
+— the builtin answers it, the frame does not read it) is not split; a multi-clause
+turn whose leading clause is a research/goal request is still owned by the
+existing goal route, whose report describes its own plan rather than the second
+clause; and intents joined without a bounded coordinator are not split. These
+remain evidence-driven, separately authorized work — no L11+/G4/C10 phase is
+created or implied.
+
 ### 34.11 Step 5 — Natural-language understanding: unseen phrasing → bounded meaning
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 5 advanced the
@@ -2053,5 +2109,23 @@ only — no routing, approval, execution, promotion, permission or model change;
 known limitations recorded in §34.11 (partial multi-intent answers and correction
 phrasing beyond the existing bounded markers remain evidence-driven work); §34.11;
 the next step is NOT STARTED).
+Step 6 intent & goal understanding reconciled: 2026-09-28 (baseline measured the
+Step 5 limitation against the real kernel and located its cause precisely: a goal
+DECOMPOSITION gap — `semantic_frame.decompose` returned ONE sub-request for a
+two-intent turn whose second clause named no recognised operation, so the second
+intent was silently absorbed. Minimal change: `semantic_frame.split_intents()` (a
+bounded coordinator split over word classes, reusing the EXISTING `interpret` per
+clause; `decompose` and Step 2 goal planning untouched) plus one conversation
+handler placed after the compound/knowledge/clarification surfaces, which answers
+each understood clause through the EXISTING builtin surface, reports every
+unmapped clause as explicitly not attempted, and records a bounded
+`metadata["multi_intent"]`; no approval, execution, promotion, permission or model
+change. 19 focused tests passed (1 skipped) plus the Step 2/Step 5/L7/builtin/
+conversation-service/self-knowledge-bridge/G1–G3/open-ended/evidence-gap
+regressions green; 21/21 real-kernel validation checks; no full-suite re-run;
+known limitations recorded in §34.12 (clauses with no bounded frame reading are
+not split; a leading research/goal clause is still owned by the existing goal
+route; intents without a bounded coordinator are not split); §34.12; the next step
+(Step 7) is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

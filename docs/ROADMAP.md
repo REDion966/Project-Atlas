@@ -356,8 +356,8 @@ validated capabilities and the classified remaining limitations are recorded in
 **evidence-driven and separately authorized**; this record neither authorizes nor
 schedules them.
 
-**Post-L10 evidence-driven step arc (Steps 1 → 5) — COMPLETE (NOT a roadmap
-phase).** Five additive steps were completed after L10 and after the C1 → C5
+**Post-L10 evidence-driven step arc (Steps 1 → 6) — COMPLETE (NOT a roadmap
+phase).** Six additive steps were completed after L10 and after the C1 → C5
 conversational validation, each authorized only after the actual capability gap
 was demonstrated:
 
@@ -393,6 +393,16 @@ was demonstrated:
   Known limitations (partial multi-intent answers; correction phrasing beyond the
   existing bounded markers) remain evidence-driven work. See
   `docs/ATLAS_STATE.md` §34.11.
+- **Step 6 — Intent & goal understanding** — the Step 5 limitation was located to
+  a goal-decomposition gap (`decompose` did not split a second clause that named
+  no recognised operation), not a language or routing gap. A bounded coordinator
+  split (`semantic_frame.split_intents`, word classes, reusing the existing
+  `interpret`; `decompose` unchanged) plus one conversation handler now answers
+  every understood intent through the EXISTING builtin surface and reports every
+  unhandled intent as explicitly *not attempted*, with a bounded
+  `metadata["multi_intent"]` record. No approval, execution, promotion,
+  permission or model change. Remaining limitations are recorded in
+  `docs/ATLAS_STATE.md` §34.12. **Step 7 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

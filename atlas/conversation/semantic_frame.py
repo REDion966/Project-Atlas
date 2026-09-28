@@ -1110,6 +1110,93 @@ def _governance_sensitive(
     )
 
 
+#: Bounded coordinators that join two independent readings inside one request.
+#: Word CLASSES, not literal phrases, and ordered LONGEST FIRST so the most
+#: specific coordinator wins. Used only by :func:`split_intents`, which leaves
+#: :func:`decompose` (and therefore goal planning) untouched.
+_INTENT_COORDINATORS: tuple[str, ...] = (
+    "and also",
+    "and then",
+    "and additionally",
+    "as well as",
+    "plus also",
+    "also",
+    "plus",
+    "and",
+)
+
+#: Bound on the independent readings returned for one request.
+_MAX_INTENTS: int = 4
+
+
+def split_intents(text: Any) -> tuple[SubRequest, ...]:
+    """Step 6 — the bounded independent readings inside ONE request.
+
+    The ordinary decomposition requires each clause to name a recognised
+    operation, so a genuine second reading that only *states* what is wanted
+    ("…and also where the conversation service lives") is not split and its
+    intent is silently absorbed or dropped. This splits the surface on the
+    bounded coordinator set above and reads each clause with the EXISTING
+    :func:`interpret`, so an unseen second clause is still represented.
+
+    Returns ``()`` when the surface carries no bounded coordinator (the existing
+    decomposition then owns the turn unchanged) or fewer than two clauses yield
+    a bounded reading, so it can never invent multiple intents from one request.
+
+    Pure, deterministic and model-independent: representation only, no routing,
+    no authority.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return ()
+
+    clauses: list[str] = []
+    remainder = text.strip()
+    for _ in range(_MAX_INTENTS - 1):
+        lowered = remainder.lower()
+        chosen: tuple[int, str] | None = None
+        for coordinator in _INTENT_COORDINATORS:
+            needle = f" {coordinator} "
+            index = lowered.find(needle)
+            if index > 0:
+                chosen = (index, coordinator)
+                break
+        if chosen is None:
+            break
+        index, coordinator = chosen
+        head = remainder[:index].strip(" ,;.")
+        if head:
+            clauses.append(head)
+        remainder = remainder[index + len(coordinator) + 2 :].strip(" ,;.")
+    if remainder:
+        clauses.append(remainder)
+    if len(clauses) < 2:
+        return ()
+
+    readings: list[SubRequest] = []
+    for clause in clauses[:_MAX_INTENTS]:
+        frame = interpret(clause)
+        if (
+            frame.domain is SemanticDomain.UNSUPPORTED
+            and not frame.operation
+            and not (frame.subject or "").strip()
+            and frame.role is SemanticRole.NEW_OBJECTIVE
+        ):
+            # A clause that yields NOTHING bounded is not a separate reading.
+            # A bounded ROLE (identity/casual/recall/...) is still a reading.
+            continue
+        readings.append(
+            SubRequest(
+                operation=frame.operation,
+                domain=frame.domain.value,
+                subject=clause[:200],
+                governance_sensitive=bool(frame.governance_sensitive),
+            )
+        )
+    if len(readings) < 2:
+        return ()
+    return tuple(readings)
+
+
 def decompose(text: Any) -> tuple[SubRequest, ...]:
     """Return bounded subrequests of a compound turn (deterministic).
 

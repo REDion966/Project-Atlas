@@ -1090,6 +1090,88 @@ class ConversationService:
             },
         )
 
+    def _maybe_handle_multi_intent(self, text: str) -> Message | None:
+        """Step 6 — answer every understood intent and REPORT the unhandled one.
+
+        Claims ONLY a turn that carries more than one bounded reading
+        (``semantic_frame.split_intents``, a bounded coordinator split of the
+        EXISTING frame) and whose clauses the EXISTING deterministic builtin
+        surface can answer — so a multi-intent request is never silently reduced
+        to its first clause. Each understood clause is answered by that SAME
+        surface (no new answering path), and any clause it cannot map is reported
+        explicitly as not attempted. Returns ``None`` when nothing is understood
+        (the Step 5 uninterpreted floor owns it) or when the turn is not a
+        multi-intent request, so all existing routing is unchanged. Nothing is
+        executed, approved or authorized by this path.
+        """
+        if self._builtin_response is None or not isinstance(text, str):
+            return None
+        from atlas.conversation import semantic_frame as _frame
+
+        try:
+            subs = _frame.split_intents(text)
+        except Exception:  # fail-soft: the existing cascade is unchanged
+            return None
+        if len(subs) < 2:
+            return None
+
+        handled: list[tuple[str, str]] = []
+        unhandled: list[str] = []
+        for sub in subs:
+            clause = str(getattr(sub, "subject", "") or "").strip()
+            if not clause:
+                continue
+            reply = None
+            if not bool(getattr(sub, "governance_sensitive", False)):
+                try:
+                    reply = self._builtin_response.respond(
+                        clause,
+                        spec=None,
+                        message_count=len(self._conversation.messages),
+                        context=None,
+                    )
+                except Exception:
+                    reply = None
+            intent = (
+                (reply.metadata or {}).get("builtin_intent")
+                if reply is not None
+                else ""
+            )
+            if reply is not None and intent and intent != "unsupported":
+                handled.append((clause, reply.content))
+            else:
+                unhandled.append(clause)
+        if not handled:
+            return None
+
+        lines = [
+            f"That request carries more than one intent. I answered "
+            f"{len(handled)} of {len(handled) + len(unhandled)}:",
+        ]
+        for clause, content in handled:
+            lines.append("")
+            lines.append(f"**{clause}**")
+            lines.append(content)
+        if unhandled:
+            lines.append("")
+            lines.append(
+                "This part could not be mapped to anything I can do, so it was "
+                "not attempted:"
+            )
+            lines.extend(f"- {clause}" for clause in unhandled)
+        lines.append("")
+        lines.append("Nothing was executed or authorized.")
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "multi_intent": {
+                    "handled": [clause for clause, _ in handled],
+                    "unhandled": list(unhandled),
+                }
+            },
+        )
+
     def _maybe_handle_compound_request(self, text: str) -> Message | None:
         """G1 — boundedly handle a compound research request.
 
@@ -1860,6 +1942,13 @@ class ConversationService:
         if clarification is not None:
             self._conversation.add_message(clarification)
             return clarification
+        # Step 6 — a request with more than one bounded intent answers every
+        # understood part and reports any unhandled part instead of silently
+        # reducing the turn to its first clause.
+        multi_intent = self._maybe_handle_multi_intent(text)
+        if multi_intent is not None:
+            self._conversation.add_message(multi_intent)
+            return multi_intent
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -2239,6 +2328,12 @@ class ConversationService:
         if clarification is not None:
             self._conversation.add_message(clarification)
             yield clarification.content
+            return
+        # Step 6 — mirror of send().
+        multi_intent = self._maybe_handle_multi_intent(text)
+        if multi_intent is not None:
+            self._conversation.add_message(multi_intent)
+            yield multi_intent.content
             return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
