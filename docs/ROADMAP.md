@@ -449,8 +449,17 @@ was demonstrated:
   justified), runs the runnable read-only steps through the EXISTING
   orchestration bridge, answers casual clauses through the EXISTING builtin
   surface, and reports every other step truthfully. Remaining limitations are
-  recorded in `docs/ATLAS_STATE.md` §34.16. **Steps 1 → 10 are COMPLETE.
-  Step 11 is NOT STARTED.**
+  recorded in `docs/ATLAS_STATE.md` §34.16.
+- **Step 11 — Natural response generation** — the real-kernel baseline showed the
+  existing response surfaces already natural enough; the demonstrated gap was the
+  step/outcome report, which echoed the whole request, exposed internal step
+  ids/targets, duplicated the target as the "output" and printed internal
+  attribution. One bounded, deterministic, model-free response-realization layer
+  now presents an established outcome in a single truthful shape (human label +
+  recorded subject + recorded state + its OWN result or reason) while preserving
+  the audit metadata. Remaining limitations are recorded in
+  `docs/ATLAS_STATE.md` §34.17. **Steps 1 → 11 are COMPLETE. Step 12 is NOT
+  STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

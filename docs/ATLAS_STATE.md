@@ -1839,6 +1839,80 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.17 Step 11 — Natural response generation: one truthful presentation contract
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 11 improved Atlas's
+ability to produce **natural, coherent, context-aware responses from information
+it has already deterministically established** — response realization only, with
+no new intelligence, knowledge, planning, execution authority or model
+dependence.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The many
+existing response surfaces (builtin, self-knowledge, clarification, reference,
+investigation/research, goal/orchestration, multi-intent, multi-step,
+unsupported/fail-closed) were **not rebuilt**. The demonstrated gap was the
+step/outcome report produced by the EXISTING reporting surface
+(`orchestration_result_to_message`), which is used by the Step 2 goal response,
+the Step 10 multi-step response and plan resumption. It was mechanically
+assembled: it echoed the entire request back (`"Done: <whole sentence>"`),
+exposed internal step ids (`step-0000`) and internal executor targets
+(`retrieve` / `synthesize`) as if they were results, **duplicated the target as
+the "output"** (`- step-0000: investigate storage layer — completed — investigate
+storage layer`) and always printed internal attribution
+(`Executed as: owner (owner).`). It did not make clear what each step *was* and
+what it actually *produced*, so completed / partial / failed / blocked work was
+not presented in one consistent, readable shape.
+
+**What was implemented (smallest coherent response layer).**
+- `atlas/conversation/response_layer.py`: a bounded, deterministic,
+  model-free response-realization layer. `describe_step` renders one step in a
+  fixed truthful shape — a human label for the step **kind** (not the internal
+  id), the bounded subject the outcome itself recorded (an internal target such
+  as `retrieve`/`synthesize` is never shown as a subject), the recorded state,
+  and the outcome's OWN recorded result (or its recorded reason when it did not
+  succeed; an input echo is never presented as a result). `render_outcome`
+  presents the whole run in one contract — `Done. Steps completed: N/M.` for a
+  completed run, `Completed with issues` for a partial run, `Could not complete
+  the request.` for a failed run (never claiming `Done` or a completed count), the
+  NLU-3 dimension-partial research report, and a bounded rejected report.
+- `atlas/orchestration/reporting.py`: `orchestration_result_to_message` now
+  delegates its *content* to `render_outcome` while keeping the deterministic
+  `orchestration` metadata byte-for-byte unchanged, so every orchestration
+  surface (Step 2 goal, Step 10 multi-step, resume) speaks the same truthful
+  shape with no change to routing or authority.
+- No new engine, planner, store, memory or world-state architecture; the Step 10
+  multi-step reply, the Step 5 unsupported notice, the Step 6 multi-intent reply,
+  the Step 7/8/9 reference/clarification wording and their pinned metadata are
+  unchanged.
+
+**Validation.** `tests/test_step11_natural_response_generation.py` — 22 focused
+tests (per-step realization uses a human label and the recorded result, never an
+internal id or an input echo; completed/partial/failed/rejected/research-partial
+rendering preserves the pinned truthful phrases and never claims `Done` on
+failure; determinism; the message-level report preserves the `orchestration`
+metadata and does not echo the request; malformed-result defense; real-kernel
+multi-step, ordered, dependent, unsupported-step, follow-up-reference,
+clarification, send/stream parity and no-authority/repository-untouched
+validation). Relevant subsystem regressions were green — Step 2 goal slices/
+resumption/gap/research-slice orchestration, conversation/checkpoint
+orchestration, the orchestration executor and reporting boundary parity,
+experience capture bridges, Steps 5/6/7 and 8/9/10, and the validating
+knowledge/target-state surfaces. The pre-existing failures documented elsewhere
+were reproduced against a pristine HEAD and remain unchanged — they are NOT
+caused by Step 11. No full-suite re-run.
+
+**Known limitations (truthful).** The response layer presents what the
+deterministic outcome recorded; where the EXISTING interpretation classified a
+clause unusually (e.g. an imperative containing the word `state` can be read by
+the shared semantic frame as an external-status question), the report faithfully
+presents the resulting failure rather than masking it — that is an upstream
+interpretation question, not a presentation one, and Step 11 deliberately does
+not invent a "better" result. A few surfaces keep their own pinned wording (the
+Step 5 unsupported notice, the Step 6 multi-intent reply, the Step 9/8
+clarification and topic-return wording) and were not consolidated, to preserve
+their existing contracts. These remain evidence-driven, separately authorized
+work — no L11+/G4/C10 phase or Step 12 is created or implied.
+
 ### 34.16 Step 10 — Multi-intent & multi-step understanding: ordered, dependency-aware
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 10 made Atlas
@@ -2563,6 +2637,29 @@ full-suite re-run; known limitations recorded in §34.16 (research-led compound
 shapes keep the existing compound route; a plain-`and` clause without a bounded
 operation is not separated; bounded order/result cues are required to represent
 order/dependency); §34.16; Steps 1 → 10 are COMPLETE and Step 11 is NOT STARTED
+and remains evidence-driven).
+Step 11 natural response generation reconciled: 2026-09-28 (the real-kernel
+baseline showed the many existing response surfaces already natural enough and
+did NOT rebuild them; the demonstrated gap was the step/outcome report — it
+echoed the whole request back ("Done: <whole sentence>"), exposed internal step
+ids ("step-0000") and internal targets ("retrieve"/"synthesize") as results,
+duplicated the target as the "output", and always printed internal attribution
+("Executed as: owner (owner)."). Minimal change: a bounded, deterministic,
+model-free response-realization layer (atlas/conversation/response_layer.py) that
+renders each step with a human kind label + the recorded subject + the recorded
+state + its OWN recorded result (or recorded reason on non-success), and the
+existing orchestration_result_to_message now delegates its content to it while
+keeping the orchestration metadata byte-for-byte unchanged; no new engine/store/
+world-state, no model call, no invented fact/action/authority. 22 focused tests
+plus relevant subsystem regressions green (Step 2 goal slices/resumption/gap/
+research-slice orchestration, conversation/checkpoint orchestration, the
+orchestration executor and reporting boundary parity, experience capture bridges,
+Steps 5/6/7 and 8/9/10, validating knowledge/target-state surfaces); the
+pre-existing failures were reproduced against a pristine HEAD and remain
+unchanged; no full-suite re-run; known limitations recorded in §34.17 (the layer
+presents what the deterministic outcome recorded — an upstream interpretation
+oddity is faithfully reported rather than masked — and a few surfaces keep their
+own pinned wording); §34.17; Steps 1 → 11 are COMPLETE and Step 12 is NOT STARTED
 and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
