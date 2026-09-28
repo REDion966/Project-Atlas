@@ -60,10 +60,10 @@ governance — its own governed development.
     from the request's own words. The Development Envelope stays disabled by
     default, promotion remains OWNER-only, and nothing is approved, executed, or
     promoted by conversation.
-- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 14)** — additive,
+- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 15)** — additive,
   model-independent, and owner-gated; no new engine, planner, scheduler or store
   was introduced, and no later step is defined (see `docs/ATLAS_STATE.md` §34.10
-  through §34.20):
+  through §34.21):
   - **Step 1** — open-ended conversation over the existing provider seam, with
     Atlas (not any model) remaining the authority.
   - **Step 2** — goal-centered orchestration: compound requests sequence as
@@ -171,10 +171,24 @@ governance — its own governed development.
     information do you not know?") are answered from that join, and an
     unregistered component is reported honestly rather than resolved to a
     spurious symbol. Representation only.
+  - **Step 15** — autonomous knowledge need detection: a bounded, deterministic,
+    model-free classification of the evidence Atlas already holds (the D3
+    sufficiency decision, the D2 acquisition outcome, and the Step 12–13
+    capability state) into ONE structured `KnowledgeNeed` — kind (`none` /
+    `missing` / `stale` / `insufficient` / `contradictory` /
+    `unsupported_capability` / `ambiguous` / `unknown`), actionability
+    (`satisfied` / `actionable` / `unsatisfiable` / `unknown`), a grounded reason
+    and bounded evidence. It is never inferred from unfamiliar wording, never
+    turns an unavailable capability into missing knowledge, and fails closed to
+    `unknown`. Two closed explicit forms ("what is the latest X?", "who won Y?")
+    are recognised as knowledge requests instead of falling to the unsupported
+    floor, and every knowledge answer carries the need as additive metadata.
+    Detection only — no research, acquisition, storage/learning or
+    capability-gap detection.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module), **not** unrestricted
-    autonomous self-development. **Steps 1 → 14 are COMPLETE; the next step
-    (Step 15) is NOT STARTED** and stays evidence-driven.
+    autonomous self-development. **Steps 1 → 15 are COMPLETE; the next step
+    (Step 16) is NOT STARTED** and stays evidence-driven.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
 - **Latest verified full-suite baseline (historical, not re-run for the Phase 3–5

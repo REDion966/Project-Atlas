@@ -1126,6 +1126,53 @@ class Atlas:
             candidate_urls=tuple(candidate_urls or ()),
         )
 
+    def knowledge_need(self, text: str, capability: str = ""):
+        """Step 15 — bounded, deterministic knowledge-need detection.
+
+        Classifies the ALREADY-COMPUTED evidence for ``text`` — the EXISTING D3
+        sufficiency/acquisition decision (``answer_knowledge_question``) and the
+        EXISTING unified capability state (Steps 12-13) — into one structured
+        ``KnowledgeNeed``. It never inspects the wording for unfamiliar terms,
+        never turns an unavailable capability into a knowledge gap, and never
+        guesses: with no grounded evidence the result is ``unknown``. Detection
+        only — no acquisition, no research, no authority, no mutation.
+        """
+        from atlas.research.knowledge_need import detect_knowledge_need
+
+        try:
+            from atlas.research.knowledge_decision import required_freshness
+
+            freshness = bool(required_freshness(text or ""))
+        except Exception:
+            freshness = False
+        answer = None
+        try:
+            answer = self.answer_knowledge_question(text)
+        except Exception:  # fail closed -> no grounded sufficiency evidence
+            answer = None
+        sufficiency = getattr(getattr(answer, "status", None), "value", "") or ""
+        acquisition = getattr(answer, "acquisition_status", "") or ""
+        has_evidence = bool(
+            getattr(answer, "claims", ()) or getattr(answer, "sources", ())
+        )
+        state = ""
+        reason = ""
+        if capability:
+            entry = self.capability_model().find(capability)
+            if entry is not None:
+                state = str(getattr(entry, "state", "") or "")
+                reason = str(getattr(entry, "reason", "") or "")
+        return detect_knowledge_need(
+            text,
+            sufficiency=sufficiency,
+            acquisition_status=acquisition,
+            has_evidence=has_evidence,
+            freshness_required=freshness,
+            capability=capability,
+            capability_state=state,
+            capability_reason=reason,
+        )
+
     @property
     def work_orchestrator(self):
         """Return the kernel-owned WorkOrchestrator (D4).

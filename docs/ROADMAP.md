@@ -492,8 +492,21 @@ was demonstrated:
   governance boundaries and a bounded known/unknown architecture knowledge
   boundary — and bounded conversation architecture questions are answered from
   that join, failing closed on unresolved names. Remaining limitations are
-  recorded in `docs/ATLAS_STATE.md` §34.20. **Steps 1 → 14 are COMPLETE. Step 15
-  is NOT STARTED.**
+  recorded in `docs/ATLAS_STATE.md` §34.20.
+- **Step 15 — Autonomous knowledge need detection** — the real-kernel baseline
+  showed the EXISTING D3 sufficiency decision and D2 acquisition status were
+  never turned into a structured result, never distinguished from a capability
+  gap, and were unreachable for an unrecognised knowledge question, so genuinely
+  unseen knowledge requests were reported as out of scope. A bounded,
+  deterministic, model-free classification of that already-computed evidence now
+  produces ONE structured `KnowledgeNeed` (kind, actionability, grounded reason
+  and bounded evidence) that is never inferred from unfamiliar wording, never
+  turns an unavailable capability into missing knowledge, and fails closed to
+  `unknown`; two closed explicit forms are recognised as knowledge requests after
+  every existing surface declined (gated on Atlas having no model-backed open
+  conversation), and every knowledge answer carries the need as additive
+  metadata. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.21.
+  **Steps 1 → 15 are COMPLETE. Step 16 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

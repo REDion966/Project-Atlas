@@ -276,6 +276,29 @@ _ARCH_KNOWLEDGE_BOUNDARY_RE = re.compile(
 #: target that does NOT resolve (reported honestly rather than guessed).
 _ARCH_COMPONENT_QUALIFIERS: tuple[str, ...] = ("component", "module", "subsystem")
 
+# ---------------------------------------------------------------------------
+# Step 15 — bounded knowledge-need recognition
+#
+# Only EXPLICIT requests for knowledge Atlas may not hold, in two closed forms:
+# a request for the CURRENT/LATEST knowledge about a subject, and the
+# attribution/origin of an external subject. Both are unambiguous knowledge
+# requests (never an operation), both require a usable bounded subject (an
+# unusable or self-referential subject declines), and both are recognised ONLY
+# when Atlas cannot answer conversationally (see
+# ``_knowledge_need_forms_apply``), so ordinary conversation is never hijacked.
+# ---------------------------------------------------------------------------
+
+_KNOWLEDGE_NEED_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"\bwhat(?:'s|\s+is|\s+are)\s+the\s+"
+        r"(?:latest|current|newest|most\s+recent|up[- ]to[- ]date)\b"
+    ),
+    re.compile(
+        r"\bwho\s+(?:won|invented|discovered|wrote|created|founded|designed|"
+        r"built|first)\b"
+    ),
+)
+
 
 def _normalized_state(raw: str) -> str | None:
     """Map a bounded state phrase to a canonical capability-state value."""
@@ -1818,6 +1841,13 @@ class BuiltinResponseService:
             metadata["validated_knowledge_status"] = self._validated_knowledge_status(
                 detail[1]
             )
+            # Step 15 — the bounded, structured knowledge-need result for this
+            # answer, from the SAME evidence the answer already reports. Additive
+            # metadata only: the reply text and the cascade are unchanged, and
+            # nothing is acquired, authorized or mutated.
+            need = self._knowledge_need_for(detail[0], detail[1])
+            if need is not None:
+                metadata["knowledge_need"] = need.to_dict()
         if intent == BUILTIN_INTENT_REFERENCE and isinstance(detail, tuple):
             metadata["reference_field"] = detail[0]
         return Message(
@@ -2583,6 +2613,16 @@ class BuiltinResponseService:
         resolved_reference = self._match_resolved_reference(spec)
         if resolved_reference is not None:
             return (BUILTIN_INTENT_REFERENCE, resolved_reference)
+        # Step 15 — reached only after EVERY existing surface above declined: an
+        # EXPLICIT request for knowledge Atlas may not hold ("what is the latest
+        # X?", "who won Y?") is recognised as a knowledge request and answered
+        # from the SAME local-first/D3 path (reporting its own honest outcome)
+        # instead of falling to the generic unsupported floor. Bounded: gated on
+        # Atlas having no model-backed open conversation and on a usable bounded
+        # subject (see ``_match_knowledge_need``).
+        knowledge_need = self._match_knowledge_need(lowered)
+        if knowledge_need is not None:
+            return (BUILTIN_INTENT_VALIDATED_KNOWLEDGE, knowledge_need)
         task_type = (
             getattr(spec.task_type, "value", "") if spec is not None else ""
         )
@@ -2801,6 +2841,123 @@ class BuiltinResponseService:
             return None
         return (query, result)
 
+    def _knowledge_need_forms_apply(self) -> bool:
+        """Step 15 — may a bounded knowledge-need form claim this turn?
+
+        Evidence-grounded and fail-closed: recognised only when Atlas holds the
+        knowledge machinery AND cannot answer conversationally — i.e. the
+        EXISTING ``open_conversation`` operational capability (Steps 12-13) is
+        NOT available. With a model-backed open conversation available the turn
+        keeps its existing open-ended route, and without the unified capability
+        model this declines, so ordinary conversation is never hijacked.
+        """
+        if self._validated_knowledge_provider is None:
+            return False
+        state = self._capability_state_for("open_conversation")[0]
+        if not state:
+            return False
+        return state.strip().lower() != "available"
+
+    def _match_knowledge_need(self, lowered: str) -> tuple[str, Any] | None:
+        """Claim a bounded knowledge-need turn as a knowledge request, or None.
+
+        Reuses the EXISTING local-first retrieval + D3/D2 decision path, so the
+        answer is the existing authoritative outcome (including the honest
+        ``empty`` outcome) and nothing is acquired, inferred or invented. A
+        matched form whose subject is unusable (or refers to Atlas itself)
+        declines, so the existing route is preserved.
+        """
+        if not self._knowledge_need_forms_apply():
+            return None
+        for pattern in _KNOWLEDGE_NEED_RES:
+            match = pattern.search(lowered)
+            if match is None:
+                continue
+            topic = _validated_knowledge_topic(lowered[match.end() :])
+            if topic is None:
+                return None
+            result = self._retrieve_validated_knowledge(topic)
+            if result is None:
+                return None
+            enriched = self._try_knowledge_decision(topic)
+            if enriched is not None and self._validated_knowledge_items(enriched):
+                result = enriched
+            return (topic, result)
+        return None
+
+    def _capability_state_for(self, name: str) -> "tuple[str, str]":
+        """Step-13 state + reason for ``name``, or ``("", "")`` (fail-soft)."""
+        model = self._capability_model()
+        if model is None:
+            return "", ""
+        finder = getattr(model, "find", None)
+        if not callable(finder):
+            return "", ""
+        try:
+            entry = finder(name)
+        except Exception:
+            return "", ""
+        if entry is None:
+            return "", ""
+        return (
+            str(getattr(entry, "state", "") or ""),
+            str(getattr(entry, "reason", "") or ""),
+        )
+
+    def _knowledge_need_for(self, query: str, result: Any) -> Any | None:
+        """Step 15 — the bounded knowledge need for an answer, or None.
+
+        Reads ONLY evidence Atlas already holds: the retrieval's own
+        authoritative status, the EXISTING D3 sufficiency/acquisition decision,
+        and the Step-13 state of the ``research`` capability the request would
+        use. Deterministic, model-free, fail-soft, and never a source of
+        authority — it detects and represents, and acquires nothing.
+        """
+        try:
+            from atlas.research.knowledge_need import (
+                SUFFICIENCY_INSUFFICIENT,
+                SUFFICIENCY_SUFFICIENT,
+                detect_knowledge_need,
+            )
+        except Exception:
+            return None
+        try:
+            has_evidence = bool(self._validated_knowledge_items(result))
+            sufficiency = ""
+            acquisition = ""
+            if has_evidence:
+                sufficiency = SUFFICIENCY_SUFFICIENT
+            else:
+                answer = self._knowledge_answer(query)
+                if answer is not None:
+                    sufficiency = str(
+                        getattr(getattr(answer, "status", None), "value", "") or ""
+                    )
+                    acquisition = str(getattr(answer, "acquisition_status", "") or "")
+                elif self._validated_knowledge_status(result) == "empty":
+                    # The retriever's own authoritative status: the local store
+                    # holds nothing for this request (no acquisition evidence).
+                    sufficiency = SUFFICIENCY_INSUFFICIENT
+            state, reason = self._capability_state_for("research")
+            try:
+                from atlas.research.knowledge_decision import required_freshness
+
+                freshness = bool(required_freshness(query))
+            except Exception:
+                freshness = False
+            return detect_knowledge_need(
+                query,
+                sufficiency=sufficiency,
+                acquisition_status=acquisition,
+                has_evidence=has_evidence,
+                freshness_required=freshness,
+                capability="research",
+                capability_state=state,
+                capability_reason=reason,
+            )
+        except Exception:  # fail-soft: reporting never breaks an answer
+            return None
+
     def _match_external_knowledge(self, lowered: str) -> tuple[str, Any] | None:
         """Resolve an external-knowledge turn to ``(query, result)`` or None.
 
@@ -2825,6 +2982,22 @@ class BuiltinResponseService:
                 result = enriched
             return (topic, result)
         return None
+
+    def _knowledge_answer(self, query: str) -> Any | None:
+        """Consult the EXISTING D3 sufficiency decision (fail-soft, read-only).
+
+        Returns the ``KnowledgeAnswer`` the report already renders (the same
+        decision ``answer_knowledge_question`` exposes), or ``None`` when the
+        provider is absent/raises — so the Step 15 classification degrades to the
+        fail-closed ``unknown`` rather than guessing.
+        """
+        provider = self._knowledge_status_provider
+        if provider is None or not query:
+            return None
+        try:
+            return provider(query)
+        except Exception:  # fail closed -> no grounded sufficiency evidence
+            return None
 
     def _try_knowledge_decision(self, query: str) -> Any | None:
         """Consult the D3 knowledge-decision provider (fail-soft, read-only)."""

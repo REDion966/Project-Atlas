@@ -1839,6 +1839,101 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.21 Step 15 — Autonomous knowledge need detection: a structured, bounded need
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 15 built the smallest
+evidence-driven, deterministic, model-independent capability that lets Atlas
+detect when it lacks knowledge required to answer or complete a request, and
+produce ONE structured knowledge-need result. It detects and represents only —
+it performs no acquisition, evaluates no source, stores/learns nothing, and
+detects no capability gap (Step 16 remains NOT STARTED).
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+sufficiency machinery already existed — the D3 `KnowledgeSufficiency` decision
+(`atlas.research.knowledge_decision`) and the D2 `ExternalAcquisitionStatus`
+(`atlas.research.external_acquisition`) — and was NOT rebuilt. But it was never
+turned into a structured result, never distinguished from a capability gap, and
+was unreachable for an unrecognised knowledge question, so genuinely unseen
+knowledge requests were reported as out of scope:
+
+  * `"What is the current release of the Zorblax protocol?"` → "I could not map
+    that request to anything I can do" (unsupported);
+  * `"Who won the 2147 World Cup?"` → unsupported;
+  * `"Tell me about quantum flux capacitors."` → the existing validated-knowledge
+    route, reporting the retrieval outcome but carrying no structured need, and
+    never distinguishing "Atlas lacks this knowledge" from "Atlas lacks the
+    capability".
+
+**What was implemented (one bounded classification over existing evidence).**
+- `atlas/research/knowledge_need.py` (new): `KnowledgeNeedKind` (`none` /
+  `missing` / `stale` / `insufficient` / `contradictory` /
+  `unsupported_capability` / `ambiguous` / `unknown`), `KnowledgeNeedStatus`
+  (`satisfied` / `actionable` / `unsatisfiable` / `unknown`) and an immutable,
+  length-bounded `KnowledgeNeed` (objective, query, capability + its Step-13
+  state, the sufficiency and acquisition values, freshness, a grounded reason,
+  and bounded evidence references). `classify_knowledge_need(...)` maps
+  ALREADY-COMPUTED evidence deterministically; `KnowledgeNeedDetector` composes
+  it from the existing read-only providers.
+- `atlas/kernel/atlas.py`: `Atlas.knowledge_need(text, capability="")` composes
+  the EXISTING D3 decision (`answer_knowledge_question`) with the EXISTING
+  unified capability state (Steps 12-13) into one `KnowledgeNeed`. Detection
+  only: no acquisition, no research, no authority, no mutation.
+- `atlas/conversation/builtin_response.py`: two closed knowledge-need forms
+  (a request for the CURRENT/LATEST knowledge about a subject, and the
+  attribution/origin of an external subject) are recognised as EXPLICIT
+  knowledge requests and answered through the SAME local-first/D3 path, instead
+  of falling to the generic unsupported floor. Every existing validated-knowledge
+  answer now also carries the structured `knowledge_need` as ADDITIVE metadata
+  (computed from the evidence the answer already reports); the reply text and
+  the cascade are unchanged and nothing is acquired.
+
+**Bounded and fail-closed by construction.** The classifier never inspects the
+wording for unfamiliar terms — a knowledge need is established ONLY from a
+grounded sufficiency decision, and with no grounded evidence the kind and status
+are `unknown`. An unavailable or blocked capability is reported as
+`unsupported_capability` (the gap is capability, not knowledge) and is NEVER
+turned into missing knowledge. Ambiguity is reported as `ambiguous` and outranks
+every other signal (clarification comes first). Actionability is derived ONLY
+from the existing acquisition outcome (`acquired`/`existing_knowledge` →
+`actionable`; `no_authorized_source`/`failed`/no path → `unsatisfiable`).
+
+**Non-hijacking.** The new forms are recognised only after EVERY existing
+surface in the deterministic floor declined, only for a usable bounded subject
+(a subject referring to Atlas itself, or an unusable one, declines), and only
+when Atlas cannot answer conversationally — i.e. the EXISTING `open_conversation`
+operational capability (Steps 12-13) is not available. With a model-backed open
+conversation available the turn keeps its open-ended route; without the unified
+capability model the forms decline outright. Normal investigation, supported
+capability requests, clarification, capability-state and architecture questions,
+and ordinary conversational turns are untouched (verified).
+
+**Validation.** `tests/test_step15_knowledge_need_detection.py` — 33 focused
+tests (the whole classification matrix; deterministic/fail-closed behaviour and
+immutability/serialization; detector composition with failing/absent providers;
+the two recognition forms; the existing knowledge answer carrying the need;
+non-hijack of ordinary turns, self-referential subjects, the open-conversation
+case and the no-capability-model case; and real-kernel validation of a genuine
+unseen need, agreement with the existing decision, the unavailable-capability
+distinction, conversation↔kernel consistency, send/stream parity,
+deny-by-default acquiring nothing, no authority/mutation, and Steps 1-14
+preservation). Relevant subsystem regressions were green (see §34.20's list plus
+the builtin-response, validated-knowledge, D3 and G2 suites). The pre-existing
+failures documented elsewhere were reproduced against a pristine HEAD and remain
+unchanged — they are NOT caused by Step 15. No full-suite re-run.
+
+**Known limitations (truthful).** Recognition is deliberately narrow: only the
+two closed explicit forms are claimed, so a knowledge question phrased some
+other way (e.g. `"What is the capital of France?"`) still falls to the existing
+unsupported floor; and a turn the existing goal route claims first (e.g.
+`"What is the latest version of the Quux framework?"` → the goal clarification)
+keeps that route. With the default deny-by-default configuration every detected
+need is `unsatisfiable` (`no_authorized_source`); `actionable` requires the OWNER
+to authorize a source first — this step never authorizes one. The need is a
+representation only: no research, acquisition, source evaluation, storage or
+learning is performed, and no capability-gap detection is performed. These remain
+evidence-driven, separately authorized work — no L11+/G4/C10 phase or Step 16 is
+created or implied.
+
 ### 34.20 Step 14 — Architecture self-understanding: one capability ↔ architecture view
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 14 built the smallest
@@ -3002,7 +3097,29 @@ import scans); the pre-existing failures were reproduced against a pristine HEAD
 and remain unchanged; no full-suite re-run; known limitations recorded in §34.20
 (no component-level interfaces/contracts or runtime state/data-flow; 702 modules
 undescribed by a component; request flow remains the existing self-knowledge
-topic); §34.20; Steps 1 → 14 are COMPLETE and Step 15 is NOT STARTED and remains
-evidence-driven).
+topic); §34.20).
+Step 15 knowledge need detection added: 2026-09-28 (the real-kernel baseline
+showed the EXISTING D3 sufficiency decision and D2 acquisition status were never
+turned into a structured result, never distinguished from a capability gap, and
+were unreachable for an unrecognised knowledge question, so unseen knowledge
+requests were reported as out of scope). Minimal change: one new pure module
+(`atlas/research/knowledge_need.py`) classifies ALREADY-COMPUTED evidence into a
+bounded `KnowledgeNeed` (kind + actionability + grounded reason/evidence), never
+inspecting the wording for unfamiliar terms and never turning an unavailable
+capability into missing knowledge, failing closed to `unknown` without grounded
+evidence; `Atlas.knowledge_need()` composes it from the existing decision and the
+Step 12-13 capability state; the conversation recognises two closed explicit
+knowledge-need forms (current/latest knowledge of a subject; attribution/origin)
+after every existing surface declined, gated on Atlas having no model-backed open
+conversation, and every validated-knowledge answer now carries the need as
+additive metadata (reply text and cascade unchanged, nothing acquired). 33
+focused tests plus relevant subsystem regressions green (builtin-response,
+validated-knowledge, D3 and G2 suites, Steps 5-14); the pre-existing failures
+were reproduced against a pristine HEAD and remain unchanged; no full-suite
+re-run; known limitations recorded in §34.21 (recognition is deliberately narrow;
+goal-claimed phrasings keep their route; deny-by-default means every detected need
+is unsatisfiable without OWNER authorization; detection only — no research,
+acquisition, storage/learning or capability-gap detection); §34.21; Steps 1 → 15
+are COMPLETE and Step 16 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
