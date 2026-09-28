@@ -424,8 +424,20 @@ was demonstrated:
   deterministic transitions, superseded topics excluded from the contextual
   candidate set, and one topic-return handler. Representation only — no routing,
   approval, execution, promotion, permission or model change. Remaining
-  limitations are recorded in `docs/ATLAS_STATE.md` §34.14. **Steps 1 → 8 are
-  COMPLETE. Step 9 is NOT STARTED.**
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.14.
+- **Step 9 — Ambiguity & clarification** — the multi-turn baseline showed Steps
+  5-8 already detect a great deal of ambiguity but that a *general* contextual
+  reference ambiguity was detected and then silently dropped, an underspecified
+  investigation request ("Investigate it.") was acted on literally, and
+  clarifications could not be resolved because the candidates were not
+  preserved. One bounded, authority-free `PendingClarification` (preserved
+  candidates + deterministic matching by name, ordinal or distinctive token) now
+  records the outstanding ambiguity, the general-contextual and
+  underspecified-investigation cases ask for clarification, and one resolver
+  handler (wired before every other surface) resolves the follow-up and resumes
+  the correct existing route while never over-clarifying clear or unsupported
+  input. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.15.
+  **Steps 1 → 9 are COMPLETE. Step 10 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

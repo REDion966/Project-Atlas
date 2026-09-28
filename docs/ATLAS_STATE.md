@@ -1839,6 +1839,96 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.15 Step 9 — Ambiguity & clarification: detect, ask, resolve, resume
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 9 made Atlas
+reliably detect genuine ambiguity in natural-language requests, ask for
+clarification only when the available context does not justify selecting one
+interpretation, resolve the user's clarification deterministically, and avoid
+unnecessary clarification.
+
+**What the baseline showed (measured through the real Atlas/kernel).** Steps 5-8
+already provided a great deal of ambiguity handling and were **not rebuilt**:
+the shared semantic frame's `needs_clarification` contract, reference-resolution
+`AMBIGUOUS`, the NLU-5 captured-entity product clarification, the Step 8 world
+state's ambiguous-topic-return branch, and the task-intake ambiguity gate. The
+demonstrated gaps were concrete:
+
+  * **ambiguity detected but clarification not requested** — a *general*
+    contextual reference ambiguity (e.g. two distinct established facts —
+    `current_subject` and `development_intent`) was returned by the resolver and
+    then silently dropped: the turn fell to the misleading model-unavailable
+    floor;
+  * **ambiguity not detected; interpretation silently invented** — an
+    underspecified investigation request whose whole object was a bare reference
+    with no antecedent (`"Investigate it."`) was read as a determined objective,
+    so Atlas *investigated the literal pronoun* instead of asking for the
+    subject (the frame's knowledge/work branches already raise
+    `needs_clarification` for this shape; the investigation branch did not);
+  * **clarification requested but not resolvable** — the competing candidates
+    were not preserved, so a follow-up (`"the handling one"`, `"the second one"`,
+    `"auth module"`) fell to the floor and the intended route never resumed.
+
+**What was implemented (smallest coherent model).**
+- `atlas/conversation/clarification.py`: one bounded, immutable, authority-free
+  `PendingClarification` (`kind` reference|topic|subject, `question`, bounded
+  `candidates`, `original_text`, `turn_id`) plus deterministic candidate matching
+  (`candidate_matches`: normalized equality/containment, explicit ordinal
+  selection, and distinctive-token containment) and `build_question`. At most
+  `MAX_CLARIFICATION_CANDIDATES` (6) candidates, every field length-capped; the
+  matching is never fuzzy or semantic and never invents a candidate.
+- `atlas/conversation/conversation_state.py`: one new
+  `ConversationState.pending_clarification` field with `to_dict`/rebuild
+  round-trip and manager methods (`record_pending_clarification`,
+  `clear_pending_clarification`); the existing manager stays the single owner.
+- `atlas/conversation/conversation_service.py`:
+  - **detect** — a general contextual reference ambiguity now surfaces a
+    bounded clarification (documented candidates) for a genuine
+    reference/follow-up turn, and an underspecified investigation
+    (`"Investigate it."`) asks for the subject; both record the outstanding
+    ambiguity (no candidate invented when none exists);
+  - **resolve** — one `_maybe_resolve_clarification` handler, wired before every
+    other surface, claims ONLY a turn while a clarification is outstanding: a
+    candidate-selection reply resolves it deterministically and resumes the
+    correct existing route (a topic selection reactivates the Step 8 world topic;
+    a reference/subject selection resumes the existing bounded
+    reference-restatement route), a genuine new request CLEARS it and keeps its
+    own route, and an unresolved reference/follow-up keeps it open (nothing is
+    guessed).
+
+Scope: representation and clarification only. No new engine, planner,
+scheduler, store, approval or promotion mechanism; no permission/authority
+change; no model or network call; every governed and fail-closed boundary is
+preserved.
+
+**Validation.** `tests/test_step9_ambiguity_and_clarification.py` — 39 focused
+tests (candidate matching, bounds/serialization/isolation; detection of general
+contextual ambiguity, underspecified investigation and ambiguous topic return;
+resolution by name, by ordinal, still-ambiguous narrowing, topic-return resume,
+new-objective supersession, no-authority and send/stream parity; no
+over-clarification for clear/continuation/unsupported turns; Step 5/6/7/8
+preservation; real-kernel multi-turn detection → resolution → route resumption).
+Relevant subsystem regressions were green — Steps 2/5/6/7/8, reference
+resolution/consumption/exposure/stream parity, conversation state/context, L4/L5
+retention, L7 floor, builtin answers, self-knowledge bridge, G1/G1-routing/G2/G3,
+open-ended conversation, NLU-4/5, entity identification, orchestration/goal
+slices, D1–D4, semantic-gap routing, evidence improvements, lexical/whitespace
+normalisation, architecture-import guards. The pre-existing failures documented
+elsewhere (qualifier aliases, the "Run it" orchestration gate, the architecture
+question, the L9 confirmation scenario, the P15.2 continuity case, two lexical
+canonicalisation cases) were reproduced against a pristine HEAD and remain
+unchanged — they are NOT caused by Step 9. No full-suite re-run.
+
+**Known limitations (truthful).** Clarification *resolution* is implemented for
+the candidate-set cases (topic and reference/subject); the missing-subject case
+(`kind=subject`, no candidates) requests the information and CLEARS on the next
+turn — the user supplies a full request, which routes normally, rather than Atlas
+reconstructing the operation. A clarification whose candidates are not
+separately selectable by name, ordinal or distinctive token keeps the question
+open rather than guessing. Matching is bounded equality/containment/ordinal, never
+fuzzy or semantic. These remain evidence-driven, separately authorized work — no
+L11+/G4/C10 phase or Step 10 is created or implied.
+
 ### 34.14 Step 8 — Conversational world state: bounded active vs historical context
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 8 advanced the
@@ -2317,5 +2407,38 @@ rather than as a world topic; a return to a non-investigation topic is
 represented but not independently consumable by the reference-restatement
 surface; topic matching is bounded equality/containment, never fuzzy); §34.14;
 Steps 1 → 8 are COMPLETE and Step 9 is NOT STARTED and remains evidence-driven).
+Step 9 ambiguity & clarification reconciled: 2026-09-28 (multi-turn baseline
+through the real kernel confirmed Steps 5-8 already detect a great deal of
+ambiguity — frame needs_clarification, resolver AMBIGUOUS, NLU-5 captured-entity
+products, the Step 8 ambiguous-topic-return branch, the intake ambiguity gate —
+and those were not rebuilt; the demonstrated gaps were (a) a GENERAL contextual
+reference ambiguity detected then silently dropped to the model-unavailable
+floor, (b) an underspecified investigation request ("Investigate it.") whose
+bare-reference object was silently acted on, and (c) clarifications that could
+not be resolved because the candidates were not preserved. Minimal change: a
+bounded authority-free `PendingClarification` (`atlas/conversation/clarification.py`)
+carried on the existing `ConversationState` as one `pending_clarification` field,
+with deterministic candidate matching (containment / explicit ordinal /
+distinctive tokens); the general contextual-ambiguity and underspecified-
+investigation cases now ask for clarification and record the outstanding
+ambiguity (no candidate invented when none exists); and one
+`_maybe_resolve_clarification` handler, wired before every other surface,
+resolves a candidate-selection reply deterministically and resumes the correct
+route (topic reactivation / reference restatement), clears on a genuine new
+request, and keeps an unresolved reply open. 39 focused tests plus relevant
+subsystem regressions green (Steps 2/5/6/7/8, reference resolution/consumption/
+exposure/stream parity, conversation state/context, L4/L5 retention, L7 floor,
+builtin answers, self-knowledge bridge, G1/G1-routing/G2/G3, open-ended
+conversation, NLU-4/5, entity identification, orchestration/goal slices, D1-D4,
+semantic-gap routing, evidence improvements, lexical/whitespace normalisation,
+architecture-import guards); the pre-existing failures (qualifier aliases, the
+"Run it" orchestration gate, the architecture question, the L9 confirmation
+scenario, the P15.2 continuity case, two lexical canonicalisation cases) were
+reproduced against a pristine HEAD and remain unchanged; no full-suite re-run;
+known limitations recorded in §34.15 (the missing-subject case requests the
+information and clears on the next turn rather than reconstructing the
+operation; a clarification whose candidates are not selectable by name/ordinal/
+distinctive token stays open; matching is bounded, never fuzzy); §34.15;
+Steps 1 → 9 are COMPLETE and Step 10 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 import uuid
 
+from atlas.conversation.clarification import PendingClarification
 from atlas.conversation.entity_capture import CapturedEntity
 from atlas.conversation.world_state import (
     ConversationWorld,
@@ -275,6 +276,14 @@ class ConversationState:
     # never a second persistence mechanism, never a durable memory store.
     world: Optional[ConversationWorld] = None
 
+    # Step 9 — bounded PENDING CLARIFICATION: the outstanding genuine ambiguity
+    # Atlas asked about (kind, question, the candidate interpretations it could
+    # see, and the originating turn), so the user's follow-up can be resolved
+    # deterministically and the correct route resumed. Facts only: requesting or
+    # resolving a clarification never executes, authorizes or mutates governed
+    # state, and it is not a second store.
+    pending_clarification: Optional[PendingClarification] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -330,6 +339,11 @@ class ConversationState:
             "world": (
                 self.world.to_dict()
                 if isinstance(self.world, ConversationWorld)
+                else None
+            ),
+            "pending_clarification": (
+                self.pending_clarification.to_dict()
+                if isinstance(self.pending_clarification, PendingClarification)
                 else None
             ),
             "turn_id": self.turn_id,
@@ -421,6 +435,14 @@ class ConversationStateManager:
             merged["world"] = ConversationWorld.from_dict(raw_world)
         else:
             merged["world"] = None
+        # Step 9 — rebuild the bounded pending clarification (fail closed).
+        raw_pending = merged.get("pending_clarification")
+        if isinstance(raw_pending, PendingClarification):
+            merged["pending_clarification"] = raw_pending
+        elif isinstance(raw_pending, dict):
+            merged["pending_clarification"] = PendingClarification.from_dict(raw_pending)
+        else:
+            merged["pending_clarification"] = None
         self._state = ConversationState(**merged)
         return self._state
 
@@ -645,3 +667,39 @@ class ConversationStateManager:
         return self.update(
             world=mark_unresolved_reference(self._world(), text)
         )
+
+    # ------------------------------------------------------------------
+    # Step 9 — pending clarification lifecycle
+    # ------------------------------------------------------------------
+
+    def record_pending_clarification(
+        self,
+        kind: str,
+        question: str,
+        candidates: "tuple[str, ...] | list[str]" = (),
+        original_text: str = "",
+    ) -> ConversationState:
+        """Record an outstanding clarification (bounded, authority-free).
+
+        Only candidates an existing deterministic surface actually produced are
+        stored; nothing is invented. Malformed input fails closed (no record).
+        """
+        pending = PendingClarification(
+            kind=str(kind or "")[:32] or "subject",
+            question=str(question or "")[:300],
+            candidates=tuple(candidates or ()),
+            original_text=str(original_text or "")[:300],
+            turn_id=self._state.turn_id,
+        )
+        # Round-trip through the bounded serializer so the bounds are enforced
+        # in one place and a malformed record is rejected.
+        normalized = PendingClarification.from_dict(pending.to_dict())
+        if normalized is None:
+            return self._state
+        return self.update(pending_clarification=normalized)
+
+    def clear_pending_clarification(self) -> ConversationState:
+        """Clear the outstanding clarification (idempotent)."""
+        if self._state.pending_clarification is None:
+            return self._state
+        return self.update(pending_clarification=None)

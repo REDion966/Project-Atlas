@@ -37,6 +37,13 @@ from atlas.conversation.world_state import (
     MAX_WORLD_TOPICS,
     match_topics,
 )
+from atlas.conversation.clarification import (
+    KIND_REFERENCE,
+    KIND_SUBJECT,
+    KIND_TOPIC,
+    build_question,
+    candidate_matches,
+)
 from atlas.conversation.research_objective import research_subject_gap
 from atlas.conversation.entity_capture import CapturedEntity, capture_named_entities
 from atlas.conversation.development_outcome_reporter import (
@@ -1106,19 +1113,39 @@ class ConversationService:
         # is a FOLLOW_UP the existing reference surface resolves, NOT an
         # ambiguous request. Without this the clarification seam preempted the
         # existing reference answer.
+        has_prior = self._has_prior_objective()
         frame = _frame.interpret(
             text,
-            has_prior_objective=self._has_prior_objective(),
+            has_prior_objective=has_prior,
             has_knowledge_context=bool(self._active_knowledge_subject()),
         )
-        if not frame.needs_clarification:
+        # Step 9 — an INVESTIGATION request whose whole object is a bare
+        # reference ("Investigate it.") with no antecedent is UNDERSPECIFIED, not
+        # determined: asking for the subject is correct, and acting on the
+        # literal reference would silently invent the target. (The frame's
+        # knowledge/work branches already raise needs_clarification for this
+        # shape; the investigation branch does not, so the check is bounded to
+        # exactly that case here.)
+        underspecified_investigation = bool(
+            frame.role is _frame.SemanticRole.NEW_OBJECTIVE
+            and frame.domain is _frame.SemanticDomain.INVESTIGATION
+            and not has_prior
+            and frame.reference
+            and not _frame.operation_object(text)
+        )
+        if not frame.needs_clarification and not underspecified_investigation:
             return None
+        question = (
+            "I need a bit more detail before I can act on that:\n"
+            "- Which subject should I use?"
+        )
+        # Step 9 — preserve the missing-information request so the next turn is
+        # interpreted against it rather than reinterpreting unrelated context.
+        # No candidate is invented; there is genuinely none to offer.
+        self._record_pending_clarification(KIND_SUBJECT, question, (), text)
         return Message(
             role="assistant",
-            content=(
-                "I need a bit more detail before I can act on that:\n"
-                "- Which subject should I use?"
-            ),
+            content=question,
             metadata={
                 "frame_clarification": {
                     "domain": frame.domain.value,
@@ -1126,6 +1153,163 @@ class ConversationService:
                 }
             },
         )
+
+    def _record_pending_clarification(
+        self,
+        kind: str,
+        question: str,
+        candidates: "tuple[str, ...] | list[str]" = (),
+        original_text: str = "",
+    ) -> None:
+        """Record an outstanding clarification (Step 9). Fail-soft.
+
+        Bounded representation only: it never executes, authorizes or mutates
+        governed state, and it never invents a candidate.
+        """
+        if self._state_manager is None:
+            return
+        try:
+            self._state_manager.record_pending_clarification(
+                kind, question, candidates, original_text=original_text
+            )
+        except Exception:  # fail-soft: recording must never break a turn
+            return
+
+    def _maybe_resolve_clarification(
+        self, text: str, spec: TaskSpec | None
+    ) -> Message | None:
+        """Step 9 — resolve an outstanding clarification deterministically.
+
+        Claims a turn ONLY when a bounded clarification is outstanding. A
+        candidate-selection reply ("the handling one", "the second one", "the
+        research task") resolves the pending ambiguity and resumes the correct
+        existing route; a genuine new request CLEARS the clarification and lets
+        the normal cascade run; anything else keeps the ambiguity open and
+        restates the question. Nothing is guessed, executed, authorized or
+        mutated.
+        """
+        if self._state_manager is None or not isinstance(text, str) or not text.strip():
+            return None
+        pending = self._state_manager.state.pending_clarification
+        if pending is None:
+            return None
+
+        if pending.candidates:
+            matches = candidate_matches(text, pending.candidates)
+            if len(matches) == 1:
+                return self._resolve_clarification_candidate(pending, matches[0], spec)
+            if len(matches) > 1:
+                # Still genuinely ambiguous: keep it open with the narrower set.
+                question = build_question(
+                    pending.kind, matches, "Which one do you mean?"
+                )
+                self._record_pending_clarification(
+                    pending.kind, question, matches, pending.original_text
+                )
+                return Message(
+                    role="assistant",
+                    content=question,
+                    metadata={
+                        "clarification": {
+                            "kind": pending.kind,
+                            "candidates": list(matches),
+                            "status": "still_ambiguous",
+                        }
+                    },
+                )
+
+        # No unique selection. A turn that is NOT a reference/follow-up is a
+        # genuine new request (or a casual/meta turn): it supersedes the
+        # clarification and keeps its existing route.
+        from atlas.conversation import semantic_frame as _frame
+
+        frame = _frame.interpret(
+            text,
+            has_prior_objective=bool(self._has_prior_objective()),
+            has_knowledge_context=bool(self._active_knowledge_subject()),
+        )
+        if frame.role not in (_frame.SemanticRole.REFERENCE, _frame.SemanticRole.FOLLOW_UP):
+            self._state_manager.clear_pending_clarification()
+            return None
+
+        # A reference/follow-up that did not select a candidate keeps the
+        # ambiguity open (no candidate is invented).
+        return Message(
+            role="assistant",
+            content=pending.question,
+            metadata={
+                "clarification": {
+                    "kind": pending.kind,
+                    "candidates": list(pending.candidates),
+                    "status": "unresolved",
+                }
+            },
+        )
+
+    def _resolve_clarification_candidate(
+        self,
+        pending: Any,
+        candidate: str,
+        spec: TaskSpec | None,
+    ) -> Message | None:
+        """Resume the correct existing route for a selected candidate."""
+        candidates = list(pending.candidates)
+        if pending.kind == KIND_TOPIC:
+            reactivated = self._state_manager.reactivate_world_topic(candidate)
+            if not reactivated:
+                return None
+            self._state_manager.clear_pending_clarification()
+            return Message(
+                role="assistant",
+                content=(
+                    f"Returning to a prior topic: '{reactivated}'. It is the "
+                    "active context again. Nothing was executed or authorized."
+                ),
+                metadata={
+                    "clarification_resolved": {
+                        "kind": KIND_TOPIC,
+                        "resolved": reactivated,
+                        "candidates": candidates,
+                    }
+                },
+            )
+
+        # A reference/subject candidate: adopt it as the active world topic and
+        # resume the existing bounded reference-restatement route.
+        self._state_manager.clear_pending_clarification()
+        self._observe_world_topic(candidate, "clarification")
+        message: Message | None = None
+        if self._builtin_response is not None and isinstance(spec, TaskSpec):
+            from dataclasses import replace as _replace
+
+            enriched = _replace(
+                spec,
+                context={
+                    **(spec.context if isinstance(spec.context, dict) else {}),
+                    "resolved_reference": {
+                        "field": "current_subject",
+                        "value": candidate,
+                    },
+                },
+            )
+            message = self._builtin_response.match_resolved_reference_answer(
+                text=pending.original_text or candidate, spec=enriched
+            )
+        if message is None:
+            message = Message(
+                role="assistant",
+                content=f"The current subject: {candidate}",
+                metadata={"builtin_intent": "reference"},
+            )
+        metadata = dict(message.metadata or {})
+        metadata["clarification_resolved"] = {
+            "kind": pending.kind,
+            "resolved": candidate,
+            "candidates": candidates,
+            "original": pending.original_text,
+        }
+        message.metadata = metadata
+        return message
 
     #: Step 7 — bounded ORDINAL / earlier-item reference surface. These name an
     #: item in a LIST of earlier things; Atlas retains the ACTIVE context (and the
@@ -1191,11 +1375,18 @@ class ConversationService:
         if not matches:
             return None
         if len(matches) > 1:
+            candidates = [topic.label for topic in matches[:MAX_WORLD_TOPICS]]
             lines = [
                 f"More than one topic in this conversation matches '{target}':",
             ]
-            lines.extend(f"- {topic.label}" for topic in matches[:MAX_WORLD_TOPICS])
+            lines.extend(f"- {candidate}" for candidate in candidates)
             lines.append("Tell me which one you mean. Nothing was executed.")
+            # Step 9 — preserve the competing topics so the follow-up ("the
+            # handling one", "the second one") resolves deterministically and the
+            # topic-return route resumes.
+            self._record_pending_clarification(
+                KIND_TOPIC, "\n".join(lines), candidates, text
+            )
             return Message(
                 role="assistant",
                 content="\n".join(lines),
@@ -1203,7 +1394,7 @@ class ConversationService:
                     "world_state": {
                         "status": "ambiguous",
                         "requested": target,
-                        "candidates": [topic.label for topic in matches],
+                        "candidates": candidates,
                     }
                 },
             )
@@ -2047,6 +2238,14 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # Step 9 — resolve an outstanding clarification BEFORE any other surface
+        # can reinterpret the follow-up. A candidate-selection reply resumes the
+        # correct route; a genuine new request clears the clarification and
+        # continues unchanged; nothing is guessed or executed.
+        clarification_resolution = self._maybe_resolve_clarification(text, spec)
+        if clarification_resolution is not None:
+            self._conversation.add_message(clarification_resolution)
+            return clarification_resolution
         # C7 GAP-C31-02 — bounded deterministic reference/context exposure.
         # Applied only to recognized multi-word reference phrases, before the
         # single existing routing cascade. AMBIGUOUS reuses the existing
@@ -2469,6 +2668,13 @@ class ConversationService:
         spec = self._intake(text, len(self._conversation.messages))
         if spec is not None and active_session is not None:
             spec = self._attach_session_to_spec(spec, active_session)
+        # Step 9 — mirror of send(): resolve an outstanding clarification before
+        # any other surface can reinterpret the follow-up.
+        clarification_resolution = self._maybe_resolve_clarification(text, spec)
+        if clarification_resolution is not None:
+            self._conversation.add_message(clarification_resolution)
+            yield clarification_resolution.content
+            return
         # C7 GAP-C31-02 (+ Phase 4) — bounded reference/context exposure on the
         # streaming path, mirroring send(): same method, same ordering, same
         # semantics. RESOLVED attaches structured evidence and routing
@@ -3054,6 +3260,18 @@ class ConversationService:
             if result.status is ReferenceResolutionStatus.AMBIGUOUS:
                 from dataclasses import replace as _replace
 
+                # Step 9 — preserve the competing candidate VALUES (bounded) so
+                # the follow-up can be resolved deterministically.
+                values = tuple(
+                    str(getattr(self._state_manager.state, field, "") or "")
+                    for field in (result.candidates or ())
+                )
+                self._record_pending_clarification(
+                    KIND_REFERENCE,
+                    result.reason or "Which subject do you mean?",
+                    values,
+                    text,
+                )
                 clarified = _replace(
                     spec,
                     needs_clarification=True,
@@ -3088,23 +3306,56 @@ class ConversationService:
             # or silently proceeding. (Only the captured-entity layer raises
             # this; existing investigation/established ambiguities keep the
             # documented "leave routing unchanged" behavior.)
-            if (
-                contextual.status is ReferenceResolutionStatus.AMBIGUOUS
-                and contextual.resolved_field == CAPTURED_ENTITY_FIELD
-            ):
-                from dataclasses import replace as _replace
+            if contextual.status is ReferenceResolutionStatus.AMBIGUOUS:
+                candidates = tuple(contextual.candidates or ())
+                if contextual.resolved_field == CAPTURED_ENTITY_FIELD:
+                    from dataclasses import replace as _replace
 
-                clarified = _replace(
-                    spec,
-                    needs_clarification=True,
-                    ambiguity=_replace(
-                        spec.ambiguity,
-                        clarification_questions=(
-                            "Which of the products you mentioned should I use?",
+                    question = "Which of the products you mentioned should I use?"
+                    self._record_pending_clarification(
+                        KIND_REFERENCE, question, candidates, text
+                    )
+                    clarified = _replace(
+                        spec,
+                        needs_clarification=True,
+                        ambiguity=_replace(
+                            spec.ambiguity,
+                            clarification_questions=(question,),
                         ),
-                    ),
+                    )
+                    return spec, self._orchestration_clarification_message(clarified)
+                # Step 9 — a GENERAL contextual ambiguity (e.g. two distinct
+                # established facts, or two candidate subjects). It is surfaced
+                # ONLY for a genuine reference/follow-up turn, so a new objective
+                # is never preempted. The competing candidates are preserved and
+                # listed; nothing is chosen and nothing is executed.
+                from atlas.conversation import semantic_frame as _frame
+
+                frame = _frame.interpret(
+                    text,
+                    has_prior_objective=bool(self._has_prior_objective()),
                 )
-                return spec, self._orchestration_clarification_message(clarified)
+                if (
+                    frame.role
+                    in (_frame.SemanticRole.REFERENCE, _frame.SemanticRole.FOLLOW_UP)
+                    and candidates
+                ):
+                    question = build_question(
+                        KIND_REFERENCE, candidates, "Which subject do you mean?"
+                    )
+                    self._record_pending_clarification(
+                        KIND_REFERENCE, question, candidates, text
+                    )
+                    return spec, Message(
+                        role="assistant",
+                        content=question,
+                        metadata={
+                            "clarification": {
+                                "kind": KIND_REFERENCE,
+                                "candidates": list(candidates),
+                            }
+                        },
+                    )
 
         # UNRESOLVED -> fail closed; current routing is unchanged.
         return spec, None
