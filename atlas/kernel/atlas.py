@@ -4766,6 +4766,10 @@ class Atlas:
                 tool_registry=self._tool_registry,
                 knowledge_manager=self._knowledge_manager,
                 capability_registry=self._capability_registry,
+                # Step 12 — the SAME unified capability-level view the kernel/
+                # CLI expose (registered capabilities/tools + the bounded
+                # operational capability catalogue). Read-only.
+                capability_model_provider=self.capability_model,
                 memory_service=self._memory_service,
                 # Lazy provider: the service container is populated later in
                 # this same startup sequence, so the status answer must
@@ -5102,13 +5106,41 @@ class Atlas:
         """Return the ComponentRegistry for structural self-observation."""
         return self._component_registry
 
-    def capability_model(self):
-        """Return the canonical deterministic capability model (C5.1).
+    def _operational_capabilities(self):
+        """Bounded, evidence-grounded operational (conversational) capabilities.
+
+        Availability is GROUNDED in actual wiring: the optional model-backed
+        open conversation is available only when an external provider is
+        configured, and a governed capability only when its governed boundary is
+        wired. Read-only and deterministic.
+        """
+        from atlas.self_knowledge.operational_capabilities import (
+            project_operational_capabilities,
+        )
+
+        external_provider = bool(
+            self._config.get("ai", "external_providers", default=False)
+        )
+        governed_wired = (
+            self._approval_manager is not None
+            and self._development_execution_bridge is not None
+        )
+        return project_operational_capabilities(
+            external_provider=external_provider,
+            governed_wired=governed_wired,
+        )
+
+    def capability_model(self, include_operational: bool = True):
+        """Return the canonical deterministic capability model (C5.1 + Step 12).
 
         READ-ONLY projection over the existing authoritative registries
-        (ComponentRegistry, CapabilityRegistry, ToolRegistry). It never mutates
-        registries, persists nothing, performs no network I/O, and does not
-        call an external AI model.
+        (ComponentRegistry, CapabilityRegistry, ToolRegistry) plus, by default,
+        the bounded OPERATIONAL (conversational) capability catalogue grounded in
+        the EXISTING conversation routes. It never mutates registries, persists
+        nothing, performs no network I/O, and does not call an external AI model.
+
+        ``include_operational=False`` returns the structural (registered-only)
+        projection, which the architecture model consumes.
         """
         from atlas.self_knowledge.capability_model import build_capability_model
 
@@ -5116,6 +5148,9 @@ class Atlas:
             component_registry=self._component_registry,
             capability_registry=self._capability_registry,
             tool_registry=self._tool_registry,
+            operational_capabilities=(
+                self._operational_capabilities() if include_operational else None
+            ),
         )
 
     def capability_contract(self, name: str):
@@ -5135,6 +5170,7 @@ class Atlas:
             component_registry=self._component_registry,
             capability_registry=self._capability_registry,
             tool_registry=self._tool_registry,
+            operational_capabilities=self._operational_capabilities(),
         )
 
     def repository_symbol(self, query: str, limit: int = 20):
@@ -5163,7 +5199,10 @@ class Atlas:
 
         return build_architecture_model(
             component_registry=self._component_registry,
-            capability_model=self.capability_model(),
+            # Structural projection only: the architecture model maps
+            # capabilities to providing COMPONENTS, which operational
+            # capabilities (no providing component) do not have.
+            capability_model=self.capability_model(include_operational=False),
             repository_map=self.repository_map,
         )
 
@@ -5181,7 +5220,7 @@ class Atlas:
 
         return build_architecture_model(
             component_registry=self._component_registry,
-            capability_model=self.capability_model(),
+            capability_model=self.capability_model(include_operational=False),
             repository_map=self._repository_map,
         )
 

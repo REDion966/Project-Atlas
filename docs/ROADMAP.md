@@ -458,8 +458,18 @@ was demonstrated:
   now presents an established outcome in a single truthful shape (human label +
   recorded subject + recorded state + its OWN result or reason) while preserving
   the audit metadata. Remaining limitations are recorded in
-  `docs/ATLAS_STATE.md` §34.17. **Steps 1 → 11 are COMPLETE. Step 12 is NOT
-  STARTED.**
+  `docs/ATLAS_STATE.md` §34.17.
+- **Step 12 — Unified capability model** — the real-kernel baseline showed Atlas
+  already had a canonical capability model over the authoritative registries
+  (NOT rebuilt), but it modelled only the registered implementation surface:
+  operational (conversational) abilities had no identity, so capability lookup
+  for them failed and the conversational inventory disagreed with the model. A
+  bounded, evidence-grounded operational capability catalogue is now merged
+  additively into the existing canonical model, with availability grounded in
+  actual wiring; the kernel/CLI lookup and the conversational capability
+  inventory/`explain` answers speak the same grounded view. Remaining limitations
+  are recorded in `docs/ATLAS_STATE.md` §34.18. **Steps 1 → 12 are COMPLETE.
+  Step 13 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

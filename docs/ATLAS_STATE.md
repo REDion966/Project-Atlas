@@ -1839,6 +1839,93 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.18 Step 12 — Unified capability model: one consistent capability-level view
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 12 established one
+consistent, model-independent capability-level representation — what capabilities
+exist, what they support, what state they are in, and what evidence justifies the
+claim — reconciled with what already existed rather than as a parallel universe.
+
+**What the baseline showed (measured through the real Atlas/kernel).** Atlas
+already had a canonical ``CapabilityModel`` (C5.1,
+`atlas/self_knowledge/capability_model.py`) projected deterministically from the
+authoritative registries (``ComponentRegistry``, ``CapabilityRegistry``,
+``ToolRegistry``) — and it was **not rebuilt**. But it modelled only the
+*registered implementation* surface. The OPERATIONAL (conversational) abilities
+Atlas actually supports (investigate, research, plan, approve, multi-step,
+clarify, follow-up, …) had **no identity at all**: they lived in a hard-coded
+help string and the implicit routes, so:
+
+  * ``capability_contract("investigation")`` returned ``found: False`` — a
+    capability question about them could not be answered from the model;
+  * the conversation capability inventory (``_render_capabilities``) and the
+    canonical model disagreed about what exists (24 registry handler names vs
+    104 registered entries), and labelled them without state/dependency/evidence;
+  * capability questions about conversation/research/orchestration/development/
+    self-knowledge had no consistent, grounded answer.
+
+**What was implemented (smallest coherent unified model).**
+- `atlas/self_knowledge/operational_capabilities.py`: the missing identity — a
+  bounded, deterministic **operational capability catalogue**
+  (`OperationalCapability`: stable `id`, human name, description, category,
+  `operations`, aliases, `evidence` naming the EXISTING backing route/handler,
+  limitations, dependency, governed flag). Availability is **grounded in actual
+  wiring**: the optional model-backed open conversation is available only when an
+  external provider is configured, and a governed capability only when its
+  governed boundary is wired — so an unavailable capability is reported
+  truthfully rather than claimed.
+- `atlas/self_knowledge/capability_model.py`: the EXISTING canonical model was
+  **extended additively** — `CapabilityKind.OPERATIONAL`,
+  `CapabilitySourceKind.OPERATIONAL_CAPABILITY`, two new bounded fields
+  (`category`, `operations`), an `operational_count`, and an optional
+  `operational_capabilities` input merged into the one model (existing callers
+  that omit it are byte-for-byte unchanged). `describe_capability` resolves an
+  operational capability (by id or alias) and still fails closed for an unknown
+  name.
+- `atlas/kernel/atlas.py`: `capability_model(include_operational=True)` is the
+  unified view (registered + operational); `capability_contract` resolves
+  operational capabilities too, so the kernel API/CLI and the conversation answer
+  from the SAME model. The architecture model keeps the structural
+  (registered-only) projection, which maps capabilities to providing
+  components — a mapping operational capabilities (no providing component) do
+  not have.
+- `atlas/conversation/builtin_response.py`: a read-only
+  `capability_model_provider` (fail-soft) lets the conversational capability
+  surfaces consult the SAME unified model — the inventory gains an "Operational
+  capabilities" section, and `explain <name>` resolves an operational capability
+  to a grounded detail (category, supported operations, availability,
+  dependency, evidence, limitations) that agrees with `capability_contract`.
+
+No new registry, store, planner or execution surface: the existing registries
+remain authoritative for their own facts and the unified model is a bounded,
+read-only projection. Governance, sandbox and promotion boundaries are untouched.
+
+**Validation.** `tests/test_step12_unified_capability_model.py` — 24 focused
+tests (bounded/grounded catalogue; lookup by id/alias/unknown fail-closed;
+grounded availability for the model-backed and governed capabilities; the
+operational entries merged into the one model with category/operations/evidence;
+the structural projection unchanged; `describe_capability` resolution and
+fail-closed; the conversation inventory and `explain <name>` detail agreeing with
+the kernel contract; real-kernel unified model, consistent contract, truthful
+unavailable/unknown, conversation↔kernel agreement, send/stream parity and
+no-authority/repository-untouched validation). Relevant subsystem regressions
+were green — the capability model/contracts/architecture model, the CLI
+capability surface, builtin state answers, the C3/C4.1/C5 self-knowledge
+surfaces, the self-knowledge bridge and the kernel suite. The pre-existing
+failures documented elsewhere were reproduced against a pristine HEAD and remain
+unchanged — they are NOT caused by Step 12. No full-suite re-run.
+
+**Known limitations (truthful).** The operational catalogue is a bounded,
+explicit list of the conversational capabilities the existing routes implement;
+it is not a discovery scan, so a newly added route must be added to the catalogue
+(one place) to appear. The unified model reports the *capability-level* view; the
+existing registries remain authoritative for their own operational facts, and the
+architecture model continues to consume the registered-only projection (the
+capability↔component mapping). Evidence is the existing route/registration/
+component-health record — Step 12 does not add test- or promotion-derived
+capability evidence (a later step may). These remain evidence-driven, separately
+authorized work — no L11+/G4/C10 phase or Step 13 is created or implied.
+
 ### 34.17 Step 11 — Natural response generation: one truthful presentation contract
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 11 improved Atlas's
@@ -2661,5 +2748,28 @@ presents what the deterministic outcome recorded — an upstream interpretation
 oddity is faithfully reported rather than masked — and a few surfaces keep their
 own pinned wording); §34.17; Steps 1 → 11 are COMPLETE and Step 12 is NOT STARTED
 and remains evidence-driven).
+Step 12 unified capability model reconciled: 2026-09-28 (the real-kernel baseline
+confirmed Atlas already had a canonical CapabilityModel projected from the
+authoritative registries — NOT rebuilt — but it modelled only the registered
+implementation surface: the OPERATIONAL (conversational) abilities had no
+identity, so capability_contract("investigation") returned found=False and the
+conversational capability inventory disagreed with the canonical model. Minimal
+change: a bounded, deterministic, evidence-grounded operational capability
+catalogue (atlas/self_knowledge/operational_capabilities.py) merged additively
+into the EXISTING canonical model (CapabilityKind.OPERATIONAL, category/
+operations fields, operational_count, optional operational_capabilities input),
+with availability grounded in actual wiring (the model-backed open conversation
+and governed capabilities are truthfully unavailable when unwired); the kernel
+capability_model(include_operational=True) is the unified view and
+capability_contract resolves operational capabilities, while the architecture
+model keeps the registered-only structural projection. 24 focused tests plus
+relevant subsystem regressions green (capability model/contracts/architecture
+model, the CLI capability surface, builtin state answers, C3/C4.1/C5
+self-knowledge surfaces, the self-knowledge bridge, the kernel suite); the
+pre-existing failures were reproduced against a pristine HEAD and remain
+unchanged; no full-suite re-run; known limitations recorded in §34.18 (the
+catalogue is a bounded explicit list; registered-only projection retained for the
+architecture mapping; no test/promotion-derived capability evidence yet); §34.18;
+Steps 1 → 12 are COMPLETE and Step 13 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

@@ -1389,6 +1389,7 @@ class BuiltinResponseService:
         knowledge_decision_provider: Callable[[str], Any] | None = None,
         architecture_relationship_provider: Callable[[], Any] | None = None,
         knowledge_status_provider: Callable[[str], Any] | None = None,
+        capability_model_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
@@ -1430,6 +1431,66 @@ class BuiltinResponseService:
         #: for a knowledge question the local store could not answer. It grants
         #: no authority, and its result is data, never instruction.
         self._knowledge_status_provider = knowledge_status_provider
+        #: Step 12 — optional zero-argument callable returning the SAME unified
+        #: capability model the kernel/CLI expose (``Atlas.capability_model``):
+        #: registered capabilities/tools PLUS the bounded operational
+        #: (conversational) capability catalogue. Read-only and fail-soft: absent,
+        #: None, non-model, or raising all decline, so capability answers fall back
+        #: to the structural registries exactly as before.
+        self._capability_model_provider = capability_model_provider
+
+    def _capability_model(self) -> Any | None:
+        """Return the unified capability model, or None (fail-soft, read-only)."""
+        provider = self._capability_model_provider
+        if provider is None:
+            return None
+        try:
+            model = provider()
+        except Exception:
+            return None
+        return model if getattr(model, "entries", None) is not None else None
+
+    def _operational_capability_entries(self) -> tuple[Any, ...]:
+        """Operational (conversational) capability entries from the model.
+
+        Returns ``()`` when no unified model is wired, so every existing
+        capability answer is byte-for-byte unchanged without one.
+        """
+        model = self._capability_model()
+        if model is None:
+            return ()
+        return tuple(
+            entry
+            for entry in getattr(model, "entries", ()) or ()
+            if str(getattr(getattr(entry, "kind", None), "value", "")) == "operational"
+        )
+
+    def _find_operational_capability(self, raw_name: str) -> Any | None:
+        """Resolve ``raw_name`` to an operational capability entry, or None."""
+        candidate = str(raw_name or "").strip().strip("?.!.,;:'\"()")
+        if not candidate:
+            return None
+        normalized = candidate.lower().replace("-", "_").replace(" ", "_")
+        for entry in self._operational_capability_entries():
+            name = str(getattr(entry, "name", "") or "")
+            if name.lower() == normalized:
+                return entry
+            if normalized in {
+                str(op).lower().replace("-", "_") for op in (getattr(entry, "operations", ()) or ())
+            }:
+                return entry
+        from atlas.self_knowledge.operational_capabilities import (
+            find_operational_capability,
+        )
+
+        resolved = find_operational_capability(normalized)
+        if resolved is None:
+            return None
+        target = resolved.id
+        for entry in self._operational_capability_entries():
+            if str(getattr(entry, "name", "") or "") == target:
+                return entry
+        return None
 
     def _resolve_service_names(self) -> tuple[str, ...] | None:
         """Resolve the container/service snapshot for the status answer.
@@ -2063,6 +2124,12 @@ class BuiltinResponseService:
                 folded.replace("_", "."),
             ):
                 return name
+        # Step 12 — an OPERATIONAL (conversational) capability resolves from the
+        # SAME unified model, so "explain investigate" is answered consistently
+        # with the kernel's capability_contract (fail-closed when unknown).
+        operational = self._find_operational_capability(normalized)
+        if operational is not None:
+            return str(getattr(operational, "name", "") or "")
         return None
 
     def _match_validated_knowledge(self, lowered: str) -> tuple[str, Any] | None:
@@ -2517,7 +2584,8 @@ class BuiltinResponseService:
     def _render_capabilities(self) -> str:
         tools = self._listed_tools()
         capabilities = sorted(self._capability_names())
-        if not tools and not capabilities:
+        operational = self._operational_capability_entries()
+        if not tools and not capabilities and not operational:
             return (
                 "No tools or capabilities are currently registered. "
                 "Deterministic conversational intents I always support: "
@@ -2547,9 +2615,28 @@ class BuiltinResponseService:
             extra = len(tools) - _MAX_TOOLS_LISTED
             if extra > 0:
                 lines.append(f"... and {extra} more registered tool(s).")
+        if operational:
+            # Step 12 — the SAME operational (conversational) capabilities the
+            # unified capability model / kernel expose, so this inventory and the
+            # canonical model agree.
+            lines.append("")
+            lines.append("Operational capabilities (what I can be asked to do):")
+            for entry in operational[:_MAX_TOOLS_LISTED]:
+                name = str(getattr(entry, "name", "") or "")
+                category = str(getattr(entry, "category", "") or "general")
+                availability = str(
+                    getattr(getattr(entry, "availability", None), "value", "")
+                    or "unknown"
+                )
+                desc = str(getattr(entry, "description", "") or "No description.")
+                lines.append(f"- **{name}** ({category}, {availability}): {desc}")
+            extra_ops = len(operational) - _MAX_TOOLS_LISTED
+            if extra_ops > 0:
+                lines.append(f"  ... and {extra_ops} more operational capabilit(ies).")
         lines.append("")
         lines.append(
-            "Ask 'explain <name>' for a registered capability or tool."
+            "Ask 'explain <name>' for a registered capability, tool, or "
+            "operational capability."
         )
         return "\n".join(lines)
 
@@ -2578,7 +2665,53 @@ class BuiltinResponseService:
                 "governed capability path (registry → router → dispatcher), "
                 "never directly from conversation."
             )
+        # Step 12 — an OPERATIONAL (conversational) capability, rendered from the
+        # SAME unified model as the kernel's capability_contract.
+        operational = self._find_operational_capability(name)
+        if operational is not None:
+            return self._render_operational_capability(operational)
         return self._render_unsupported()
+
+    @staticmethod
+    def _render_operational_capability(entry: Any) -> str:
+        """Render one operational capability consistently from the unified model."""
+        name = str(getattr(entry, "name", "") or "")
+        category = str(getattr(entry, "category", "") or "")
+        description = str(getattr(entry, "description", "") or "No description.")
+        availability = str(
+            getattr(getattr(entry, "availability", None), "value", "") or "unknown"
+        )
+        dependency = str(
+            getattr(getattr(entry, "dependency", None), "value", "") or "unknown"
+        )
+        operations = tuple(getattr(entry, "operations", ()) or ())
+        limitations = tuple(getattr(entry, "limitations", ()) or ())
+        sources = tuple(getattr(entry, "sources", ()) or ())
+        evidence = next(
+            (
+                str(getattr(source, "detail", "") or "")
+                for source in sources
+                if str(getattr(source, "kind", "")) == "operational_capability"
+                and str(getattr(source, "detail", "") or "")
+            ),
+            "",
+        )
+        lines = [
+            f"**{name}** (operational capability, category `{category or 'general'}`):",
+            description,
+        ]
+        if operations:
+            lines.append("Supports: " + ", ".join(f"`{op}`" for op in operations) + ".")
+        lines.append(f"Availability: {availability}; dependency: {dependency}.")
+        if evidence:
+            lines.append(f"Grounded in: {evidence}.")
+        for limitation in limitations:
+            lines.append(f"Limitation: {limitation}")
+        lines.append(
+            "This describes an EXISTING Atlas route; acting on it remains "
+            "governed and approval-gated where applicable."
+        )
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Self-description (Phase 2.9) — bounded, read-only, model-grounded

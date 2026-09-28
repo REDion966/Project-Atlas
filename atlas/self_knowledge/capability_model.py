@@ -49,10 +49,14 @@ _MAX_IMPLEMENTATIONS: int = 3
 
 
 class CapabilityKind(str, Enum):
-    """Whether an entry is a capability or a registered tool."""
+    """Whether an entry is a capability, a registered tool, or an operational ability."""
 
     CAPABILITY = "capability"
     TOOL = "tool"
+    #: Step 12 — an OPERATIONAL (conversational) capability: something Atlas can
+    #: actually be asked to do, grounded in an existing conversation route
+    #: (:mod:`atlas.self_knowledge.operational_capabilities`).
+    OPERATIONAL = "operational"
 
 
 class CapabilityDependency(str, Enum):
@@ -78,6 +82,9 @@ class CapabilitySourceKind(str, Enum):
     COMPONENT_REGISTRY = "component_registry"
     CAPABILITY_REGISTRY = "capability_registry"
     TOOL_REGISTRY = "tool_registry"
+    #: Step 12 — the operational capability catalogue (an EXISTING conversation
+    #: route/handler is the evidence for the claim).
+    OPERATIONAL_CAPABILITY = "operational_capability"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +118,11 @@ class CapabilityEntry:
     implementation: str = ""
     #: Declared tool input contract: (name, type_hint, required) triples.
     inputs: tuple[tuple[str, str, bool], ...] = ()
+    #: Step 12 — capability category/domain ("" when none is declared).
+    category: str = ""
+    #: Step 12 — the bounded operations the capability supports ("" when none is
+    #: declared). Empty for structural entries that declare no operations.
+    operations: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,6 +137,8 @@ class CapabilityEntry:
             "description": self.description,
             "implementation": self.implementation,
             "inputs": [list(i) for i in self.inputs],
+            "category": self.category,
+            "operations": list(self.operations),
         }
 
 
@@ -141,12 +155,15 @@ class CapabilityModel:
     health_counts: tuple[tuple[str, int], ...]
     source_counts: tuple[tuple[str, int], ...]
     limitations: tuple[str, ...]
+    #: Step 12 — count of OPERATIONAL (conversational) capability entries.
+    operational_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "component_count": self.component_count,
             "capability_count": self.capability_count,
             "tool_count": self.tool_count,
+            "operational_count": self.operational_count,
             "entry_count": len(self.entries),
             "dependency_counts": [list(x) for x in self.dependency_counts],
             "availability_counts": [list(x) for x in self.availability_counts],
@@ -168,6 +185,7 @@ class CapabilityModel:
             f"- Components: {self.component_count}",
             f"- Capabilities: {self.capability_count}",
             f"- Tools: {self.tool_count}",
+            f"- Operational capabilities: {self.operational_count}",
             "- Dependency: "
             + (
                 ", ".join(f"{k}={v}" for k, v in self.dependency_counts)
@@ -208,6 +226,10 @@ class CapabilityModel:
                 f"components={','.join(entry.components) or '-'} "
                 f"sources={sources}"
             )
+            if entry.category:
+                lines.append(f"    - category: {entry.category}")
+            if entry.operations:
+                lines.append(f"    - operations: {', '.join(entry.operations)}")
             if entry.description:
                 lines.append(f"    - description: {entry.description}")
             if entry.implementation:
@@ -264,6 +286,7 @@ class CapabilityModelBuilder:
         component_registry: Any,
         capability_registry: Any | None = None,
         tool_registry: Any | None = None,
+        operational_capabilities: Any | None = None,
     ) -> CapabilityModel:
         # name -> accumulator
         acc: dict[str, dict[str, Any]] = {}
@@ -279,6 +302,7 @@ class CapabilityModelBuilder:
                     "descriptions": set(),
                     "implementations": set(),
                     "inputs": (),
+                    "operational": None,
                 },
             )
 
@@ -362,48 +386,115 @@ class CapabilityModelBuilder:
                     )
                 )
 
+        # --- Operational capability catalogue (Step 12) ---
+        # Each entry is grounded in an EXISTING conversation route/handler; the
+        # route reference is the evidence for the claim. Nothing is invented.
+        if operational_capabilities is not None:
+            for capability in tuple(operational_capabilities)[:64]:
+                cap_id = str(
+                    getattr(capability, "id", "") or getattr(capability, "name", "") or ""
+                ).strip()
+                if not cap_id:
+                    continue
+                item = _entry(cap_id)
+                item["operational"] = capability
+                evidence = "; ".join(
+                    str(entry)
+                    for entry in (getattr(capability, "evidence", ()) or ())
+                    if str(entry)
+                )
+                item["sources"].append(
+                    CapabilitySource(
+                        kind=CapabilitySourceKind.OPERATIONAL_CAPABILITY.value,
+                        reference=cap_id,
+                        detail=evidence[:240],
+                    )
+                )
+
         entries: list[CapabilityEntry] = []
         for name in sorted(acc):
             item = acc[name]
             component_names = tuple(sorted(item["components"]))
             packages = sorted(set(item["components"].values()))
             is_tool = bool(item["is_tool"])
-
-            # Classification (evidence-derived; never guessed).
-            if any(p.startswith(_EXTERNAL_MODEL_PACKAGE_PREFIX) for p in packages):
-                dependency = CapabilityDependency.EXTERNAL_MODEL_DEPENDENT
-            elif component_names or is_tool:
-                dependency = CapabilityDependency.DETERMINISTIC
-            else:
-                dependency = CapabilityDependency.UNKNOWN
+            operational = item["operational"]
 
             health = tuple(sorted(item["health"].items()))
-            availability = _derive_availability([s for _, s in health])
-
             limitations: list[str] = []
-            if dependency is CapabilityDependency.EXTERNAL_MODEL_DEPENDENT:
-                limitations.append(
-                    "Requires an optional external AI model (providing "
-                    "component package 'atlas.ai'); unavailable when no "
-                    "external model is configured."
-                )
-            elif dependency is CapabilityDependency.UNKNOWN:
-                limitations.append(
-                    "Dependency classification could not be established from "
-                    "available evidence (no providing component or tool)."
-                )
+            category = ""
+            operations: tuple[str, ...] = ()
 
-            # Declared description: only an UNAMBIGUOUS single source is used, so
-            # an entry is never given a description that contradicts another.
-            descriptions = sorted(item["descriptions"])
-            description = descriptions[0] if len(descriptions) == 1 else ""
-            implementations = sorted(item["implementations"])[:_MAX_IMPLEMENTATIONS]
-            implementation = ", ".join(implementations)
+            if operational is not None:
+                # Step 12 — an OPERATIONAL (conversational) capability. Its
+                # dependency and availability are GROUNDED in wiring (see
+                # operational_capabilities.project_operational_capabilities),
+                # not in component health: it has no providing component.
+                dependency = (
+                    CapabilityDependency.EXTERNAL_MODEL_DEPENDENT
+                    if str(getattr(operational, "dependency", "") or "")
+                    == "external_model_dependent"
+                    else CapabilityDependency.DETERMINISTIC
+                )
+                availability = (
+                    CapabilityAvailability.AVAILABLE
+                    if bool(getattr(operational, "available", False))
+                    else CapabilityAvailability.UNAVAILABLE
+                )
+                description = str(getattr(operational, "description", "") or "")
+                category = str(getattr(operational, "category", "") or "")
+                operations = tuple(
+                    str(op)
+                    for op in (getattr(operational, "operations", ()) or ())
+                    if str(op)
+                )
+                limitations.extend(
+                    str(lim)
+                    for lim in (getattr(operational, "limitations", ()) or ())
+                    if str(lim)
+                )
+                if bool(getattr(operational, "governed", False)):
+                    limitations.append(
+                        "Governed: acting on it requires explicit OWNER approval."
+                    )
+                kind = CapabilityKind.OPERATIONAL
+                implementation = ""
+            else:
+                # Classification (evidence-derived; never guessed).
+                if any(p.startswith(_EXTERNAL_MODEL_PACKAGE_PREFIX) for p in packages):
+                    dependency = CapabilityDependency.EXTERNAL_MODEL_DEPENDENT
+                elif component_names or is_tool:
+                    dependency = CapabilityDependency.DETERMINISTIC
+                else:
+                    dependency = CapabilityDependency.UNKNOWN
+                availability = _derive_availability([s for _, s in health])
+                if dependency is CapabilityDependency.EXTERNAL_MODEL_DEPENDENT:
+                    limitations.append(
+                        "Requires an optional external AI model (providing "
+                        "component package 'atlas.ai'); unavailable when no "
+                        "external model is configured."
+                    )
+                elif dependency is CapabilityDependency.UNKNOWN:
+                    limitations.append(
+                        "Dependency classification could not be established from "
+                        "available evidence (no providing component or tool)."
+                    )
+                # Declared description: only an UNAMBIGUOUS single source is used,
+                # so an entry is never given a description that contradicts
+                # another.
+                descriptions = sorted(item["descriptions"])
+                description = descriptions[0] if len(descriptions) == 1 else ""
+                implementations = sorted(item["implementations"])[
+                    :_MAX_IMPLEMENTATIONS
+                ]
+                implementation = ", ".join(implementations)
+                kind = (
+                    CapabilityKind.TOOL if is_tool else CapabilityKind.CAPABILITY
+                )
 
             entries.append(
                 CapabilityEntry(
                     name=name,
-                    kind=CapabilityKind.TOOL if is_tool else CapabilityKind.CAPABILITY,
+                    kind=kind,
                     dependency=dependency,
                     availability=availability,
                     components=component_names,
@@ -418,12 +509,17 @@ class CapabilityModelBuilder:
                     description=description,
                     implementation=implementation,
                     inputs=tuple(item["inputs"]),
+                    category=category,
+                    operations=operations,
                 )
             )
 
         component_count = len(components)
         capability_count = sum(1 for e in entries if e.kind is CapabilityKind.CAPABILITY)
         tool_count = sum(1 for e in entries if e.kind is CapabilityKind.TOOL)
+        operational_count = sum(
+            1 for e in entries if e.kind is CapabilityKind.OPERATIONAL
+        )
 
         dependency_counts = tuple(
             sorted(Counter(e.dependency.value for e in entries).items())
@@ -481,6 +577,7 @@ class CapabilityModelBuilder:
             component_count=component_count,
             capability_count=capability_count,
             tool_count=tool_count,
+            operational_count=operational_count,
             dependency_counts=dependency_counts,
             availability_counts=availability_counts,
             health_counts=health_counts,
@@ -493,12 +590,20 @@ def build_capability_model(
     component_registry: Any,
     capability_registry: Any | None = None,
     tool_registry: Any | None = None,
+    operational_capabilities: Any | None = None,
 ) -> CapabilityModel:
-    """Convenience function: build the canonical capability model."""
+    """Convenience function: build the canonical capability model.
+
+    ``operational_capabilities`` is the bounded, evidence-grounded operational
+    (conversational) catalogue (:mod:`atlas.self_knowledge.operational_capabilities`).
+    When omitted the model is the registered structural projection exactly as
+    before (additive: existing callers are unchanged).
+    """
     return CapabilityModelBuilder().build(
         component_registry,
         capability_registry=capability_registry,
         tool_registry=tool_registry,
+        operational_capabilities=operational_capabilities,
     )
 
 
@@ -507,6 +612,7 @@ def describe_capability(
     component_registry: Any,
     capability_registry: Any | None = None,
     tool_registry: Any | None = None,
+    operational_capabilities: Any | None = None,
 ) -> dict[str, Any]:
     """Bounded, deterministic capability-discovery answer for one name.
 
@@ -522,8 +628,18 @@ def describe_capability(
         component_registry,
         capability_registry=capability_registry,
         tool_registry=tool_registry,
+        operational_capabilities=operational_capabilities,
     )
     entry = model.find(text)
+    if entry is None:
+        # Step 12 — resolve an operational capability by its alias too (e.g.
+        # "investigation" -> "investigate"), deterministically and fail-closed.
+        from atlas.self_knowledge.operational_capabilities import (
+            find_operational_capability,
+        )
+
+        resolved = find_operational_capability(text, operational_capabilities)
+        entry = model.find(resolved.id) if resolved is not None else None
     if entry is None:
         return {"found": False, "name": text}
     payload = entry.to_dict()
