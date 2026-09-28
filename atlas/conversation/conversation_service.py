@@ -807,6 +807,20 @@ class ConversationService:
         except Exception:  # fail-soft: world-state recording never breaks a turn
             return
 
+    def _maybe_handle_capability_state_question(self, text: str) -> Message | None:
+        """Step 13 — answer a bounded capability-STATE question (read-only).
+
+        Delegates to the builtin service, whose single authoritative matcher
+        answers ONLY a bounded state-question form naming a capability that
+        resolves against the SAME unified capability model the kernel exposes
+        (or the bounded "which capabilities are unavailable" inventory form).
+        An unresolvable name declines, so an ordinary request keeps its existing
+        route; nothing is executed, authorized or mutated.
+        """
+        if self._builtin_response is None:
+            return None
+        return self._builtin_response.match_capability_state_question(text)
+
     def _maybe_handle_capability_detail_request(self, text: str) -> Message | None:
         """C4.1 — honour an explicit ``explain <name>`` request for a
         REGISTERED capability/tool before generic investigation/research cue
@@ -2411,6 +2425,15 @@ class ConversationService:
         if capability_detail is not None:
             self._conversation.add_message(capability_detail)
             return capability_detail
+        # Step 13 — a bounded capability-STATE question ("is investigation
+        # available?", "why can't you research?", "which capabilities are
+        # unavailable?") is answered from the SAME unified capability model the
+        # kernel exposes, BEFORE an operational route can misinterpret it as a
+        # request to run. An unresolvable name declines (fail-closed).
+        capability_state = self._maybe_handle_capability_state_question(text)
+        if capability_state is not None:
+            self._conversation.add_message(capability_state)
+            return capability_state
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests are claimed deterministically
         # BEFORE the development/execution handlers, so an informational
@@ -2841,6 +2864,14 @@ class ConversationService:
         if capability_detail is not None:
             self._conversation.add_message(capability_detail)
             yield capability_detail.content
+            return
+        # Step 13 — mirror of send(): a bounded capability-STATE question is
+        # answered from the SAME unified capability model before an operational
+        # route can misinterpret it.
+        capability_state = self._maybe_handle_capability_state_question(text)
+        if capability_state is not None:
+            self._conversation.add_message(capability_state)
+            yield capability_state.content
             return
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests (mirror of send()).

@@ -56,6 +56,8 @@ BUILTIN_INTENT_HELP = "help"
 BUILTIN_INTENT_IDENTITY = "identity"
 BUILTIN_INTENT_CAPABILITIES = "capabilities"
 BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
+#: Step 13 — bounded capability-STATE answer (grounded in the unified model).
+BUILTIN_INTENT_CAPABILITY_STATE = "capability_state"
 BUILTIN_INTENT_ARCHITECTURE = "architecture"
 BUILTIN_INTENT_SELF_DESCRIPTION = "self_description"
 #: C5.1 — bounded self-knowledge question families (architecture/components,
@@ -171,6 +173,87 @@ _CAPABILITY_DETAIL_DO_RE = re.compile(
     r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/]*)"
     r"(?:\s+(?:capabilit(?:y|ies)|tool|tools))?"
     r"\s+do\b"
+)
+
+# ---------------------------------------------------------------------------
+# Step 13 — bounded capability-STATE questions
+#
+# These ask about the CURRENT STATE of one named capability (or of the
+# capability set as a whole), not for a capability to run. Each named form
+# resolves its target against the SAME unified capability model the kernel
+# exposes and DECLINES (falls through, fail-closed) when the name does not
+# resolve, so an ordinary request that merely contains a state word is never
+# hijacked. The state words are a bounded vocabulary, never free reasoning.
+# ---------------------------------------------------------------------------
+
+#: The bounded state vocabulary a question may ask about.
+_STATE_VOCAB: str = r"(?:available|enabled|wired|operational|active|blocked|governed|supported)"
+
+#: "Is <name> available?" / "Is the <name> capability currently enabled?"
+_STATE_IS_RE = re.compile(
+    rf"^\s*(?:is|are|isn'?t|aren'?t)\s+(?:the\s+)?"
+    rf"(?P<name>.{{1,60}}?)\s+(?:currently\s+|still\s+|now\s+)?{_STATE_VOCAB}\b.*$",
+    re.IGNORECASE,
+)
+
+#: "What is the status/state of <name>?"
+_STATE_STATUS_RE = re.compile(
+    r"^\s*what(?:'?s| is)\s+the\s+(?:current\s+)?(?:status|state)\s+of\s+"
+    r"(?:the\s+)?(?P<name>.{1,60}?)[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
+#: "Why can't you <op>?" / "What is preventing <name>?" / "What is blocking <name>?"
+_STATE_WHY_RE = re.compile(
+    r"^\s*(?:why|what)\s+(?:can'?t|cannot|won'?t|is\s+preventing|prevents?"
+    r"|is\s+blocking|blocks?|stops?)\s+(?:you\s+|atlas\s+)?(?:from\s+)?"
+    r"(?P<name>.{1,60}?)[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
+#: "Can you <op>?" (a single operation token, no object) — "Can you investigate?"
+_STATE_CAN_RE = re.compile(
+    r"^\s*(?:can|could|are)\s+you\s+(?P<name>[a-zA-Z0-9_]+)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
+#: "Which/What capabilities are unavailable|available|disabled|blocked|governed?"
+_STATE_INVENTORY_RE = re.compile(
+    r"^\s*(?:which|what|list)\s+(?:of\s+your\s+)?capabilit(?:y|ies)\s+"
+    r"(?:are|is)\s+(?:currently\s+)?"
+    r"(?P<state>unavailable|not\s+available|available|disabled|blocked|governed"
+    r"|partial(?:ly)?\s+supported)\b.*$",
+    re.IGNORECASE,
+)
+
+def _normalized_state(raw: str) -> str | None:
+    """Map a bounded state phrase to a canonical capability-state value."""
+    text = " ".join(str(raw or "").lower().split())
+    if text in ("not available", "unavailable", "disabled", "off", "down"):
+        return "unavailable"
+    if text in ("available", "enabled", "wired", "operational", "active", "on", "up"):
+        return "available"
+    if text in ("blocked", "blocked by", "prevented"):
+        return "blocked"
+    if text in ("governed", "approval", "approval-gated"):
+        return "governed"
+    if text in ("partial supported", "partially supported", "degraded", "partial"):
+        return "partially_supported"
+    if text == "unknown":
+        return "unknown"
+    return None
+
+
+#: Trailing qualifier words stripped from a captured capability name.
+_STATE_NAME_QUALIFIERS: tuple[str, ...] = (
+    "capability",
+    "capabilities",
+    "tool",
+    "tools",
+    "operation",
+    "operations",
+    "op",
+    "ops",
 )
 
 #: Bounded deterministic self-knowledge recognition. Selects the EXISTING
@@ -1739,6 +1822,185 @@ class BuiltinResponseService:
                 "builtin_response": True,
                 "builtin_intent": BUILTIN_INTENT_CAPABILITY_DETAIL,
                 "model_used": False,
+            },
+        )
+
+    def match_capability_state_question(self, text: str) -> Message | None:
+        """Answer a bounded capability-STATE question from the unified model.
+
+        Step 13 — claims ONLY a bounded state-question form that names a
+        capability which RESOLVES against the SAME unified capability model the
+        kernel exposes (or the bounded "which capabilities are unavailable"
+        inventory form). The answer is the grounded ``state`` / ``reason`` /
+        ``governing`` / ``blocked_by`` the model derived; nothing is inferred
+        and no other surface is consulted. An unresolvable name returns ``None``
+        so the existing route (fail-closed) is unchanged.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        # Match the RAW turn (case-folded, whitespace-collapsed): the general
+        # canonicalizer intentionally strips request preludes such as "can you",
+        # which are meaningful for a bounded capability-state question.
+        lowered = re.sub(r"\s+", " ", text).strip().lower()
+
+        inventory = _STATE_INVENTORY_RE.match(lowered)
+        if inventory is not None:
+            return self._render_capability_state_inventory(inventory.group("state"))
+
+        for pattern in (_STATE_IS_RE, _STATE_STATUS_RE, _STATE_WHY_RE, _STATE_CAN_RE):
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            name = self._clean_state_name(match.group("name"))
+            if not name:
+                continue
+            entry = self._find_state_entry(name)
+            if entry is None:
+                # An unresolvable name is NOT a capability-state question: try
+                # the other bounded forms, then fail closed so an ordinary
+                # request keeps its existing route.
+                continue
+            return self._render_capability_state(entry)
+        return None
+
+    @staticmethod
+    def _clean_state_name(raw: str) -> str:
+        """Normalize a captured capability name (drop qualifiers/determiners)."""
+        text = (raw or "").strip().strip("?.!.,;:'\"()")
+        if text.lower().startswith("the "):
+            text = text[4:].strip()
+        words = text.split()
+        while words and words[-1].lower() in _STATE_NAME_QUALIFIERS:
+            words.pop()
+        return " ".join(words).strip()
+
+    def _find_state_entry(self, name: str) -> Any | None:
+        """Resolve ``name`` to a unified-model entry, or ``None`` (fail-closed)."""
+        model = self._capability_model()
+        resolved = self._resolve_detail_name(name)
+        if resolved is not None:
+            entry = model.find(resolved) if model is not None else None
+            if entry is not None:
+                return entry
+        if model is not None:
+            entry = model.find(name)
+            if entry is not None:
+                return entry
+        # Last resort: an operational alias (e.g. "investigation" -> investigate).
+        operational = self._find_operational_capability(name)
+        if operational is not None and model is not None:
+            return model.find(str(getattr(operational, "name", "") or ""))
+        return None
+
+    @staticmethod
+    def _state_fields(entry: Any) -> dict[str, Any]:
+        return {
+            "name": str(getattr(entry, "name", "") or ""),
+            "kind": str(getattr(getattr(entry, "kind", None), "value", "") or ""),
+            "state": str(getattr(entry, "state", "") or ""),
+            "reason": str(getattr(entry, "reason", "") or ""),
+            "availability": str(
+                getattr(getattr(entry, "availability", None), "value", "") or ""
+            ),
+            "dependency": str(
+                getattr(getattr(entry, "dependency", None), "value", "") or ""
+            ),
+            "governing": str(getattr(entry, "governing", "") or ""),
+            "blocked_by": list(getattr(entry, "blocked_by", ()) or ()),
+        }
+
+    def _render_capability_state(self, entry: Any) -> Message:
+        """Render a grounded capability-state answer (facts only)."""
+        fields = self._state_fields(entry)
+        name = fields["name"]
+        state = fields["state"] or "unknown"
+        reason = fields["reason"]
+        lines = [f"`{name}` is currently **{state}**."]
+        if reason:
+            lines.append(f"Reason: {reason}")
+        if fields["governing"]:
+            lines.append(f"Governing condition: {fields['governing']}.")
+        if fields["blocked_by"]:
+            lines.append("Blocked by: " + ", ".join(fields["blocked_by"]) + ".")
+        operations = tuple(getattr(entry, "operations", ()) or ())
+        if operations:
+            lines.append("Supports: " + ", ".join(f"`{op}`" for op in operations) + ".")
+        lines.append(
+            f"Dependency: {fields['dependency'] or 'unknown'}; "
+            f"availability: {fields['availability'] or 'unknown'}."
+        )
+        evidence = next(
+            (
+                str(getattr(source, "detail", "") or "")
+                for source in (getattr(entry, "sources", ()) or ())
+                if str(getattr(source, "detail", "") or "")
+            ),
+            "",
+        )
+        if evidence:
+            lines.append(f"Evidence: {evidence}.")
+        lines.append(
+            "This reports the capability's stored, evidence-derived state; "
+            "nothing was executed or authorized."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_CAPABILITY_STATE,
+                "model_used": False,
+                "capability_state": fields,
+            },
+        )
+
+    def _render_capability_state_inventory(self, raw_state: str) -> Message | None:
+        """Report the capabilities currently in a requested grounded state."""
+        wanted = _normalized_state(raw_state)
+        if wanted is None:
+            return None
+        entries = self._operational_capability_entries() or tuple(
+            getattr(self._capability_model() or object(), "entries", ()) or ()
+        )
+        matching = [
+            entry
+            for entry in entries
+            if str(getattr(entry, "state", "") or "") == wanted
+        ]
+        label = wanted.replace("_", " ")
+        if not matching:
+            return Message(
+                role="assistant",
+                content=(
+                    f"No known capability is currently {label}. "
+                    "Nothing was executed or authorized."
+                ),
+                metadata={
+                    "builtin_response": True,
+                    "builtin_intent": BUILTIN_INTENT_CAPABILITY_STATE,
+                    "model_used": False,
+                    "capability_state": {"query": wanted, "matches": []},
+                },
+            )
+        lines = [f"Capabilities currently {label}:"]
+        for entry in matching[:_MAX_TOOLS_LISTED]:
+            name = str(getattr(entry, "name", "") or "")
+            reason = str(getattr(entry, "reason", "") or "")
+            lines.append(f"- `{name}`" + (f" — {reason}" if reason else ""))
+        lines.append("Nothing was executed or authorized.")
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_CAPABILITY_STATE,
+                "model_used": False,
+                "capability_state": {
+                    "query": wanted,
+                    "matches": [
+                        str(getattr(entry, "name", "") or "") for entry in matching
+                    ],
+                },
             },
         )
 

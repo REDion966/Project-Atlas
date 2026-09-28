@@ -468,8 +468,20 @@ was demonstrated:
   additively into the existing canonical model, with availability grounded in
   actual wiring; the kernel/CLI lookup and the conversational capability
   inventory/`explain` answers speak the same grounded view. Remaining limitations
-  are recorded in `docs/ATLAS_STATE.md` §34.18. **Steps 1 → 12 are COMPLETE.
-  Step 13 is NOT STARTED.**
+  are recorded in `docs/ATLAS_STATE.md` §34.18.
+- **Step 13 — Capability state & self-knowledge** — the real-kernel baseline
+  showed the Step 12 model exposed definitions and a coarse availability but no
+  grounded state (a structural external-model-dependent capability reported
+  available while the operational one — same dependency class — reported
+  unavailable), and capability-state questions were misrouted or unsupported. A
+  bounded, deterministic state derivation (available / unavailable /
+  partially_supported / blocked / governed / unknown, with reason, governing
+  condition and blocking dependency) grounded in the evidence Atlas already holds
+  is now exposed consistently through the kernel contract and a bounded
+  conversation state-question surface; an external-model-dependent capability is
+  truthfully unavailable without a provider. Remaining limitations are recorded
+  in `docs/ATLAS_STATE.md` §34.19. **Steps 1 → 13 are COMPLETE. Step 14 is NOT
+  STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

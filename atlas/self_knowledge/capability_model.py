@@ -33,7 +33,7 @@ classification cannot be established honestly, it is reported as ``unknown``.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
 
@@ -73,6 +73,34 @@ class CapabilityAvailability(str, Enum):
     AVAILABLE = "available"
     DEGRADED = "degraded"
     UNAVAILABLE = "unavailable"
+    UNKNOWN = "unknown"
+
+
+class CapabilityState(str, Enum):
+    """Grounded current state of one capability (Step 13).
+
+    Only states actual internal evidence can establish are used:
+
+      * ``available`` — registered/wired and its dependencies are satisfied;
+      * ``unavailable`` — a required dependency is absent (an optional external
+        model is not configured) or the providing component is OFFLINE;
+      * ``partially_supported`` — the providing component is DEGRADED;
+      * ``blocked`` — a capability it requires is itself unavailable;
+      * ``governed`` — available, but acting on it requires explicit OWNER
+        approval (the existing governance boundary);
+      * ``unknown`` — insufficient evidence to establish the state.
+
+    The state is derived deterministically from the SAME evidence the model
+    already projects (registration/wiring, dependency class, component health,
+    the governed boundary); it is never inferred from the mere existence of a
+    file, class, name or documentation.
+    """
+
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    PARTIALLY_SUPPORTED = "partially_supported"
+    BLOCKED = "blocked"
+    GOVERNED = "governed"
     UNKNOWN = "unknown"
 
 
@@ -123,6 +151,14 @@ class CapabilityEntry:
     #: Step 12 — the bounded operations the capability supports ("" when none is
     #: declared). Empty for structural entries that declare no operations.
     operations: tuple[str, ...] = ()
+    #: Step 13 — the bounded, grounded CURRENT STATE (see :class:`CapabilityState`).
+    state: str = CapabilityState.UNKNOWN.value
+    #: Step 13 — a bounded, grounded explanation of the state (never invented).
+    reason: str = ""
+    #: Step 13 — the capability ids this one is blocked by (empty unless blocked).
+    blocked_by: tuple[str, ...] = ()
+    #: Step 13 — the governing condition when the capability is approval-gated.
+    governing: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -130,6 +166,10 @@ class CapabilityEntry:
             "kind": self.kind.value,
             "dependency": self.dependency.value,
             "availability": self.availability.value,
+            "state": self.state,
+            "reason": self.reason,
+            "blocked_by": list(self.blocked_by),
+            "governing": self.governing,
             "components": list(self.components),
             "sources": [s.to_dict() for s in self.sources],
             "health": [list(h) for h in self.health],
@@ -157,6 +197,8 @@ class CapabilityModel:
     limitations: tuple[str, ...]
     #: Step 12 — count of OPERATIONAL (conversational) capability entries.
     operational_count: int = 0
+    #: Step 13 — count of entries per grounded capability state.
+    state_counts: tuple[tuple[str, int], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -164,6 +206,7 @@ class CapabilityModel:
             "capability_count": self.capability_count,
             "tool_count": self.tool_count,
             "operational_count": self.operational_count,
+            "state_counts": [list(x) for x in self.state_counts],
             "entry_count": len(self.entries),
             "dependency_counts": [list(x) for x in self.dependency_counts],
             "availability_counts": [list(x) for x in self.availability_counts],
@@ -186,6 +229,8 @@ class CapabilityModel:
             f"- Capabilities: {self.capability_count}",
             f"- Tools: {self.tool_count}",
             f"- Operational capabilities: {self.operational_count}",
+            "- State: "
+            + (", ".join(f"{k}={v}" for k, v in self.state_counts) or "(none)"),
             "- Dependency: "
             + (
                 ", ".join(f"{k}={v}" for k, v in self.dependency_counts)
@@ -221,11 +266,18 @@ class CapabilityModel:
             )
             lines.append(
                 f"- `{entry.name}` [{entry.kind.value}] "
+                f"state={entry.state} "
                 f"dependency={entry.dependency.value} "
                 f"availability={entry.availability.value} "
                 f"components={','.join(entry.components) or '-'} "
                 f"sources={sources}"
             )
+            if entry.reason:
+                lines.append(f"    - state reason: {entry.reason}")
+            if entry.governing:
+                lines.append(f"    - governing: {entry.governing}")
+            if entry.blocked_by:
+                lines.append(f"    - blocked_by: {', '.join(entry.blocked_by)}")
             if entry.category:
                 lines.append(f"    - category: {entry.category}")
             if entry.operations:
@@ -263,6 +315,100 @@ def _status_name(status: Any) -> str:
     return str(status)
 
 
+def _derive_states(
+    entries: "list[CapabilityEntry]",
+    acc: "dict[str, dict[str, Any]]",
+) -> "list[CapabilityEntry]":
+    """Derive each entry's grounded STATE/reason from the projected evidence.
+
+    Deterministic, bounded and fail-closed. The inputs are exactly the facts the
+    builder already projected: ``availability`` (component health / wiring),
+    ``dependency`` (external-model class), ``governing`` (the OWNER approval
+    boundary) and each capability's declared ``requires``. No new evidence is
+    gathered and nothing is inferred from the mere existence of a name.
+    """
+    base: dict[str, str] = {}
+    for entry in entries:
+        if entry.availability is CapabilityAvailability.UNAVAILABLE:
+            base[entry.name] = CapabilityState.UNAVAILABLE.value
+        elif entry.availability is CapabilityAvailability.DEGRADED:
+            base[entry.name] = CapabilityState.PARTIALLY_SUPPORTED.value
+        elif entry.availability is CapabilityAvailability.AVAILABLE:
+            base[entry.name] = (
+                CapabilityState.GOVERNED.value
+                if entry.governing
+                else CapabilityState.AVAILABLE.value
+            )
+        else:
+            base[entry.name] = CapabilityState.UNKNOWN.value
+
+    derive: list[CapabilityEntry] = []
+    for entry in entries:
+        state = base[entry.name]
+        blocked_by: tuple[str, ...] = ()
+        requires = tuple(
+            dep
+            for dep in (acc.get(entry.name, {}).get("requires") or ())
+            if isinstance(dep, str) and dep
+        )
+        # A required capability that is itself unavailable BLOCKS this one —
+        # but only when this capability is otherwise runnable (never masking a
+        # stronger unavailable/unknown signal).
+        if state in (
+            CapabilityState.AVAILABLE.value,
+            CapabilityState.GOVERNED.value,
+            CapabilityState.PARTIALLY_SUPPORTED.value,
+        ):
+            missing = tuple(
+                dep for dep in requires if base.get(dep) == CapabilityState.UNAVAILABLE.value
+            )
+            if missing:
+                state = CapabilityState.BLOCKED.value
+                blocked_by = missing
+
+        derive.append(
+            replace(
+                entry,
+                state=state,
+                reason=_state_reason(entry, state, blocked_by),
+                blocked_by=blocked_by,
+            )
+        )
+    return derive
+
+
+def _state_reason(
+    entry: CapabilityEntry, state: str, blocked_by: "tuple[str, ...]"
+) -> str:
+    """Return a bounded, grounded explanation for ``state`` (never invented)."""
+    if state == CapabilityState.BLOCKED.value:
+        return "blocked by unavailable dependenc(ies): " + ", ".join(blocked_by)
+    if state == CapabilityState.UNAVAILABLE.value:
+        if entry.dependency is CapabilityDependency.EXTERNAL_MODEL_DEPENDENT:
+            return (
+                "requires an optional external AI model, and none is configured"
+            )
+        offline = [name for name, status in entry.health if status == "OFFLINE"]
+        if offline:
+            return "providing component is OFFLINE: " + ", ".join(sorted(offline))
+        return "its backing route is not currently wired"
+    if state == CapabilityState.PARTIALLY_SUPPORTED.value:
+        degraded = [name for name, status in entry.health if status == "DEGRADED"]
+        if degraded:
+            return "providing component is DEGRADED: " + ", ".join(sorted(degraded))
+        return "available only partially (a required part is degraded)"
+    if state == CapabilityState.GOVERNED.value:
+        return (
+            "available, but acting on it requires the existing OWNER approval "
+            "boundary (" + (entry.governing or "owner_approval") + ")"
+        )
+    if state == CapabilityState.AVAILABLE.value:
+        if entry.kind is CapabilityKind.OPERATIONAL:
+            return "its backing conversation route is wired"
+        return "registered and its providing component is healthy"
+    return "insufficient evidence to establish the capability state"
+
+
 def _derive_availability(statuses: list[str]) -> CapabilityAvailability:
     """Derive availability from existing component health status names."""
     unique = set(statuses)
@@ -287,6 +433,7 @@ class CapabilityModelBuilder:
         capability_registry: Any | None = None,
         tool_registry: Any | None = None,
         operational_capabilities: Any | None = None,
+        external_model_available: bool = True,
     ) -> CapabilityModel:
         # name -> accumulator
         acc: dict[str, dict[str, Any]] = {}
@@ -303,6 +450,7 @@ class CapabilityModelBuilder:
                     "implementations": set(),
                     "inputs": (),
                     "operational": None,
+                    "requires": (),
                 },
             )
 
@@ -398,6 +546,11 @@ class CapabilityModelBuilder:
                     continue
                 item = _entry(cap_id)
                 item["operational"] = capability
+                item["requires"] = tuple(
+                    str(dep)
+                    for dep in (getattr(capability, "requires", ()) or ())
+                    if str(dep)
+                )
                 evidence = "; ".join(
                     str(entry)
                     for entry in (getattr(capability, "evidence", ()) or ())
@@ -423,6 +576,7 @@ class CapabilityModelBuilder:
             limitations: list[str] = []
             category = ""
             operations: tuple[str, ...] = ()
+            governing = ""
 
             if operational is not None:
                 # Step 12 — an OPERATIONAL (conversational) capability. Its
@@ -456,6 +610,9 @@ class CapabilityModelBuilder:
                     limitations.append(
                         "Governed: acting on it requires explicit OWNER approval."
                     )
+                    # Step 13 — the governing condition, grounded in the existing
+                    # OWNER approval boundary (never a new mechanism).
+                    governing = "owner_approval"
                 kind = CapabilityKind.OPERATIONAL
                 implementation = ""
             else:
@@ -466,7 +623,15 @@ class CapabilityModelBuilder:
                     dependency = CapabilityDependency.DETERMINISTIC
                 else:
                     dependency = CapabilityDependency.UNKNOWN
-                availability = _derive_availability([s for _, s in health])
+                if (
+                    dependency is CapabilityDependency.EXTERNAL_MODEL_DEPENDENT
+                    and not external_model_available
+                ):
+                    # Grounded: the optional external model is not configured, so
+                    # the capability is unavailable regardless of component health.
+                    availability = CapabilityAvailability.UNAVAILABLE
+                else:
+                    availability = _derive_availability([s for _, s in health])
                 if dependency is CapabilityDependency.EXTERNAL_MODEL_DEPENDENT:
                     limitations.append(
                         "Requires an optional external AI model (providing "
@@ -511,8 +676,15 @@ class CapabilityModelBuilder:
                     inputs=tuple(item["inputs"]),
                     category=category,
                     operations=operations,
+                    governing=governing,
                 )
             )
+
+        # Step 13 — GROUNDED current state. A bounded post-pass derives each
+        # entry's state/reason from the SAME evidence the model already
+        # projected (availability, dependency class, component health, governing
+        # boundary) and resolves a blocking dependency against the other entries.
+        entries = _derive_states(entries, acc)
 
         component_count = len(components)
         capability_count = sum(1 for e in entries if e.kind is CapabilityKind.CAPABILITY)
@@ -520,6 +692,7 @@ class CapabilityModelBuilder:
         operational_count = sum(
             1 for e in entries if e.kind is CapabilityKind.OPERATIONAL
         )
+        state_counts = tuple(sorted(Counter(e.state for e in entries).items()))
 
         dependency_counts = tuple(
             sorted(Counter(e.dependency.value for e in entries).items())
@@ -578,6 +751,7 @@ class CapabilityModelBuilder:
             capability_count=capability_count,
             tool_count=tool_count,
             operational_count=operational_count,
+            state_counts=state_counts,
             dependency_counts=dependency_counts,
             availability_counts=availability_counts,
             health_counts=health_counts,
@@ -591,6 +765,7 @@ def build_capability_model(
     capability_registry: Any | None = None,
     tool_registry: Any | None = None,
     operational_capabilities: Any | None = None,
+    external_model_available: bool = True,
 ) -> CapabilityModel:
     """Convenience function: build the canonical capability model.
 
@@ -604,6 +779,7 @@ def build_capability_model(
         capability_registry=capability_registry,
         tool_registry=tool_registry,
         operational_capabilities=operational_capabilities,
+        external_model_available=external_model_available,
     )
 
 
@@ -613,6 +789,7 @@ def describe_capability(
     capability_registry: Any | None = None,
     tool_registry: Any | None = None,
     operational_capabilities: Any | None = None,
+    external_model_available: bool = True,
 ) -> dict[str, Any]:
     """Bounded, deterministic capability-discovery answer for one name.
 
@@ -629,6 +806,7 @@ def describe_capability(
         capability_registry=capability_registry,
         tool_registry=tool_registry,
         operational_capabilities=operational_capabilities,
+        external_model_available=external_model_available,
     )
     entry = model.find(text)
     if entry is None:

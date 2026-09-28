@@ -1839,6 +1839,99 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.19 Step 13 — Capability state & self-knowledge: grounded, evidence-derived state
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 13 built the next
+justified layer on Step 12: Atlas can now determine and communicate the CURRENT
+STATE of its known capabilities from grounded internal evidence, rather than
+merely listing capability definitions.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+Step 12 unified model represented capability DEFINITIONS and a coarse
+``availability`` but did not expose a grounded, explicit capability STATE:
+
+  * a structural external-model-dependent capability (``ai_chat`` /
+    ``model_routing``) reported ``available`` because its component was HEALTHY
+    — even though no external model was configured and its own limitation said
+    it was unavailable — while the operational ``open_conversation`` (the same
+    dependency class) correctly reported ``unavailable``: **the same evidence
+    class produced two different availabilities**;
+  * there was no ``state`` / ``reason`` / ``blocked_by`` / ``governing``, so a
+    consumer had to parse limitation prose and the governed boundary was not a
+    state at all;
+  * capability-STATE questions were misrouted or unsupported: *"Is investigation
+    available?"* ran a real investigation, *"Is research available?"* and *"What
+    is the status of investigation?"* ran a knowledge retrieval, *"Is open
+    conversation enabled?"* and *"What is preventing knowledge acquisition?"*
+    were unsupported, and *"What capabilities are unavailable?"* returned the
+    unfiltered inventory.
+
+**What was implemented (smallest grounded state model).**
+- `atlas/self_knowledge/capability_model.py`: `CapabilityState`
+  (``available`` / ``unavailable`` / ``partially_supported`` / ``blocked`` /
+  ``governed`` / ``unknown``) plus four bounded, grounded `CapabilityEntry`
+  fields — `state`, `reason`, `blocked_by`, `governing` — and a model-level
+  `state_counts`. State is derived deterministically in one bounded post-pass
+  from the SAME evidence the model already projected: registration/wiring,
+  the external-model dependency class, component health, and the OWNER approval
+  boundary. A new `external_model_available` input (default ``True``, so every
+  existing caller is unchanged) makes an external-model-dependent capability
+  **truthfully unavailable** when no provider is configured — removing the
+  Step 12 inconsistency. A capability whose declared prerequisite is itself
+  unavailable is `blocked` with its `blocked_by`; insufficient evidence yields
+  `unknown` (fail closed). Nothing is inferred from the mere existence of a
+  file, class, name or documentation.
+- `atlas/self_knowledge/operational_capabilities.py`: a bounded `requires`
+  field grounds a capability's real prerequisites (``plan``→``investigate``,
+  ``execute``→``approve``, ``knowledge_acquisition``→``research``) so a blocking
+  dependency can be represented rather than speculated.
+- `atlas/kernel/atlas.py`: the unified `capability_model()` and
+  `capability_contract()` pass the grounded `external_model_available` fact, so
+  the kernel/CLI and the conversation share ONE state derivation.
+- `atlas/conversation/builtin_response.py` + `conversation_service.py`: a
+  bounded capability-STATE question surface (`match_capability_state_question`)
+  answers *"Is <capability> available/enabled?"*, *"What is the status of
+  <capability>?"*, *"Why can't you <operation>?"*, *"Can you <operation>?"* and
+  *"Which capabilities are unavailable?"* from the SAME unified model, with the
+  grounded `state` / `reason` / `governing` / `blocked_by`. It claims a turn ONLY
+  when the named capability RESOLVES (an unknown name fails closed to the
+  existing route) and only for a bounded, explicit state-question form, so a
+  real request ("Can you investigate the storage layer?") is never hijacked.
+
+Representation only: no new registry/store/planner/execution, no model call, no
+speculative lifecycle machinery, no invented state; the existing governance,
+sandbox and promotion boundaries are untouched and no state transition bypasses
+them.
+
+**Validation.** `tests/test_step13_capability_state.py` — 26 focused tests
+(grounded derivation for available / unavailable-external-model /
+partially_supported (DEGRADED) / governed / blocked / unknown; grounded reasons;
+`blocked_by`; `state_counts`; determinism; Step 12 fields preserved; the
+conversation state questions and their precision (real requests and unknown
+names are not hijacked); contract↔conversation agreement; real-kernel grounded
+contract state for available / unavailable / governed / unknown capabilities,
+configuration-change reflection, send/stream parity and
+no-authority/repository-untouched validation). Relevant subsystem regressions
+were green — the capability model/contracts/architecture model, the CLI
+capability surface, builtin state answers, the Step 12 suite, the C3/C4.1/C5
+self-knowledge surfaces, the self-knowledge bridge, the kernel suite, the
+capability routing/execution suites, conversation service and the import scans.
+The pre-existing failures documented elsewhere were reproduced against a
+pristine HEAD and remain unchanged — they are NOT caused by Step 13. No
+full-suite re-run.
+
+**Known limitations (truthful).** State is derived from the evidence Atlas
+already holds (registration/wiring, component health, the governed boundary, the
+declared prerequisites); it is NOT derived from test coverage or promotion
+history, so a capability that is registered and wired is reported ``available``
+even if it has no dedicated test — that is a later, separately authorized step.
+The operational prerequisites are a small, explicit, grounded set (a new
+dependency must be declared to be represented). A DEACTIVATED/retired state is
+not used because no existing Atlas evidence distinguishes it. The conversation
+surface answers only the bounded state-question forms it recognises; other
+wording keeps its existing route. These remain evidence-driven, separately
+authorized work — no L11+/G4/C10 phase or Step 14 is created or implied.
+
 ### 34.18 Step 12 — Unified capability model: one consistent capability-level view
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 12 established one
@@ -2771,5 +2864,32 @@ unchanged; no full-suite re-run; known limitations recorded in §34.18 (the
 catalogue is a bounded explicit list; registered-only projection retained for the
 architecture mapping; no test/promotion-derived capability evidence yet); §34.18;
 Steps 1 → 12 are COMPLETE and Step 13 is NOT STARTED and remains evidence-driven).
+Step 13 capability state & self-knowledge reconciled: 2026-09-28 (the real-kernel
+baseline showed the Step 12 model exposed definitions and a coarse availability
+but no grounded STATE: a structural external-model-dependent capability
+(ai_chat/model_routing) reported available while the operational
+open_conversation — the same dependency class — reported unavailable, and
+capability-state questions were misrouted or unsupported. Minimal change:
+CapabilityState (available/unavailable/partially_supported/blocked/governed/
+unknown) plus bounded grounded entry fields (state/reason/blocked_by/governing)
+and model-level state_counts, derived in one deterministic post-pass from the
+SAME evidence the model already projected, with a new external_model_available
+input (default True → existing callers unchanged) that makes an
+external-model-dependent capability truthfully unavailable without a provider; a
+bounded `requires` field grounds prerequisites so a blocked dependency is
+represented; the kernel model/contract pass the grounded fact; and a bounded
+conversation capability-STATE question surface answers is-available / status /
+why-can't / can-you / which-are-unavailable from the SAME model, declining
+unknown names (fail closed) so real requests are never hijacked. 26 focused
+tests plus relevant subsystem regressions green (capability model/contracts/
+architecture model, CLI capability surface, builtin state answers, the Step 12
+suite, C3/C4.1/C5 self-knowledge surfaces, self-knowledge bridge, kernel suite,
+capability routing/execution, conversation service, import scans); the
+pre-existing failures were reproduced against a pristine HEAD and remain
+unchanged; no full-suite re-run; known limitations recorded in §34.19 (state is
+not derived from test coverage or promotion history; the prerequisite set is an
+explicit grounded list; no retired state is used; only the bounded
+state-question forms are recognised); §34.19; Steps 1 → 13 are COMPLETE and
+Step 14 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

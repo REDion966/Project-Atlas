@@ -5118,9 +5118,7 @@ class Atlas:
             project_operational_capabilities,
         )
 
-        external_provider = bool(
-            self._config.get("ai", "external_providers", default=False)
-        )
+        external_provider = self._external_providers_enabled()
         governed_wired = (
             self._approval_manager is not None
             and self._development_execution_bridge is not None
@@ -5129,6 +5127,18 @@ class Atlas:
             external_provider=external_provider,
             governed_wired=governed_wired,
         )
+
+    def _external_providers_enabled(self) -> bool:
+        """True when an optional external AI provider is configured (grounded).
+
+        Deterministic, read-only: the SAME configuration fact the operational
+        capability catalogue and the capability-state derivation use, so the
+        model-backed capabilities never report as available without a provider.
+        """
+        try:
+            return bool(self._config.get("ai", "external_providers", default=False))
+        except Exception:
+            return False
 
     def capability_model(self, include_operational: bool = True):
         """Return the canonical deterministic capability model (C5.1 + Step 12).
@@ -5151,6 +5161,9 @@ class Atlas:
             operational_capabilities=(
                 self._operational_capabilities() if include_operational else None
             ),
+            # Step 13 — grounded: without a configured external provider the
+            # external-model-dependent capabilities are truthfully unavailable.
+            external_model_available=self._external_providers_enabled(),
         )
 
     def capability_contract(self, name: str):
@@ -5171,6 +5184,7 @@ class Atlas:
             capability_registry=self._capability_registry,
             tool_registry=self._tool_registry,
             operational_capabilities=self._operational_capabilities(),
+            external_model_available=self._external_providers_enabled(),
         )
 
     def repository_symbol(self, query: str, limit: int = 20):

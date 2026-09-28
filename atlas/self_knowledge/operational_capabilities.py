@@ -55,6 +55,10 @@ class OperationalCapability:
     dependency: str = DEP_DETERMINISTIC
     governed: bool = False
     available: bool = True
+    #: Step 13 — prerequisite capability ids this capability actually needs. A
+    #: required capability that is itself unavailable makes this one BLOCKED
+    #: (grounded, never speculated).
+    requires: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +73,7 @@ class OperationalCapability:
             "dependency": self.dependency,
             "governed": self.governed,
             "available": self.available,
+            "requires": list(self.requires),
         }
 
 
@@ -205,6 +210,7 @@ _OPERATIONAL_CAPABILITIES: tuple[OperationalCapability, ...] = (
         evidence=("atlas.research.acquisition",),
         limitations=("Deny-by-default: requires an authorized source and the D2 boundary.",),
         governed=True,
+        requires=("research",),
     ),
     OperationalCapability(
         id="goal_orchestration",
@@ -258,6 +264,7 @@ _OPERATIONAL_CAPABILITIES: tuple[OperationalCapability, ...] = (
         evidence=("atlas.conversation.investigation",),
         limitations=("A proposal is evidence-only and requires explicit OWNER approval.",),
         governed=True,
+        requires=("investigate",),
     ),
     OperationalCapability(
         id="approve",
@@ -280,6 +287,7 @@ _OPERATIONAL_CAPABILITIES: tuple[OperationalCapability, ...] = (
         evidence=("atlas.evolution",),
         limitations=("Sandbox-only; it never writes to the live repository.",),
         governed=True,
+        requires=("approve",),
     ),
     OperationalCapability(
         id="verify",
@@ -359,6 +367,7 @@ def project_operational_capabilities(
                 dependency=capability.dependency,
                 governed=capability.governed,
                 available=available,
+                requires=capability.requires,
             )
         )
     return tuple(projected)
