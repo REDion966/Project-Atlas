@@ -1128,6 +1128,20 @@ _INTENT_COORDINATORS: tuple[str, ...] = (
 #: Bound on the independent readings returned for one request.
 _MAX_INTENTS: int = 4
 
+#: STRONG coordinators. These join genuinely separate intents even when the
+#: following clause only *states* what is wanted. Every other coordinator
+#: ("then", plain "and") is WEAK: it only separates clauses when BOTH sides name
+#: a bounded OPERATION, so a single multi-clause intent ("investigate the
+#: component that handles X and Y") is never over-split.
+_STRONG_INTENT_COORDINATORS: tuple[str, ...] = (
+    "and also",
+    "and additionally",
+    "as well as",
+    "plus also",
+    "also",
+    "plus",
+)
+
 
 def split_intents(text: Any) -> tuple[SubRequest, ...]:
     """Step 6 — the bounded independent readings inside ONE request.
@@ -1170,6 +1184,21 @@ def split_intents(text: Any) -> tuple[SubRequest, ...]:
     if remainder:
         clauses.append(remainder)
     if len(clauses) < 2:
+        return ()
+
+    # Anti-over-split: without a STRONG coordinator, a clause boundary is only a
+    # real second intent when BOTH sides name a bounded OPERATION. A single
+    # multi-clause intent ("investigate the component that handles X and Y") is
+    # therefore never split.
+    lowered_text = f" {text.lower()} "
+    strong = any(
+        f" {connector} " in lowered_text
+        for connector in _STRONG_INTENT_COORDINATORS
+    )
+    if not strong and any(
+        not (interpret(clause).operation or "").strip()
+        for clause in clauses[:_MAX_INTENTS]
+    ):
         return ()
 
     readings: list[SubRequest] = []

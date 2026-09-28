@@ -437,7 +437,20 @@ was demonstrated:
   handler (wired before every other surface) resolves the follow-up and resumes
   the correct existing route while never over-clarifying clear or unsupported
   input. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.15.
-  **Steps 1 → 9 are COMPLETE. Step 10 is NOT STARTED.**
+- **Step 10 — Multi-intent & multi-step understanding** — the multi-turn baseline
+  showed Step 6 reads only casual multi-intent turns and the Step 2 goal plan
+  composes only a fixed closed set of two-stage slices, so a multi-intent/
+  multi-step operational request was handed to a single route that acted on the
+  whole sentence and dropped the other intents, explicit "first … then …"
+  sequencing was not split, a dependent "investigate A, then analyze the
+  findings" ran over stale evidence, and a single multi-clause intent was
+  over-split. One bounded, authority-free representation now reads the ordered
+  steps (order only when expressed, a `"result"` dependency only when
+  justified), runs the runnable read-only steps through the EXISTING
+  orchestration bridge, answers casual clauses through the EXISTING builtin
+  surface, and reports every other step truthfully. Remaining limitations are
+  recorded in `docs/ATLAS_STATE.md` §34.16. **Steps 1 → 10 are COMPLETE.
+  Step 11 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

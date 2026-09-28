@@ -1839,6 +1839,99 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.16 Step 10 — Multi-intent & multi-step understanding: ordered, dependency-aware
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 10 made Atlas
+reliably understand requests that carry more than one distinct intent or step:
+identify the separate steps, preserve their order only where the language
+expresses it, distinguish dependent from independent steps, and route each
+understood part through the appropriate EXISTING Atlas mechanism.
+
+**What the baseline showed (measured through the real Atlas/kernel, multi-turn).**
+Step 6 (``split_intents`` + the builtin multi-intent answer) reads only *casual*
+multi-intent turns, and the Step 2 goal plan composes only a fixed closed set of
+two-stage slices; both were **not rebuilt**. A genuinely unseen multi-intent/
+multi-step OPERATIONAL request was therefore handed to a single operational route
+that acted on the WHOLE sentence and silently dropped the other intents:
+
+  * `"Investigate A and also research B"` → only the investigation ran (on the
+    whole sentence); the research intent vanished;
+  * `"First investigate A, then research B"` → the splitter did not even see a
+    second intent (`then` is not a Step 6 coordinator);
+  * `"Investigate A, then analyze the findings"` → the analysis route fired over
+    STALE retained evidence instead of the step's own result;
+  * `"Investigate the component that handles X and Y"` → a SINGLE multi-clause
+    intent was over-split by the Step 6 splitter and preempted the investigation.
+
+**What was implemented (smallest coherent model).**
+- `atlas/conversation/multi_step.py`: a bounded, deterministic **representation**
+  — `StepClause` / `RequestStep` / `MultiStepRequest` — plus an ordering-aware
+  `split_clauses` (numbering and `then`/`after that`/`next`/`finally` name an
+  explicit order), a closed `_classify` mapping each clause to an existing
+  read-only mechanism (`investigation` / `knowledge` / `analysis`), the
+  deterministic builtin surface, or nothing, and `build_multi_step`, which
+  represents order **only** when the language expressed it, records a
+  `depends_on`/`dependency="result"` edge **only** when a later clause reasons
+  over an earlier RESULT, marks an analysis without a prerequisite `blocked`, and
+  returns `None` for a single multi-clause intent (anti-over-split). It also
+  provides `build_execution_steps`, which maps the runnable steps onto the
+  EXISTING executor's bounded kinds.
+- `atlas/conversation/conversation_service.py`: one handler
+  `_maybe_handle_multi_step` (wired after the existing compound route so
+  research-led compound shapes keep their pinned route, and before the
+  knowledge/investigation routes) that runs the runnable read-only steps through
+  the EXISTING kernel-owned orchestration bridge (the same mechanism Step 2
+  uses), answers understood CASUAL clauses through the EXISTING builtin surface,
+  and REPORTS every other step truthfully (unsupported / governed / blocked) —
+  nothing is invented, executed or authorized. Two minimal precedence guards
+  make the demonstrated gaps reachable: the evidence-gap-analysis route declines
+  a genuine multi-step request (so `"investigate X and then analyze the
+  findings"` analyses its OWN result, not stale evidence), and the Step 2 goal
+  route declines a turn that carries more intents than its two-stage plan covers.
+- `atlas/conversation/semantic_frame.py`: `split_intents` gained an anti-over-split
+  rule — a WEAK connector (`and`, `then`) separates clauses only when BOTH sides
+  name a bounded operation — so a single multi-clause intent is never split.
+
+No new engine, planner, scheduler, orchestration engine, memory store or second
+persistence mechanism: the retained plan is the EXISTING `current_plan`, and the
+EXISTING `depends_on`/`carry_from` mechanism carries the result. Governance and
+fail-closed boundaries are untouched (a governance-sensitive clause is never a
+step).
+
+**Validation.** `tests/test_step10_multi_intent_multi_step.py` — 39 focused
+tests (clause splitting/ordering evidence; the bounded representation for 2
+independent intents, explicit order, dependent analysis with a prerequisite,
+blocked analysis, unsupported and governed clauses, casual-only and
+single-multi-clause negatives, determinism; execution-step mapping; conversation
+routing for two operational intents, ordered requests, dependent carry, mixed
+casual+operational, unsupported/governed reporting, no-authority metadata,
+single-turn/casual-multi-intent preservation, send/stream parity; Steps 6/9
+preservation; real-kernel two-intent, ordered, dependent, three-intent-mixed,
+anti-over-split, clear-single and repository-untouched validation). Relevant
+subsystem regressions were green — Step 2 orchestration/goal slices/resumption/
+gap orchestration, Steps 5/6/7/8/9, reference resolution/consumption/exposure/
+stream parity, conversation state/context, L4/L5 retention, L7 floor, builtin
+answers, self-knowledge bridge, G1/G1-routing/G2/G3, open-ended conversation,
+NLU-4/5, entity identification, D1–D4, semantic-gap routing, evidence
+improvements, lexical/whitespace normalisation, architecture-import guards. The
+pre-existing failures documented elsewhere (qualifier aliases, the "Run it"
+orchestration gate, the architecture question, the L9 confirmation scenario, the
+P15.2 continuity case, two lexical canonicalisation cases) were reproduced
+against a pristine HEAD and remain unchanged — they are NOT caused by Step 10. No
+full-suite re-run.
+
+**Known limitations (truthful).** A research-led compound shape
+(`"Research X and summarize what you find."`) keeps the EXISTING compound route
+(which answers the lead research and reports the remaining clause) rather than
+being orchestrated, because an existing pinned contract owns it; a
+conversational clause joined by a plain `and` to an operation is not separated
+unless the operation is bounded; the representation is derived from bounded
+clause vocabulary/order/result cues, so a dependency expressed without an
+ordinal/result cue is represented as independent (never invented); ordering is
+executed in textual order but an UNORDERED request records no order. These remain
+evidence-driven, separately authorized work — no L11+/G4/C10 phase or Step 11 is
+created or implied.
+
 ### 34.15 Step 9 — Ambiguity & clarification: detect, ask, resolve, resume
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 9 made Atlas
@@ -2440,5 +2533,36 @@ information and clears on the next turn rather than reconstructing the
 operation; a clarification whose candidates are not selectable by name/ordinal/
 distinctive token stays open; matching is bounded, never fuzzy); §34.15;
 Steps 1 → 9 are COMPLETE and Step 10 is NOT STARTED and remains evidence-driven).
+Step 10 multi-intent & multi-step understanding reconciled: 2026-09-28
+(multi-turn baseline through the real kernel confirmed Step 6 reads only casual
+multi-intent turns and the Step 2 goal plan composes only a fixed closed set of
+two-stage slices — neither rebuilt; the demonstrated gap was that a multi-intent/
+multi-step OPERATIONAL request was handed to a single operational route that
+acted on the whole sentence and silently dropped the other intents, explicit
+sequencing ("first … then …") was not split, a dependent
+"investigate X and then analyze the findings" fired over stale evidence, and a
+single multi-clause intent was over-split. Minimal change: a bounded authority-
+free representation (`atlas/conversation/multi_step.py` — ordering-aware
+`split_clauses`, closed `_classify`, `build_multi_step` with order only when
+expressed and a `"result"` dependency only when justified, and
+`build_execution_steps`), one `_maybe_handle_multi_step` handler that runs the
+runnable read-only steps through the EXISTING orchestration bridge (the same
+mechanism Step 2 uses), answers CASUAL clauses through the EXISTING builtin
+surface and reports every other step truthfully (unsupported/governed/blocked),
+plus two minimal precedence guards (evidence-gap-analysis declines a genuine
+multi-step request; the Step 2 goal route declines a turn with more intents than
+its plan covers) and an anti-over-split rule in `split_intents`. 39 focused tests
+plus relevant subsystem regressions green (Step 2 orchestration/goal slices/
+resumption/gap, Steps 5/6/7/8/9, reference resolution/consumption/exposure/stream
+parity, conversation state/context, L4/L5 retention, L7 floor, builtin answers,
+self-knowledge bridge, G1/G1-routing/G2/G3, open-ended conversation, NLU-4/5,
+entity identification, D1-D4, semantic-gap routing, evidence improvements,
+lexical/whitespace normalisation, architecture-import guards); the pre-existing
+failures were reproduced against a pristine HEAD and remain unchanged; no
+full-suite re-run; known limitations recorded in §34.16 (research-led compound
+shapes keep the existing compound route; a plain-`and` clause without a bounded
+operation is not separated; bounded order/result cues are required to represent
+order/dependency); §34.16; Steps 1 → 10 are COMPLETE and Step 11 is NOT STARTED
+and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

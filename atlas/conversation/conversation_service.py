@@ -44,6 +44,15 @@ from atlas.conversation.clarification import (
     build_question,
     candidate_matches,
 )
+from atlas.conversation.multi_step import (
+    DEP_RESULT,
+    EXEC_ANALYSIS,
+    STATUS_BLOCKED,
+    STATUS_GOVERNED,
+    STATUS_UNSUPPORTED,
+    build_execution_steps,
+    build_multi_step,
+)
 from atlas.conversation.research_objective import research_subject_gap
 from atlas.conversation.entity_capture import CapturedEntity, capture_named_entities
 from atlas.conversation.development_outcome_reporter import (
@@ -882,6 +891,21 @@ class ConversationService:
         if not is_evidence_gap_analysis_request(text):
             return None
 
+        # Step 10 — a genuine MULTI-STEP request (a runnable work step followed by
+        # an analysis of its RESULT) belongs to the multi-step route, not to a gap
+        # analysis over whatever report happened to be retained. Without this, the
+        # dependent request "Investigate X and then analyze the findings." analyses
+        # STALE evidence instead of the step's own result.
+        try:
+            multi = build_multi_step(text)
+        except Exception:
+            multi = None
+        if multi is not None and any(
+            step.executor == EXEC_ANALYSIS and step.dependency == DEP_RESULT
+            for step in multi.steps
+        ):
+            return None
+
         report = self._last_investigation_report
         if report is None:
             return Message(
@@ -1485,6 +1509,100 @@ class ConversationService:
             },
         )
 
+    def _maybe_handle_multi_step(self, text: str) -> Message | None:
+        """Step 10 — understand and route a multi-intent/multi-step request.
+
+        Claims ONLY a genuinely multi-intent/multi-step OPERATIONAL request (two
+        or more bounded clauses of which at least one is a runnable read-only
+        step) that the existing routes did not already own. It:
+
+          * represents every step (order only when the language expressed it,
+            dependency only when a later step reasons over an earlier RESULT);
+          * runs the runnable read-only steps through the EXISTING kernel-owned
+            orchestration bridge (the same mechanism Step 2 uses), preserving
+            order and `depends_on`/`carry_from`;
+          * answers understood CASUAL clauses through the EXISTING builtin
+            surface;
+          * REPORTS every other step truthfully (unsupported / governed /
+            blocked) — nothing is invented, executed or authorized.
+
+        Returns ``None`` for every other turn, so all existing routes keep their
+        precedence. No new execution engine and no second persistence mechanism
+        is introduced: the retained plan is the existing ``current_plan``.
+        """
+        if self._goal_orchestration_resolver is None or self._state_manager is None:
+            return None
+        if not isinstance(text, str) or not text.strip():
+            return None
+        try:
+            request = build_multi_step(text)
+        except Exception:  # fail-soft: the existing cascade is unchanged
+            return None
+        if request is None or not request.has_operational_step:
+            return None
+        plan = build_execution_steps(request)
+        if not plan:
+            return None
+        try:
+            message = self._goal_orchestration_resolver(
+                text, plan, self._last_session_context
+            )
+        except Exception:  # fail-soft: the bridge never breaks conversation
+            return None
+        if not isinstance(message, Message):
+            return None
+        self._retain_goal_plan(text, plan, message)
+
+        lines = [message.content]
+        for step in request.builtin_steps:
+            if self._builtin_response is None:
+                continue
+            try:
+                reply = self._builtin_response.respond(
+                    step.clause,
+                    spec=None,
+                    message_count=len(self._conversation.messages),
+                    context=None,
+                )
+            except Exception:
+                reply = None
+            if reply is not None and isinstance(reply.content, str) and reply.content.strip():
+                lines.append("")
+                lines.append(f"**{step.clause}**")
+                lines.append(reply.content)
+        reported = request.reported_steps
+        if reported:
+            reasons = {
+                STATUS_UNSUPPORTED: "not supported",
+                STATUS_GOVERNED: "requires the existing OWNER approval flow",
+                STATUS_BLOCKED: "blocked — its prerequisite was not satisfied",
+            }
+            lines.append("")
+            lines.append("Recognized but not attempted:")
+            for step in reported:
+                lines.append(f"- {step.clause} — {reasons.get(step.status, 'not attempted')}")
+        lines.append("")
+        lines.append("Nothing was executed or authorized beyond the steps reported above.")
+
+        metadata = dict(message.metadata or {})
+        representation = request.to_dict()
+        run = metadata.get("orchestration")
+        if isinstance(run, dict):
+            states = {
+                str(entry.get("step_id")): str(entry.get("state") or "")
+                for entry in (run.get("steps") or ())
+                if isinstance(entry, dict)
+            }
+            for step in representation["steps"]:
+                executed = states.get(step["step_id"])
+                if executed:
+                    step["status"] = executed
+        representation["run_status"] = (
+            str(run.get("status") or "") if isinstance(run, dict) else ""
+        )
+        metadata["multi_step"] = representation
+        return Message(role="assistant", content="\n".join(lines), metadata=metadata)
+
     def _maybe_handle_multi_intent(self, text: str) -> Message | None:
         """Step 6 — answer every understood intent and REPORT the unhandled one.
 
@@ -1643,6 +1761,16 @@ class ConversationService:
         except Exception:  # fail-soft: any failure keeps existing routing
             return None
         if not steps:
+            return None
+        # Step 10 — the closed two-stage slices never cover a request that also
+        # carries a THIRD intent; when the bounded multi-step reading sees more
+        # steps than this plan covers, the multi-step route owns the turn (so a
+        # legitimate third intent is never silently dropped).
+        try:
+            multi = build_multi_step(text)
+        except Exception:
+            multi = None
+        if multi is not None and len(multi.steps) > len(steps):
             return None
         try:
             message = self._goal_orchestration_resolver(
@@ -2350,6 +2478,15 @@ class ConversationService:
         if compound is not None:
             self._conversation.add_message(compound)
             return compound
+        # Step 10 — a genuinely multi-intent/multi-step OPERATIONAL request that
+        # the existing routes did not own (research-led compound shapes keep the
+        # compound route above) is understood — ordered steps, explicit
+        # dependencies — and its runnable read-only steps run through the
+        # EXISTING orchestration bridge; every other step is reported truthfully.
+        multi_step = self._maybe_handle_multi_step(text)
+        if multi_step is not None:
+            self._conversation.add_message(multi_step)
+            return multi_step
         knowledge_request = self._maybe_handle_knowledge_request(text, spec)
         if knowledge_request is not None:
             self._conversation.add_message(knowledge_request)
@@ -2754,6 +2891,14 @@ class ConversationService:
         if compound is not None:
             self._conversation.add_message(compound)
             yield compound.content
+            return
+        # Step 10 — mirror of send(): understand a multi-intent/multi-step
+        # operational request and route its runnable read-only steps through the
+        # EXISTING orchestration bridge.
+        multi_step = self._maybe_handle_multi_step(text)
+        if multi_step is not None:
+            self._conversation.add_message(multi_step)
+            yield multi_step.content
             return
         knowledge_request = self._maybe_handle_knowledge_request(text, spec)
         if knowledge_request is not None:
