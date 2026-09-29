@@ -1839,6 +1839,130 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.31 Step 25 — Integrated autonomous intelligence loop: the completed post-L10 cycle
+
+**Status: COMPLETE (additive, not a roadmap phase). Steps 1 → 25 are COMPLETE.**
+Step 25 built the smallest evidence-driven, deterministic, model-independent
+COORDINATOR that connects the completed post-L10 capabilities (Steps 12-24) into ONE
+governed end-to-end cycle: request → understanding/adjudication → knowledge
+assessment → capability assessment → specification/design → governed
+self-development → verification → promotion boundary → truthful response. It is
+orchestration ONLY: every stage delegates to an EXISTING mechanism and routes on that
+mechanism's OWN typed result. It adds no engine, planner, registry, store, approval
+system, promotion path, source authorization or model dependency, and it changes
+nothing about the existing conversation or orchestration architecture.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The completed
+capabilities were individually reachable but **unconnected**: `Atlas` had no
+integrated-loop API (`integrated_loop`, `integrated_intelligence_loop`,
+`run_integrated_loop`, `resume_integrated_loop`, `intelligence_loop` all absent) and
+`atlas/autonomy/` did not exist. Going from one request to a reviewable
+specification required **10 separate seams**
+(`knowledge_need` → `research_knowledge_need` → `research_provenance` →
+`knowledge_retention` → `retained_knowledge` → `temporal_knowledge` →
+`refresh_requests` → `monitor_knowledge` → `capability_gap` →
+`capability_specification`), each ignoring the previous one's result; no stage/state
+machine existed, no single object carried the cycle, and nothing could resume after
+the human approval boundary. `Atlas.tick()` still drove only its four settles (task
+manager, evolution scheduler, goal executor, autonomy dispatcher).
+
+**What was implemented (one bounded coordinator over existing seams).**
+- `atlas/autonomy/integrated_loop.py` (new) + `atlas/autonomy/__init__.py` (new):
+  `LoopStage` (understanding / research / provenance / retention / temporal /
+  refresh / monitoring / capability / specification / planning / implementation /
+  verification / promotion), `LoopStatus` (answered / awaiting_input /
+  awaiting_approval / awaiting_promotion / refused / not_promotable / failed),
+  `LoopAction` (none / provide_change_payload / provide_evidence / authorize_source
+  / resolve_ambiguity / address_failure / revise_design / approve_proposal /
+  provide_authorization / owner_promotion), the immutable `IntegratedLoopResult`
+  (status, stage, action, truthful response, EVERY artifact of the cycle, evidence,
+  and the in-flight proposal/approval/promotion ids), `LoopSeams` (the injected
+  EXISTING seams), `IntegratedIntelligenceLoop` with `run` and `resume`, and
+  `INTEGRATED_LOOP_RULE`.
+- `atlas/kernel/atlas.py`: `Atlas.integrated_loop(request, ...)`,
+  `Atlas.resume_integrated_loop(prior, ...)` and the single wiring point
+  `_integrated_loop()` that binds the twelve EXISTING kernel seams
+  (`knowledge_need`, `research_knowledge_need`, `research_provenance`,
+  `knowledge_retention`, `retained_knowledge`, `temporal_knowledge`,
+  `refresh_requests`, `refresh_knowledge`, `monitor_knowledge`, `capability_gap`,
+  `capability_specification`, `specification_development`). Nothing is added to
+  `Atlas.tick()`.
+
+**The loop path (capability-driven, no command cascade).** Each stage routes on the
+previous stage's OWN closed vocabulary through explicit tables, so the next step is
+derived from typed results rather than from raw text: the knowledge-boundary kinds
+that require research (`missing` / `stale` / `insufficient` / `contradictory`), the
+research outcomes that leave evidence to evaluate (`researched` /
+`not_needed`) versus the ones that name a blocker (`no_authorized_source`,
+`insufficient`, `failed`, `unknown`), the eight Step 22 adjudications, the Step 23
+`specified` / `refused` design verdict, and the seven Step 24 development stages.
+The capability adjudicator is AUTHORITATIVE for the reported next step — it already
+reconciles the knowledge signal into its verdict — except that when its verdict IS a
+knowledge verdict (a knowledge shortage, or evidence too thin to conclude) the
+concrete remedy the knowledge stage established (`authorize_source` /
+`address_failure`) is reported instead of the generic "provide evidence". An
+unrecognised value at any stage fails closed. The design carries no implementation,
+so a confirmed gap with no bounded change payload pauses at `awaiting_input`
+(`provide_change_payload`) rather than inventing code. Monitoring OBSERVES: a
+required refresh is reported and never fetched unless the caller explicitly passes
+`refresh=True`, which then uses the EXISTING deny-by-default governed refresh.
+
+**Governance boundaries (unchanged, preserved end to end).** The loop approves
+nothing, authorizes nothing, promotes nothing, refreshes nothing by itself and never
+touches the live repository. Development stops at the EXISTING `awaiting_approval`
+boundary and exposes the EXISTING approval request; execution runs only when the
+proposal already carries an authorizing status or an explicit grant bound to it, and
+only inside the EXISTING sandbox; a failed or unverified run yields `not_promotable`
+with NO promotion request; promotion remains the separate OWNER decision and is the
+only place `PROMOTED` is set. Human approval interrupts and RESUMES the loop without
+losing state: the result carries every artifact, `_state_from` restores the completed
+prefix verbatim (it is never re-derived) and only the development stage re-runs
+against the SAME persisted proposal — so resuming without the required authorization
+is a deterministic no-op, and the evidence list is preserved unchanged.
+
+**Validation.** `tests/test_step25_integrated_loop.py` — 60 focused tests: the
+capability-driven routing for every knowledge-boundary kind, every research outcome,
+every one of the eight adjudications, the design verdict and every development stage;
+the capability-driven-versus-authoritative action rule; the full knowledge evaluation
+(provenance/retention/temporal/refresh/monitoring) with its evidence lines; the
+payload pause, the approval boundary, the promotion boundary and the not-promotable
+verdict; observed-versus-explicit refresh; resume with authorization, resume without
+it (deterministic no-op), resume of the payload pause, resume of a terminal result and
+of the promotion boundary, and the proof that resuming never re-derives the prefix;
+fail-closed behaviour for an empty request, a missing seam, a raising seam and a
+failing later stage; determinism, immutability, bounds, serialization and module
+model-independence; and real-kernel end-to-end validation of a genuinely grounded gap
+through specification, approval, sandbox execution, verification and the promotion
+review with the live repository unchanged, plus negative paths for no genuine gap
+(supported / temporarily blocked / governed), missing knowledge, insufficient research
+(deny-by-default), ambiguity, a missing payload, failed verification, an invalid
+authorization, an unknown proposal state, no network use, an unchanged `tick()` and
+Steps 1-24 preservation). The broader checkpoint regression pass then ran the FULL
+suite: **9,602 passed, 3 skipped, 368 subtests passed, 30 failed**. All 30 failures
+were re-run against a pristine HEAD and are **pre-existing** — they lie in
+conversation/reference-resolution suites (`test_reference_consumption`,
+`test_lexical_canonicalization`, `test_last_operation_repeat`,
+`test_p15_2_conversation_continuity`, `test_ambiguity_uncertainty`,
+`test_nlu6_model_independence_failure_proof`, `test_l9_*`), the C3/C5/C6 evidence
+suites, `test_continuous_self_improvement_validation`,
+`test_evolution_model_assisted_activation`, and the evidence-development suites whose
+`_evidence_proposal` helper reports "no resolvable real evidence gap" (a consequence
+of earlier steps' added coverage). NONE is caused by Step 25 and none is in Step-25
+scope.
+
+**Known limitations (truthful).** The loop is a COORDINATOR, not an author: it
+performs no work of its own and inherits every limitation of the capabilities it
+composes — a specification can only arise from a genuine gap whose subject is known
+from validated knowledge, the architecture snapshot is cache-only, and the bounded
+change payload must still be supplied by the caller. It is not wired into
+`Atlas.tick()` and adds no timer, thread or background loop, so a "continuous"
+cycle is still the caller's cadence. It resumes only from `awaiting_input` /
+`awaiting_approval`; the promotion decision itself remains outside the loop. Promotion
+in the real-kernel tests is deliberately never executed (that stays a separate OWNER
+action), and the promotion-veto path is exercised at the coordinator layer while the
+real Step 24 bridge stops at `not_promotable` for a failed verification. No new
+roadmap exists beyond Step 25 and no speculative autonomy was introduced.
+
 ### 34.30 Step 24 — Atlas direct self-development: a governed specification-driven workflow
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 24 built the smallest
@@ -4226,6 +4350,43 @@ produces a proposal and never code; it inherits the EXISTING evidence base and t
 cache-only architecture snapshot; the authorization check reuses the EXISTING OWNER
 approval or the config-gated, default-disabled envelope and mints neither; promotion
 is never performed here; the integrated intelligence loop is out of scope);
-§34.30; Steps 1 → 24 are COMPLETE and Step 25 is NOT STARTED).
+§34.30).
+Step 25 integrated autonomous intelligence loop added: 2026-09-29 (the real-kernel
+baseline showed the completed post-L10 capabilities were individually reachable but
+UNCONNECTED: no integrated-loop API existed, atlas/autonomy/ did not exist, reaching a
+reviewable specification took 10 separate seams that each ignored the previous one's
+result, no stage/state machine existed, no single object carried the cycle and nothing
+could resume after the human approval boundary; tick() still drove only its four
+settles). Minimal change: one bounded coordinator
+(`atlas/autonomy/integrated_loop.py`) that connects the EXISTING Step 15-24 seams and
+routes on their OWN closed vocabularies through explicit tables — knowledge-boundary
+kinds, research outcomes, the eight Step 22 adjudications, the Step 23 design verdict
+and the seven Step 24 development stages — reporting an immutable
+IntegratedLoopResult (status / stage / action / truthful response / every artifact /
+evidence / in-flight ids), with the adjudicator authoritative for the action except
+when its verdict is itself a knowledge verdict and the knowledge stage named a
+concrete remedy; `Atlas.integrated_loop()` and `Atlas.resume_integrated_loop()` expose
+it over a single wiring point (`_integrated_loop()`) binding the twelve existing kernel
+seams, and nothing is wired into tick(). The loop approves, authorizes, promotes,
+refreshes and mutates nothing by itself: development stops at the EXISTING
+awaiting_approval boundary, a required refresh is observed and reported and only acted
+on through the EXISTING deny-by-default governed refresh when the caller explicitly
+asks, a failed or unverified run yields not_promotable with no promotion request, and
+promotion remains the separate OWNER decision. Human approval interrupts and resumes
+the loop WITHOUT losing state — the completed prefix is restored verbatim and never
+re-derived, only the development stage re-runs against the same persisted proposal, and
+resuming without authorization is a deterministic no-op. 60 focused tests green, and
+the broader checkpoint regression pass ran the FULL suite (9,602 passed, 3 skipped,
+368 subtests passed, 30 failed) — every one of the 30 failures was reproduced
+identically against a pristine HEAD, so all are PRE-EXISTING
+(conversation/reference-resolution suites, C3/C5/C6 evidence suites, the continuous
+self-improvement and model-assisted-activation suites, and the evidence-development
+suites reporting "no resolvable real evidence gap") and none is in Step-25 scope or
+caused by it; known limitations recorded in §34.31 (a coordinator, not an
+author — it inherits every limitation of the capabilities it composes, the bounded
+change payload must still be supplied by the caller, it is not wired into tick() and
+adds no timer/thread/loop, it resumes only from awaiting_input/awaiting_approval, and
+the promotion decision itself stays outside the loop); §34.31; **Steps 1 → 25 are
+COMPLETE** and no later step exists or is implied).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

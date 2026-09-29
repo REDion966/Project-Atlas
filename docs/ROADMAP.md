@@ -630,7 +630,31 @@ was demonstrated:
   work yields `not_promotable` with no promotion request, the result records what
   changed, why and how it was verified, and promotion remains the separate OWNER
   step. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.30.
-  **Steps 1 → 24 are COMPLETE. Step 25 is NOT STARTED.**
+- **Step 25 — Integrated autonomous intelligence loop** — the real-kernel baseline
+  showed the completed capabilities were individually reachable but
+  **unconnected**: no integrated-loop API existed, `atlas/autonomy/` did not exist,
+  reaching a reviewable specification took 10 separate seams that each ignored the
+  previous one's result, no stage/state machine existed, no single object carried
+  the cycle, and nothing could resume after the human approval boundary (and
+  `Atlas.tick()` still drove only its four settles). One bounded coordinator
+  (`atlas/autonomy/integrated_loop.py`) now connects the EXISTING Step 15-24 seams
+  and routes on their OWN closed vocabularies through explicit tables — the
+  knowledge-boundary kinds, the research outcomes, the eight Step 22 adjudications,
+  the Step 23 design verdict and the seven Step 24 development stages — reporting
+  an immutable result with the truthful status, the stage reached, the bounded next
+  step, every artifact of the cycle and a truthful response. The loop approves,
+  authorizes, promotes, refreshes and mutates nothing by itself: development stops
+  at the EXISTING approval boundary, a stale-knowledge finding is observed and
+  reported and only acted on through the EXISTING deny-by-default refresh when the
+  caller explicitly asks, failed or unverified work yields `not_promotable` with no
+  promotion request, and promotion remains the separate OWNER decision. Human
+  approval interrupts and resumes the loop without losing state (the completed
+  prefix is restored verbatim, never re-derived). As the final roadmap checkpoint,
+  the FULL suite was run (9,602 passed, 3 skipped, 368 subtests passed, 30 failed);
+  all 30 failures were reproduced identically against a pristine HEAD and are
+  pre-existing, none in Step-25 scope. Remaining limitations are recorded in
+  `docs/ATLAS_STATE.md` §34.31. **Steps 1 → 25 are COMPLETE, and no later step
+  exists or is implied.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and
@@ -639,11 +663,13 @@ and promotion approval remain separate OWNER decisions, unapproved development
 does not execute, promotion before approval is refused, verification is required,
 execution stays sandboxed, live writes stay controlled through `PromotionExecutor`,
 and invalid or insufficient-evidence paths fail closed. The validated loop remains
-the demonstrated evidence-gap remedy class plus a specification-driven workflow
-that still stops at every EXISTING governance boundary — **not** unrestricted
-autonomous self-development. **The next step is NOT STARTED**: further evolution
-requires an explicitly authorized specification and the OWNER decisions the
-existing machinery already enforces. See `docs/ATLAS_STATE.md` §34.10.
+the demonstrated evidence-gap remedy class plus a specification-driven workflow and
+the integrated cycle, all of which still stop at every EXISTING governance boundary
+— **not** unrestricted autonomous self-development. **The roadmap is COMPLETE
+through Step 25 and no later step is proposed here**: any further evolution requires
+an explicitly authorized specification and the OWNER decisions the existing
+machinery already enforces, and nothing beyond Step 25 may be inferred from this
+document. See `docs/ATLAS_STATE.md` §34.10 and §34.31.
 
 ---
 

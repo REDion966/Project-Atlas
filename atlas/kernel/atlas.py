@@ -1471,6 +1471,103 @@ class Atlas:
             evidence_ids=evidence_ids,
         )
 
+    def _integrated_loop(self):
+        """Step 25 loop over the EXISTING seams (single wiring point)."""
+        from atlas.autonomy.integrated_loop import (
+            IntegratedIntelligenceLoop,
+            LoopSeams,
+        )
+
+        seams = LoopSeams(
+            knowledge_need=lambda text, **kw: self.knowledge_need(text, **kw),
+            research=lambda text, **kw: self.research_knowledge_need(text, **kw),
+            provenance=lambda outcome: self.research_provenance(outcome),
+            retention=lambda outcome: self.knowledge_retention(outcome),
+            retained=lambda query: self.retained_knowledge(query),
+            temporal=lambda query: self.temporal_knowledge(query),
+            refresh_requests=lambda query: self.refresh_requests(query),
+            refresh=lambda query, **kw: self.refresh_knowledge(query, **kw),
+            monitoring=lambda query: self.monitor_knowledge(query),
+            capability_gap=lambda request, **kw: self.capability_gap(request, **kw),
+            specification=lambda request, **kw: self.capability_specification(
+                request, **kw
+            ),
+            development=lambda specification, **kw: self.specification_development(
+                specification, **kw
+            ),
+        )
+        return IntegratedIntelligenceLoop(seams=seams)
+
+    def integrated_loop(
+        self,
+        request: str,
+        *,
+        candidate_urls=(),
+        capability: str = "",
+        ambiguous: bool = False,
+        execution_failed: bool = False,
+        code_changes=(),
+        test_files=(),
+        target_components=(),
+        evidence_ids=(),
+        authorization=None,
+        refresh: bool = False,
+    ):
+        """Step 25 — ONE bounded pass of the integrated intelligence loop.
+
+        Composes the EXISTING Step 15-24 capabilities into one governed cycle
+        (understanding -> knowledge -> capability assessment -> specification ->
+        governed development -> promotion boundary -> truthful response) and
+        STOPS at every boundary the existing architecture already enforces. It
+        approves, authorizes, promotes and refreshes nothing by itself: without
+        authorization the cycle stops at ``awaiting_approval``, and stale
+        knowledge is only observed unless ``refresh=True`` explicitly asks for
+        the EXISTING governed refresh.
+        """
+        return self._integrated_loop().run(
+            request,
+            candidate_urls=candidate_urls,
+            capability=capability,
+            ambiguous=ambiguous,
+            execution_failed=execution_failed,
+            code_changes=code_changes,
+            test_files=test_files,
+            target_components=target_components,
+            evidence_ids=evidence_ids,
+            authorization=authorization,
+            refresh=refresh,
+        )
+
+    def resume_integrated_loop(
+        self,
+        prior,
+        *,
+        authorization=None,
+        code_changes=(),
+        test_files=(),
+        target_components=(),
+        evidence_ids=(),
+        candidate_urls=(),
+        refresh: bool = False,
+    ):
+        """Step 25 — resume an interrupted loop from its PRESERVED state.
+
+        The completed prefix is taken from ``prior`` verbatim (never re-derived)
+        and only the governed development stage runs again against the SAME
+        persisted proposal, so an OWNER approval continues the cycle without
+        losing state. Nothing is approved, authorized or promoted here.
+        """
+        return self._integrated_loop().resume(
+            prior,
+            authorization=authorization,
+            code_changes=code_changes,
+            test_files=test_files,
+            target_components=target_components,
+            evidence_ids=evidence_ids,
+            candidate_urls=candidate_urls,
+            refresh=refresh,
+        )
+
     def _knowledge_refresher(self):
         """Step 20 refresher over the EXISTING boundaries (single wiring point)."""
         from atlas.research.refresh import KnowledgeRefresher

@@ -278,17 +278,38 @@ governance — its own governed development.
     sandbox execution, read-only verification and promotion gate: failed or
     unverified work is never promoted, and promotion itself stays a separate OWNER
     decision. The result records what changed, why and how it was verified.
+  - **Step 25** — integrated autonomous intelligence loop: the completed
+    capabilities now run as **one governed cycle** — request → understanding →
+    knowledge assessment (research, provenance, retention, freshness, refresh,
+    monitoring) → capability adjudication → specification → governed
+    self-development → verification → promotion boundary → truthful response —
+    with each stage delegating to the existing mechanism and routing on that
+    mechanism's own typed result. The loop approves, authorizes, promotes and
+    refreshes nothing by itself, stops at the existing human approval boundary,
+    reports a promotion boundary only after verification actually succeeded, and
+    a human approval can interrupt and resume it without losing state.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
-    specification-driven workflow that stops at every existing governance
-    boundary — **not** unrestricted autonomous self-development. **Steps 1 → 24
-    are COMPLETE; the next step (Step 25) is NOT STARTED.**
+    specification-driven workflow and the integrated cycle above — every one of
+    them stopping at each existing governance boundary — **not** unrestricted
+    autonomous self-development. **Steps 1 → 25 are COMPLETE**, and no later
+    roadmap step exists or is implied.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
-- **Latest verified full-suite baseline (historical, not re-run for the Phase 3–5
-  reconciliation):** 5,945 test items executed — 5,876 test cases passed (+67
-  subtests), 0 failed, 0 errors, 2 skipped. Focused suites were used for the recent
-  reconciliations. Current schema version: **11**.
+- **Full-suite baseline (measured at the Step 25 checkpoint):** 9,602 passed, 3
+  skipped, 368 subtests passed, **30 failed** (3:43:48). All 30 failures were
+  reproduced identically against a pristine HEAD — they are **pre-existing** and
+  entirely in conversation/reference-resolution and evidence-gap-remedy suites
+  (`test_reference_consumption`, `test_lexical_canonicalization`,
+  `test_last_operation_repeat`, `test_p15_2_conversation_continuity`,
+  `test_ambiguity_uncertainty`, `test_nlu6_model_independence_failure_proof`,
+  `test_l9_*`, `test_c3_*`, `test_c5_*`, `test_c6_*`,
+  `test_continuous_self_improvement_validation`,
+  `test_evolution_model_assisted_activation`, and the evidence-development suites
+  that report "no resolvable real evidence gap"); none is caused by Step 25 and
+  none is in Step-25 scope. The earlier 5,945-item/0-failure figure predates the
+  post-L10 steps 14-24, which were validated with focused suites only. Current
+  schema version: **11**.
 
 ---
 
