@@ -1839,6 +1839,90 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.32 Temporary Roadmap Step 1 — conversational exposure policy & internal-state precedence
+
+**Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
+phase and no Step 26).** The completed post-L10 arc left several deterministic
+internal surfaces without a conversational owner (the capability state and
+declared requirements, the freshness/temporal verdict over retained knowledge,
+and the source-authorization policy), so bounded questions about Atlas's OWN
+state either fell through to the generic knowledge routes or reached the
+unsupported floor. Step 1 states the exposure policy explicitly and lets those
+questions reach their EXISTING read-only seams. It adds no new engine, registry,
+store, planner, model dependency or authority: every answer is a projection of a
+seam that already computed it.
+
+**The policy** (stated once in `atlas/conversation/builtin_response.py` as
+`EXPOSURE_POLICY_RULE`, `EXPOSED_INTERNAL_SURFACES` and `EXPOSURE_PRECEDENCE`):
+
+1. an answer may be projected only from an EXISTING bounded read-only seam;
+2. exposure is representation, NEVER authority (no approval, authorization,
+   execution, promotion, activation or configuration change);
+3. fail closed — an unresolvable subject, unwired raising seam or ambiguous turn
+   declines and keeps its existing route, and nothing is ever guessed;
+4. a bounded internal-state question is claimed BEFORE the generic
+   knowledge/research routes, so it cannot be reinterpreted as a request for
+   external information or as an operation;
+5. a request to CHANGE source authorization is answered only by a bounded
+   explanation of the existing policy — conversation never configures anything;
+6. every exposed surface is registered in the bounded operational capability
+   catalogue (the Step 12 rule).
+
+**Ownership / precedence (read off the existing cascade).** `clarification →
+reference → repeat → capability_detail → capability_state → architecture →
+self_knowledge → knowledge_state → source_authorization → external_knowledge →
+knowledge_request → multi_step → investigation → development → identity →
+status → capabilities → validated_knowledge → unsupported_floor`. The
+internal-state surfaces therefore precede BOTH generic knowledge layers (the
+knowledge-request route and the floor's validated-knowledge surface), while
+investigation, development and the approval/verification handlers keep the
+documented order they already had.
+
+**What changed.**
+- `atlas/conversation/builtin_response.py`: the policy block; two bounded intents
+  (`knowledge_state`, `source_authorization`); the bounded cue families
+  (`_KNOWLEDGE_STATE_RES` for Atlas's OWN knowledge, a verb+object detector for
+  source-authorization turns, `_CAPABILITY_REQUIREMENTS_RES` for requirement
+  phrasings); `match_knowledge_state_question`,
+  `match_source_authorization_question`, `match_capability_requirements` and
+  their renderers (the requirement answer projects the SAME unified-model
+  contract fields as `explain <name>`, so the capability-detail surface keeps
+  ownership rather than a new owner being introduced).
+- `atlas/conversation/conversation_service.py`: the knowledge-state and
+  source-authorization hooks in `send` and in the `stream` mirror (placed with
+  the Step 13/14 hooks, before the knowledge/research routes).
+- `atlas/kernel/atlas.py`: `knowledge_state_provider` wired to the read-only
+  `_knowledge_state_snapshot` (the EXISTING `Atlas.temporal_knowledge`; nothing
+  is acquired, refreshed or written).
+- `atlas/self_knowledge/operational_capabilities.py`: the `knowledge_freshness`
+  operational entry.
+
+**Validation.** `tests/test_temporary_step1_conversational_exposure.py` — 63
+focused tests (the policy artifact and its consistency; the freshness surface's
+seven bounded forms, its use of the seam's OWN verdict/age/standing, the
+"absence of temporal evidence is never freshness" rule, and its honest
+empty/unwired/raising fail-closed paths; the requirement phrasings owned by the
+capability-detail surface with undeclared prerequisites reported as undeclared
+and unresolvable names declined; the source-authorization explanation
+disclosing no configured value and never capturing a development approval; and
+real-kernel routing for every case, including that generic knowledge answers,
+research, investigation, development and approval routing are unchanged, that
+`model_used` is false, that no promotion review appears and that git HEAD is
+untouched). Relevant regressions were green (the builtin response surfaces,
+Step 12/13/14, the capability contracts, the C6.1 conversation bridge, the
+temporal/knowledge suites, the L1 adjudication suite and the routing suites).
+
+**Known limitations (truthful).** The surface set is bounded and phrase-based: a
+freshness question must name Atlas's OWN knowledge ("your knowledge about X"), so
+"has the deployment_certificate guidance gone stale?" is still not claimed; an
+architecture *composition* question ("what components make up the research
+subsystem?") and an architecture question whose name does not resolve remain
+unsupported (no renderer or resolution exists for them, and inventing one would
+be speculative); a subject with no retained knowledge is reported as such rather
+than assessed; the configured allow-list is never disclosed (only the policy is
+explained); and nothing here acquires, refreshes, authorizes, executes or
+promotes.
+
 ### 34.31 Step 25 — Integrated autonomous intelligence loop: the completed post-L10 cycle
 
 **Status: COMPLETE (additive, not a roadmap phase). Steps 1 → 25 are COMPLETE.**
@@ -4388,5 +4472,26 @@ change payload must still be supplied by the caller, it is not wired into tick()
 adds no timer/thread/loop, it resumes only from awaiting_input/awaiting_approval, and
 the promotion decision itself stays outside the loop); §34.31; **Steps 1 → 25 are
 COMPLETE** and no later step exists or is implied).
+Temporary Roadmap Step 1 — conversational exposure policy & internal-state
+precedence added: 2026-09-29 (NOT a roadmap phase; no Step 26). The completed
+post-L10 arc left the capability state/requirements, the freshness verdict over
+retained knowledge and the source-authorization policy without a conversational
+owner, so bounded questions about Atlas's OWN state fell through to the generic
+knowledge routes or the unsupported floor). Minimal change: the exposure policy
+is stated once in atlas/conversation/builtin_response.py
+(EXPOSURE_POLICY_RULE / EXPOSED_INTERNAL_SURFACES / EXPOSURE_PRECEDENCE), the
+knowledge-state surface answers the state of knowledge Atlas itself retains by
+projecting the EXISTING Step 19/21 temporal seam (wired read-only through the
+kernel's _knowledge_state_snapshot), the requirement phrasings are owned by the
+EXISTING capability-detail surface (same unified model, fail-closed on an
+unresolvable name), and a request to AUTHORIZE a research source is answered by a
+bounded explanation of the existing deny-by-default OWNER-configuration policy
+that performs and discloses nothing. Ownership/precedence: internal-state
+surfaces are claimed before both generic knowledge layers, while investigation,
+development, approval and the governance boundaries keep their documented order
+and no authority, acquisition, execution or promotion is introduced. 63 focused
+tests plus relevant builtin/capability/Step-12-14/temporal/C6.1/routing
+regressions green; known limitations recorded in §34.32 (bounded phrase-based
+forms, no architecture composition renderer, no allow-list disclosure); §34.32).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

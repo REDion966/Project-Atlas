@@ -59,6 +59,16 @@ BUILTIN_INTENT_CAPABILITY_DETAIL = "capability_detail"
 #: Step 13 — bounded capability-STATE answer (grounded in the unified model).
 BUILTIN_INTENT_CAPABILITY_STATE = "capability_state"
 BUILTIN_INTENT_ARCHITECTURE = "architecture"
+#: Temporary Roadmap Step 1 — bounded answer about the CURRENT state of the
+#: knowledge Atlas itself retains (the EXISTING Step 19/21 temporal + attention
+#: verdict). It reports only what the freshness assessor already computed: it
+#: never claims freshness, never acquires anything, and never mutates state.
+BUILTIN_INTENT_KNOWLEDGE_STATE = "knowledge_state"
+#: Temporary Roadmap Step 1 — bounded EXPLANATION of the deny-by-default source
+#: authorization policy (and of the fact that changing it is an OWNER
+#: configuration act). It explains only; it never authorizes, allowlists, or
+#: changes any configuration.
+BUILTIN_INTENT_SOURCE_AUTHORIZATION = "source_authorization"
 BUILTIN_INTENT_SELF_DESCRIPTION = "self_description"
 #: C5.1 — bounded self-knowledge question families (architecture/components,
 #: reference resolution, evidence/failure behaviour, current limitations,
@@ -111,6 +121,84 @@ _SELF_KNOWLEDGE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
 #: only by the bounded cue family below AND only with an extractable,
 #: non-self-referential topic, so no other request of that type is affected.
 _VALIDATED_KNOWLEDGE_TASK_TYPES: frozenset[str] = frozenset({"information_request"})
+
+# ---------------------------------------------------------------------------
+# CONVERSATIONAL EXPOSURE POLICY (Temporary Roadmap Step 1)
+# ---------------------------------------------------------------------------
+# A question about Atlas's OWN current state is answered -- if at all -- only
+# from an EXISTING bounded read-only seam, only in representation form, and only
+# for the bounded cue forms registered below. The policy is stated once here so
+# the whole conversational layer has a single, testable contract.
+#
+# Rules (in precedence order):
+#   1. EXISTING SURFACES ONLY. An answer is projected from a read-only seam that
+#      already computes it. No new state, store, registry, scan or model call is
+#      introduced, and no surface may reach storage directly.
+#   2. REPRESENTATION, NEVER AUTHORITY. Exposure reports facts. It never
+#      approves, authorizes, executes, promotes, activates, changes
+#      configuration, or mutates live Atlas; no message metadata gains an
+#      authority field.
+#   3. FAIL CLOSED. An unresolvable subject, an unwired seam, a raising seam or
+#      an ambiguous turn declines and keeps the existing route -- never a guess
+#      and never an invented fact.
+#   4. INTERNAL STATE OUTRANKS GENERIC KNOWLEDGE. A bounded internal-state
+#      question (capability state/requirements, architecture, retained-knowledge
+#      freshness) is claimed by its own surface BEFORE the generic
+#      knowledge/research routes can reinterpret it as a request for external
+#      information or as an operation.
+#   5. CHANGE REQUESTS ARE NEVER SATISFIED CONVERSATIONALLY. A request to
+#      authorize a research source / change configuration is answered only by a
+#      bounded explanation of the existing policy; nothing is authorized or
+#      configured from conversation.
+#   6. EVERY EXPOSED SURFACE IS REGISTERED. A newly added route must be added to
+#      the bounded operational capability catalogue (Step 12 rule) to appear.
+EXPOSURE_POLICY_RULE: str = (
+    "Only existing bounded read-only seams may be exposed conversationally, "
+    "only as representation (never authority), and only for registered bounded "
+    "cue forms; a declined form keeps its existing route, and a change request "
+    "is answered by an explanation rather than performed."
+)
+
+#: The bounded internal/self-knowledge surfaces this layer may expose, each
+#: mapped to the EXISTING seam it projects (the policy's rule 1 and rule 6).
+EXPOSED_INTERNAL_SURFACES: tuple[tuple[str, str], ...] = (
+    ("identity", "atlas.conversation.builtin_response"),
+    ("status", "atlas.runtime"),
+    ("capabilities", "atlas.self_knowledge.capability_model"),
+    ("capability_detail", "atlas.self_knowledge.capability_model"),
+    ("capability_state", "atlas.self_knowledge.capability_model"),
+    ("architecture", "atlas.self_knowledge.architecture_model"),
+    ("self_knowledge", "atlas.self_knowledge.architecture_model"),
+    ("knowledge_state", "atlas.research.temporal"),
+    ("validated_knowledge", "atlas.research.validated_retrieval"),
+    ("source_authorization", "atlas.research.sources.web"),
+)
+
+#: The policy's ordering of ownership for conversational turns (rule 4), read
+#: off the EXISTING ``ConversationService`` cascade: a bounded internal-state
+#: question is claimed by its own surface BEFORE the generic knowledge/research
+#: routes can reinterpret it, and every governed surface keeps its own route.
+EXPOSURE_PRECEDENCE: tuple[str, ...] = (
+    "clarification",
+    "reference",
+    "repeat",
+    "capability_detail",
+    "capability_state",
+    "architecture",
+    "self_knowledge",
+    "knowledge_state",
+    "source_authorization",
+    "external_knowledge",
+    "knowledge_request",
+    "multi_step",
+    "investigation",
+    "development",
+    "identity",
+    "status",
+    "capabilities",
+    "validated_knowledge",
+    "unsupported_floor",
+)
 
 #: NLU-1 — a LEADING "help me <verb> ..." turn is a request for assistance with
 #: a concrete task ("Help me create a systematic plan for reviewing a
@@ -328,6 +416,87 @@ _STATE_NAME_QUALIFIERS: tuple[str, ...] = (
     "operations",
     "op",
     "ops",
+)
+
+#: Temporary Roadmap Step 1 — bounded cue families for a question about the
+#: CURRENT state of the knowledge Atlas ITSELF retains (freshness/staleness).
+#: Every form must name Atlas's own knowledge ("your knowledge about X"), so a
+#: question about an external subject's state is never captured. The answer is
+#: projected only from the EXISTING Step 19/21 temporal seam.
+_KNOWLEDGE_STATE_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*(?:is|are)\s+(?:your|atlas'?s?)\s+"
+        r"(?:knowledge|information|understanding)\s+"
+        r"(?:about|on|regarding|for)\s+(?P<name>.{1,80}?)\s*"
+        r"(?:still\s+|currently\s+|now\s+)?"
+        r"(?:current|up[\s-]*to[\s-]*date|fresh|accurate|valid|stale|outdated|"
+        r"obsolete|expired)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:is|are)\s+(?:your|atlas'?s?)\s+"
+        r"(?:knowledge|information|understanding)\s*"
+        r"(?:still\s+|currently\s+|now\s+)?"
+        r"(?:current|up[\s-]*to[\s-]*date|fresh|accurate|valid|stale|outdated|"
+        r"obsolete|expired)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*how\s+(?:current|fresh|recent|stale|accurate)\s+is\s+"
+        r"(?:the\s+)?(?P<name>.{1,80}?)\s+"
+        r"(?:knowledge|information|understanding|data)"
+        r"(?:\s+(?:you|atlas)\s+(?:hold|have|retain))?\s*[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:has|have)\s+(?:your|atlas'?s?)\s+"
+        r"(?:knowledge|information|understanding)\s+"
+        r"(?:about|on|regarding)\s+(?P<name>.{1,80}?)\s+"
+        r"(?:gone|become|grown)\s+"
+        r"(?:stale|outdated|obsolete|expired)\b.*$",
+        re.IGNORECASE,
+    ),
+)
+
+#: Temporary Roadmap Step 1 — a turn counts as a source-authorization request
+#: only when it carries BOTH an allow/authorize verb AND an explicit source/host
+#: object. This keeps "authorize this proposal" (a development approval) on its
+#: existing route: nothing here inspects or changes authority.
+_SOURCE_AUTHORIZATION_VERB_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:authori[sz]e|authori[sz]ed|allow|allowed|allow\s?list|white\s?list|"
+    r"permit|permitted|enable|enabled|add|include)\b",
+    re.IGNORECASE,
+)
+_SOURCE_AUTHORIZATION_OBJECT_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:sources?|hosts?|domains?|websites?|web\s?sites?|urls?|allow\s?lists?|"
+    r"white\s?lists?|research\s+(?:hosts?|sources?|domains?))\b"
+    r"|\b[a-z0-9][a-z0-9.\-]*\.(?:com|org|net|io|dev|ai|edu|gov|info)\b",
+    re.IGNORECASE,
+)
+
+#: Temporary Roadmap Step 1 — bounded REQUIREMENT phrasings for a named
+#: capability. These ask the same capability-contract question Step 12/13
+#: already answer structurally, so the EXISTING capability-detail surface owns
+#: them instead of the turn falling through to the generic knowledge route.
+_CAPABILITY_REQUIREMENTS_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"(?:what|which)\s+(?:does|do)\s+"
+        r"(?:(?:the\s+)?(?:capabilit(?:y|ies)|tools?|operation)\s+)?"
+        r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/ ]{0,60}?)\s+"
+        r"(?:require|requires|need|needs)\b"
+    ),
+    re.compile(
+        r"(?:the\s+)?(?:prerequisites?|requirements?)\s+(?:of|for)\s+"
+        r"(?:(?:the\s+)?(?:capabilit(?:y|ies)|tools?|operation)\s+)?"
+        r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/ ]{0,60}?)\s*[?.!]*\s*$"
+    ),
+    re.compile(
+        r"(?:what|which)\s+(?:inputs?|parameters?|arguments?)\s+"
+        r"(?:does|do)\s+"
+        r"(?:(?:the\s+)?(?:capabilit(?:y|ies)|tools?|operation)\s+)?"
+        r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/ ]{0,60}?)\s+"
+        r"(?:accept|accepts|take|takes|require|requires|need|needs)\b"
+    ),
 )
 
 #: Bounded deterministic self-knowledge recognition. Selects the EXISTING
@@ -1410,6 +1579,9 @@ _MAX_TOOLS_LISTED = 20
 #: Bounds applied to the self-knowledge renderer so an architecture answer is a
 #: concise, bounded summary and never a raw repository dump.
 _MAX_ARCHITECTURE_SUBSYSTEMS = 8
+#: Temporary Roadmap Step 1 — bounded number of retained claims reported in a
+#: knowledge-state answer.
+_MAX_KNOWLEDGE_STATE_ENTRIES: int = 6
 _MAX_ARCHITECTURE_RELATIONS = 8
 _MAX_ARCHITECTURE_LIMITATIONS = 3
 
@@ -1547,6 +1719,7 @@ class BuiltinResponseService:
         architecture_relationship_provider: Callable[[], Any] | None = None,
         knowledge_status_provider: Callable[[str], Any] | None = None,
         capability_model_provider: Callable[[], Any] | None = None,
+        knowledge_state_provider: Callable[[str], Any] | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._knowledge_manager = knowledge_manager
@@ -1595,6 +1768,14 @@ class BuiltinResponseService:
         #: None, non-model, or raising all decline, so capability answers fall back
         #: to the structural registries exactly as before.
         self._capability_model_provider = capability_model_provider
+        #: Temporary Roadmap Step 1 — optional one-argument callable delegating
+        #: to the EXISTING Step 19/21 temporal knowledge seam
+        #: (``Atlas.temporal_knowledge``), which reads only already-retained
+        #: validated knowledge. Read-only by contract: consulted for a bounded
+        #: "is your knowledge about X still current?" question only, never
+        #: mutating, never acquiring, and declined (fail closed) when absent,
+        #: unwired or raising.
+        self._knowledge_state_provider = knowledge_state_provider
 
     def _capability_model(self) -> Any | None:
         """Return the unified capability model, or None (fail-soft, read-only)."""
@@ -2047,6 +2228,61 @@ class BuiltinResponseService:
             },
         )
 
+    def _render_capability_requirements(self, entry: Any) -> Message:
+        """Render the DECLARED requirements of one capability (facts only).
+
+        Temporary Roadmap Step 1 — the same capability-detail ownership as
+        ``explain <name>``, projected from the SAME unified capability model the
+        kernel's ``capability_contract`` exposes (state / reason / blocked_by /
+        governing / dependency / availability / declared inputs). Nothing is
+        inferred: an undeclared prerequisite is reported as undeclared rather
+        than invented.
+        """
+        fields = self._state_fields(entry)
+        name = fields["name"]
+        lines = [f"Requirements for `{name}` (from the EXISTING capability model):"]
+        lines.append(f"Current state: {fields['state'] or 'unknown'}.")
+        if fields["reason"]:
+            lines.append(f"Reason: {fields['reason']}")
+        if fields["blocked_by"]:
+            lines.append(
+                "Blocked by: " + ", ".join(fields["blocked_by"]) + "."
+            )
+        else:
+            lines.append(
+                "No blocking prerequisite is declared for this capability."
+            )
+        if fields["governing"]:
+            lines.append(
+                f"Governing condition: {fields['governing']} (the EXISTING OWNER "
+                "approval boundary)."
+            )
+        lines.append(
+            f"Dependency: {fields['dependency'] or 'unknown'}; availability: "
+            f"{fields['availability'] or 'unknown'}."
+        )
+        inputs = tuple(getattr(entry, "inputs", ()) or ())
+        if inputs:
+            rendered = ", ".join(
+                f"`{item[0]}`" for item in inputs if isinstance(item, (list, tuple))
+            )
+            if rendered:
+                lines.append(f"Declared inputs: {rendered}.")
+        lines.append(
+            "This reports the capability's declared, evidence-derived "
+            "requirements; nothing was executed, authorized or changed."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_CAPABILITY_DETAIL,
+                "model_used": False,
+                "capability_requirements": fields,
+            },
+        )
+
     def _render_capability_state_inventory(self, raw_state: str) -> Message | None:
         """Report the capabilities currently in a requested grounded state."""
         wanted = _normalized_state(raw_state)
@@ -2093,6 +2329,198 @@ class BuiltinResponseService:
                     "matches": [
                         str(getattr(entry, "name", "") or "") for entry in matching
                     ],
+                },
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Temporary Roadmap Step 1 — bounded internal-state exposure
+    # ------------------------------------------------------------------
+
+    def match_knowledge_state_question(self, text: str) -> Message | None:
+        """Answer a bounded question about the state of Atlas's OWN knowledge.
+
+        Claims ONLY the bounded freshness cue forms (``_KNOWLEDGE_STATE_RES``)
+        and ONLY when the EXISTING temporal seam is wired. The answer is whatever
+        that seam already computed — its own retrieval ``status`` plus each
+        retained claim's temporal status, age and standing. Nothing is inferred,
+        no freshness is ever assumed from missing evidence, nothing is acquired
+        and nothing is changed. An unwired or raising seam returns ``None`` so an
+        ordinary request keeps its existing route (fail closed).
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        if self._knowledge_state_provider is None:
+            return None
+        lowered = re.sub(r"\s+", " ", text).strip().lower()
+        for pattern in _KNOWLEDGE_STATE_RES:
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            subject = self._clean_state_name(match.groupdict().get("name") or "")
+            return self._render_knowledge_state(subject)
+        return None
+
+    def match_source_authorization_question(self, text: str) -> Message | None:
+        """Explain the EXISTING source-authorization policy (never change it).
+
+        Claims a turn ONLY when it carries both an allow/authorize verb and an
+        explicit source/host object, so a development approval ("authorize this
+        proposal") keeps its existing route unchanged. The answer restates the
+        deny-by-default policy the adapter already enforces and the fact that
+        authorizing a host is an OWNER configuration act. Nothing is authorized,
+        allowlisted, configured or executed, and no configured value is disclosed.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        lowered = re.sub(r"\s+", " ", text).strip().lower()
+        if _SOURCE_AUTHORIZATION_VERB_RE.search(lowered) is None:
+            return None
+        if _SOURCE_AUTHORIZATION_OBJECT_RE.search(lowered) is None:
+            return None
+        return self._render_source_authorization()
+
+    def match_capability_requirements(self, text: str) -> Message | None:
+        """Answer a bounded REQUIREMENTS question for a NAMED capability.
+
+        Part of the EXISTING capability-detail surface (same owner, same unified
+        capability model): the requirement phrasings were simply not covered by
+        the surface's cue set, so the question fell through to the generic
+        knowledge route. An unresolvable name returns ``None`` (fail closed), so
+        an ordinary request keeps its existing route.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        lowered = re.sub(r"\s+", " ", text).strip().lower()
+        for pattern in _CAPABILITY_REQUIREMENTS_RES:
+            match = pattern.search(lowered)
+            if match is None:
+                continue
+            name = self._clean_state_name(match.group("name"))
+            if not name:
+                continue
+            entry = self._find_state_entry(name)
+            if entry is None:
+                # An unresolvable name is not a capability question: fail closed.
+                continue
+            return self._render_capability_requirements(entry)
+        return None
+
+    def _render_knowledge_state(self, subject: str) -> Message:
+        """Render the EXISTING temporal verdict for retained knowledge (facts only)."""
+        provider = self._knowledge_state_provider
+        try:
+            temporal = provider(subject) if provider is not None else None
+        except Exception:  # fail closed: a raising seam is not evidence
+            temporal = None
+        if temporal is None:
+            # Fail closed and say so honestly: an unwired/raising temporal seam
+            # means the state is simply not readable, never that it is fresh.
+            return Message(
+                role="assistant",
+                content=(
+                    "I could not read the current state of my retained knowledge "
+                    "(the temporal seam is unavailable), so I will not claim "
+                    "anything about its freshness. Nothing was changed."
+                ),
+                metadata={
+                    "builtin_response": True,
+                    "builtin_intent": BUILTIN_INTENT_UNSUPPORTED,
+                    "model_used": False,
+                    "knowledge_state": {"subject": subject, "status": "unavailable"},
+                },
+            )
+        status = str(getattr(temporal, "status", "") or "unknown")
+        entries = tuple(getattr(temporal, "entries", ()) or ())[
+            :_MAX_KNOWLEDGE_STATE_ENTRIES
+        ]
+        scope = f" for '{subject}'" if subject else ""
+        lines = [
+            f"Knowledge state{scope} (deterministic; read-only; no model used):"
+        ]
+        if not entries:
+            lines.append(
+                "No retained validated knowledge matched, so there is no "
+                f"freshness to report (retrieval status: {status})."
+            )
+        else:
+            counts: dict[str, int] = {}
+            for entry in entries:
+                entry_status = str(
+                    getattr(getattr(entry, "status", ""), "value", "")
+                    or getattr(entry, "status", "")
+                    or "unknown"
+                )
+                counts[entry_status] = counts.get(entry_status, 0) + 1
+                detail = [entry_status]
+                age_days = getattr(entry, "age_days", None)
+                if age_days is not None:
+                    detail.append(f"age ~{age_days:g} day(s)")
+                standing = str(getattr(entry, "standing", "") or "")
+                if standing:
+                    detail.append(f"standing {standing}")
+                claim_id = str(getattr(entry, "claim_id", "") or "claim")
+                lines.append(f"- {claim_id}: " + "; ".join(detail) + ".")
+            lines.append(
+                "Summary: "
+                + ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+                + "."
+            )
+        seam_message = str(getattr(temporal, "message", "") or "")
+        if seam_message:
+            lines.append(seam_message)
+        lines.append(
+            "This reports the EXISTING temporal/freshness assessment of knowledge "
+            "Atlas already retains; absence of temporal evidence is never treated "
+            "as freshness, and nothing was acquired, refreshed, changed or "
+            "authorized."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_KNOWLEDGE_STATE,
+                "model_used": False,
+                "knowledge_state": {
+                    "subject": subject,
+                    "status": status,
+                    "entries": len(entries),
+                },
+            },
+        )
+
+    @staticmethod
+    def _render_source_authorization() -> Message:
+        """Render the EXISTING deny-by-default source-authorization policy."""
+        lines = [
+            "Source authorization (deterministic; read-only; no external model used):",
+            "- Atlas acquires external sources through the EXISTING bounded web "
+            "adapter, whose host policy is DENY-BY-DEFAULT: by default no host is "
+            "fetchable at all.",
+            "- A source must be explicitly listed in Atlas's OWNER-owned "
+            "configuration (`research.web_allowed_hosts`) before anything can be "
+            "fetched from it; HTTP/HTTPS remain the only accepted schemes and the "
+            "SSRF/IP protections, redirect revalidation and size/time bounds stay "
+            "mandatory regardless of the allowlist.",
+            "- I cannot authorize, allowlist or change that configuration from "
+            "conversation: it is an OWNER configuration act, and conversation "
+            "never grants authority. Nothing was authorized or changed.",
+            "- If you want a source authorized, set `research.web_allowed_hosts` "
+            "in Atlas's configuration; a later research request can then acquire "
+            "from it, or report `no_authorized_source` if it is still denied.",
+        ]
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_SOURCE_AUTHORIZATION,
+                "model_used": False,
+                "source_authorization": {
+                    "policy": "deny_by_default",
+                    "changed": False,
+                    "authority": "none",
                 },
             },
         )

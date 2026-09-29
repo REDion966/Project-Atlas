@@ -850,7 +850,40 @@ class ConversationService:
         """
         if self._builtin_response is None:
             return None
-        return self._builtin_response.match_registered_capability_detail(text)
+        detail = self._builtin_response.match_registered_capability_detail(text)
+        if detail is not None:
+            return detail
+        # Temporary Roadmap Step 1 — the SAME capability-detail surface also owns
+        # the bounded REQUIREMENTS phrasing for a named capability ("what does
+        # the research capability require?"), which previously fell through to
+        # the generic knowledge route. Same owner, same unified model, same
+        # fail-closed rule: an unresolvable name declines.
+        return self._builtin_response.match_capability_requirements(text)
+
+    def _maybe_handle_knowledge_state_question(self, text: str) -> Message | None:
+        """Temporary Roadmap Step 1 — the state of Atlas's OWN retained knowledge.
+
+        Read-only: the builtin service projects the EXISTING temporal seam's own
+        verdict (temporal status / age / standing), so no freshness is ever
+        claimed from missing evidence and nothing is acquired or changed. Declines
+        when the seam is unwired, so the existing route is preserved.
+        """
+        if self._builtin_response is None:
+            return None
+        return self._builtin_response.match_knowledge_state_question(text)
+
+    def _maybe_handle_source_authorization_request(self, text: str) -> Message | None:
+        """Temporary Roadmap Step 1 — EXPLAIN source authorization, never change it.
+
+        A bounded explanation of the EXISTING deny-by-default host policy and of
+        the fact that authorizing a source is an OWNER configuration act. It
+        performs no authorization, writes no configuration, and discloses no
+        configured value; a turn that does not name a source/host object (e.g. a
+        development approval) is never claimed here.
+        """
+        if self._builtin_response is None:
+            return None
+        return self._builtin_response.match_source_authorization_question(text)
 
     def _maybe_handle_evidence_self_knowledge(self, text: str) -> Message | None:
         """Evidence-driven: Atlas-specific self-knowledge topics (read-only).
@@ -2459,6 +2492,26 @@ class ConversationService:
         if architecture_question is not None:
             self._conversation.add_message(architecture_question)
             return architecture_question
+        # Temporary Roadmap Step 1 — a bounded question about the CURRENT state
+        # of the knowledge Atlas itself retains ("is your knowledge about X still
+        # current?", "how fresh is the X information you hold?") is answered from
+        # the EXISTING temporal seam BEFORE the generic knowledge/research routes
+        # can reinterpret it as a request for external information. Internal-state
+        # ownership outranks generic knowledge; an unwired seam declines
+        # (fail-closed) so the existing route is unchanged.
+        knowledge_state = self._maybe_handle_knowledge_state_question(text)
+        if knowledge_state is not None:
+            self._conversation.add_message(knowledge_state)
+            return knowledge_state
+        # Temporary Roadmap Step 1 — a request to AUTHORIZE a research source (or
+        # to change the host allowlist) is answered by a bounded EXPLANATION of
+        # the existing deny-by-default policy, never by performing it. Claimed
+        # only when the turn names a source/host object, so a development
+        # approval ("authorize this proposal") keeps its own route.
+        source_authorization = self._maybe_handle_source_authorization_request(text)
+        if source_authorization is not None:
+            self._conversation.add_message(source_authorization)
+            return source_authorization
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests are claimed deterministically
         # BEFORE the development/execution handlers, so an informational
@@ -2904,6 +2957,21 @@ class ConversationService:
         if architecture_question is not None:
             self._conversation.add_message(architecture_question)
             yield architecture_question.content
+            return
+        # Temporary Roadmap Step 1 (mirror of send()): internal-state ownership
+        # outranks generic knowledge — the state of Atlas's OWN retained
+        # knowledge is answered from the EXISTING temporal seam, and a request to
+        # authorize a research source is answered by an explanation of the
+        # existing deny-by-default policy rather than by performing it.
+        knowledge_state = self._maybe_handle_knowledge_state_question(text)
+        if knowledge_state is not None:
+            self._conversation.add_message(knowledge_state)
+            yield knowledge_state.content
+            return
+        source_authorization = self._maybe_handle_source_authorization_request(text)
+        if source_authorization is not None:
+            self._conversation.add_message(source_authorization)
+            yield source_authorization.content
             return
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests (mirror of send()).

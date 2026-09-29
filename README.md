@@ -288,12 +288,23 @@ governance — its own governed development.
     refreshes nothing by itself, stops at the existing human approval boundary,
     reports a promotion boundary only after verification actually succeeded, and
     a human approval can interrupt and resume it without losing state.
+  - **Conversational exposure policy** (temporary post-roadmap step, not a
+    roadmap phase): Atlas now states in one place which bounded read-only
+    internal state may be exposed conversationally, and questions about its OWN
+    state — a capability's state or declared requirements, the freshness of the
+    knowledge it itself retains, and the source-authorization policy — are
+    answered from those existing seams **before** the generic knowledge/research
+    routes can reinterpret them. A request to *change* source authorization is
+    answered only by a bounded explanation of the existing deny-by-default
+    policy; conversation never authorizes, configures, executes or promotes
+    anything.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of
     them stopping at each existing governance boundary — **not** unrestricted
-    autonomous self-development. **Steps 1 → 25 are COMPLETE**, and no later
-    roadmap step exists or is implied.
+    autonomous self-development. **Steps 1 → 25 are COMPLETE**; no later roadmap
+    step exists or is implied, and the work in progress is a bounded temporary
+    step rather than a new roadmap phase.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
 - **Full-suite baseline (measured at the Step 25 checkpoint):** 9,602 passed, 3

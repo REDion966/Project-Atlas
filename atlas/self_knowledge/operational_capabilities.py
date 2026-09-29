@@ -166,6 +166,26 @@ _OPERATIONAL_CAPABILITIES: tuple[OperationalCapability, ...] = (
         ),
     ),
     OperationalCapability(
+        id="knowledge_freshness",
+        name="Knowledge freshness / state",
+        description=(
+            "Report the current state (freshness / staleness) of the knowledge "
+            "Atlas ITSELF retains, from the existing temporal assessment."
+        ),
+        category="self_knowledge",
+        operations=("describe_knowledge_state",),
+        evidence=(
+            "atlas.conversation.builtin_response",
+            "atlas.research.temporal",
+        ),
+        limitations=(
+            "Reports only the EXISTING temporal assessment of already-retained "
+            "knowledge: it acquires, refreshes and changes nothing, absence of "
+            "temporal evidence is never read as freshness, and a subject with no "
+            "retained knowledge is reported as such.",
+        ),
+    ),
+    OperationalCapability(
         id="investigate",
         name="Investigation",
         description="Run a read-only investigation of a subject in the repository.",

@@ -5257,6 +5257,12 @@ class Atlas:
                 # CLI expose (registered capabilities/tools + the bounded
                 # operational capability catalogue). Read-only.
                 capability_model_provider=self.capability_model,
+                # Temporary Roadmap Step 1 — the CURRENT state of the knowledge
+                # Atlas itself retains (the EXISTING Step 19/21 temporal
+                # verdict). Read-only: it reads already-retained validated
+                # knowledge and never acquires, refreshes, writes or mutates
+                # anything; an unwired seam declines (fail-closed).
+                knowledge_state_provider=self._knowledge_state_snapshot,
                 memory_service=self._memory_service,
                 # Lazy provider: the service container is populated later in
                 # this same startup sequence, so the status answer must
@@ -5725,6 +5731,18 @@ class Atlas:
             capability_model=self.capability_model(),
             repository_map=self._repository_map,
         )
+
+    def _knowledge_state_snapshot(self, query: str):
+        """Temporary Roadmap Step 1 — the state of Atlas's OWN retained knowledge.
+
+        READ-ONLY and deterministic: it delegates to the EXISTING Step 19/21
+        temporal seam (``temporal_knowledge``), which overlays the temporal status
+        of validated knowledge Atlas already retains. It acquires nothing,
+        refreshes nothing, executes nothing, grants no authority, and never
+        treats missing temporal evidence as freshness — the seam's own honest
+        status (including ``empty``) is what the conversation reports.
+        """
+        return self.temporal_knowledge(query)
 
     def validated_knowledge(self, query: str):
         """Return validated (SUPPORTED) persisted research knowledge (C6.1).
