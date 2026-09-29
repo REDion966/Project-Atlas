@@ -571,7 +571,19 @@ was demonstrated:
   replacement is accepted only when it is justified and at least as strong as the
   retained standing, and weaker/unjustified/denied/insufficient/failed refreshes
   preserve the original explicitly. Remaining limitations are recorded in
-  `docs/ATLAS_STATE.md` §34.26. **Steps 1 → 20 are COMPLETE. Step 21 is NOT
+  `docs/ATLAS_STATE.md` §34.26.
+- **Step 21 — Continuous information monitoring** — the real-kernel baseline showed
+  nothing ran continuously (`Atlas.tick()` referenced no monitor/refresh/freshness)
+  and there was no monitoring target, observation or attention concept anywhere. A
+  bounded, deterministic, model-free monitoring pass now represents monitoring
+  targets for retained knowledge, derives attention (fresh / stale / uncertain /
+  temporally unknown / unknown) from the existing Step 19 temporal status, and emits
+  deterministic, de-duplicated observations carrying the existing Step 20 refresh
+  request — observing only, never fetching, writing, replacing or promoting. The
+  refresh runs only when explicitly invoked, through the existing governed path,
+  and the mechanism is deliberately not wired into `Atlas.tick()` (no timer, thread
+  or background loop). Remaining limitations are recorded in
+  `docs/ATLAS_STATE.md` §34.27. **Steps 1 → 21 are COMPLETE. Step 22 is NOT
   STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration

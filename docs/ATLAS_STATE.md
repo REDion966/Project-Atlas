@@ -1839,6 +1839,104 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.27 Step 21 — Continuous information monitoring: bounded observation, never automatic action
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 21 built the smallest
+evidence-driven, deterministic, model-independent monitoring pass over retained
+knowledge: it represents bounded monitoring targets, decides which of them require
+attention using the EXISTING temporal/freshness machinery, and emits deterministic
+observations plus actionable refresh candidates. It is NOT a scheduler, NOT a
+second freshness/refresh pipeline and NOT an alerting system — attention comes from
+the EXISTING Step 19 temporal overlay and Step 20 refresh plan, execution is the
+EXISTING Step 20 refresh, and observations are returned data. Monitoring ONLY —
+no new source authorization, no autonomous trust decisions, no speculative
+alerting infrastructure, no capability-gap detection, no autonomous capability
+development, no unrelated scheduling/agent infrastructure.
+
+**What the baseline showed (measured through the real Atlas/kernel).** Nothing ran
+continuously: `Atlas.tick()` referenced no monitor/refresh/freshness at all (its
+body drives only the task manager, the evolution scheduler, the goal executor and
+the autonomy dispatcher), the Steps 19-20 temporal/refresh surfaces were purely
+on-demand, and there was no monitoring target, observation or attention concept
+anywhere (`monitor_knowledge` and `atlas/research/monitoring.py` did not exist).
+
+**Scheduler decision (reuse, or stay explicitly callable).** The existing
+recurring seam is `Atlas.tick()` (externally driven by the CLI/runtime loop) and
+the existing schedulers are the task scheduler and the evolution scheduler
+(rate-limited and threshold-gated over evolution observations/proposals). Neither
+is a fit for knowledge freshness without inventing a competing semantic, and the
+codebase's strong invariant is that development/self-management work is never
+added to `Atlas.tick()`. The monitoring mechanism is therefore deliberately
+**bounded and explicitly callable**: continuity is the caller's (the existing
+externally-driven tick/runtime loop, a CLI or a host), and a test asserts
+`Atlas.tick()` still references no monitor/refresh/freshness.
+
+**What was implemented (one bounded pass over the existing surfaces).**
+- `atlas/research/monitoring.py` (new): `AttentionKind` (``fresh`` / ``stale`` /
+  ``uncertain`` / ``temporally_unknown`` / ``unknown``), `MonitoringStatus`,
+  `MonitoringTarget` (the bounded target representation), `MonitoringObservation`
+  (a deterministic, idempotent observation carrying the record identity, standing,
+  attention, temporal status, age, the EXISTING assessor's reasons and the EXISTING
+  Step 20 ``RefreshRequest``), `MonitoringReport`, `MonitoringRun`, and the public
+  `attention_for(temporal_status)` mapping (an unrecognised status yields
+  ``unknown`` — never ``fresh``).
+- `atlas/kernel/atlas.py`: ``Atlas.monitor_knowledge(query, now)`` (one bounded
+  observe-only pass) and ``Atlas.monitor_and_refresh_knowledge(query,
+  candidate_urls, now)`` (monitor, then explicitly refresh the candidates through
+  the EXISTING Step 20 governed path); the Step 20 refresher wiring was factored
+  into one private ``_knowledge_refresher()`` shared by both.
+
+**Guarantees.** Observe, never mutate: the pass reads the existing store, temporal
+overlay and refresh plan — no acquisition, no I/O, no write, no replacement, no
+promotion, no authorization — and the monitored knowledge is unchanged.
+Idempotent: an observation id is derived deterministically from the record and its
+attention kind, observations are de-duplicated within a pass, and repeated passes
+with the same clock produce identical output. Attention is evidence-only (a
+missing signal reports ``unknown``, never freshness); a stale record becomes a
+refresh candidate, while uncertain/temporally-unknown records are reported as
+requiring a governed REVIEW with NO refresh scheduled. Refresh happens only
+through an explicit call that reuses the Step 20 ``KnowledgeRefresher`` unchanged,
+so denied/unavailable/insufficient/failed/weaker outcomes are reported explicitly
+and the original knowledge is preserved. Bounded (targets/observations/sources
+capped), deterministic (injectable clock), model-free and fail-closed (an
+unreadable store yields an explicit status and no observations).
+
+**Validation.** `tests/test_step21_information_monitoring.py` — 26 focused tests
+(the full attention mapping incl. "never assumes freshness"; fresh vs stale vs
+uncertain vs temporally-unknown detection; target representation; multi-item
+monitoring with deterministic ordering; deterministic and idempotent observations
+incl. duplicate collapse and stable observation ids; empty/unavailable/error stores
+reported explicitly; boundedness; the observation reusing the EXISTING Step 20
+`RefreshRequest`; monitor-only never touching the acquisition boundary; the
+explicit refresh path running Step 20; no-candidate and no-refresher paths fetching
+nothing; denied and failed refreshes explicit and preserving; and real-kernel
+validation that monitoring is not wired into `tick()`, a pass observes without
+mutating, monitoring is deterministic/read-only and survives a restart, a
+deny-by-default refresh after monitoring fetches nothing and leaves every store
+count unchanged, an authorized monitoring refresh reuses Step 20 and preserves the
+original, and Steps 1-20 are preserved). Relevant subsystem regressions were green
+(Steps 15-20, the kernel suite, the F2 freshness suite, F8 acquisition,
+validated-retrieval, research-storage, evidence/provenance, model-free-knowledge,
+the C6.1/C6-reuse/C6-learning suites, conversation service, G2, D2/D3/D4, the
+architecture import scan and the CLI). The pre-existing failures documented
+elsewhere were reproduced against a pristine HEAD and remain unchanged — they are
+NOT caused by Step 21. No full-suite run.
+
+**Known limitations (truthful).** Monitoring is a bounded, callable pass, not a
+daemon: nothing schedules it, and it runs only when a caller invokes it (the
+existing externally-driven tick/runtime loop or a CLI/host can do so) — there is
+no timer, thread or background loop, by design. Observations are returned data,
+not persisted records: they are deliberately not written to storage or published
+to the event bus, so no alerting/history/queue exists (Step 21 scope), and
+idempotency is structural (identical output for identical input) rather than
+de-duplicated across restarts. Attention is a freshness signal only: it says an
+observation is warranted, never that the knowledge is wrong, and it never
+authorizes, fetches, replaces or promotes anything unless the caller explicitly
+invokes the governed refresh. Only the configured `research.web_allowed_hosts`
+allowlist is reachable, so the default posture keeps every refresh
+``no_authorized_source`` until the OWNER authorizes a source. Capability-gap
+detection and autonomous capability development remain out of scope.
+
 ### 34.26 Step 20 — Knowledge refresh: re-validating stale knowledge without corruption
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 20 built the smallest
@@ -3714,7 +3812,31 @@ limitations recorded in §34.26 (on-demand only — no scheduling/monitoring; th
 recorded source identity is reused, so a vanished/unauthorized source yields an
 explicit outcome rather than an overwrite; replacement compares evidence strength,
 never factual agreement; deny-by-default keeps every refresh
-no_authorized_source until the OWNER authorizes a source); §34.26; Steps 1 → 20
-are COMPLETE and Step 21 is NOT STARTED and remains evidence-driven).
+no_authorized_source until the OWNER authorizes a source); §34.26).
+Step 21 continuous information monitoring added: 2026-09-29 (the real-kernel
+baseline showed nothing ran continuously — Atlas.tick() referenced no
+monitor/refresh/freshness at all — and there was no monitoring target,
+observation or attention concept anywhere). Minimal change: one new pure module
+(`atlas/research/monitoring.py`) represents bounded monitoring targets, derives
+attention (fresh / stale / uncertain / temporally_unknown / unknown) from the
+EXISTING Step 19 temporal status via the public attention_for mapping, and emits
+deterministic, de-duplicated observations that carry the EXISTING Step 20
+RefreshRequest — observing only, never fetching, writing, replacing or promoting;
+`Atlas.monitor_knowledge()` exposes the pass and
+`Atlas.monitor_and_refresh_knowledge()` performs the refresh ONLY when explicitly
+called, reusing the Step 20 refresher unchanged (the wiring was factored into one
+shared `_knowledge_refresher()`). No scheduler was created: the mechanism is
+bounded and explicitly callable, continuity is the existing externally-driven
+tick/runtime loop, and a test asserts Atlas.tick() still references no
+monitor/refresh/freshness. 26 focused tests plus relevant knowledge/research/
+temporal/refresh/storage/kernel regressions green; the pre-existing failures were
+reproduced against a pristine HEAD and remain unchanged; no full-suite run; known
+limitations recorded in §34.27 (a callable pass, not a daemon — no timer/thread/
+loop and nothing schedules it; observations are returned data, not persisted
+records, so no alerting/history/queue exists and idempotency is structural rather
+than cross-restart de-duplication; attention is a freshness signal only and never
+authorizes/fetches/replaces/promotes unless the governed refresh is explicitly
+invoked; deny-by-default still applies); §34.27; Steps 1 → 21 are COMPLETE and
+Step 22 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

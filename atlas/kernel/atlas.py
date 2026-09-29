@@ -1321,17 +1321,54 @@ class Atlas:
         Denied, insufficient, failed or weaker refreshes preserve the original
         and say so explicitly. Nothing is scheduled, promoted or model-decided.
         """
+        retained = self.retained_knowledge(query)
+        return self._knowledge_refresher().refresh_all(
+            retained.records, candidate_urls=tuple(candidate_urls or ()), now=now
+        )
+
+    def _knowledge_refresher(self):
+        """Step 20 refresher over the EXISTING boundaries (single wiring point)."""
         from atlas.research.refresh import KnowledgeRefresher
 
-        retained = self.retained_knowledge(query)
-        refresher = KnowledgeRefresher(
+        return KnowledgeRefresher(
             acquirer=self.external_acquisition,
             acquisition=self.acquisition_service,
             storage=self._research_storage,
             capability_state_provider=self._research_capability_state,
         )
-        return refresher.refresh_all(
-            retained.records, candidate_urls=tuple(candidate_urls or ()), now=now
+
+    def monitor_knowledge(self, query: str, now=None):
+        """Step 21 — one bounded, deterministic monitoring pass (observe only).
+
+        Represents the monitoring targets of the retained knowledge and reports
+        which of them require attention, using the EXISTING Step 19 temporal
+        overlay and Step 20 refresh plan. It fetches nothing, writes nothing,
+        replaces nothing, promotes nothing and grants no authority, and it is
+        deliberately NOT wired into ``Atlas.tick()``: continuity is the caller's.
+        """
+        from atlas.research.monitoring import KnowledgeMonitor
+
+        monitor = KnowledgeMonitor(
+            storage=self._research_storage,
+            refresher=self._knowledge_refresher(),
+        )
+        return monitor.monitor(query, now=now)
+
+    def monitor_and_refresh_knowledge(self, query: str, candidate_urls=(), now=None):
+        """Step 21 — monitor, then explicitly refresh the refresh candidates.
+
+        The refresh is the EXISTING Step 20 governed path (no second refresh
+        path). Denied, unavailable, insufficient, failed or weaker refreshes are
+        reported explicitly and leave the original knowledge intact.
+        """
+        from atlas.research.monitoring import KnowledgeMonitor
+
+        monitor = KnowledgeMonitor(
+            storage=self._research_storage,
+            refresher=self._knowledge_refresher(),
+        )
+        return monitor.monitor_and_refresh(
+            query, candidate_urls=tuple(candidate_urls or ()), now=now
         )
 
     @property
