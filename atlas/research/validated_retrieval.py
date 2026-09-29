@@ -71,6 +71,23 @@ def _citation_to_json(citation: CitationRecord) -> dict[str, Any]:
     }
 
 
+def _standing_of(verification: Any) -> str:
+    """Step 18 — the EXISTING verifier's standing for ``verification``.
+
+    Reuses the single Step 17 source of truth so the retrieval surface and the
+    provenance/knowledge surfaces can never disagree. Fail-soft: an unavailable
+    helper yields ``""`` (an unknown standing is never reported as verified).
+    """
+    try:
+        from atlas.research.provenance import claim_standing
+    except Exception:  # pragma: no cover - defensive
+        return ""
+    try:
+        return claim_standing(verification)
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
 @dataclass(frozen=True, slots=True)
 class ValidatedKnowledgeItem:
     """One validated (SUPPORTED) knowledge claim with provenance."""
@@ -83,6 +100,13 @@ class ValidatedKnowledgeItem:
     citations: tuple[CitationRecord, ...] = ()
     extracted_at: datetime | None = None
     verified_at: datetime | None = None
+    #: Step 18 — the EXISTING verifier's own standing for this claim
+    #: (``verified`` / ``supported`` ...). Additive: an empty value means the
+    #: caller did not project the standing, never that the claim is unsupported.
+    standing: str = ""
+    #: Step 18 — the evidence (citation) record ids for this claim, so a caller
+    #: can attribute the retrieved knowledge back to its evidence.
+    evidence_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe projection (timestamps as ISO strings)."""
@@ -99,6 +123,8 @@ class ValidatedKnowledgeItem:
             "verified_at": (
                 self.verified_at.isoformat() if self.verified_at else None
             ),
+            "standing": self.standing,
+            "evidence_ids": list(self.evidence_ids),
         }
 
 
@@ -254,6 +280,13 @@ class ValidatedKnowledgeRetriever:
                     citations=tuple(claim.citations),
                     extracted_at=claim.extracted_at,
                     verified_at=verification.verified_at,
+                    # Step 18 — project the EXISTING verifier's standing and the
+                    # evidence ids, so a retrieved claim is no longer opaque
+                    # about corroboration or attribution.
+                    standing=_standing_of(verification),
+                    evidence_ids=tuple(
+                        c.record_id for c in claim.citations if c.record_id
+                    ),
                 )
             )
 

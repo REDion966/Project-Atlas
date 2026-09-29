@@ -531,8 +531,21 @@ was demonstrated:
   evidence (authorization outcome, use, identity, evidence presence, the existing
   verification verdict) and surfacing established vs merely-retrieved, conflicts
   and insufficient provenance rather than silently trusting it. Remaining
-  limitations are recorded in `docs/ATLAS_STATE.md` §34.23. **Steps 1 → 17 are
-  COMPLETE. Step 18 is NOT STARTED.**
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.23.
+- **Step 18 — Knowledge representation & learning** — the real-kernel baseline
+  showed the durable artifacts and validated retrieval already existed and were
+  not rebuilt, but the retrieved item carried no standing (a caller could not
+  tell a 2+-source `verified` claim from a single-source `supported` one) and no
+  evidence ids, contested/unverified claims were silently filtered out with no
+  refusal representation, and no justified-knowledge record existed at all. A
+  bounded, deterministic, model-free representation now turns justified knowledge
+  into `KnowledgeRecord`s carrying the Step 17 provenance chain verbatim, under a
+  closed retention rule that retains only verified/supported claims WITH a
+  provenance link and refuses contested/unverified/unknown/unattributed claims
+  with reasons (duplicates collapsed by claim id; nothing written, promoted or
+  model-decided), and the existing retrieval surface is now standing-aware.
+  Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.24. **Steps 1 →
+  18 are COMPLETE. Step 19 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

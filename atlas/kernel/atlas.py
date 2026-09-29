@@ -1250,6 +1250,36 @@ class Atlas:
             reports = ()
         return provenance_from_outcome(outcome, reports=reports)
 
+    def knowledge_retention(self, outcome):
+        """Step 18 — the bounded retention decision for a research outcome.
+
+        Composes the Step 17 provenance with the deterministic retention rule:
+        only claims the EXISTING verifier stands behind (``verified`` /
+        ``supported``) AND that carry a provenance link become retained
+        ``KnowledgeRecord``s; ``contested`` / ``unverified`` / ``unknown`` claims
+        are refused with their reason recorded. Pure, deterministic and
+        fail-closed: it writes nothing, promotes nothing into the evolution
+        lifecycle, grants no authority and consults no model.
+        """
+        from atlas.research.knowledge_representation import retain_knowledge
+
+        return retain_knowledge(self.research_provenance(outcome))
+
+    def retained_knowledge(self, query: str):
+        """Step 18 — deterministic retrieval of retained (justified) knowledge.
+
+        Read-only projection over the EXISTING research storage through the
+        EXISTING validated-knowledge retriever, returning justified
+        ``KnowledgeRecord``s with their Step 17 standing, sources and evidence
+        ids. It never writes, acquires, or calls a model, and fails closed
+        rather than falling back to unvalidated knowledge.
+        """
+        from atlas.research.knowledge_representation import (
+            RetainedKnowledgeRetriever,
+        )
+
+        return RetainedKnowledgeRetriever(self._research_storage).retrieve(query)
+
     @property
     def work_orchestrator(self):
         """Return the kernel-owned WorkOrchestrator (D4).

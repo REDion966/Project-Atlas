@@ -365,6 +365,15 @@ def _standing(verification: Any) -> str:
     return ClaimStanding.UNKNOWN.value
 
 
+def claim_standing(verification: Any) -> str:
+    """Public, deterministic claim standing for a verification.
+
+    The single source of truth for the standing ladder (Step 17), reused by the
+    Step 18 knowledge representation so both surfaces can never disagree.
+    """
+    return _standing(verification)
+
+
 def _claims_and_evidence(
     reports: Any,
 ) -> tuple[
@@ -692,5 +701,6 @@ __all__ = [
     "ResearchProvenance",
     "SourceAuthorization",
     "build_research_provenance",
+    "claim_standing",
     "provenance_from_outcome",
 ]

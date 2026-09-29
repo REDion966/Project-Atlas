@@ -1839,6 +1839,103 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.24 Step 18 — Knowledge representation & learning: retaining justified knowledge
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 18 built the smallest
+evidence-driven, deterministic, model-independent representation of the JUSTIFIED
+knowledge produced by the existing research/provenance pipeline (Steps 16-17),
+plus the retention decision that separates it from what is merely retrieved. It
+is a REPRESENTATION over the EXISTING model: the durable artifacts remain the
+existing research storage (``research_claims`` / ``research_verifications`` /
+``research_citations`` / ``research_reports``), the standing remains the existing
+verifier's verdict (Step 17 ``ClaimStanding``), and retrieval remains the
+existing ``ValidatedKnowledgeRetriever``. No second store, no competing
+retrieval system, no embeddings, no ontology, no model-based learning, no
+authority. Knowledge representation/learning ONLY: no temporal/freshness-aware
+knowledge, no refresh, no monitoring, no capability-gap detection, no autonomous
+development.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+durable artifacts already existed and were NOT rebuilt, and
+``validated_knowledge`` already retrieved SUPPORTED claims with citations. But:
+
+  * ``ValidatedKnowledgeItem`` carried no ``standing`` — a caller could not tell
+    a 2+-source ``verified`` claim from a single-source ``supported`` one (Step 17
+    knew the standing; retrieval did not expose it), and there were no
+    ``evidence_ids`` per retrieved claim;
+  * ``contested``/``unverified`` claims were in the durable store but were
+    SILENTLY filtered out (seeded CONTRADICTED and UNKNOWN claims were stored and
+    ``validated_knowledge`` returned ``empty``) — no refusal, no representation;
+  * there was no representation of a justified knowledge record at all
+    (``KnowledgeRecord`` / ``retained_knowledge`` did not exist anywhere).
+
+**What was implemented (one bounded representation over existing evidence).**
+- `atlas/research/knowledge_representation.py` (new): ``KnowledgeRecord`` (a
+  justified record carrying the Step 17 chain verbatim — evaluated sources,
+  evidence/citation items, supporting sources, report ids, acquisition id — plus
+  standing, ``established`` and the verification status/score/outcome),
+  ``RefusedKnowledge`` (claim + standing + reason), ``KnowledgeRetention`` (the
+  retention decision with counts, duplicates and findings),
+  ``RetainedKnowledge``/``RetainedKnowledgeRetriever`` (deterministic,
+  fail-closed retrieval of retained knowledge over the EXISTING store) and
+  ``RETENTION_RULE``.
+- `atlas/research/validated_retrieval.py`: the EXISTING retrieval surface is now
+  standing-aware — ``ValidatedKnowledgeItem`` gained additive ``standing`` and
+  ``evidence_ids``, projected from the same Step 17 ``claim_standing`` helper, so
+  the two surfaces can never disagree. ``validation_status`` and every existing
+  field are unchanged.
+- `atlas/research/provenance.py`: the private standing derivation is exposed as
+  ``claim_standing(verification)`` — one source of truth reused by both surfaces.
+- `atlas/kernel/atlas.py`: ``Atlas.knowledge_retention(outcome)`` (retention
+  decision from a research outcome, composed with the Step 17 provenance) and
+  ``Atlas.retained_knowledge(query)`` (standing-aware retrieval).
+
+**Retention rule (closed, deterministic, fail-closed).** A claim is retained as
+knowledge ONLY when the EXISTING verification stands at ``verified`` (2+
+independent supporting sources) or ``supported`` (exactly one supporting
+source) **and** it carries a provenance link (at least one evidence record).
+``contested`` (conflicting evidence), ``unverified`` (retrieved without
+supporting evidence) and ``unknown`` (no verification) claims are REFUSED with
+the reason recorded, and a justified claim with no preserved provenance link is
+also refused — never retained unattributed. Duplicates are collapsed
+deterministically by ``claim_id`` (stable order, reported), ordering is
+deterministic (sorted by claim id), and with no claim-level provenance nothing is
+retained and the insufficiency is reported rather than hidden. Nothing is
+written, nothing is promoted into the evolution lifecycle, no model is
+consulted, and no authority is granted.
+
+**Validation.** `tests/test_step18_knowledge_representation.py` — 28 focused
+tests (structured record representation; the Step 17 chain preserved verbatim on
+each record and in the serialized form; promotion/rejection boundaries for
+contested, unverified, unknown and no-provenance-link claims; established vs
+supported counts with "no retained record is ever silently trusted"; duplicate
+collapse and deterministic ordering/serialization; insufficient input retaining
+nothing; the adapter for a Step 16 outcome; retrieval returning standing-aware
+records with attribution while unjustified claims are never retrieved and an
+unavailable store fails closed; read-only retrieval; and real-kernel validation
+of researched-knowledge retention, the standing-aware retrieval surface, retained
+knowledge surviving a kernel restart, denied/insufficient research retaining
+nothing, a contested claim in the store never being retrieved as trusted,
+read-only/no-promotion guarantees and Steps 1-17 preservation). Relevant
+subsystem regressions were green (Steps 15-17, the kernel suite, the
+validated-retrieval, evidence/provenance, information-gathering,
+external-knowledge, research-storage and model-free-knowledge suites, plus the
+C6.1/C6-reuse/C6-learning knowledge suites, conversation service, G2, the
+evidence-improvement suites, D2/D3/D4, the architecture import scan and the CLI).
+The pre-existing failures documented elsewhere were reproduced against a pristine
+HEAD and remain unchanged — they are NOT caused by Step 18. No full-suite run.
+
+**Known limitations (truthful).** Retention is a read-only REPRESENTATION: the
+justified subset is derived from durable artifacts the existing pipeline already
+persisted (which deliberately keep every extracted claim as an evidence record),
+so Step 18 curates and attributes rather than writing a separate knowledge store.
+A single-source corpus can never yield an ``established`` record (multi-source
+corroboration is required), so retained knowledge is usually ``supported``.
+Retention is scoped to the claims a research report carries — it does not
+re-verify, re-fetch or repair anything. Temporal/freshness handling, refresh,
+monitoring and capability-gap detection remain evidence-driven, separately
+authorized work — no later phase is implemented or implied.
+
 ### 34.23 Step 17 — Source evaluation & provenance: research → source → evidence → claim
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 17 built the smallest
@@ -3340,7 +3437,30 @@ HEAD and remain unchanged; no full-suite run; known limitations recorded in
 §34.23 (evaluation limited to what the pipeline records; a source never loaded has
 only its authorization outcome; a single-source corpus cannot reach verified;
 a missing stored report degrades to insufficient aggregate-only provenance);
-§34.23; Steps 1 → 17 are COMPLETE and Step 18 is NOT STARTED and remains
-evidence-driven).
+§34.23).
+Step 18 knowledge representation & learning added: 2026-09-29 (the real-kernel
+baseline showed the durable artifacts and validated retrieval already existed and
+were NOT rebuilt, but ValidatedKnowledgeItem carried no standing or evidence ids
+(a caller could not tell verified from supported), contested/unverified claims
+were SILENTLY filtered out of retrieval with no refusal representation, and no
+justified-knowledge record existed at all). Minimal change: one new pure module
+(`atlas/research/knowledge_representation.py`) represents justified knowledge as
+bounded immutable `KnowledgeRecord`s carrying the Step 17 provenance chain
+verbatim, with a closed deterministic retention rule that retains only claims
+standing at verified/supported WITH a provenance link and refuses contested/
+unverified/unknown/unattributed claims with reasons (duplicates collapsed by
+claim_id; nothing written, promoted, or model-decided); the EXISTING retrieval
+surface gained additive `standing`/`evidence_ids` from the same single
+`claim_standing` helper; and `Atlas.knowledge_retention()` /
+`Atlas.retained_knowledge()` expose the decision and the standing-aware retrieval.
+28 focused tests plus relevant research/knowledge/storage/kernel regressions
+green; the pre-existing failures were reproduced against a pristine HEAD and
+remain unchanged; no full-suite run; known limitations recorded in §34.24
+(retention is a read-only representation over artifacts the pipeline already
+persisted, so it curates and attributes rather than writing a separate store;
+a single-source corpus cannot yield an established record; retention does not
+re-verify/re-fetch; temporal/freshness, refresh, monitoring and capability-gap
+detection remain out of scope); §34.24; Steps 1 → 18 are COMPLETE and Step 19 is
+NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
