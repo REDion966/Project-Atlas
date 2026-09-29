@@ -1218,6 +1218,38 @@ class Atlas:
             need, candidate_urls=tuple(candidate_urls or ())
         )
 
+    def research_provenance(self, outcome):
+        """Step 17 — bounded provenance/evaluation for a research outcome.
+
+        Turns a Step 16 ``ResearchOutcome`` into the explicit provenance chain
+        research → source → evidence → claim, using the EXISTING stored research
+        artifacts (the claims/citations/verifications already persisted by the
+        acquisition pipeline). Read-only: it loads reports and writes nothing,
+        consults no model, grants no authority, and evaluates a source ONLY from
+        evidence Atlas actually recorded (authorization outcome, use, identity,
+        evidence presence, existing verification). Reachability is never treated
+        as truth and no credibility is invented. A missing stored report is
+        reported as insufficient provenance rather than hidden.
+        """
+        from atlas.research.provenance import provenance_from_outcome
+
+        reports: tuple = ()
+        try:
+            report_ids = {
+                str(rid)
+                for rid in (getattr(outcome, "report_ids", ()) or ())
+                if str(rid)
+            }
+            if report_ids:
+                reports = tuple(
+                    report
+                    for report in self._research_storage.load_reports()
+                    if str(getattr(report, "report_id", "")) in report_ids
+                )
+        except Exception:  # fail-soft: unwired/unreadable storage is reported
+            reports = ()
+        return provenance_from_outcome(outcome, reports=reports)
+
     @property
     def work_orchestrator(self):
         """Return the kernel-owned WorkOrchestrator (D4).

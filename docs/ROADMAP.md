@@ -519,7 +519,20 @@ was demonstrated:
   `established` only when validated claims were actually produced). It enables no
   source, unlocks no network access, persists and promotes nothing, and consults
   no model. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.22.
-  **Steps 1 → 16 are COMPLETE. Step 17 is NOT STARTED.**
+- **Step 17 — Source evaluation & provenance** — the real-kernel baseline showed
+  the raw provenance already existed in the stored reports (claims each carrying a
+  citation record and a verification with the verifier's own
+  outcome/supporting/contradicting), but the Step 16 outcome was aggregate-only
+  (no claims, no citations), `ResearchReport.citations` was empty while the claims
+  carried the citations, the verified/supported/contested distinction was computed
+  but never surfaced, and a denied source was just a URI with no evaluation. A
+  bounded, deterministic, model-free representation now exposes the chain
+  research → source → evidence → claim, evaluating each source only from recorded
+  evidence (authorization outcome, use, identity, evidence presence, the existing
+  verification verdict) and surfacing established vs merely-retrieved, conflicts
+  and insufficient provenance rather than silently trusting it. Remaining
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.23. **Steps 1 → 17 are
+  COMPLETE. Step 18 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

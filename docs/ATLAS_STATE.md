@@ -1839,6 +1839,97 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.23 Step 17 — Source evaluation & provenance: research → source → evidence → claim
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 17 built the smallest
+evidence-driven, deterministic, model-independent layer that evaluates research
+sources and preserves trustworthy provenance for acquired information. It is a
+REPRESENTATION over the EXISTING claim/citation/verification model — no second
+persistence, no competing claim model, no credibility scoring. It implements
+source evaluation/provenance ONLY: no knowledge representation/learning
+(Step 18), no temporal/freshness-aware knowledge, no refresh, no continuous
+monitoring, no capability-gap detection, no self-development, no speculative
+ranking, no model-dependent source judgement.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The raw
+provenance already existed and was NOT rebuilt: the stored `ResearchReport`
+carried claims, each with a `CitationRecord` (record id, URI, title, kind,
+section) and a `ClaimVerification` (status, score, and — in metadata — the
+verifier's own `outcome`, `supporting` and `contradicting` source lists). But:
+
+  * the Step 16 `ResearchOutcome` was **aggregate-only** — its `to_dict()` had no
+    `claims` key and no citations, just per-source COUNTS, so a caller could not
+    say WHERE a claim came from nor whether it was verified or merely retrieved;
+  * `ResearchReport.citations` was **empty** while the claims carried the
+    citations (0 vs 3 in the baseline) — a naive report-level read silently
+    looks like "no provenance";
+  * the verifier's `verified` (2+ supporting sources) vs `supported`
+    (single-source) vs `contested` distinction was computed but never surfaced;
+  * a denied source existed only as a URI in `denied_sources`, with no
+    evaluation and no record that nothing was fetched.
+
+**What was implemented (one bounded evaluation layer over existing evidence).**
+- `atlas/research/provenance.py` (new): `SourceAuthorization` (`authorized` /
+  `denied` / `unknown`), `ClaimStanding` (`verified` / `supported` /
+  `contested` / `unverified` / `unknown`) and immutable, length-bounded
+  `ProvenanceSource` (URI, title, kind, authorization, accessed, identity_known,
+  evidence_present, claim/supporting/contradicted counts, findings),
+  `ProvenanceEvidence` (a citation record: WHERE content was found — kept
+  distinct from the claim) and `ProvenanceClaim` (the acquired statement plus
+  verification status/score/outcome, source links, evidence ids and `verified` /
+  `merely_retrieved`), composed into `ResearchProvenance` (the chain
+  research → source → evidence → claim, with `established_claim_ids`,
+  `supported_claim_ids`, `contested_claim_ids`, `unverified_claim_ids`,
+  `has_conflicts`, `has_insufficient_provenance` and `retained_for_learning`).
+  `build_research_provenance(...)` is a pure builder over recorded artifacts;
+  `provenance_from_outcome(outcome, reports=...)` adapts a Step 16 outcome.
+- `atlas/kernel/atlas.py`: `Atlas.research_provenance(outcome)` loads the
+  outcome's report ids from the EXISTING research storage (read-only) and builds
+  the chain. Nothing is written, no second store is created, and no authority is
+  granted.
+
+**Evidence-only evaluation (no invented credibility).** Every property comes
+from something Atlas recorded: `authorization` is the acquisition policy's own
+outcome (a used source was permitted; a denied source was refused BEFORE any
+I/O), `accessed` says the source was actually used, `identity_known` says a
+URI/title identifies it, `evidence_present` says an acquired claim cites it, and
+the standing is the EXISTING verifier's own verdict. Credibility is never
+inferred from domain names, popularity or any heuristic, and reachability alone
+is never treated as truth: a claim is `verified` only on 2+ independent
+supporting sources, a single supporting source is `supported`, no supporting
+evidence is `unverified` (merely retrieved), and conflicting evidence is
+`contested` and surfaced rather than trusted away. Missing claim-level provenance
+is reported as insufficient, not hidden.
+
+**Validation.** `tests/test_step17_source_provenance.py` — 26 focused tests
+(source identity/evaluation incl. denied and evidence-less sources; the
+research → source → evidence → claim chain; metadata-vs-evidence separation; the
+verified/supported/contested/unverified standing ladder with "one source is
+never verified"; conflicts and insufficiency surfaced; determinism, immutability,
+bounds and serialization; and real-kernel validation of an authorized chain,
+agreement with the EXISTING persistence layer and `validated_knowledge`, denied
+sources remaining denied with nothing fetched, deny-by-default reported as
+insufficient, read-only provenance building, no unrecognised-outcome trust and
+Steps 1–16 preservation). Relevant subsystem regressions were green (Steps
+13–16, the kernel suite, the evidence/provenance, research-storage, F8, D2,
+validated-retrieval, information-gathering, external-knowledge,
+research-coordinator and model-free-knowledge suites, plus the C6/D3/D4
+knowledge suites, conversation service, G2, the architecture import scan and the
+CLI). The pre-existing failures documented elsewhere were reproduced against a
+pristine HEAD and remain unchanged — they are NOT caused by Step 17. No
+full-suite run.
+
+**Known limitations (truthful).** Evaluation is limited to what the acquisition
+pipeline records: a source that was never loaded has no accessibility evidence
+beyond its authorization outcome, and per-source counts come from the existing
+verifier's `supporting`/`contradicting` lists (a single-source corpus can
+therefore never reach `verified`). Provenance is a read-only projection of
+stored artifacts — it does not re-verify, re-fetch or repair anything, and a
+missing stored report degrades to aggregate-only provenance reported as
+insufficient. Knowledge representation/learning (Step 18), temporal/freshness
+handling, refresh and monitoring remain evidence-driven, separately authorized
+work — no later phase is implemented or implied.
+
 ### 34.22 Step 16 — Autonomous research: acting on an actionable knowledge need
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 16 built the smallest
@@ -3227,7 +3318,29 @@ HEAD and remain unchanged; no full-suite re-run; known limitations recorded in
 yields no_authorized_source and needs OWNER authorization; insufficient vs failed
 is derived from whether the boundary attached an inner acquisition result;
 governed knowledge_acquisition still requires OWNER approval; no source
-evaluation/provenance, representation/learning or refresh); §34.22; Steps 1 → 16
-are COMPLETE and Step 17 is NOT STARTED and remains evidence-driven).
+evaluation/provenance, representation/learning or refresh); §34.22).
+Step 17 source evaluation & provenance added: 2026-09-29 (the real-kernel baseline
+showed the raw provenance already existed in the stored reports — claims each with
+a citation record and a verification carrying the verifier's own
+outcome/supporting/contradicting — but the Step 16 outcome was aggregate-only
+(no claims, no citations), ResearchReport.citations was empty while the claims
+carried the citations, the verified/supported/contested distinction was computed
+but unsurfaced, and a denied source was just a URI with no evaluation). Minimal
+change: one new pure module (`atlas/research/provenance.py`) represents the chain
+research → source → evidence → claim with bounded immutable objects
+(`ProvenanceSource`/`ProvenanceEvidence`/`ProvenanceClaim`/`ResearchProvenance`),
+evaluating a source ONLY from recorded evidence (authorization outcome, use,
+identity, evidence presence, the EXISTING verification verdict) and exposing
+established vs merely-retrieved, conflicts and insufficient provenance instead of
+silently trusting it; `Atlas.research_provenance(outcome)` projects it read-only
+from the EXISTING research storage (no second store, nothing written, no model,
+no authority). 26 focused tests plus relevant research/knowledge/kernel
+regressions green; the pre-existing failures were reproduced against a pristine
+HEAD and remain unchanged; no full-suite run; known limitations recorded in
+§34.23 (evaluation limited to what the pipeline records; a source never loaded has
+only its authorization outcome; a single-source corpus cannot reach verified;
+a missing stored report degrades to insufficient aggregate-only provenance);
+§34.23; Steps 1 → 17 are COMPLETE and Step 18 is NOT STARTED and remains
+evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
