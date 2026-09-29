@@ -1326,6 +1326,41 @@ class Atlas:
             retained.records, candidate_urls=tuple(candidate_urls or ()), now=now
         )
 
+    def capability_gap(
+        self,
+        request: str,
+        *,
+        capability: str = "",
+        ambiguous: bool = False,
+        execution_failed: bool = False,
+    ):
+        """Step 22 — bounded, evidence-backed capability-gap diagnosis (read-only).
+
+        Adjudicates a request from grounded evidence Atlas already holds — the
+        EXISTING request-level development-gap assessment, the EXISTING unified
+        capability model and its per-capability state, and the EXISTING Step 15
+        knowledge need — into ONE explainable diagnosis. It distinguishes a
+        supported capability, temporary unavailability, a governance boundary, a
+        knowledge need, an ambiguity and an execution failure from a GENUINE
+        capability absence, and fails closed to ``unknown`` when the evidence is
+        insufficient. ``ambiguous``/``execution_failed`` let a caller contribute
+        grounded outcomes (Step 9 clarification, a recorded run failure); nothing
+        is executed, fetched, authorized, replaced or mutated here, and the
+        conversation cascade is untouched.
+        """
+        from atlas.research.validated_retrieval import ValidatedKnowledgeRetriever
+        from atlas.self_knowledge.capability_gap import assess_capability_gap
+
+        return assess_capability_gap(
+            request,
+            capability_model=self.capability_model(),
+            knowledge_retriever=ValidatedKnowledgeRetriever(self._research_storage),
+            knowledge_need=self.knowledge_need(request, capability=capability),
+            capability=capability,
+            ambiguous=ambiguous,
+            execution_failed=execution_failed,
+        )
+
     def _knowledge_refresher(self):
         """Step 20 refresher over the EXISTING boundaries (single wiring point)."""
         from atlas.research.refresh import KnowledgeRefresher

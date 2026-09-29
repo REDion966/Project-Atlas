@@ -583,8 +583,21 @@ was demonstrated:
   refresh runs only when explicitly invoked, through the existing governed path,
   and the mechanism is deliberately not wired into `Atlas.tick()` (no timer, thread
   or background loop). Remaining limitations are recorded in
-  `docs/ATLAS_STATE.md` §34.27. **Steps 1 → 21 are COMPLETE. Step 22 is NOT
-  STARTED.**
+  `docs/ATLAS_STATE.md` §34.27.
+- **Step 22 — General capability gap detection** — the real-kernel baseline showed
+  Atlas had no capability-gap API or type: the existing request-level adjudicator
+  reported `missing_knowledge` for a genuinely unsupported operation whenever the
+  store held nothing about its subject, and the existing knowledge-need classifier
+  reported `unsupported_capability` for an *unavailable* capability — the same kind
+  absence would use. A bounded, deterministic, model-free adjudicator now
+  reconciles the existing adjudicator, the existing unified capability model's
+  per-capability state and the existing knowledge need into one explainable
+  diagnosis (`supported` / `temporarily_blocked` / `governed` / `missing_knowledge`
+  / `ambiguous` / `execution_failure` / `unsupported_capability` / `unknown`),
+  claiming a gap only when no capability covers a request whose subject is known
+  from validated knowledge, and failing closed to `unknown` otherwise. Remaining
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.28. **Steps 1 → 22 are
+  COMPLETE. Step 23 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

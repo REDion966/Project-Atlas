@@ -1839,6 +1839,109 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.28 Step 22 — General capability gap detection: an evidence-backed diagnosis
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 22 built the smallest
+evidence-driven, deterministic, model-independent adjudicator that decides whether
+a request exposes a GENUINE capability gap — or whether it is something the
+existing machinery already explains: a supported capability, temporary
+unavailability, a governance boundary, a knowledge need, an ambiguity or an
+execution failure. It reconciles EXISTING grounded signals rather than creating a
+new registry, discovery engine or development path. Gap detection ONLY — no
+capability specification/design, no autonomous capability development, no
+integrated autonomy loop, no automatic implementation suggestions, no speculative
+discovery, no model-based inference, no new execution or authorization mechanism.
+
+**What the baseline showed (measured through the real Atlas/kernel).** `Atlas` had
+**no** capability-gap API and no `CapabilityGap` type. The EXISTING signals existed
+but could not express the distinction:
+
+  * `atlas.evolution.development_gap.assess_development_gap` returned
+    ``missing_knowledge`` for a genuinely unsupported operation whenever the store
+    held nothing about its subject (its rule infers capability absence from
+    knowledge *presence*), so an absent capability and a knowledge need were
+    indistinguishable without grounded knowledge;
+  * Step 15 ``knowledge_need`` reported ``unsupported_capability`` for an
+    UNAVAILABLE capability — the SAME kind absence would use
+    (``atlas.knowledge_need(text, capability="open_conversation")`` →
+    ``unsupported_capability`` with state ``unavailable``), so unavailability and
+    absence could not be told apart;
+  * nothing represented the detected capability boundary, the capability's
+    grounded state, governance boundaries or execution failures as a diagnosis.
+
+**What was implemented (one bounded adjudicator over existing evidence).**
+- `atlas/self_knowledge/capability_gap.py` (new): `CapabilityGapKind` (``supported``
+  / ``temporarily_blocked`` / ``missing_knowledge`` / ``ambiguous`` / ``governed``
+  / ``execution_failure`` / ``unsupported_capability`` / ``unknown``), an immutable
+  bounded `CapabilityGap` (request, boundary, capability, capability_state,
+  matched, requires, reason, evidence, `is_gap`), the public
+  ``assess_capability_gap(...)`` adjudicator, the `CapabilityGapDetector`
+  binding seam, and ``GAP_RULE``.
+- `atlas/kernel/atlas.py`: ``Atlas.capability_gap(request, *, capability="",
+  ambiguous=False, execution_failed=False)`` — read-only, wired to the EXISTING
+  unified capability model, the EXISTING request-level adjudicator and the
+  EXISTING Step 15 knowledge need.
+
+**The adjudication path (grounded, no inference from wording).** The base decision
+is the EXISTING ``assess_development_gap`` (whose ``DevelopmentGapKind`` values are
+reconciled into this module's own closed tokens through the real enum, so a renamed
+value can never be silently mistranslated); the refinements use the EXISTING
+unified capability model's per-capability ``state``, the EXISTING Step 15
+``KnowledgeNeed``, and caller-supplied GROUNDED outcomes (Step 9 ambiguity, a
+recorded execution failure). Precedence: ambiguity → ``ambiguous``; a matched
+capability whose state is ``governed`` → ``governed``; a matched capability whose
+state is ``unavailable``/``blocked``/``partially_supported`` →
+``temporarily_blocked``; an execution failure with a matched capability →
+``execution_failure``; a matched available capability → ``supported``; an
+unavailable capability reported by the knowledge need → ``temporarily_blocked``;
+``missing_capability`` → ``unsupported_capability`` (the ONLY way a gap is ever
+claimed: no capability covers the request while its subject is known from
+validated knowledge); ``missing_knowledge`` → ``missing_knowledge``; anything else
+(including the EXISTING ``unclear``) → ``unknown``.
+
+**Never a gap from "Atlas could not answer".** Unfamiliar wording, unknown
+entities, temporary source denial/deny-by-default and missing knowledge never
+produce a gap: an unsupported operation whose subject is unknown is a knowledge
+need, and insufficient evidence yields ``unknown``. Absence is distinguished from
+unavailability (``temporarily_blocked`` — the capability EXISTS), authorization is
+not absence (``governed``), and a failed run is not a missing capability
+(``execution_failure``). The adjudicator is pure logic over recorded evidence (no
+AI, no network, no write, no authority), deterministic, bounded and json-safe, and
+the conversation cascade is untouched — no handler was added and no message
+metadata changed.
+
+**Validation.** `tests/test_step22_capability_gap_detection.py` — 32 focused tests
+(the full four-way distinction plus governed/ambiguous/execution-failure; every
+unavailable/blocked/partially-supported state mapping to ``temporarily_blocked``
+with ``requires``; the fail-closed ladder for empty requests, a missing capability
+model, ``unclear`` and unrecognised bases; "unfamiliar wording alone is never a
+gap"; the reuse of the REAL adjudicator driving the base decision both with and
+without grounded knowledge; the detector's provider binding and failure
+behaviour; determinism, bounds, immutability and serialization; and real-kernel
+validation of a genuine gap from grounded evidence, no-evidence-is-not-a-gap, a
+supported matched capability, unavailable/governed not being absence, ambiguity and
+execution failure not being gaps, determinism/read-only behaviour, the unchanged
+conversation outcome, and Steps 1-21 preservation). Relevant subsystem regressions
+were green (the capability-model/contracts suites, Steps 12-14, Steps 15-21, the
+kernel suite, the C6.1/C6-reuse/C6-learning suites, conversation service, G2, D2,
+the architecture import scan and the CLI). The pre-existing failures documented
+elsewhere were reproduced against a pristine HEAD and remain unchanged — they are
+NOT caused by Step 22. No full-suite run.
+
+**Known limitations (truthful).** The gap claim inherits the EXISTING adjudicator's
+evidence base: a genuine gap is reported only when the request's subject is known
+from validated knowledge (``missing_capability``); with an empty knowledge store an
+unsupported operation is reported as ``missing_knowledge`` (research first) rather
+than as a gap — deliberately conservative, since the existing authority cannot tell
+the two apart without that knowledge. The base adjudication matches request tokens
+against REGISTERED capability names, so a request phrased entirely outside that
+vocabulary needs grounded knowledge to be adjudicable at all. ``capability`` and
+the ``ambiguous``/``execution_failed`` flags must come from the caller's grounded
+outcomes (the conversation's clarification state, a recorded run failure); nothing
+is inferred from wording and no diagnosis is wired into the conversation cascade.
+Capability specification/design, autonomous development and the integrated
+autonomy loop remain out of scope.
+
 ### 34.27 Step 21 — Continuous information monitoring: bounded observation, never automatic action
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 21 built the smallest
@@ -3836,7 +3939,32 @@ loop and nothing schedules it; observations are returned data, not persisted
 records, so no alerting/history/queue exists and idempotency is structural rather
 than cross-restart de-duplication; attention is a freshness signal only and never
 authorizes/fetches/replaces/promotes unless the governed refresh is explicitly
-invoked; deny-by-default still applies); §34.27; Steps 1 → 21 are COMPLETE and
-Step 22 is NOT STARTED and remains evidence-driven).
+invoked; deny-by-default still applies); §34.27).
+Step 22 general capability gap detection added: 2026-09-29 (the real-kernel
+baseline showed Atlas had NO capability-gap API or type; the EXISTING
+request-level adjudicator reported missing_knowledge for a genuinely unsupported
+operation whenever the store held nothing about its subject, and Step 15's
+knowledge_need reported unsupported_capability for an UNAVAILABLE capability — the
+same kind absence would use — so absence, unavailability, missing knowledge,
+governance and execution failure could not be told apart). Minimal change: one new
+pure module (`atlas/self_knowledge/capability_gap.py`) reconciles the EXISTING
+DevelopmentGapKind (mapped through the real enum, never raw literals), the
+EXISTING unified capability model's per-capability state and the EXISTING Step 15
+KnowledgeNeed (plus caller-supplied grounded ambiguity/execution-failure outcomes)
+into ONE bounded, explainable `CapabilityGap` with an eight-value closed kind and
+the detected boundary/capability/state/requires/evidence; `Atlas.capability_gap()`
+exposes it read-only, and the conversation cascade is untouched. A gap is claimed
+ONLY from `missing_capability` (no capability covers the request while its subject
+is known from validated knowledge) — never from unfamiliar wording, unknown
+entities, deny-by-default denial or missing knowledge — and insufficient evidence
+yields unknown. 32 focused tests plus relevant capability/self-knowledge/
+conversation/knowledge/research/monitoring/kernel regressions green; the
+pre-existing failures were reproduced against a pristine HEAD and remain
+unchanged; no full-suite run; known limitations recorded in §34.28 (the gap claim
+inherits the EXISTING evidence base, so an unsupported operation with an empty
+knowledge store is reported as missing_knowledge; base matching uses registered
+capability names; the capability/ambiguity/execution-failure inputs must be
+grounded caller-supplied outcomes; nothing is wired into the cascade); §34.28;
+Steps 1 → 22 are COMPLETE and Step 23 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
