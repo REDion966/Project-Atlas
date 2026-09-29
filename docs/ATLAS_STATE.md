@@ -1839,6 +1839,96 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.29 Step 23 — Capability specification & development design: a reviewable artifact
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 23 built the smallest
+evidence-driven, deterministic, model-independent layer that turns a CONFIRMED
+Step 22 capability gap into a bounded, reviewable capability specification: what
+the capability is for, the operations the request implies, its dependencies, the
+existing architecture areas it touches, the constraints and governance boundary it
+must respect, the verification it must satisfy — and, explicitly, which parts of
+the design the evidence establishes versus which remain unresolved. It is NOT an
+implementation engine: nothing is generated, written, approved, authorized,
+executed or promoted, no repository is touched, and no model is consulted.
+Specification/design ONLY — no capability implementation (Step 24), no automatic
+code generation or repository mutation, no autonomous approval/authorization or
+deployment/promotion, no integrated intelligence loop (Step 25), no speculative
+architecture changes.
+
+**What the baseline showed (measured through the real Atlas/kernel).** Step 22's
+`CapabilityGap` was a **terminal, read-only diagnosis**: `Atlas` had no
+`capability_specification` API and no specification/design type existed anywhere
+(`atlas/self_knowledge/capability_specification.py` absent), and nothing downstream
+consumed a gap. The closest existing artifact — the EXISTING
+`AcquisitionStrategy` (advisory: mechanism, prerequisites, validation, failure
+conditions) — carried no architecture grounding and no known-vs-unresolved split
+and is reachable only from capability discovery; and the EXISTING
+`DevelopmentPlanner.plan` accepts only an APPROVED proposal, so a raw gap could not
+enter it.
+
+**What was implemented (one bounded builder over existing evidence).**
+- `atlas/self_knowledge/capability_specification.py` (new): `SpecificationStatus`
+  (``specified`` / ``refused``) and an immutable bounded `CapabilitySpecification`
+  carrying the intended capability, purpose, operations, inputs/outputs,
+  dependencies, affected areas, constraints, governance, verification, the
+  EXISTING advisory mechanism/prerequisites/failure conditions, `known_facts`,
+  `unresolved_questions`, `options`, the originating gap's kind/boundary/reason and
+  its evidence — plus `build_capability_specification(gap, ...)` and
+  `SPECIFICATION_RULE`.
+- `atlas/kernel/atlas.py`: `Atlas.capability_specification(request, *, capability,
+  ambiguous, execution_failed)` — diagnoses with the EXISTING Step 22 adjudicator
+  and drafts the artifact from the EXISTING unified capability model, the EXISTING
+  architecture snapshot and the EXISTING advisory acquisition strategy.
+
+**The specification path (grounded, nothing invented).** Only a genuine,
+evidence-backed gap with a non-empty request is accepted — anything else is
+REFUSED with a reason naming what the request actually is (a supported capability,
+temporary unavailability, a governance boundary, a knowledge need, an ambiguity, an
+execution failure or insufficient evidence), and a refusal carries NO design
+fields. For an accepted gap: the operations come from the request's own
+vocabulary; the affected areas and dependencies come from the EXISTING
+`ArchitectureModel.locate()` and the located components' declared dependencies; the
+constraints include the architecture model's OWN stated scope boundaries; the
+governance requirements are the EXISTING governance boundaries plus the codebase's
+fixed invariants; and the mechanism, prerequisites, verification requirements and
+failure conditions are the EXISTING `AcquisitionStrategy`. Inputs and outputs stay
+EMPTY and are reported as unresolved — the current architecture cannot justify
+them — and when the evidence admits more than one candidate host the alternatives
+are LISTED in `options` rather than silently chosen.
+
+**Validation.** `tests/test_step23_capability_specification.py` — 35 focused tests
+(a specified design with bounded operations and purpose; the existing advisory
+skeleton reused for mechanism/verification/prerequisites/failure conditions;
+constraints taken from the architecture's own scope boundaries; governance from the
+existing boundaries and invariants; the known-vs-unresolved split with inputs and
+outputs left uninvented; architecture grounding of areas and dependencies; multiple
+candidate hosts listed rather than chosen; unresolved areas reported honestly;
+no-architecture-model behaviour; gap provenance preserved verbatim; determinism,
+immutability, bounds and serialization; refusal for EVERY non-gap kind plus
+ungrounded inputs, empty requests and non-`CapabilityGap` objects, each carrying no
+design; and real-kernel validation of a genuine gap producing a specification, all
+non-gaps refused, map-grounded areas/dependencies/options, no authority or
+mutation, determinism and Steps 1-22 preservation). Relevant subsystem regressions
+were green (Step 22, the capability-model/contracts suites, Steps 12-14, the
+gap/acquisition/planning/authorized-boundary suites, Steps 15-21, the kernel suite,
+the C6.1/C6-reuse/C6-learning suites, conversation service, G2, D2, the
+architecture import scan and the CLI). The pre-existing failures documented
+elsewhere were reproduced against a pristine HEAD and remain unchanged — they are
+NOT caused by Step 23. No full-suite run.
+
+**Known limitations (truthful).** The specification is a reviewable DESIGN, not a
+plan: it carries no implementation, no code changes and no proposal, and it stops
+exactly there (Step 24 would implement it through the existing governed path). It
+inherits the EXISTING evidence base, so a specification can only be produced for a
+genuine gap whose subject is known from validated knowledge, and the affected areas
+depend on the architecture snapshot — which is cache-only (the seam triggers no
+repository scan), so a fresh kernel reports them as unresolved rather than scanning
+on demand. Inputs and outputs are never invented, and the operation signature,
+capability id and owning area are reported as unresolved questions. Alternatives
+are listed only where the located evidence admits more than one host. Capability
+implementation, autonomous approval/deployment and the integrated intelligence
+loop remain out of scope.
+
 ### 34.28 Step 22 — General capability gap detection: an evidence-backed diagnosis
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 22 built the smallest
@@ -3964,7 +4054,35 @@ unchanged; no full-suite run; known limitations recorded in §34.28 (the gap cla
 inherits the EXISTING evidence base, so an unsupported operation with an empty
 knowledge store is reported as missing_knowledge; base matching uses registered
 capability names; the capability/ambiguity/execution-failure inputs must be
-grounded caller-supplied outcomes; nothing is wired into the cascade); §34.28;
-Steps 1 → 22 are COMPLETE and Step 23 is NOT STARTED and remains evidence-driven).
+grounded caller-supplied outcomes; nothing is wired into the cascade); §34.28).
+Step 23 capability specification & development design added: 2026-09-29 (the
+real-kernel baseline showed Step 22's CapabilityGap was a terminal read-only
+diagnosis with nothing downstream consuming it, no specification/design type
+existed anywhere, the closest artifact — the advisory AcquisitionStrategy —
+carried no architecture grounding and no known-vs-unresolved split and was
+reachable only from capability discovery, and DevelopmentPlanner.plan accepts only
+an APPROVED proposal so a raw gap could not enter it). Minimal change: one new pure
+module (`atlas/self_knowledge/capability_specification.py`) turns a CONFIRMED
+genuine gap into an immutable bounded CapabilitySpecification — intended
+capability, purpose, request-derived operations, dependencies and affected areas
+from the EXISTING ArchitectureModel.locate()/component entries, constraints from
+the architecture's OWN scope boundaries, governance from the EXISTING boundaries
+plus the fixed invariants, and mechanism/prerequisites/verification/failure
+conditions from the EXISTING advisory AcquisitionStrategy — with an explicit
+known_facts vs unresolved_questions split (inputs/outputs are never invented) and
+alternatives LISTED in `options` when the evidence admits more than one host;
+non-gaps (supported, temporarily blocked, governed, missing knowledge, ambiguous,
+execution failure, unknown) and ungrounded/empty inputs are REFUSED with a reason
+and carry no design; `Atlas.capability_specification()` exposes it read-only and
+the conversation cascade is untouched. 35 focused tests plus relevant
+capability/self-knowledge/development/evolution/kernel/conversation regressions
+green; the pre-existing failures were reproduced against a pristine HEAD and remain
+unchanged; no full-suite run; known limitations recorded in §34.29 (a reviewable
+design, not a plan — no implementation/code changes/proposal; it inherits the
+EXISTING evidence base so a genuine gap needs a known subject; the architecture
+snapshot is cache-only so a fresh kernel reports areas as unresolved rather than
+scanning; inputs/outputs never invented; implementation, autonomous approval and
+the intelligence loop out of scope); §34.29; Steps 1 → 23 are COMPLETE and Step 24
+is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

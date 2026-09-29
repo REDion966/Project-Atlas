@@ -596,8 +596,22 @@ was demonstrated:
   / `ambiguous` / `execution_failure` / `unsupported_capability` / `unknown`),
   claiming a gap only when no capability covers a request whose subject is known
   from validated knowledge, and failing closed to `unknown` otherwise. Remaining
-  limitations are recorded in `docs/ATLAS_STATE.md` §34.28. **Steps 1 → 22 are
-  COMPLETE. Step 23 is NOT STARTED.**
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.28.
+- **Step 23 — Capability specification & development design** — the real-kernel
+  baseline showed Step 22's `CapabilityGap` was a terminal, read-only diagnosis
+  that nothing consumed, with no specification/design type existing anywhere; the
+  closest artifact (the advisory `AcquisitionStrategy`) carried no architecture
+  grounding and no known-vs-unresolved split, and `DevelopmentPlanner.plan` accepts
+  only an APPROVED proposal. A bounded, deterministic, model-free builder now turns
+  a CONFIRMED genuine gap into one immutable, reviewable specification — purpose,
+  request-derived operations, dependencies and affected areas from the existing
+  architecture model, constraints from its own scope boundaries, the existing
+  governance boundary and verification requirements, and the existing advisory
+  mechanism — with an explicit known-vs-unresolved split (inputs/outputs never
+  invented) and alternatives listed rather than chosen; every non-gap and
+  ungrounded input is refused with a reason and carries no design. Remaining
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.29. **Steps 1 → 23 are
+  COMPLETE. Step 24 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

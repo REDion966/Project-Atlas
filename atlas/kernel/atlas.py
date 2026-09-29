@@ -1361,6 +1361,45 @@ class Atlas:
             execution_failed=execution_failed,
         )
 
+    def capability_specification(
+        self,
+        request: str,
+        *,
+        capability: str = "",
+        ambiguous: bool = False,
+        execution_failed: bool = False,
+    ):
+        """Step 23 — a bounded, reviewable capability specification (read-only).
+
+        Diagnoses the request with the EXISTING Step 22 gap adjudicator and, ONLY
+        for a confirmed genuine capability gap, drafts a bounded design artifact:
+        purpose, implied operations, dependencies, affected architecture areas,
+        constraints, the EXISTING governance boundary, verification requirements
+        and the EXISTING advisory mechanism — plus an explicit split between what
+        the evidence establishes and what remains unresolved, with alternatives
+        listed rather than chosen.
+
+        Non-gaps (a supported capability, temporary unavailability, a governance
+        boundary, a knowledge need, an ambiguity, an execution failure) are
+        REFUSED with a reason. Nothing is generated, written, approved,
+        authorized, executed or promoted, and no model is consulted.
+        """
+        from atlas.self_knowledge.capability_specification import (
+            build_capability_specification,
+        )
+
+        gap = self.capability_gap(
+            request,
+            capability=capability,
+            ambiguous=ambiguous,
+            execution_failed=execution_failed,
+        )
+        return build_capability_specification(
+            gap,
+            capability_model=self.capability_model(),
+            architecture_model=self._architecture_model_snapshot(),
+        )
+
     def _knowledge_refresher(self):
         """Step 20 refresher over the EXISTING boundaries (single wiring point)."""
         from atlas.research.refresh import KnowledgeRefresher
