@@ -610,8 +610,27 @@ was demonstrated:
   mechanism — with an explicit known-vs-unresolved split (inputs/outputs never
   invented) and alternatives listed rather than chosen; every non-gap and
   ungrounded input is refused with a reason and carries no design. Remaining
-  limitations are recorded in `docs/ATLAS_STATE.md` §34.29. **Steps 1 → 23 are
-  COMPLETE. Step 24 is NOT STARTED.**
+  limitations are recorded in `docs/ATLAS_STATE.md` §34.29.
+- **Step 24 — Atlas direct self-development** — the real-kernel baseline showed a
+  Step 23 `CapabilitySpecification` was terminal: `Atlas` had no
+  `specification_development` API and no bridge module existed, so an approved
+  design could not enter the governed pipeline (the closest existing precedent,
+  `evidence_development.development_need_from_gap`, consumes a `ConcreteGap` from an
+  evidence-gap report, never a specification, and the sandbox envelope is disabled
+  in the controlled config, so the OWNER approval path is the real boundary). A
+  bounded, deterministic, model-free bridge
+  (`atlas/evolution/specification_development.py`) now accepts only a `SPECIFIED`,
+  complete specification, translates it into the EXISTING `DevelopmentNeed`,
+  prepares the DRAFT proposal and its approval request through the EXISTING
+  `DevelopmentCycleController`, exposes that human approval request rather than
+  bypassing it, and runs the EXISTING authorized sandbox execution + read-only
+  verification + `PromotionGate` review ONLY when the proposal is already
+  `APPROVED` / `SANDBOX_AUTHORIZED` or an explicit authorization is bound to it —
+  a design is never silently converted into authorization. Failed or unverified
+  work yields `not_promotable` with no promotion request, the result records what
+  changed, why and how it was verified, and promotion remains the separate OWNER
+  step. Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.30.
+  **Steps 1 → 24 are COMPLETE. Step 25 is NOT STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and
@@ -619,11 +638,12 @@ none expanded a permission boundary. Governance is unchanged: development approv
 and promotion approval remain separate OWNER decisions, unapproved development
 does not execute, promotion before approval is refused, verification is required,
 execution stays sandboxed, live writes stay controlled through `PromotionExecutor`,
-and invalid or insufficient-evidence paths fail closed. The validated loop is the
-demonstrated evidence-gap remedy class, **not** unrestricted autonomous
-self-development. **The next step is NOT STARTED** and remains evidence-driven:
-further evolution requires validated evidence of the next justified capability
-gap. See `docs/ATLAS_STATE.md` §34.10.
+and invalid or insufficient-evidence paths fail closed. The validated loop remains
+the demonstrated evidence-gap remedy class plus a specification-driven workflow
+that still stops at every EXISTING governance boundary — **not** unrestricted
+autonomous self-development. **The next step is NOT STARTED**: further evolution
+requires an explicitly authorized specification and the OWNER decisions the
+existing machinery already enforces. See `docs/ATLAS_STATE.md` §34.10.
 
 ---
 

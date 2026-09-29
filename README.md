@@ -267,10 +267,22 @@ governance — its own governed development.
     chosen. Non-gaps are refused with a reason; inputs and outputs are never
     invented; it generates no implementation, code changes or proposal and grants
     no authority.
+  - **Step 24** — Atlas direct self-development: an **authorized** specification
+    becomes a governed development workflow. Only a specified, complete design is
+    accepted (everything else is refused with a reason); it is translated into the
+    existing development need and prepared through the existing development cycle,
+    which stops at a bounded human approval request — a design is never silently
+    converted into authorization. Implementation, verification and promotion
+    readiness run only when the proposal already carries an authorizing status or
+    an explicit authorization bound to it, and only ever through the existing
+    sandbox execution, read-only verification and promotion gate: failed or
+    unverified work is never promoted, and promotion itself stays a separate OWNER
+    decision. The result records what changed, why and how it was verified.
   - The validated loop is the demonstrated evidence-gap remedy class
-    (`untested_component` → deterministic coverage module), **not** unrestricted
-    autonomous self-development. **Steps 1 → 23 are COMPLETE; the next step
-    (Step 24) is NOT STARTED** and stays evidence-driven.
+    (`untested_component` → deterministic coverage module) plus a
+    specification-driven workflow that stops at every existing governance
+    boundary — **not** unrestricted autonomous self-development. **Steps 1 → 24
+    are COMPLETE; the next step (Step 25) is NOT STARTED.**
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
 - **Latest verified full-suite baseline (historical, not re-run for the Phase 3–5

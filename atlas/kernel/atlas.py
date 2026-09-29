@@ -1400,6 +1400,77 @@ class Atlas:
             architecture_model=self._architecture_model_snapshot(),
         )
 
+    def specification_development(
+        self,
+        specification,
+        *,
+        code_changes=(),
+        test_files=(),
+        target_components=(),
+        evidence_ids=(),
+        proposal_id: str = "",
+        authorization=None,
+    ):
+        """Step 24 — governed self-development from an AUTHORIZED specification.
+
+        Translates a Step 23 specification into a bounded ``DevelopmentNeed`` and
+        carries it through the EXISTING governed pipeline: the EXISTING development
+        cycle prepares a DRAFT proposal and exposes its approval request, and the
+        EXISTING authorised sandbox execution + verification + promotion review run
+        ONLY when the proposal is ``APPROVED`` / ``SANDBOX_AUTHORIZED`` or an
+        explicit authorization is bound to it.
+
+        Without authorization it STOPS at the human approval boundary
+        (``awaiting_approval``) — a design is never silently turned into
+        authorization. Nothing is approved, authorised, promoted or written to the
+        live repository here, and no model is called.
+        """
+        from atlas.evolution.specification_development import (
+            SpecificationDevelopmentBridge,
+        )
+
+        proposal = None
+        if proposal_id:
+            memory = getattr(self, "_evolution_memory", None)
+            if memory is not None:
+                try:
+                    proposal = memory.get_proposal(proposal_id)
+                except Exception:
+                    proposal = None
+            if proposal is None:
+                raise RuntimeError(
+                    f"development proposal {proposal_id!r} could not be read "
+                    "(fail-closed)"
+                )
+
+        def _execute(target):
+            """The EXISTING authorised sandbox path (OWNER, else bounded envelope)."""
+            target_id = str(getattr(target, "proposal_id", "") or "")
+            status = str(getattr(getattr(target, "status", None), "name", "") or "")
+            if status == "APPROVED":
+                return self.run_development_execution(self.session_context, target_id)
+            if status != "SANDBOX_AUTHORIZED":
+                self.authorize_development_execution(target_id)
+            return self.run_development_execution(
+                None, target_id, allow_envelope=True
+            )
+
+        bridge = SpecificationDevelopmentBridge(
+            cycle_runner=self.run_development_cycle,
+            execute=_execute,
+            gate=self._promotion_gate,
+            promotion_preparer=self._prepare_promotion_request,
+        )
+        return bridge.run(
+            specification,
+            proposal=proposal,
+            authorization=authorization,
+            code_changes=code_changes,
+            test_files=test_files,
+            target_components=target_components,
+            evidence_ids=evidence_ids,
+        )
+
     def _knowledge_refresher(self):
         """Step 20 refresher over the EXISTING boundaries (single wiring point)."""
         from atlas.research.refresh import KnowledgeRefresher

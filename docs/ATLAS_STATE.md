@@ -1839,6 +1839,114 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.30 Step 24 — Atlas direct self-development: a governed specification-driven workflow
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 24 built the smallest
+evidence-driven, deterministic, model-independent bridge that lets Atlas carry an
+**authorized** Step 23 capability specification through the EXISTING governed
+development pipeline: a bounded development need, a DRAFT proposal and its
+approval request through the EXISTING development cycle, the EXISTING human
+approval boundary, the EXISTING sandbox-only authorized execution, the EXISTING
+read-only verification and the EXISTING promotion review. It is NOT an
+implementation, approval or promotion system: nothing is approved, authorized,
+promoted or written to the live repository, and no model is consulted.
+Specification-driven workflow ONLY — no autonomous approval, no unrestricted
+repository mutation, no automatic deployment/promotion outside existing
+governance, no new coding-agent dependency, no speculative self-modification, no
+integrated intelligence loop (Step 25).
+
+**What the baseline showed (measured through the real Atlas/kernel).** A Step 23
+`CapabilitySpecification` was **terminal**: `Atlas` had no `specification_development`
+API and no bridge module existed (`atlas/evolution/specification_development.py`
+absent), so an approved design could not enter the governed pipeline at all. The
+closest existing precedent — `evidence_development.development_need_from_gap` with
+`EvidenceChangeSupplier` — consumes a `ConcreteGap` from an evidence-gap report,
+never a capability specification, and supports one remedy class only. The EXISTING
+machinery was otherwise complete and was reused unchanged: the cycle stops at
+`PENDING_APPROVAL`, `DevelopmentPlanner.plan` accepts only `APPROVED` /
+`SANDBOX_AUTHORIZED`, the loop runs the disposable path-confined `CodeSandbox`, and
+promotion is OWNER-only. The bounded sandbox envelope is DISABLED in the controlled
+config (`enabled=False, max_runs_per_window=0`), so the OWNER approval path is the
+real governance boundary.
+
+**What was implemented (one bounded bridge over existing seams).**
+- `atlas/evolution/specification_development.py` (new): `SelfDevelopmentStage`
+  (``refused`` / ``awaiting_approval`` / ``implementation`` / ``verification`` /
+  ``promotion_review`` / ``not_promotable`` / ``failed``), the immutable bounded
+  `SpecificationDevelopmentResult` (stage, specification id, capability, request,
+  authorization flag, proposal/approval-request/plan ids, execution and verification
+  statuses, promotion request id, bounded changed files, evidence lines and truthful
+  reasons), `development_need_from_specification(...)`,
+  `SpecificationDevelopmentBridge` and `SELF_DEVELOPMENT_RULE`.
+- `atlas/kernel/atlas.py`:
+  `Atlas.specification_development(specification, *, code_changes, test_files,
+  target_components, evidence_ids, proposal_id, authorization)` — composes the
+  EXISTING cycle runner, the EXISTING authorized execution seam (OWNER approval for
+  an `APPROVED` proposal, else the bounded envelope path), the EXISTING
+  `PromotionGate` and the EXISTING promotion-preparer.
+
+**The development path (governed, nothing bypassed).** Only a `SPECIFIED`,
+complete specification is accepted — a refused, ambiguous, incomplete (no request /
+no operations / no mechanism) or non-specification input is REFUSED with a truthful
+reason and starts no workflow. The accepted design is translated into the EXISTING
+`DevelopmentNeed` (title, purpose, request-derived operations, the specification's
+known facts and gap reason, its evidence, and the bounded change payload in the
+EXISTING `metadata["code_changes"]` / `metadata["test_files"]` convention, with the
+specification's provenance preserved under `metadata["specification"]`), and the
+EXISTING cycle prepares the DRAFT proposal and its approval request. Without
+authorization the bridge STOPS at ``awaiting_approval`` and exposes that bounded
+approval request — a design is never silently converted into authorization. Execution
+runs ONLY when the proposal already carries an authorizing status (`APPROVED` /
+`SANDBOX_AUTHORIZED` — the EXISTING states the planner and loop accept) or an
+explicit authorization bound to that proposal (`DevelopmentAuthorization.is_valid_for`)
+is supplied; a supplied-but-invalid authorization is REFUSED with nothing executed.
+Implementation happens only inside the EXISTING sandbox, verification is the EXISTING
+read-only `DevelopmentVerification` (or the verification the run already carries), and
+promotion readiness is the EXISTING `PromotionGate` — a failed run or a
+non-``verified`` verification yields ``not_promotable`` with NO promotion request,
+and the gate's own ``not_promotable`` verdict is honoured even when the run passed.
+A verified change reaches ``promotion_review`` only through the EXISTING review
+seam; promotion itself remains the separate OWNER decision, and promotion remains the
+only place `PROMOTED` is set.
+
+**Validation.** `tests/test_step24_specification_development.py` — 32 focused tests
+(the approved specification producing a bounded workflow that stops at the approval
+boundary with nothing executed; an authorized proposal running implementation,
+verification and reaching a promotion review; an explicit authorization object
+authorizing execution and an invalid one failing closed; no-approval and
+``SANDBOX_AUTHORIZED`` states; the bounded need carrying the specification's
+provenance and the existing supplier payload convention; resume without re-running the
+cycle; refusals for a refused specification, incomplete designs, non-specification
+inputs, a failing/raising cycle and missing collaborators; failed verification and a
+gate ``not_promotable`` verdict producing no promotion request; the honest stop at
+``verification`` when no review seam is wired; evidence recording what changed, why
+and how it was verified; determinism, immutability, bounds, serialization and module
+model-independence; and real-kernel validation of a genuine gap →
+specification → awaiting approval without mutation, then OWNER approval → sandbox
+implementation → ``verified`` → promotion review with the live repository unchanged,
+an unapproved proposal not executing, failed verification never promoted, an unknown
+proposal id failing closed, no network use, and Steps 1-23 preservation). Relevant
+subsystem regressions were green (the F9 cycle, planner, approval boundary, change
+design, evidence-directed development, 115 planning, model-assisted supplier,
+E6 sandbox integration, P42 lifecycle, sandbox development/execution, capability
+activation, direct evolution, governed-lifecycle validation, durable guided
+improvement, P7 self-development integration, and Steps 14-23). The pre-existing
+failures documented elsewhere were reproduced against a pristine HEAD and remain
+unchanged — they are NOT caused by Step 24. No full-suite run.
+
+**Known limitations (truthful).** The bridge is a GOVERNED WORKFLOW, not an author:
+it carries no implementation of its own and cannot author changes, so the bounded
+change payload must be supplied by the caller (or a later step) — a specification
+alone produces a proposal, never code. It inherits the EXISTING evidence base, so a
+specification can only be produced for a genuine gap whose subject is known from
+validated knowledge, and its affected areas depend on the architecture snapshot,
+which is cache-only. The authorization check reuses the EXISTING states only: an
+OWNER approval or the bounded (config-gated, default-disabled) sandbox envelope, and
+the bridge never mints either. Promotion is never performed here — a verified change
+stops at the existing review and remains an explicit OWNER decision. The action
+surface is the kernel method plus this module; it is not wired into `Atlas.tick()`,
+and the integrated autonomous intelligence loop remains out of scope (Step 25).
+
 ### 34.29 Step 23 — Capability specification & development design: a reviewable artifact
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 23 built the smallest
@@ -4082,7 +4190,42 @@ design, not a plan — no implementation/code changes/proposal; it inherits the
 EXISTING evidence base so a genuine gap needs a known subject; the architecture
 snapshot is cache-only so a fresh kernel reports areas as unresolved rather than
 scanning; inputs/outputs never invented; implementation, autonomous approval and
-the intelligence loop out of scope); §34.29; Steps 1 → 23 are COMPLETE and Step 24
-is NOT STARTED and remains evidence-driven).
+the intelligence loop out of scope); §34.29).
+Step 24 Atlas direct self-development added: 2026-09-29 (the real-kernel baseline
+showed a Step 23 CapabilitySpecification was TERMINAL — Atlas had no
+specification_development API and no bridge module existed, so an approved design
+could not enter the governed pipeline; the closest precedent,
+evidence_development.development_need_from_gap, consumes a ConcreteGap from an
+evidence-gap report, never a specification, and the bounded sandbox envelope is
+DISABLED in the controlled config, making the OWNER approval path the real
+boundary). Minimal change: one new bounded bridge
+(`atlas/evolution/specification_development.py`) accepts ONLY a SPECIFIED, complete
+specification, translates it into the EXISTING DevelopmentNeed (EXISTING
+metadata["code_changes"]/["test_files"] supplier convention, specification
+provenance preserved under metadata["specification"]), prepares the DRAFT proposal
+and its approval request through the EXISTING DevelopmentCycleController, and STOPS
+at awaiting_approval exposing that request rather than bypassing it — a design is
+never silently converted into authorization; execution runs ONLY when the proposal
+is already APPROVED/SANDBOX_AUTHORIZED or an explicit authorization bound to it
+(DevelopmentAuthorization.is_valid_for) is supplied, and an invalid authorization is
+refused with nothing executed. Implementation uses the EXISTING sandbox-only
+authorized execution, verification is the EXISTING read-only DevelopmentVerification
+(or the run's own), promotion readiness is the EXISTING PromotionGate — a failed run
+or non-verified verification yields not_promotable with NO promotion request and the
+gate's own not_promotable verdict is honoured — and a verified change reaches
+promotion_review only through the EXISTING review seam, with promotion remaining the
+separate OWNER decision (the only place PROMOTED is set). Evidence records what
+changed, why and how it was verified;
+`Atlas.specification_development()` exposes the workflow and nothing is wired into
+tick(). 32 focused tests plus relevant development/evolution/planning/approval/
+sandbox/capability/kernel/Steps 14-23 regressions green; the pre-existing failures
+were reproduced against a pristine HEAD and remain unchanged; no full-suite run;
+known limitations recorded in §34.30 (a governed workflow, not an author — the
+bounded change payload must be supplied by the caller, so a specification alone
+produces a proposal and never code; it inherits the EXISTING evidence base and the
+cache-only architecture snapshot; the authorization check reuses the EXISTING OWNER
+approval or the config-gated, default-disabled envelope and mints neither; promotion
+is never performed here; the integrated intelligence loop is out of scope);
+§34.30; Steps 1 → 24 are COMPLETE and Step 25 is NOT STARTED).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
