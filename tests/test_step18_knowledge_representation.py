@@ -22,6 +22,7 @@ contradictory information into established knowledge.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 
@@ -44,27 +45,36 @@ from atlas.research.provenance import build_research_provenance
 _URL_A = "https://example.com/a"
 _URL_B = "https://example.com/b"
 
+#: Fixed timestamps (Step 19): the models default to ``datetime.now()``, so the
+#: fixture pins them — otherwise two separately-built fixtures would differ and
+#: the determinism assertions would be meaningless.
+_T0 = datetime(2026, 1, 1, 12, 0, 0)
 
-def _citation(uri, index=0):
+
+def _citation(uri, index=0, retrieved_at=_T0):
     return CitationRecord(
         record_id=f"cite:{uri}:{index:04d}",
         source_uri=uri,
         source_title=uri.split("/")[2],
         source_kind=SourceKind.WEB,
         section=f"chunk:{index:04d}",
+        retrieved_at=retrieved_at,
     )
 
 
-def _claim(claim_id, statement, citations, confidence=0.8):
+def _claim(claim_id, statement, citations, confidence=0.8, extracted_at=_T0):
     return KnowledgeClaim(
         claim_id=claim_id,
         statement=statement,
         citations=tuple(citations),
         confidence=confidence,
+        extracted_at=extracted_at,
     )
 
 
-def _verification(claim_id, outcome, supporting=(), contradicting=(), score=0.75):
+def _verification(
+    claim_id, outcome, supporting=(), contradicting=(), score=0.75, verified_at=_T0
+):
     status = {
         "VERIFIED": VerificationStatus.SUPPORTED,
         "PLAUSIBLE": VerificationStatus.SUPPORTED,
@@ -76,6 +86,7 @@ def _verification(claim_id, outcome, supporting=(), contradicting=(), score=0.75
         claim_id=claim_id,
         status=status,
         score=score,
+        verified_at=verified_at,
         metadata={
             "outcome": outcome,
             "supporting": list(supporting),

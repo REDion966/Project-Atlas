@@ -123,7 +123,9 @@ class ProvenanceEvidence:
     """One citation record: WHERE evidence was found (metadata, not evidence).
 
     Kept distinct from the claim so a consumer can never mistake a source
-    reference for established knowledge.
+    reference for established knowledge. ``retrieved_at`` is the EXISTING
+    citation timestamp (when the evidence was fetched) — event time only; it is
+    never a statement about when the content is true.
     """
 
     evidence_id: str
@@ -132,8 +134,15 @@ class ProvenanceEvidence:
     source_kind: str = ""
     section: str = ""
     page_or_line: str = ""
+    #: Step 19 — the EXISTING citation retrieval timestamp (event time), if any.
+    retrieved_at: Any = None
+    #: Step 19 — the EXISTING citation metadata, so an explicitly recorded
+    #: content time (if a source ever provides one) stays available.
+    metadata: Any = None
 
     def to_dict(self) -> dict[str, Any]:
+        retrieved_at = getattr(self.retrieved_at, "isoformat", None)
+        metadata = self.metadata if isinstance(self.metadata, dict) else {}
         return {
             "evidence_id": self.evidence_id,
             "source_uri": self.source_uri,
@@ -141,6 +150,8 @@ class ProvenanceEvidence:
             "source_kind": self.source_kind,
             "section": self.section,
             "page_or_line": self.page_or_line,
+            "retrieved_at": retrieved_at() if callable(retrieved_at) else None,
+            "metadata": dict(metadata),
         }
 
 
@@ -160,6 +171,10 @@ class ProvenanceClaim:
     contradicting_sources: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     findings: tuple[str, ...] = ()
+    #: Step 19 — the EXISTING event timestamps (when Atlas extracted/verified the
+    #: claim). They say nothing about when the content is true.
+    extracted_at: Any = None
+    verified_at: Any = None
 
     @property
     def verified(self) -> bool:
@@ -175,6 +190,8 @@ class ProvenanceClaim:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        extracted_at = getattr(self.extracted_at, "isoformat", None)
+        verified_at = getattr(self.verified_at, "isoformat", None)
         return {
             "claim_id": self.claim_id,
             "statement": self.statement,
@@ -190,6 +207,8 @@ class ProvenanceClaim:
             "findings": list(self.findings),
             "verified": self.verified,
             "merely_retrieved": self.merely_retrieved,
+            "extracted_at": extracted_at() if callable(extracted_at) else None,
+            "verified_at": verified_at() if callable(verified_at) else None,
         }
 
 
@@ -333,6 +352,18 @@ def _int(value: Any) -> int:
         return 0
 
 
+def _timestamp(value: Any) -> Any:
+    """Return the EXISTING datetime on ``value``, or ``None`` (never invented)."""
+    try:
+        from datetime import datetime
+
+        if isinstance(value, datetime):
+            return value
+    except Exception:  # pragma: no cover - defensive
+        return None
+    return None
+
+
 def _float(value: Any) -> float:
     try:
         return round(float(value), 4)
@@ -446,6 +477,10 @@ def _claims_and_evidence(
                         source_kind=citation_kind,
                         section=_clean(getattr(citation, "section", ""), 120),
                         page_or_line=_clean(getattr(citation, "page_or_line", ""), 120),
+                        # Step 19 — the EXISTING citation timestamp (event time)
+                        # and metadata (a source-recorded content time, if any).
+                        retrieved_at=_timestamp(getattr(citation, "retrieved_at", None)),
+                        metadata=getattr(citation, "metadata", None),
                     )
                 )
         verification = latest.get(claim_id)
@@ -483,6 +518,9 @@ def _claims_and_evidence(
                 ),
                 evidence_ids=tuple(evidence_ids[:_MAX_EVIDENCE]),
                 findings=tuple(findings[:_MAX_FINDINGS]),
+                # Step 19 — the EXISTING event timestamps (never content time).
+                extracted_at=_timestamp(getattr(raw, "extracted_at", None)),
+                verified_at=_timestamp(getattr(verification, "verified_at", None)),
             )
         )
 

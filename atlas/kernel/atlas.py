@@ -1280,6 +1280,23 @@ class Atlas:
 
         return RetainedKnowledgeRetriever(self._research_storage).retrieve(query)
 
+    def temporal_knowledge(self, query: str, now=None):
+        """Step 19 — temporal/freshness overlay for retained knowledge.
+
+        Projects the EXISTING event timestamps (citation ``retrieved_at``, claim
+        ``extracted_at``, verification ``verified_at``) and the EXISTING
+        freshness assessor (``atlas.evolution.freshness``, default policy) onto
+        the Step 18 retained records, and keeps content time (when the knowledge
+        is ABOUT) strictly apart from acquisition time. Read-only, deterministic
+        given ``now`` (the injectable clock; the default is the assessor's own
+        clock), model-free and fail-closed: absent temporal evidence is reported
+        as unknown, never as freshness, and no dates or validity periods are
+        invented.
+        """
+        from atlas.research.temporal import temporal_from_retained
+
+        return temporal_from_retained(self.retained_knowledge(query), now=now)
+
     @property
     def work_orchestrator(self):
         """Return the kernel-owned WorkOrchestrator (D4).

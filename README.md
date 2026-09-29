@@ -60,10 +60,10 @@ governance — its own governed development.
     from the request's own words. The Development Envelope stays disabled by
     default, promotion remains OWNER-only, and nothing is approved, executed, or
     promoted by conversation.
-- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 18)** — additive,
+- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 19)** — additive,
   model-independent, and owner-gated; no new engine, planner, scheduler or store
   was introduced, and no later step is defined (see `docs/ATLAS_STATE.md` §34.10
-  through §34.24):
+  through §34.25):
   - **Step 1** — open-ended conversation over the existing provider seam, with
     Atlas (not any model) remaining the authority.
   - **Step 2** — goal-centered orchestration: compound requests sequence as
@@ -217,10 +217,19 @@ governance — its own governed development.
     surface is now standing-aware (each retrieved claim reports its standing and
     its evidence ids), so an opaque `SUPPORTED` item can no longer be mistaken for
     corroborated knowledge.
+  - **Step 19** — temporal & freshness-aware knowledge: retained knowledge now
+    carries its EXISTING event timestamps (citation `retrieved_at`, claim
+    `extracted_at`, verification `verified_at`) and a bounded temporal status
+    computed by the EXISTING freshness assessor — `current_relative` (current
+    **relative to when Atlas acquired it**, never a claim that the content is true
+    now), `historical`, `undated` or `unknown`. Content time (when the knowledge
+    is *about*) is kept strictly apart and stays unknown unless a source recorded
+    one; absent temporal evidence is never treated as freshness, and no dates,
+    validity periods or thresholds are invented.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module), **not** unrestricted
-    autonomous self-development. **Steps 1 → 18 are COMPLETE; the next step
-    (Step 19) is NOT STARTED** and stays evidence-driven.
+    autonomous self-development. **Steps 1 → 19 are COMPLETE; the next step
+    (Step 20) is NOT STARTED** and stays evidence-driven.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
 - **Latest verified full-suite baseline (historical, not re-run for the Phase 3–5

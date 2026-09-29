@@ -544,8 +544,21 @@ was demonstrated:
   provenance link and refuses contested/unverified/unknown/unattributed claims
   with reasons (duplicates collapsed by claim id; nothing written, promoted or
   model-decided), and the existing retrieval surface is now standing-aware.
-  Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.24. **Steps 1 →
-  18 are COMPLETE. Step 19 is NOT STARTED.**
+  Remaining limitations are recorded in `docs/ATLAS_STATE.md` §34.24.
+- **Step 19 — Temporal & freshness-aware knowledge** — the real-kernel baseline
+  showed the pipeline already recorded event time (citation retrieved_at, claim
+  extracted_at, verification verified_at) and an existing freshness assessor
+  already existed, but Step 17 provenance carried no timestamp, Step 18
+  `KnowledgeRecord` carried none (`RetainedKnowledgeRetriever` dropped the
+  extracted_at/verified_at it could read), nothing bridged retained knowledge to
+  the assessor, and no content-time concept existed. A bounded, deterministic,
+  model-free overlay now gives retained knowledge its event timestamps and a
+  temporal status (`current_relative` / `historical` / `undated` / `unknown`)
+  computed by the EXISTING assessor with its default policy, keeping content time
+  (when the knowledge is *about*) strictly apart and never treating the absence of
+  temporal evidence as freshness. Remaining limitations are recorded in
+  `docs/ATLAS_STATE.md` §34.25. **Steps 1 → 19 are COMPLETE. Step 20 is NOT
+  STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration
 engine, memory store, approval system, promotion system or model dependency, and

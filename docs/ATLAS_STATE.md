@@ -1839,6 +1839,99 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.25 Step 19 — Temporal & freshness-aware knowledge: event time vs content time
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 19 built the smallest
+evidence-driven, deterministic, model-independent temporal overlay for retained
+knowledge (Steps 17-18): it states, from evidence Atlas already holds, WHEN the
+knowledge was retrieved/extracted/verified, whether it is current RELATIVE to
+that acquisition or historical, and whether temporal information is simply
+unknown — while keeping content time (when the knowledge is *about*) strictly
+apart. It is NOT a new time model and NOT a refresh mechanism, and it invents no
+dates, no validity periods and no thresholds. It implements temporal/freshness
+representation ONLY: no automatic refresh/revalidation (Step 20), no continuous
+monitoring, no capability-gap detection, no autonomous learning beyond the
+existing Step 18 retention boundary, no speculative temporal inference.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+pipeline already recorded event time (citation ``retrieved_at``, claim
+``extracted_at``, verification ``verified_at``) and an EXISTING freshness
+assessor already existed (``atlas/evolution/freshness``: FRESH/STALE/UNCERTAIN,
+``FreshnessPolicy(max_source_age=180d, max_verification_age=90d)``, and its
+"missing provenance is never fresh" rule) — neither was rebuilt. But:
+
+  * Step 17 ``ProvenanceEvidence``/``ProvenanceClaim`` carried NO timestamp, so
+    the citation/claim/verification times were dropped before the knowledge
+    layer;
+  * Step 18 ``KnowledgeRecord`` therefore carried no temporal metadata, and
+    ``RetainedKnowledgeRetriever`` actively dropped the ``extracted_at``/
+    ``verified_at`` the underlying item already exposed;
+  * nothing bridged retained knowledge to the existing assessor — no production
+    code constructs a ``KnowledgeRef`` — so retained knowledge had no temporal
+    status at all;
+  * no content-time (when the knowledge is ABOUT) concept existed anywhere: the
+    pipeline is event-time only.
+
+**What was implemented (one bounded overlay over existing evidence).**
+- `atlas/research/temporal.py` (new): ``TemporalStatus`` (``current_relative`` /
+  ``historical`` / ``undated`` / ``unknown``), ``KnowledgeTemporal`` (record/claim
+  identity, standing, content time, the three event times, the assessor's
+  ``assessed_at``/``age_days``/``reasons``/``rationale`` and bounded findings) and
+  ``TemporalKnowledge``; ``assess_record_temporal`` / ``assess_temporal`` /
+  ``temporal_from_retained`` project the EXISTING assessor onto retained records.
+- `atlas/research/provenance.py`: ``ProvenanceEvidence`` gained the EXISTING
+  citation ``retrieved_at`` (and metadata); ``ProvenanceClaim`` gained the
+  EXISTING ``extracted_at``/``verified_at`` — additive, so the Step 17 chain now
+  carries event time.
+- `atlas/research/knowledge_representation.py`: ``KnowledgeRecord`` gained the
+  event timestamps and an explicit ``knowledge_time`` slot, populated by BOTH
+  builders (retention from the provenance, retrieval from the item/citation), so
+  the retrieval surface no longer drops them.
+- `atlas/kernel/atlas.py`: ``Atlas.temporal_knowledge(query, now=None)``.
+
+**Guarantees.** Absence of temporal evidence is never freshness (no timestamps →
+``undated``, with a finding that it is "never assumed current"); no date or
+validity period is invented (a missing content time stays unknown, and no
+expiration window exists); ``current_relative`` means current *relative to when
+Atlas acquired it* and is documented as exactly that — newer acquisition is never
+treated as newer truth; content time is read ONLY from an explicitly recorded
+source metadata value (no adapter records one today, and the hard-coded
+``mtime_epoch`` placeholder is deliberately ignored); the age judgement is the
+EXISTING assessor with its shipped policy; and the overlay is read-only,
+deterministic given the injected clock, and preserves the Steps 17-18 provenance,
+standing and justification verbatim.
+
+**Validation.** `tests/test_step19_temporal_knowledge.py` — 25 focused tests
+(event-time representation; the content-time vs acquisition-time distinction;
+content time unknown/never inferred, and known when a source recorded it;
+current-relative and historical cases; the injected EXISTING policy driving the
+threshold so no new one is invented; determinism and deterministic ordering;
+mixed naive/aware timestamps; missing evidence staying ``undated`` and never
+``current_relative``; no invented validity period; standing/identity preservation
+and non-mutation; the retained-result overlay; and real-kernel validation of
+current/historical through the kernel, temporal metadata reaching the retrieval
+surface, survival across a kernel restart, contested/absent knowledge having no
+temporal entry, event time never claiming content currency, read-only assessment
+and Steps 1-18 preservation). Relevant subsystem regressions were green (Steps
+15-18, the kernel suite, the F2 freshness suite, F8 acquisition,
+validated-retrieval, research-storage, evidence/provenance, model-free-knowledge
+and research-models suites, plus the C6.1/C6-reuse/C6-learning suites,
+conversation service, G2, D2/D3/D4, the architecture import scan and the CLI).
+The pre-existing failures documented elsewhere were reproduced against a pristine
+HEAD and remain unchanged — they are NOT caused by Step 19. No full-suite run.
+
+**Known limitations (truthful).** The pipeline records event time only, so in
+practice every retained record is ``current_relative`` or ``historical`` and
+``undated`` arises only when a caller supplies records without timestamps; and
+because no adapter records a content time, ``knowledge_time`` is unknown for all
+real data (the reader is exercised with a synthetic recorded value). The overlay
+does not refresh, revalidate or reacquire anything and never ages a record while
+it sits — status is computed at assessment time from the injected clock. Temporal
+staleness uses the EXISTING default freshness policy (180d source / 90d
+verification); no per-knowledge validity period is modelled. Automatic refresh,
+monitoring and capability-gap detection remain evidence-driven, separately
+authorized work — no later phase is implemented or implied.
+
 ### 34.24 Step 18 — Knowledge representation & learning: retaining justified knowledge
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 18 built the smallest
@@ -3460,7 +3553,30 @@ remain unchanged; no full-suite run; known limitations recorded in §34.24
 persisted, so it curates and attributes rather than writing a separate store;
 a single-source corpus cannot yield an established record; retention does not
 re-verify/re-fetch; temporal/freshness, refresh, monitoring and capability-gap
-detection remain out of scope); §34.24; Steps 1 → 18 are COMPLETE and Step 19 is
-NOT STARTED and remains evidence-driven).
+detection remain out of scope); §34.24).
+Step 19 temporal & freshness-aware knowledge added: 2026-09-29 (the real-kernel
+baseline showed the pipeline already recorded event time — citation retrieved_at,
+claim extracted_at, verification verified_at — and an EXISTING freshness assessor
+already existed, but Step 17 provenance carried no timestamp, Step 18
+KnowledgeRecord carried none (RetainedKnowledgeRetriever dropped the
+extracted_at/verified_at it could read), nothing bridged retained knowledge to the
+assessor, and no content-time concept existed). Minimal change: one new pure
+module (`atlas/research/temporal.py`) projects the EXISTING assessor (default
+policy) and the EXISTING event timestamps onto retained knowledge as a bounded
+`KnowledgeTemporal` (current_relative / historical / undated / unknown) that keeps
+content time (when the knowledge is ABOUT — unknown unless a source explicitly
+recorded one) strictly apart from acquisition/verification time; Step 17
+ProvenanceEvidence/ProvenanceClaim and Step 18 KnowledgeRecord gained those
+timestamps additively; and `Atlas.temporal_knowledge(query, now=None)` exposes it.
+No dates, validity periods or thresholds are invented, and absent temporal
+evidence is never freshness. 25 focused tests plus relevant
+knowledge/research/freshness/storage/kernel regressions green; the pre-existing
+failures were reproduced against a pristine HEAD and remain unchanged; no
+full-suite run; known limitations recorded in §34.25 (the pipeline is event-time
+only, so undated requires timestamp-less input and knowledge_time is unknown for
+all real data; staleness uses the EXISTING default freshness policy; status is
+computed at assessment time from the injected clock; no refresh/revalidation);
+§34.25; Steps 1 → 19 are COMPLETE and Step 20 is NOT STARTED and remains
+evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

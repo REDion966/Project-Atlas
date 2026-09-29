@@ -120,6 +120,14 @@ class KnowledgeRecord:
     objective: str = ""
     query: str = ""
     findings: tuple[str, ...] = ()
+    #: Step 19 — the EXISTING event timestamps (when Atlas retrieved / extracted
+    #: / verified the claim). They are NOT content time.
+    retrieved_at: Any = None
+    extracted_at: Any = None
+    verified_at: Any = None
+    #: Step 19 — an explicit content time recorded by a source, if any. Never
+    #: inferred; empty means the temporal overlay reports it as unknown.
+    knowledge_time: str = ""
 
     @property
     def source_uris(self) -> tuple[str, ...]:
@@ -127,6 +135,10 @@ class KnowledgeRecord:
         return tuple(e.source_uri for e in self.evidence if e.source_uri)
 
     def to_dict(self) -> dict[str, Any]:
+        def _iso(value: Any) -> str | None:
+            encoder = getattr(value, "isoformat", None)
+            return encoder() if callable(encoder) else None
+
         return {
             "record_id": self.record_id,
             "claim_id": self.claim_id,
@@ -147,6 +159,11 @@ class KnowledgeRecord:
             "query": self.query,
             "findings": list(self.findings),
             "source_uris": list(self.source_uris),
+            "retrieved_at": _iso(self.retrieved_at),
+            "extracted_at": _iso(self.extracted_at),
+            "verified_at": _iso(self.verified_at),
+            "knowledge_time": self.knowledge_time,
+            "knowledge_time_known": bool(self.knowledge_time),
         }
 
 
@@ -278,6 +295,25 @@ def _evidence_for(
         if item is not None and item not in out:
             out.append(item)
     return tuple(out[:_MAX_EVIDENCE])
+
+
+def _earliest_retrieved(evidence: tuple[ProvenanceEvidence, ...]) -> Any:
+    """The earliest EXISTING evidence retrieval timestamp, or None.
+
+    Step 19 — the oldest evidence bounds how current the record can be; with no
+    timestamp it stays None (never invented, never assumed current).
+    """
+    stamps = [
+        item.retrieved_at
+        for item in evidence
+        if getattr(item, "retrieved_at", None) is not None
+    ]
+    if not stamps:
+        return None
+    try:
+        return min(stamps)
+    except TypeError:  # mixed naive/aware: keep the recorded order
+        return stamps[0]
 
 
 def _sources_for(
@@ -419,6 +455,10 @@ def retain_knowledge(provenance: Any) -> KnowledgeRetention:
                 objective=objective,
                 query=query,
                 findings=tuple(findings[:_MAX_FINDINGS]),
+                # Step 19 — temporal metadata carried from the existing evidence.
+                retrieved_at=_earliest_retrieved(evidence_items),
+                extracted_at=getattr(claim, "extracted_at", None),
+                verified_at=getattr(claim, "verified_at", None),
             )
         )
         if len(records) >= _MAX_RECORDS:
@@ -523,6 +563,10 @@ class RetainedKnowledgeRetriever:
                     source_kind=_name_of(getattr(c, "source_kind", "")),
                     section=_clean(getattr(c, "section", ""), 120),
                     page_or_line=_clean(getattr(c, "page_or_line", ""), 120),
+                    # Step 19 — keep the EXISTING citation timestamp (event time)
+                    # and metadata (a source-recorded content time, if any).
+                    retrieved_at=getattr(c, "retrieved_at", None),
+                    metadata=getattr(c, "metadata", None),
                 )
                 for c in citations
             )
@@ -543,6 +587,11 @@ class RetainedKnowledgeRetriever:
                         getattr(item, "verification_score", 0.0)
                     ),
                     evidence=evidence[:_MAX_EVIDENCE],
+                    # Step 19 — the retrieval surface no longer drops the
+                    # EXISTING extracted/verified/retrieved timestamps.
+                    retrieved_at=_earliest_retrieved(evidence[:_MAX_EVIDENCE]),
+                    extracted_at=getattr(item, "extracted_at", None),
+                    verified_at=getattr(item, "verified_at", None),
                 )
             )
 
