@@ -238,6 +238,67 @@ def _temporal_status(assessment: Any) -> TemporalStatus:
 # ---------------------------------------------------------------------------
 
 
+def record_event_times(record: Any) -> tuple[Any, Any, Any]:
+    """The EXISTING event timestamps of a record: (retrieved, extracted, verified).
+
+    ``retrieved_at`` falls back to the earliest evidence retrieval; a missing
+    value stays ``None`` (never invented).
+    """
+    evidence = tuple(getattr(record, "evidence", ()) or ())
+    retrieved_at = _as_datetime(getattr(record, "retrieved_at", None)) or _earliest(
+        [getattr(item, "retrieved_at", None) for item in evidence]
+    )
+    extracted_at = _as_datetime(getattr(record, "extracted_at", None))
+    verified_at = _as_datetime(getattr(record, "verified_at", None))
+    return retrieved_at, extracted_at, verified_at
+
+
+def record_source_uris(record: Any) -> tuple[str, ...]:
+    """The source identity recorded on a record's evidence (attribution)."""
+    return tuple(
+        uri
+        for uri in (
+            _clean(getattr(item, "source_uri", ""), 200)
+            for item in (getattr(record, "evidence", ()) or ())
+        )
+        if uri
+    )
+
+
+def knowledge_ref_for(record: Any) -> Any | None:
+    """The EXISTING ``KnowledgeRef`` for a retained record, or ``None``.
+
+    Shared by the temporal overlay (Step 19) and knowledge refresh (Step 20) so
+    both evaluate the SAME projection with the EXISTING freshness assessor.
+    Deterministic and read-only; ``None`` when the freshness model is
+    unavailable (fail-closed).
+    """
+    try:
+        from atlas.evolution.freshness.models import KnowledgeRef
+    except Exception:  # pragma: no cover - defensive
+        return None
+    record_id = _clean(getattr(record, "record_id", ""), 120)
+    claim_id = _clean(getattr(record, "claim_id", ""), 120)
+    retrieved_at, _extracted_at, verified_at = record_event_times(record)
+    try:
+        return KnowledgeRef(
+            knowledge_id=record_id or claim_id,
+            source_uris=record_source_uris(record),
+            claim_id=claim_id,
+            # a recorded verification exists whenever a status was recorded
+            verification_id=(
+                f"verify:{claim_id}"
+                if getattr(record, "verification_status", "")
+                else ""
+            ),
+            retrieved_at=retrieved_at,
+            verified_at=verified_at,
+            confidence=getattr(record, "confidence", None),
+        )
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
 def assess_record_temporal(
     record: Any,
     *,
@@ -255,12 +316,7 @@ def assess_record_temporal(
     standing = _clean(getattr(record, "standing", ""), 32)
     justified = bool(getattr(record, "justified", True))
 
-    evidence = tuple(getattr(record, "evidence", ()) or ())
-    retrieved_at = _as_datetime(getattr(record, "retrieved_at", None)) or _earliest(
-        [getattr(item, "retrieved_at", None) for item in evidence]
-    )
-    extracted_at = _as_datetime(getattr(record, "extracted_at", None))
-    verified_at = _as_datetime(getattr(record, "verified_at", None))
+    retrieved_at, extracted_at, verified_at = record_event_times(record)
 
     knowledge_time = ""
     knowledge_time_known = False
@@ -274,14 +330,6 @@ def assess_record_temporal(
             knowledge_time = candidate
             knowledge_time_known = True
 
-    source_uris = [
-        uri
-        for uri in (
-            _clean(getattr(item, "source_uri", ""), 200) for item in evidence
-        )
-        if uri
-    ]
-
     assessment: Any = None
     assessed_at: Any = None
     reasons: tuple[str, ...] = ()
@@ -289,8 +337,6 @@ def assess_record_temporal(
     status = TemporalStatus.UNDATED
     age_days: float | None = None
     try:
-        from atlas.evolution.freshness.models import KnowledgeRef
-
         engine = assessor
         if engine is None:
             from atlas.evolution.freshness.assessor import (
@@ -298,16 +344,9 @@ def assess_record_temporal(
             )
 
             engine = KnowledgeFreshnessAssessor()
-        reference = KnowledgeRef(
-            knowledge_id=record_id or claim_id,
-            source_uris=tuple(source_uris),
-            claim_id=claim_id,
-            # a recorded verification exists whenever a status was recorded
-            verification_id=(f"verify:{claim_id}" if getattr(record, "verification_status", "") else ""),
-            retrieved_at=retrieved_at,
-            verified_at=verified_at,
-            confidence=getattr(record, "confidence", None),
-        )
+        reference = knowledge_ref_for(record)
+        if reference is None:
+            raise ValueError("no freshness reference could be built")
         assessment = engine.assess(reference, now=now)
         status = _temporal_status(assessment)
         assessed_at = getattr(assessment, "assessed_at", None)
@@ -416,5 +455,8 @@ __all__ = [
     "TemporalStatus",
     "assess_record_temporal",
     "assess_temporal",
+    "knowledge_ref_for",
+    "record_event_times",
+    "record_source_uris",
     "temporal_from_retained",
 ]

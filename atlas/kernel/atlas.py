@@ -1297,6 +1297,43 @@ class Atlas:
 
         return temporal_from_retained(self.retained_knowledge(query), now=now)
 
+    def refresh_requests(self, query: str, now=None):
+        """Step 20 — the bounded refresh plan for retained knowledge (read-only).
+
+        Uses the EXISTING temporal overlay (Step 19) and the EXISTING freshness
+        assessor to report which retained records warrant refresh/revalidation,
+        with the action and the recorded sources to re-acquire. It fetches
+        nothing, writes nothing and grants no authority.
+        """
+        from atlas.research.refresh import plan_refresh
+
+        retained = self.retained_knowledge(query)
+        return plan_refresh(retained.records, now=now)
+
+    def refresh_knowledge(self, query: str, candidate_urls=(), now=None):
+        """Step 20 — refresh stale retained knowledge through EXISTING boundaries.
+
+        Composes the Steps 19-18 temporal/retention surfaces with the EXISTING
+        D2 authorization policy and the EXISTING F8 acquisition pipeline. The
+        original knowledge and its provenance are never overwritten: a
+        replacement is accepted only when the refreshed evidence is justified
+        under the Step 18 rule AND at least as strong as the retained standing.
+        Denied, insufficient, failed or weaker refreshes preserve the original
+        and say so explicitly. Nothing is scheduled, promoted or model-decided.
+        """
+        from atlas.research.refresh import KnowledgeRefresher
+
+        retained = self.retained_knowledge(query)
+        refresher = KnowledgeRefresher(
+            acquirer=self.external_acquisition,
+            acquisition=self.acquisition_service,
+            storage=self._research_storage,
+            capability_state_provider=self._research_capability_state,
+        )
+        return refresher.refresh_all(
+            retained.records, candidate_urls=tuple(candidate_urls or ()), now=now
+        )
+
     @property
     def work_orchestrator(self):
         """Return the kernel-owned WorkOrchestrator (D4).

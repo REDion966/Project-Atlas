@@ -557,7 +557,21 @@ was demonstrated:
   computed by the EXISTING assessor with its default policy, keeping content time
   (when the knowledge is *about*) strictly apart and never treating the absence of
   temporal evidence as freshness. Remaining limitations are recorded in
-  `docs/ATLAS_STATE.md` §34.25. **Steps 1 → 19 are COMPLETE. Step 20 is NOT
+  `docs/ATLAS_STATE.md` §34.25.
+- **Step 20 — Knowledge refresh** — the real-kernel baseline showed the existing
+  freshness assessor already computed the refresh action for stale retained
+  knowledge (RESEARCH with `provenance_refs`) and Steps 18–19 already represented
+  that knowledge, but nothing consumed the decision: no refresh seam existed, there
+  was no bounded request or replacement decision, and the D2 boundary short-circuits
+  a stale-but-justified claim as `existing_knowledge`, so a naive route could never
+  re-validate it. A bounded, deterministic, model-free capability now derives a
+  refresh request from the existing provenance, authorizes the recorded web sources
+  through the existing deny-by-default policy, executes through the existing F8
+  pipeline, and reads the refreshed evidence back through the Step 17–18 rules — a
+  replacement is accepted only when it is justified and at least as strong as the
+  retained standing, and weaker/unjustified/denied/insufficient/failed refreshes
+  preserve the original explicitly. Remaining limitations are recorded in
+  `docs/ATLAS_STATE.md` §34.26. **Steps 1 → 20 are COMPLETE. Step 21 is NOT
   STARTED.**
 
 None of these steps introduced a new engine, planner, scheduler, orchestration

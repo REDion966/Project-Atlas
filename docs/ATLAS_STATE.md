@@ -1839,6 +1839,119 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.26 Step 20 — Knowledge refresh: re-validating stale knowledge without corruption
+
+**Status: COMPLETE (additive, not a roadmap phase).** Step 20 built the smallest
+evidence-driven, deterministic, model-independent capability that identifies
+retained knowledge whose EXISTING temporal/freshness evidence says it is stale or
+needs revalidation, formulates a bounded refresh request from the knowledge's own
+provenance, routes it through the EXISTING governed acquisition pipeline, and
+decides from the Step 17-18 evidence/standing rules whether the refreshed
+evidence may replace the retained knowledge. It is NOT a second research or
+storage system and NOT a scheduler: the request is built from the EXISTING
+provenance and source identity, the authorization decision is the EXISTING D2
+host policy, execution is the EXISTING F8 pipeline, and the refreshed evidence is
+read back through the EXISTING Step 17 provenance and Step 18 retention rules.
+Nothing is written, deleted, replaced, promoted or scheduled. Refresh ONLY —
+no continuous/background monitoring (Step 21), no automatic scheduling loops, no
+capability-gap detection, no speculative source ranking, no autonomous
+authorization, no new external source permissions.
+
+**What the baseline showed (measured through the real Atlas/kernel).** The
+EXISTING freshness assessor already computed the refresh decision for stale
+knowledge — for a 400-day-old retained claim it returned
+`StaleKnowledgeCandidate(recommended_action=RESEARCH, provenance_refs=('https://
+example.com/old',))` — and Steps 18-19 already represented retained knowledge with
+standing and event time. But **nothing consumed that decision for retained
+knowledge**: no refresh seam existed anywhere (`refresh_knowledge`,
+`refresh_requests` and `atlas/research/refresh.py` did not exist), there was no
+bounded refresh request and no replacement decision; and the D2 boundary
+actively short-circuits a stale-but-justified claim
+(`acquire_external_knowledge(...)` → `existing_knowledge`, "Existing validated
+knowledge covers the objective; no external acquisition"), so a naive refresh
+route could never re-validate it.
+
+**What was implemented (one bounded capability over existing boundaries).**
+- `atlas/research/refresh.py` (new): `RefreshStatus` (``not_required`` /
+  ``review_required`` / ``refreshed`` / ``preserved`` / ``no_authorized_source`` /
+  ``insufficient`` / ``failed`` / ``unknown``), `ReplacementDecision`
+  (``accepted`` / ``weaker_evidence`` / ``unjustified`` / ``no_candidate``),
+  a bounded `RefreshRequest` (identity, standing, temporal status, the EXISTING
+  action and reasons, the query, and the recorded sources to re-acquire),
+  an immutable `RefreshOutcome` (always carrying the ORIGINAL record, and a
+  replacement only when one was accepted), `KnowledgeRefresh` and
+  `KnowledgeRefresher`; plus ``REFRESH_RULE``.
+- `atlas/research/temporal.py`: the Step 19 ``KnowledgeRef`` construction was
+  extracted into the shared ``knowledge_ref_for(record)`` (with
+  ``record_event_times`` / ``record_source_uris``) so the temporal overlay and
+  refresh evaluate the SAME projection (behaviour unchanged).
+- `atlas/kernel/atlas.py`: ``Atlas.refresh_requests(query, now)`` (the read-only
+  refresh plan) and ``Atlas.refresh_knowledge(query, candidate_urls, now)``.
+
+**The refresh path (and why it is composed this way).** A stale retained record
+is projected to the EXISTING ``KnowledgeRef`` and evaluated by the EXISTING
+freshness assessor, which supplies the action (``research`` for source age,
+``verify`` for verification age) and the EXISTING ``provenance_refs`` as the
+re-acquisition list. Execution then applies the EXISTING D2 authorization policy
+(``authorize``, I/O-free, deny-by-default — applied only to sources the EXISTING
+``WEB_SCHEMES`` allowlist covers, so a non-web spec passes to the existing
+resolver unchanged) and runs the EXISTING F8 acquisition pipeline over the
+authorized sources. The D2 acquirer's "existing validated knowledge already
+covers it" short-circuit is deliberately not used: that rule exists to answer
+questions, and it is exactly what prevents re-validating stale evidence. The
+refreshed evidence is read back through the EXISTING Step 17 provenance and
+Step 18 retention rules, and only a JUSTIFIED record (standing
+``verified``/``supported`` WITH a provenance link) whose standing is at least as
+strong as the retained knowledge's may replace it.
+
+**Refresh is never "overwrite because newer data was fetched".** The original
+knowledge and its provenance are preserved — the store is never rewritten or
+deleted, and every outcome reports the original; a weaker, unjustified, absent,
+denied, insufficient or failed refresh preserves the original and states why;
+``not_required``/``review_required`` (temporal standing unknown → a governed
+review, nothing fetched) never touch the boundary at all. All of it is
+deterministic given the injected clock, model-free, fail-closed and
+authorization-bound.
+
+**Validation.** `tests/test_step20_knowledge_refresh.py` — 30 focused tests
+(fresh knowledge requiring no refresh; a bounded stale request reusing the
+existing provenance/sources; verification-age requesting ``verify``; temporal
+unknown handled explicitly as ``review_required`` with nothing fetched;
+deterministic, ordered, bounded planning; the full stronger/equal/weaker/
+unjustified/no-candidate replacement matrix; a not-required refresh never
+touching the boundary; deny-by-default and denied-source paths fetching nothing
+and preserving the original; unavailable capability and raising pipeline failing
+closed; a run without evidence being insufficient; equal/stronger evidence
+refreshing while weaker and contested evidence preserve; non-web sources passing
+through the resolver; bounded deterministic ``refresh_all``; and real-kernel
+validation that fresh knowledge needs no refresh, a denied refresh leaves every
+store count unchanged with the original still retrievable, an authorized refresh
+replaces with justified at-least-as-strong evidence while keeping the ORIGINAL in
+the store, an empty authorized refresh is insufficient and preserves, refreshed
+and preserved knowledge survive a kernel restart, planning is read-only and
+Steps 1-19 are preserved). Relevant subsystem regressions were green (Steps
+15-19, the kernel suite, the F2 freshness suite, F8 acquisition,
+validated-retrieval, research-storage, evidence/provenance, model-free-knowledge,
+the C6.1/C6-reuse/C6-learning suites, conversation service, G2, D2/D3/D4, the
+architecture import scan and the CLI). The pre-existing failures documented
+elsewhere were reproduced against a pristine HEAD and remain unchanged — they are
+NOT caused by Step 20. No full-suite run.
+
+**Known limitations (truthful).** Refresh executes on demand only: nothing
+schedules, loops or monitors (Step 21), and no automatic revalidation happens
+until a caller asks. Re-acquisition uses the recorded source identity, so a
+source that no longer exists, is no longer authorized, or whose content changed
+yields an explicit ``no_authorized_source``/``insufficient``/``preserved``
+outcome rather than a silent overwrite. Replacement compares EVIDENCE STRENGTH
+(standing and a provenance link), never factual agreement: a stronger claim that
+contradicts the retained one is accepted as the newest validated evidence for
+that query while the original record remains retrievable. Only the configured
+`research.web_allowed_hosts` allowlist is reachable, so the default posture keeps
+every refresh ``no_authorized_source`` (nothing fetched) until the OWNER
+authorizes a source — this step never authorizes one and grants no new
+permission. Continuous monitoring, capability-gap detection and broad
+knowledge-learning changes remain out of scope.
+
 ### 34.25 Step 19 — Temporal & freshness-aware knowledge: event time vs content time
 
 **Status: COMPLETE (additive, not a roadmap phase).** Step 19 built the smallest
@@ -3576,7 +3689,32 @@ full-suite run; known limitations recorded in §34.25 (the pipeline is event-tim
 only, so undated requires timestamp-less input and knowledge_time is unknown for
 all real data; staleness uses the EXISTING default freshness policy; status is
 computed at assessment time from the injected clock; no refresh/revalidation);
-§34.25; Steps 1 → 19 are COMPLETE and Step 20 is NOT STARTED and remains
-evidence-driven).
+§34.25).
+Step 20 knowledge refresh added: 2026-09-29 (the real-kernel baseline showed the
+EXISTING freshness assessor already computed the refresh action for stale
+knowledge — RESEARCH with provenance_refs — and Steps 18-19 already represented
+retained knowledge, but NOTHING consumed that decision: no refresh seam existed,
+there was no bounded request or replacement decision, and the D2 boundary
+short-circuits a stale-but-justified claim as "existing_knowledge" so a naive
+route could never re-validate it). Minimal change: one new pure module
+(`atlas/research/refresh.py`) derives a bounded refresh request from the EXISTING
+provenance via the EXISTING assessor, authorizes the recorded web sources through
+the EXISTING D2 policy (I/O-free), executes through the EXISTING F8 pipeline, and
+reads the refreshed evidence back through the EXISTING Step 17-18 rules so a
+replacement is accepted only when it is justified AND at least as strong as the
+retained standing (weaker/unjustified/denied/insufficient/failed all preserve the
+original explicitly); the Step 19 KnowledgeRef construction was extracted into a
+shared `knowledge_ref_for`; and `Atlas.refresh_requests()` /
+`Atlas.refresh_knowledge()` expose the plan and the governed refresh. Nothing is
+written, deleted, scheduled or promoted, and no new permission is granted. 30
+focused tests plus relevant knowledge/research/temporal/freshness/acquisition/
+storage/kernel regressions green; the pre-existing failures were reproduced
+against a pristine HEAD and remain unchanged; no full-suite run; known
+limitations recorded in §34.26 (on-demand only — no scheduling/monitoring; the
+recorded source identity is reused, so a vanished/unauthorized source yields an
+explicit outcome rather than an overwrite; replacement compares evidence strength,
+never factual agreement; deny-by-default keeps every refresh
+no_authorized_source until the OWNER authorizes a source); §34.26; Steps 1 → 20
+are COMPLETE and Step 21 is NOT STARTED and remains evidence-driven).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
