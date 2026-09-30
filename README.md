@@ -338,6 +338,18 @@ governance — its own governed development.
     fact travels the existing governed research path, and the retained knowledge
     grounds the existing capability specification. Nothing is invented, and no
     architecture answer grants authority.
+  - **Stabilization & final regression** (final temporary post-roadmap step, not a
+    roadmap phase): the complete chain demonstrated across the temporary roadmap —
+    conversation → understanding → knowledge/research → provenance/retention →
+    gap detection → specification → governed development → approval → sandbox →
+    verification → promotion boundary — was re-audited and re-verified with a
+    36-scenario real-world matrix through the real entry point on isolated stores.
+    No production defect was found and no capability was added; the matrix is
+    36/36, deny-by-default authorization, human approval, sandbox isolation,
+    verification ≠ promotion, model independence and fail-closed behaviour are
+    unchanged, and the remaining documented limitations are recorded in
+    `docs/ATLAS_STATE.md` §34.37. **The temporary roadmap ends here: no Step 8 and
+    no roadmap expansion is defined or implied.**
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of

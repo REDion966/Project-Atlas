@@ -1839,6 +1839,82 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.37 Temporary Roadmap Step 7 — stabilization & final regression
+
+**Status: COMPLETE (final temporary post-roadmap step; additive documentation
+only — NOT a roadmap phase, no Step 8, no roadmap expansion, no new
+capability).** Step 7 stabilized and re-verified the complete chain demonstrated
+across the temporary roadmap: natural conversation → intent/goal understanding →
+knowledge/research → provenance/retention → capability-gap detection →
+specification → governed development → approval → sandbox execution →
+verification → promotion boundary.
+
+**Audit (read-only).** The twenty-two audited areas were inspected against the
+existing architecture and tests without modifying anything: casual conversation
+and routing, multi-turn context and references, knowledge retrieval and
+validated-knowledge precedence, subject-aware knowledge state/freshness,
+authorized external research, GitHub research through the existing repository
+mechanism, provenance/retention, knowledge reuse, capability-gap detection,
+capability specification, conversational development requests, send/stream
+parity, repeated equivalent development requests, self-architecture questions,
+development-driver governance, human approval boundaries, sandbox isolation,
+verification/promotion separation, model independence, fail-closed behaviour, the
+Step 1–6 contracts/invariants, and every limitation documented in Stages 1–6.
+
+**Real-world stabilization matrix.** A 36-scenario matrix was executed through the
+real entry point (`Atlas.chat`/`Atlas.stream`) over isolated temporary stores and
+an offline deterministic transport under the real deny-by-default host policy:
+casual conversation, unknown questions, unknown-subject knowledge, subject
+freshness (held and unheld), architecture responsibility/structure/dependencies/
+dependents/contracts, bounded investigation, multi-turn references, authorized and
+unauthorized research, research → retention → reuse (including `not_needed` on a
+repeat), already-supported / missing / ambiguous development requests, a
+development request that carries its own knowledge need through the existing
+seams, repeated equivalent requests, send/stream parity, the approval boundary
+(denied and granted), sandbox execution, verification, `not_promotable` on failing
+focused tests, pending promotion reviews, live-repository and operator-store
+integrity, network unavailability and provider unavailability. **Result: 36/36
+scenarios PASS with no production change required.**
+
+**Defects found: none in the product.** Two initial matrix deviations were traced
+to the harness expectations rather than the implementation, and each was corrected
+against the EXISTING documented contract: (a) the reference resolver deliberately
+claims only bounded MULTI-WORD phrases over the structured conversation state
+("AMBIGUITY → CLARIFICATION, NEVER GUESS"; bare it/that/more never invoke), and
+(b) the documented "findings" family maps to `(current_investigation,
+latest_result)` and renders the resolved field's own label. No assertion was
+weakened and no fallback behaviour was added.
+
+**Final regression.** The broad final regression (conversation, reference and
+investigation routing, research/knowledge/provenance/retention, capability and
+development, architecture and self-knowledge, evolution/autonomy, the C3–C6,
+D1–D5, L9/L10, NLU, phase and target-state suites, and all six temporary-step
+suites) was run at this checkpoint, together with `git diff --check`, LSP
+diagnostics and repository status/diff inspection. Its result and the
+baseline-classified pre-existing failures are recorded in the footer entry below.
+
+**Documented, non-blocking limitations carried forward.** Generic continuation
+phrasings are not claimed by design (bounded multi-word reference phrases only);
+research requires an explicitly named, operator-authorized source (Atlas does not
+discover sources by itself, and an unlisted host reports `no_authorized_source`);
+GitHub acquisition through the kernel needs the configured hosts and real network
+access, so an offline environment reports its own honest non-success status; the
+specification's affected-area matching remains the EXISTING lexical rule and a
+brand-new capability legitimately has no affected area (reported as unresolved);
+the L1 subject rule keeps its frozen three-token threshold; a development request
+that combines a domain with an authorization verb ("add"…) is still claimed by the
+Step-1 source-authorization explanation; the driver result and proposal views do
+not expose a changed-file list (the promotion review exposes the manifest count);
+and the pre-existing failing suites recorded at the Step-25 baseline
+(conversation/reference-resolution, lexical canonicalization, L9/C3/C5/C6 and
+evidence-development families) reproduce identically at the previous checkpoints.
+
+**Governance confirmations.** Deny-by-default source authorization, human approval,
+sandbox-only execution, verification ≠ promotion (nothing promoted, nothing
+activated), live-repository integrity, operator-store isolation, model independence
+(provider and network unavailable still succeed deterministically) and fail-closed
+behaviour are all unchanged and re-verified by the matrix.
+
 ### 34.36 Temporary Roadmap Step 5 — self-architecture understanding
 
 **Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
@@ -4877,5 +4953,34 @@ retained knowledge grounds the EXISTING Step-23 specification, with development
 still stopping at the existing awaiting_approval boundary. 22 focused tests plus
 the architecture/self-knowledge, routing and Step 1-4 regressions were green;
 known limitations recorded in §34.36; §34.36).
+Temporary Roadmap Step 7 — stabilization & final regression added: 2026-10-01 (NOT
+a roadmap phase; documentation only, no Step 8, no roadmap expansion, no new
+capability; this is the final temporary step). A read-only audit of the twenty-two
+stabilization areas plus a 36-scenario real-world matrix through the real entry
+point (Atlas.chat / Atlas.stream) over isolated temporary stores and an offline
+deterministic transport under the real deny-by-default host policy: casual
+conversation, unknown questions and unknown-subject knowledge, freshness held and
+unheld, architecture responsibility/structure/dependencies/dependents/contracts,
+bounded investigation, multi-turn references, authorized and unauthorized research,
+research -> retention -> reuse (including not_needed on a repeat), already-supported
+/ missing / ambiguous development requests, a development request carrying its own
+knowledge need through the existing seams, repeated equivalent requests,
+send/stream parity, approval denied and granted, sandbox execution, verification,
+not_promotable on failing focused tests, pending promotion reviews,
+live-repository and operator-store integrity, network unavailability and provider
+unavailability. Result: 36/36 PASS with NO production change required and no
+defect found; the only two initial deviations were harness expectations that
+contradicted the EXISTING documented contracts (the reference resolver claims only
+bounded multi-word phrases over the structured conversation state with the
+AMBIGUITY -> CLARIFICATION, NEVER GUESS invariant; the findings family maps to
+(current_investigation, latest_result) and renders the resolved field's own label)
+and were corrected in the harness, not in the product. Broad final regression at
+this checkpoint: 4343 passed, 15 failed, 1 skipped, 252 subtests passed — every one
+of the 15 reproduced identically at the Step-6 checkpoint 28e79fa and belongs to
+the documented pre-existing families (reference-consumption SUBFAILEDs, L9
+real-world/intake/corpus, C3/C5/C6 evidence, model-assisted-activation off-by-default
+and opt-in, and the NLU6 metadata proof); no Step-7 regression exists, and git diff
+--check plus LSP diagnostics are clean. Documented non-blocking limitations carried
+forward are recorded in §34.37. §34.37).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
