@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas — local</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: #0f1115; color: #e6e8ee; }
+  header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+           padding: 10px 14px; border-bottom: 1px solid #262b36; background: #141822; }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; letter-spacing: .2px; }
+  .chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #1d2330;
+          border: 1px solid #2b3242; color: #9aa4b8; }
+  .chip.ok { color: #7ee0a8; border-color: #24503a; }
+  .chip.bad { color: #ff9a9a; border-color: #5a2a2a; }
+  main { display: grid; grid-template-columns: 1fr 260px; gap: 0; height: calc(100vh - 49px); }
+  #history { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .turn { max-width: 860px; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap;
+          word-wrap: break-word; }
+  .user { align-self: flex-end; background: #1f2a44; border: 1px solid #2c3a5c; }
+  .atlas { align-self: flex-start; background: #171b24; border: 1px solid #262b36; }
+  .meta { display: block; margin-top: 6px; font-size: 11px; color: #7c869c; }
+  #status { padding: 16px; color: #9aa4b8; }
+  footer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #262b36;
+           background: #141822; }
+  textarea { flex: 1; resize: none; height: 46px; padding: 10px; border-radius: 8px;
+             background: #0f1115; color: #e6e8ee; border: 1px solid #2b3242; font: inherit; }
+  button { padding: 8px 12px; border-radius: 8px; background: #223055; color: #e6e8ee;
+           border: 1px solid #2f4173; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  aside { border-left: 1px solid #262b36; background: #12161f; overflow-y: auto; padding: 12px; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
+             color: #7c869c; margin: 0 0 8px; }
+  ul { list-style: none; margin: 0 0 12px; padding: 0; }
+  li { font-size: 12px; padding: 6px 8px; border-radius: 6px; color: #b9c2d4;
+       cursor: pointer; border: 1px solid transparent; word-break: break-all; }
+  li:hover { background: #1a2130; border-color: #2b3242; }
+  .error { color: #ff9a9a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Atlas</h1>
+  <span id="conn" class="chip">connecting…</span>
+  <span id="conv" class="chip">no conversation</span>
+  <button id="create">New conversation</button>
+  <button id="close" disabled>Close conversation</button>
+</header>
+
+<main>
+  <div id="history"><div id="status">Starting…</div></div>
+  <aside>
+    <h2>Saved conversations</h2>
+    <ul id="saved"></ul>
+    <h2>Note</h2>
+    <p class="meta">This page is a plain client of the local Atlas gateway on
+    127.0.0.1. It only sends text and displays Atlas's own answers, refusals and
+    errors verbatim. It has no model, no tools, no authority, and makes no
+    network request other than to this local gateway.</p>
+  </aside>
+</main>
+
+<footer>
+  <textarea id="input" placeholder="Ask Atlas something… (Enter to send, Shift+Enter for a new line)"></textarea>
+  <button id="send">Send</button>
+</footer>
+
+<script>
+"use strict";
+const historyEl = document.getElementById("history");
+const statusEl = document.getElementById("status");
+const inputEl = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const createBtn = document.getElementById("create");
+const closeBtn = document.getElementById("close");
+const connEl = document.getElementById("conn");
+const convEl = document.getElementById("conv");
+const savedEl = document.getElementById("saved");
+let conversationId = null;
+let busy = false;
+
+function setChip(el, text, state) {
+  el.textContent = text;
+  el.className = "chip" + (state ? " " + state : "");
+}
+
+function addTurn(kind, text) {
+  if (statusEl && statusEl.parentNode) { statusEl.remove(); }
+  const el = document.createElement("div");
+  el.className = "turn " + kind;
+  el.textContent = text;
+  historyEl.appendChild(el);
+  historyEl.scrollTop = historyEl.scrollHeight;
+  return el;
+}
+
+function addMeta(el, text) {
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  meta.textContent = text;
+  el.appendChild(meta);
+}
+
+function describe(metadata) {
+  if (!metadata || typeof metadata !== "object") { return ""; }
+  const bits = [];
+  if (metadata.builtin_intent) { bits.push("route: " + metadata.builtin_intent); }
+  if (metadata.model_used !== undefined) { bits.push("model_used: " + metadata.model_used); }
+  if (metadata.validated_knowledge_status) { bits.push("knowledge: " + metadata.validated_knowledge_status); }
+  const research = metadata.external_research;
+  if (research && research.research_status) { bits.push("research: " + research.research_status); }
+  const driver = metadata.development_driver;
+  if (driver && driver.terminal) { bits.push("development: " + driver.terminal); }
+  return bits.join(" · ");
+}
+
+async function readJson(response) {
+  const text = await response.text();
+  try { return JSON.parse(text); } catch (e) { return { raw: text }; }
+}
+
+function errorText(status, payload) {
+  if (payload && typeof payload.error === "string") { return payload.error; }
+  if (payload && typeof payload.raw === "string") { return payload.raw; }
+  return "request failed with status " + status;
+}
+
+async function refreshState() {
+  try {
+    const response = await fetch("/v1/conversation");
+    if (!response.ok) { throw new Error("status " + response.status); }
+    const payload = await readJson(response);
+    conversationId = payload.conversation_id || null;
+    setChip(connEl, "connected", "ok");
+    setChip(convEl, conversationId ? "conversation " + conversationId : "no conversation");
+    closeBtn.disabled = !conversationId || busy;
+  } catch (error) {
+    conversationId = null;
+    setChip(connEl, "disconnected", "bad");
+    setChip(convEl, "no conversation");
+    closeBtn.disabled = true;
+    statusEl.textContent = "Cannot reach the local Atlas gateway: " + error.message;
+  }
+}
+
+async function refreshSaved() {
+  try {
+    const response = await fetch("/v1/conversations");
+    const payload = await readJson(response);
+    if (!response.ok) { throw new Error(errorText(response.status, payload)); }
+    savedEl.innerHTML = "";
+    (payload.saved_conversations || []).forEach(function (path) {
+      const item = document.createElement("li");
+      item.textContent = path;
+      item.title = "Reopen this persisted conversation";
+      item.addEventListener("click", function () { reopen(path); });
+      savedEl.appendChild(item);
+    });
+    if (!savedEl.children.length) {
+      const item = document.createElement("li");
+      item.textContent = "(none saved yet)";
+      item.style.cursor = "default";
+      savedEl.appendChild(item);
+    }
+  } catch (error) {
+    savedEl.innerHTML = "";
+    const item = document.createElement("li");
+    item.className = "error";
+    item.textContent = String(error.message || error);
+    savedEl.appendChild(item);
+  }
+}
+
+async function createConversation() {
+  try {
+    const response = await fetch("/v1/conversation", { method: "POST" });
+    const payload = await readJson(response);
+    if (!response.ok) { throw new Error(errorText(response.status, payload)); }
+    conversationId = payload.conversation_id;
+    addTurn("atlas", "New conversation " + conversationId + " started.");
+    await refreshState();
+  } catch (error) {
+    addTurn("atlas", "Could not start a conversation: " + error.message);
+  }
+}
+
+async function reopen(path) {
+  try {
+    const response = await fetch("/v1/conversation/reopen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: path })
+    });
+    const payload = await readJson(response);
+    if (!response.ok) { throw new Error(errorText(response.status, payload)); }
+    conversationId = payload.conversation_id;
+    addTurn("atlas", "Reopened " + path + " as " + conversationId + ".");
+    await refreshState();
+  } catch (error) {
+    addTurn("atlas", "Could not reopen that conversation: " + error.message);
+  }
+}
+
+async function closeConversation() {
+  if (!conversationId) { return; }
+  try {
+    const response = await fetch("/v1/conversation/" + encodeURIComponent(conversationId) + "/close", { method: "POST" });
+    const payload = await readJson(response);
+    if (!response.ok) { throw new Error(errorText(response.status, payload)); }
+    addTurn("atlas", "Conversation closed and persisted: " + (payload.detail || ""));
+    conversationId = null;
+    await refreshState();
+    await refreshSaved();
+  } catch (error) {
+    addTurn("atlas", "Could not close the conversation: " + error.message);
+  }
+}
+
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text || busy) { return; }
+  if (!conversationId) {
+    await createConversation();
+    if (!conversationId) { return; }
+  }
+  inputEl.value = "";
+  busy = true;
+  sendBtn.disabled = true;
+  addTurn("user", text);
+  const answer = addTurn("atlas", "");
+  addMeta(answer, "streaming…");
+  let raw = "";
+  try {
+    const response = await fetch(
+      "/v1/conversation/" + encodeURIComponent(conversationId) + "/stream",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+      }
+    );
+    if (!response.ok) {
+      const payload = await readJson(response);
+      answer.textContent = errorText(response.status, payload);
+      answer.className = "turn atlas error";
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) { break; }
+      raw += decoder.decode(chunk.value, { stream: true });
+      answer.textContent = raw;
+      historyEl.scrollTop = historyEl.scrollHeight;
+    }
+    raw += decoder.decode();
+    answer.textContent = raw;
+    answer.querySelectorAll(".meta").forEach(function (node) { node.remove(); });
+    addMeta(answer, "complete");
+  } catch (error) {
+    answer.className = "turn atlas error";
+    answer.textContent = raw + (raw ? "\n\n" : "") + "Stream error: " + error.message;
+  } finally {
+    busy = false;
+    sendBtn.disabled = false;
+    refreshState();
+  }
+}
+
+sendBtn.addEventListener("click", send);
+createBtn.addEventListener("click", createConversation);
+closeBtn.addEventListener("click", closeConversation);
+inputEl.addEventListener("keydown", function (event) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    send();
+  }
+});
+
+(async function start() {
+  await refreshState();
+  await refreshSaved();
+  setInterval(refreshState, 15000);
+})();
+</script>
+</body>
+</html>

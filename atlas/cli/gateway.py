@@ -60,9 +60,20 @@ this first private version.
 
 Endpoints
 ---------
+``GET /`` and ``GET /index.html``
+    The single static private page (read-only, same-origin, served only from
+    ``STATIC_ROOT`` = ``atlas/cli/web``; nothing outside that directory is ever
+    reachable and no CORS support is needed because the page is same-origin).
 ``POST /v1/conversation``
     Create a conversation identifier. Refused with ``409`` while another
     conversation is active.
+``POST /v1/conversation/reopen``
+    JSON ``{"file": "..."}`` -> reopen a PERSISTED conversation that the existing
+    saved-conversation list already contains, via the existing
+    ``Atlas.load_conversation()``. Refused with ``409`` while another conversation
+    is active, and for any path that is not a persisted Atlas conversation.
+``GET /v1/conversation``
+    Pure lifecycle query: the active conversation identifier, if any.
 ``POST /v1/conversation/{id}/message``
     JSON ``{"message": "..."}`` -> JSON response with the Atlas answer and its
     own metadata.
@@ -88,14 +99,30 @@ import json
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from atlas.kernel.atlas import Atlas
 from atlas.storage.conversation_storage import ConversationStorage
 
 #: The only host this gateway will ever bind to.
 LOOPBACK_HOST: str = "127.0.0.1"
+
+#: The single read-only directory this gateway will ever serve files from. Static
+#: serving is confined to it: nothing outside it (repository sources, stores,
+#: configuration) is reachable, and requests are read-only.
+STATIC_ROOT: Path = (Path(__file__).resolve().parent / "web")
+
+#: Content types for the (bounded) static asset kinds this gateway serves.
+_STATIC_TYPES: dict[str, str] = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+}
+
 
 #: Default local port (override with ``--port``; ``0`` selects an ephemeral port).
 DEFAULT_PORT: int = 8765
@@ -366,6 +393,58 @@ class AtlasGateway:
             self._storage = storage
         return [str(path) for path in storage.list()]
 
+    def active_conversation(self) -> dict[str, Any]:
+        """Pure lifecycle query: the active conversation, if any (no side effects)."""
+        with self._lock:
+            conversation_id = self._conversation_id
+            return {
+                "conversation_id": conversation_id,
+                "active": conversation_id is not None,
+                "kernel_installed": self._atlas is not None,
+            }
+
+    def reopen_conversation(self, file_path: str) -> tuple[bool, str, str]:
+        """Reopen a PERSISTED conversation through the EXISTING Atlas API.
+
+        Returns ``(reopened, conversation_id, reason)``. The requested file must be
+        one of the conversations the existing persistence abstraction already
+        lists (so no arbitrary path can ever be loaded), and no conversation may be
+        active (a second active conversation is refused, exactly like ``create``).
+        Reopening adopts that persisted conversation with the existing
+        ``Atlas.load_conversation()``; when no kernel is live a fresh kernel is
+        started first, so nothing from an earlier session can leak into it.
+        ConversationService internals are never touched, and no second persistence
+        layer exists.
+        """
+        with self._lock:
+            if self._conversation_id is not None:
+                return (
+                    False,
+                    self._conversation_id,
+                    "this gateway serves ONE active conversation at a time; "
+                    "close the current conversation before reopening another",
+                )
+            requested = str(file_path or "").strip()
+            if not requested:
+                return (False, "", "'file' must be the path of a saved conversation")
+            allowed = {str(Path(item)) for item in self.saved_conversations()}
+            normalised = str(Path(requested))
+            if normalised not in allowed:
+                return (
+                    False,
+                    "",
+                    "that path is not a persisted Atlas conversation; only the "
+                    "existing saved-conversation list may be reopened",
+                )
+            self._ensure_kernel()
+            try:
+                self.atlas.load_conversation(Path(normalised))
+            except Exception as exc:
+                return (False, "", f"{type(exc).__name__}: {exc}")
+            self._counter += 1
+            self._conversation_id = f"conv-{self._counter:04d}"
+            return (True, self._conversation_id, "")
+
 
 class _GatewayRefusal(Exception):
     """A transport-level refusal (never used to soften an Atlas answer)."""
@@ -435,15 +514,24 @@ def _make_handler(gateway: AtlasGateway):
         # -- routes --------------------------------------------------------
 
         def do_GET(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path.rstrip("/") or "/"
+            path = urlparse(self.path).path or "/"
             try:
-                if path == "/v1/conversations":
+                if path.rstrip("/") == "/v1/conversation":
+                    self._send_json(HTTPStatus.OK, gateway.active_conversation())
+                    return
+                if path.rstrip("/") == "/v1/conversations":
                     self._send_json(
                         HTTPStatus.OK,
                         {"saved_conversations": gateway.saved_conversations()},
                     )
                     return
-                self._not_found()
+                if path.startswith("/v1/"):
+                    self._not_found()
+                    return
+                # Everything else is a read-only static asset request, confined to
+                # the designated static root (no repository, store or config file
+                # is reachable, and nothing outside the root can be addressed).
+                self._serve_static("index.html" if path in ("/", "") else path)
             except _GatewayRefusal as refusal:
                 self._send_json(refusal.status, {"error": refusal.reason})
             except Exception as exc:  # Atlas error passes through verbatim
@@ -456,6 +544,26 @@ def _make_handler(gateway: AtlasGateway):
             path = urlparse(self.path).path.rstrip("/") or "/"
             parts = [part for part in path.split("/") if part]
             try:
+                if parts == ["v1", "conversation", "reopen"]:
+                    payload = self._read_body()
+                    file_path = payload.get("file")
+                    if not isinstance(file_path, str):
+                        raise _GatewayRefusal(
+                            HTTPStatus.BAD_REQUEST,
+                            "'file' must be the path of a saved conversation",
+                        )
+                    reopened, conversation_id, reason = gateway.reopen_conversation(
+                        file_path
+                    )
+                    self._send_json(
+                        HTTPStatus.OK if reopened else HTTPStatus.CONFLICT,
+                        {
+                            "reopened": reopened,
+                            "conversation_id": conversation_id,
+                            "reason": reason,
+                        },
+                    )
+                    return
                 if parts == ["v1", "conversation"]:
                     created, conversation_id, reason = gateway.create_conversation()
                     self._send_json(
@@ -541,17 +649,54 @@ def _make_handler(gateway: AtlasGateway):
                         self.wfile.write(b"0\r\n\r\n")
                 return
 
+        def _serve_static(self, requested_path: str) -> None:
+            """Serve one READ-ONLY file confined to ``STATIC_ROOT``.
+
+            The request path is URL-decoded, normalised and resolved against the
+            static root; anything that escapes the root (`..`, absolute paths,
+            symlinked escapes, directory requests) is refused with 404. Only the
+            bounded asset kinds in ``_STATIC_TYPES`` are served, so repository
+            sources, stores and configuration can never be reached.
+            """
+            relative = unquote(requested_path).replace("\\", "/").lstrip("/")
+            if not relative or ".." in relative.split("/"):
+                self._not_found()
+                return
+            root = STATIC_ROOT.resolve()
+            candidate = (root / relative).resolve()
+            if root not in candidate.parents or not candidate.is_file():
+                self._not_found()
+                return
+            content_type = _STATIC_TYPES.get(candidate.suffix.lower())
+            if content_type is None:
+                self._not_found()
+                return
+            try:
+                body = candidate.read_bytes()
+            except OSError:
+                self._not_found()
+                return
+            self.send_response(int(HTTPStatus.OK))
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def _not_found(self) -> None:
             self._send_json(
                 HTTPStatus.NOT_FOUND,
                 {
                     "error": "unknown gateway route",
                     "routes": [
+                        "GET  /",
+                        "GET  /v1/conversation",
+                        "GET  /v1/conversations",
                         "POST /v1/conversation",
+                        "POST /v1/conversation/reopen",
                         "POST /v1/conversation/{id}/message",
                         "POST /v1/conversation/{id}/stream",
                         "POST /v1/conversation/{id}/close",
-                        "GET /v1/conversations",
                     ],
                 },
             )
