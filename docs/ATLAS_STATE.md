@@ -1839,6 +1839,82 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.38 Local conversation gateway & private web interface
+
+**Status: COMPLETE (private local interface; NOT a roadmap phase, no Step 26).**
+Atlas has a local, governed **conversation gateway** and a private, same-origin
+**web interface** for talking to the local instance. Neither is a capability in
+Atlas's reasoning, governance, authority or execution system: both are
+transport/presentation layers above the EXISTING conversation surface, and every
+existing boundary is unchanged.
+
+**Gateway — `atlas/cli/gateway.py` (transport only).** A stdlib-only HTTP adapter
+over the EXISTING `Atlas.chat()` / `Atlas.stream()` entry points, bound to
+**loopback only** (`127.0.0.1`; non-loopback hosts are refused at construction,
+so there is no LAN or Internet exposure). Routes:
+
+| Route | Behaviour |
+|---|---|
+| `GET /`, `GET /index.html` | The private page, served read-only and confined to `STATIC_ROOT` (`atlas/cli/web`) |
+| `GET /v1/conversation` | Pure lifecycle query: the active conversation, if any |
+| `GET /v1/conversations` | The EXISTING saved-conversation list (read-only; no kernel is constructed or started) |
+| `POST /v1/conversation` | Create the active conversation (409 while one is active) |
+| `POST /v1/conversation/reopen` | Reopen a PERSISTED conversation through the EXISTING `Atlas.load_conversation()`; only paths already in the saved-conversation list are accepted |
+| `POST /v1/conversation/{id}/message` | One turn through `Atlas.chat()` |
+| `POST /v1/conversation/{id}/stream` | One turn through `Atlas.stream()`, returned as chunked `text/plain` |
+| `POST /v1/conversation/{id}/close` | Persist via `Atlas.save_conversation()`, end the session via `Atlas.shutdown()`, drop the kernel |
+
+Lifecycle follows the EXISTING interactive-CLI contract (`Atlas()` → `start()` →
+`chat()`/`stream()` → `tick()` per completed turn → `save_conversation()` →
+`shutdown()`). A conversation identifier is a genuine conversation boundary:
+closing persists the conversation and ends its session, so the next conversation
+starts from a newly constructed kernel with no inherited history, subject,
+references, ambiguity or conversational world state — `ConversationService` is
+never inspected or reset. Kernel construction has exactly ONE authoritative,
+race-safe install path (guarded by the gateway's reentrant lock), the read-only
+listing constructs nothing, one active conversation per process is enforced, and
+all turns are serialized.
+
+**Private interface — `atlas/cli/web/index.html` (presentation only).** One
+self-contained page (plain HTML/CSS/JS; no framework, bundler, npm, CDN or
+external asset) served **same-origin** by the gateway, so no CORS support is
+needed. It provides connection/active-conversation status, new/close
+conversation, the saved-conversation list with click-to-reopen, a message input
+and send control, incremental rendering of the streamed response, and verbatim
+display of Atlas's own answers, refusals and errors together with a summary of
+Atlas's own response metadata. It contains no reasoning, no authority control
+(no approve/authorize/execute/promote/configure), no model or provider selection,
+no tool/filesystem/browser access, no telemetry and no external network call.
+
+**Governance, model independence and safety.** The gateway holds no authority: it
+only forwards text and reports what Atlas returned (a refusal is ordinary Atlas
+content; a genuine Atlas exception becomes `500` carrying its own message). Human
+OWNER approval, sandbox-only verification, the separate promotion decision, the
+deny-by-default source policy and model independence are unchanged — no model,
+provider, tool or resource-access layer was added anywhere in this work. Static
+serving is read-only and confined by resolving the request path and requiring the
+resolved static root to be an ancestor of the resolved candidate, so traversal
+(including encoded forms), absolute paths, directory requests and symlink escapes
+are refused with `404`; only a bounded asset-type allow-list is served.
+
+**Verification.** `tests/test_local_gateway.py` (30 tests) and
+`tests/test_gateway_web_interface.py` (35 tests) cover delegation parity with
+direct `Atlas.chat`/`stream`/refusals, the conversation boundary and identifier
+isolation, the read-only listing, the deterministic kernel-install race safety,
+stop safety, streaming validation before headers, the traversal/arbitrary-file
+matrix, reopen validation and confinement, absence of authority routes,
+loopback-only binding and model independence; focused conversation regressions
+(conversation service, conversational development bridge, development intake; 46
+tests) are green. The interface passed an independent read-only audit.
+
+**Known limitations (truthful).** One active conversation per gateway process (a
+second is refused with `409`); reopening restores a persisted conversation's
+message history but not its live reference/world state (the existing persistence
+semantics); streaming is plain chunked text (no SSE); no authentication or
+tenancy (loopback-only private use); the stdlib HTTP banner still reports the
+Python runtime version; and no resource/tool access (files, applications,
+browser, workspace) is exposed.
+
 ### 34.37 Temporary Roadmap Step 7 — stabilization & final regression
 
 **Status: COMPLETE (final temporary post-roadmap step; additive documentation
@@ -4982,5 +5058,27 @@ real-world/intake/corpus, C3/C5/C6 evidence, model-assisted-activation off-by-de
 and opt-in, and the NLU6 metadata proof); no Step-7 regression exists, and git diff
 --check plus LSP diagnostics are clean. Documented non-blocking limitations carried
 forward are recorded in §34.37. §34.37).
+Local conversation gateway & private web interface added: 2026-10-01 (private
+local interface; NOT a roadmap phase, no Step 26, no new capability). Atlas now
+has a stdlib-only, loopback-bound conversation gateway over the EXISTING
+Atlas.chat()/Atlas.stream() surface (create/adopt, active-state query, message,
+chunked streaming, close/persist, read-only saved-conversation listing, and
+reopen through the existing Atlas.load_conversation()), plus a private
+same-origin static page (atlas/cli/web/index.html) that drives that lifecycle,
+renders streamed responses incrementally, and displays Atlas's own answers,
+refusals, errors and metadata verbatim. Both are transport/presentation only: no
+reasoning, no authority/approval/execute/promote/configure path, no model or
+provider, no tool/filesystem/browser access, no external resource or telemetry,
+and unchanged governance (OWNER approval, sandbox-only verification, separate
+promotion, deny-by-default sources) and model independence. The conversation
+identifier is a genuine boundary (close persists via Atlas.save_conversation(),
+ends the session via Atlas.shutdown() and drops the kernel, so the next
+conversation starts fresh), kernel construction has one authoritative race-safe
+install path, the read-only listing constructs no kernel, static serving is
+read-only and confined to STATIC_ROOT (traversal, encoded traversal, absolute
+paths, directory requests and symlink escapes refused with 404), and binding is
+loopback-only. 30 + 35 focused gateway/interface tests plus 46 narrow conversation
+regressions are green, and the interface passed an independent read-only audit;
+known limitations recorded in §34.38. §34.38).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

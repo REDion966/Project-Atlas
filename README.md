@@ -350,6 +350,20 @@ governance — its own governed development.
     unchanged, and the remaining documented limitations are recorded in
     `docs/ATLAS_STATE.md` §34.37. **The temporary roadmap ends here: no Step 8 and
     no roadmap expansion is defined or implied.**
+  - **Local conversation gateway & private web interface** (private local
+    interface, not a roadmap phase): a stdlib-only, loopback-bound HTTP gateway
+    exposes the existing `Atlas.chat()` / `Atlas.stream()` conversation surface
+    (create/adopt a conversation, active-state query, message, chunked streaming,
+    close with persistence, read-only saved-conversation listing, and reopening a
+    persisted conversation through the existing `Atlas.load_conversation()`), and
+    a single self-contained page served same-origin by that gateway provides the
+    private chat interface: streamed answers rendered incrementally, verbatim
+    refusals/errors, Atlas's own metadata, and the conversation lifecycle. Both are
+    transport/presentation only — no new reasoning, no authority, no model or
+    provider, no tool/filesystem/browser access, no external resource or
+    telemetry — and every existing boundary (OWNER approval, sandbox-only
+    verification, separate promotion, deny-by-default sources, model
+    independence) is unchanged. See `docs/ATLAS_STATE.md` §34.38.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of
