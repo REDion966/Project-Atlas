@@ -4050,7 +4050,15 @@ class ConversationService:
             spec = _replace(
                 spec, intent=resolved_antecedent, goal=resolved_antecedent
             )
-        operand = spec.goal or spec.intent or None
+        # Temporary Roadmap Step 6 gap fix — the accepted-request operand is the
+        # user's OWN text. The deterministic intake's ``goal`` carries the bounded
+        # utterance prefix ("respond: ..."), and recording that form made a
+        # REPEATED equivalent turn hand the prefixed text back through the
+        # antecedent machinery, which changed the derived capability identity for
+        # the same user text. Preferring the already-clean ``intent`` (falling back
+        # to the goal) keeps the recorded request, the derivation and every
+        # transport identical. No routing, authority or lifecycle rule changes.
+        operand = spec.intent or spec.goal or None
         # G3 — the governed self-development route: offer the (antecedent-resolved)
         # request to the EXISTING bounded DevelopmentDriver, which owns gap
         # assessment, deterministic authoring, the envelope-authorized sandbox

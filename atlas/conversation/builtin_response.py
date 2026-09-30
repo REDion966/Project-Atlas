@@ -2594,7 +2594,9 @@ class BuiltinResponseService:
         except Exception:  # fail closed: a raising seam is not evidence
             return None
 
-    def parse_external_research_target(self, text: str) -> dict[str, Any] | None:
+    def parse_external_research_target(
+        self, text: str, *, require_cue: bool = True
+    ) -> dict[str, Any] | None:
         """Temporary Roadmap Step 4 — the bounded TARGET of an external-research turn.
 
         Returns ``{"kind": "url"|"github", "target": ..., "keywords": (...)}`` for a
@@ -2604,6 +2606,13 @@ class BuiltinResponseService:
         question, and a request to CHANGE source authorization keeps its Step-1
         owner. This surface only PARSES; it acquires nothing, enables no source,
         and never grants authority.
+
+        ``require_cue=False`` (Temporary Roadmap Step 6) returns the target for a
+        turn that names an explicit external source without a research verb — used
+        by the governed development route, where the request itself may name the
+        source its missing knowledge should come from. The same bounded rules
+        apply, and the deny-by-default host policy still decides whether anything
+        may be fetched.
         """
         if not isinstance(text, str) or not text.strip():
             return None
@@ -2625,7 +2634,13 @@ class BuiltinResponseService:
             return None
         has_cue = _EXTERNAL_SOURCE_CUE_RE.search(lowered) is not None
         has_object = _EXTERNAL_SOURCE_OBJECT_RE.search(lowered) is not None
-        if not (has_cue or has_object):
+        if require_cue:
+            # Step-4 rule: a research/acquisition cue is required.
+            if not has_cue:
+                return None
+        elif not (has_object or url is not None or github is not None):
+            # Step-6 rule for the governed development route: an EXPLICIT source
+            # (a URL/GitHub target) or a bounded source noun must be present.
             return None
         keywords = self._external_research_keywords(lowered, target)
         return {"kind": kind, "target": target, "keywords": keywords}

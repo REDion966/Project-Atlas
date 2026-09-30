@@ -3028,9 +3028,17 @@ class Atlas:
                 ),
             )
 
-        request = str(
+        # Temporary Roadmap Step 6 gap fix — the derivation input must be the
+        # user's OWN request text: the deterministic intake's goal carries a
+        # bounded utterance prefix ("respond: ..."), and a REPEATED equivalent
+        # turn reaches this seam through the antecedent machinery carrying that
+        # prefix, which would otherwise change the derived capability identity
+        # (and create a divergent proposal) for the same user text. The EXISTING
+        # bounded prefix normalization is applied to the derivation input here,
+        # so every transport and every repetition derive the same identity.
+        request = self._development_purpose_text(
             getattr(spec, "intent", "") or getattr(spec, "goal", "") or need.title
-        ).strip()
+        )
         metadata: dict[str, Any] = {}
         scaffold = scaffold_spec_for_request(
             request, registered_names=self._registered_capability_names()
@@ -3046,7 +3054,27 @@ class Atlas:
         # Both are ADDITIVE: the governed development route below still runs and
         # reports only what it actually did, and nothing is authorized, executed
         # or promoted by understanding the request.
-        design_lines = list(self._development_request_adjudication_lines(request))
+        # Temporary Roadmap Step 6 gap fix — the development request's OWN knowledge
+        # need is closed by Atlas, not by the caller: when the EXISTING adjudication
+        # shows the subject knowledge is missing and the request itself names an
+        # explicit external source, ONE governed acquisition runs through the
+        # EXISTING research/provenance/retention seam BEFORE the adjudication and
+        # the design are reported, so the reported verdict and design reflect the
+        # knowledge the request now has. Deny-by-default is unchanged (an unlisted
+        # host acquires nothing), nothing is authorized/approved/executed/promoted
+        # here, and the governed development route below is untouched.
+        utterance = " ".join(
+            part
+            for part in (
+                str(getattr(spec, "intent", "") or ""),
+                str(getattr(spec, "goal", "") or ""),
+            )
+            if part
+        )
+        design_lines = list(
+            self._development_request_knowledge_lines(request, source_text=utterance)
+        )
+        design_lines += list(self._development_request_adjudication_lines(request))
         if design_lines:
             design_lines.append("")
         lines = design_lines + [
@@ -3219,6 +3247,87 @@ class Atlas:
             "- Next governed step: the design is reviewable now; implementation "
             "needs a bounded change payload and the EXISTING OWNER approval, and "
             "verification runs in the sandbox before any promotion."
+        )
+        return tuple(lines)
+
+    def _development_request_knowledge_lines(
+        self, request: str, *, source_text: str = ""
+    ) -> tuple[str, ...]:
+        """Temporary Roadmap Step 6 — the request's OWN knowledge need, closed by Atlas.
+
+        Runs AT MOST ONE acquisition, through the EXISTING Step-16/17/18 seams
+        (governed acquisition under the deny-by-default host policy, provenance,
+        retention), when BOTH hold:
+
+          * the EXISTING Step-22 adjudication says the request's subject knowledge is
+            missing (not a capability gap yet), and
+          * the request itself names an explicit external source (a URL or a GitHub
+            target — the same bounded parse the Step-4 research surface uses).
+
+        Read-only with respect to authority: it enables no source, allowlists
+        nothing, approves/authorizes/executes/promotes nothing, consults no model,
+        and reports exactly what the mechanisms returned — including a refusal.
+        """
+        builtin = self._builtin_response
+        if builtin is None:
+            return ()
+        # The deterministic intake keeps the user's named source on the utterance
+        # (its goal carries the remaining clauses, e.g. a constraints segment), so
+        # the bounded parse considers the request AND that utterance form.
+        target = builtin.parse_external_research_target(
+            source_text or request, require_cue=False
+        ) or builtin.parse_external_research_target(request, require_cue=False)
+        if not target:
+            return ()
+        gap = self.capability_gap(request)
+        kind = str(getattr(getattr(gap, "kind", None), "value", "") or "")
+        if kind != "missing_knowledge":
+            return ()
+        spec = target if isinstance(target, dict) else {}
+        kind_label = str(spec.get("kind", "") or "")
+        address = str(spec.get("target", "") or "")
+        keywords = tuple(spec.get("keywords", ()) or ())
+        objective = " ".join(keywords) or request
+        lines = [
+            "Knowledge gap detected by Atlas for this development request; the "
+            "EXISTING authorized research mechanism was invoked automatically:",
+            f"- Source: `{address}` ({kind_label or 'unknown'})",
+        ]
+        outcome = self.research_knowledge_need(objective, candidate_urls=(address,))
+        status = str(getattr(getattr(outcome, "status", None), "value", "") or "")
+        lines.append(f"- Acquisition: {status or 'unknown'}")
+        provenance = self.research_provenance(outcome)
+        sources = tuple(getattr(provenance, "sources", ()) or ())
+        claims = tuple(getattr(provenance, "claims", ()) or ())
+        standings = [str(getattr(claim, "standing", "") or "") for claim in claims]
+        lines.append(
+            f"- Provenance: {len(sources)} source(s), {len(claims)} evaluated "
+            f"claim(s) with standing {standings}"
+            if (sources or claims)
+            else "- Provenance: no evaluated source or claim"
+        )
+        retention = self.knowledge_retention(outcome)
+        lines.append(
+            "- Retention (governed knowledge mechanism): retained "
+            f"{int(getattr(retention, 'retained_count', 0) or 0)}, refused "
+            f"{int(getattr(retention, 'refused_count', 0) or 0)}, contested "
+            f"{int(getattr(retention, 'contested_count', 0) or 0)}, established "
+            f"{int(getattr(retention, 'established_count', 0) or 0)}"
+        )
+        need = self.knowledge_need(objective)
+        lines.append(
+            "- Knowledge need for the acquisition objective: "
+            f"{str(getattr(getattr(need, 'kind', None), 'value', '') or 'unknown')} "
+            f"({str(getattr(getattr(need, 'status', None), 'value', '') or 'unknown')})"
+        )
+        after = self.capability_gap(request)
+        lines.append(
+            "- Adjudication after acquisition: "
+            f"{str(getattr(getattr(after, 'kind', None), 'value', '') or 'unknown')}"
+        )
+        lines.append(
+            "Only the authorized source policy decided this acquisition; nothing "
+            "was authorized, allowlisted, configured, approved, executed or promoted."
         )
         return tuple(lines)
 
