@@ -309,6 +309,16 @@ governance — its own governed development.
     existing architecture model, and the bounded investigation idioms ("look
     into X") reach the read-only investigation route. Nothing new is authorized
     or executed by understanding a sentence.
+  - **Development loop closure** (temporary post-roadmap step, not a roadmap
+    phase): a natural-language development request now reports, from the EXISTING
+    Step-22 adjudicator, whether a capability or retained knowledge already
+    covers it — and, when it is a genuine capability gap, the bounded design the
+    existing specification produced (what it is for, what it would touch, how it
+    must be verified and the governance boundary it must respect) — ahead of the
+    unchanged governed `DevelopmentDriver` report. Understanding a request still
+    authorizes nothing: implementation needs a bounded change payload and the
+    OWNER's approval, focused tests run in the sandbox before any promotion, and
+    a failed test yields no promotion request.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of

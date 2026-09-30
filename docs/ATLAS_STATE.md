@@ -1839,6 +1839,78 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.34 Temporary Roadmap Step 3 — self-development loop closure
+
+**Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
+phase and no Step 26).** Step 3 closes the gap between a natural-language
+development request and the EXISTING development pipeline: the conversational
+development entry point (`Atlas._development_driver_bridge`, the G3 route every
+`DEVELOPMENT_REQUEST` turn reaches) now reports the EXISTING capability/knowledge
+adjudication (Step 22) and — when the request is a genuine capability gap — the
+bounded design the EXISTING specification surface (Step 23) produced, ahead of
+the governed driver report it already returned.
+
+**Measured gap.** Through `Atlas.chat` on an isolated kernel a development
+request reached the governed `DevelopmentDriver`, but the user learned only a
+coarse terminal (`envelope_disabled` / `author_unavailable`): nothing said
+whether a capability or retained knowledge already covered the request
+(acceptance criterion 2), what bounded design would be built, how it must be
+verified, or where the approval boundary lay (criteria 1, 3, 4) — while the
+Step-22/23/25 chain that answers all of this was reachable only through the
+kernel API.
+
+**What changed (one file, purely additive).** `atlas/kernel/atlas.py`:
+`_development_request_adjudication_lines` projects the EXISTING Step-22 verdict
+(kind, reason, matched capability, prerequisites) and, when
+`capability_specification(request).is_specified`, the EXISTING Step-23 design
+(capability, purpose, operations, affected areas, required verification,
+governance boundary, unresolved questions) plus the truthful next governed step;
+`_development_driver_bridge` prepends those lines to the report it already
+built; `_development_purpose_text` strips a bounded utterance prefix
+("respond:" …) so the same user text reports identically on every transport. No
+new engine, planner, supplier, registry, store or route was added, and the
+governed driver route, its terminals and its envelope/approval behaviour are
+unchanged (an unsettleable verdict simply adds no lines).
+
+**Governance and model independence.** The addition is read-only: it consults the
+EXISTING adjudicator and specification and authorizes, executes, approves or
+promotes nothing. Implementation still stops at the EXISTING `awaiting_approval`
+boundary, and only an OWNER authorization reaches the sandbox, whose focused
+tests plus `DevelopmentVerification` decide promotability (a failed focused test
+yields `not_promotable` and no promotion request). No model is consulted and no
+external AI service is required; lexical overlap is never read as functional
+equivalence, so an incidental capability-name overlap cannot suppress a real
+request (the G3 contract) and the report can never disagree with the adjudicator.
+
+**Validation.** `tests/test_temporary_step3_development_loop_closure.py` — 16
+focused tests: the genuine-gap request (a three-token subject overlap under the
+frozen L1 rule) reaching `unsupported_capability` → `specified` and reporting the
+design with its verification and governance requirements while the driver still
+runs; the reported verdict matching the adjudicator for existing-capability and
+missing-knowledge requests with no design produced and no execution or promotion;
+underspecified and governance-crossing requests failing closed with nothing
+approved, executed or promoted and an unchanged repository; the EXISTING driver
+API unchanged; and the complete authorized chain from a natural-language request
+(design → bounded payload → OWNER approval → sandbox implementation → focused
+tests → `verified` → separate promotion review), including the failing-test
+`not_promotable` path, plus stream/send agreement and blocked-network /
+`model_used` false assertions. Regressions (the conversational development
+bridge, target-state G3, the final evolution lifecycle, the P7 self-development
+suites, semantic gap routing, Steps 22/23/24/25, the F9 development cycle, Steps
+1–2 of this temporary roadmap, L1 and the capability/intake suites) were green.
+
+**Known limitations (truthful).** The design block appears only when the EXISTING
+Step-23 surface returns `specified`; a request whose subject overlap does not
+satisfy the frozen L1 rule is reported as `missing_knowledge` (establish the
+knowledge first) rather than as a capability gap, and a subjectless request keeps
+the driver's own honest `author_unavailable` terminal instead of a bespoke
+clarification. The conversational route still prepares only a REVIEWABLE
+proposal — implementation needs a bounded change payload and the OWNER's
+approval — and the EXISTING driver may prepare a pending proposal for a request
+the adjudicator already considers covered (pinned G3 behaviour: lexical overlap
+is not functional equivalence). Nothing here acquires, refreshes, authorizes,
+approves, executes, promotes or configures anything.
+
 ### 34.33 Temporary Roadmap Step 2 — conversational interface closure
 
 **Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
@@ -4586,5 +4658,25 @@ every governance boundary are unchanged; 48 focused tests plus the Step 1/L1,
 builtin, self-knowledge, routing, intake, investigation, Step 5/6/10/11/13/14,
 L9/L10 and knowledge-bridge regressions green; known limitations recorded in
 §34.33; §34.33).
+Temporary Roadmap Step 3 — self-development loop closure added: 2026-09-30 (NOT a
+roadmap phase; no Step 26). The conversational development entry point (the G3
+route every DEVELOPMENT_REQUEST turn reaches) now reports the EXISTING Step-22
+capability/knowledge adjudication and — when the request is a genuine capability
+gap — the bounded design the EXISTING Step-23 specification produced, ahead of
+the governed driver report it already returned. Purely additive and confined to
+atlas/kernel/atlas.py: _development_request_adjudication_lines projects the
+verdict/design, _development_driver_bridge prepends them, and the bounded
+utterance-prefix strip keeps the same user text identical on every transport. No
+engine, planner, supplier, registry, store, route, authority or model dependency
+was added, the governed driver route and its envelope/approval boundaries are
+unchanged, and the reported verdict can never disagree with the adjudicator. 16
+focused tests cover the genuine-gap design, the existing-capability and
+missing-knowledge verdicts, the fail-closed underspecified/governance cases, the
+unchanged driver API and the complete authorized chain (design → bounded payload →
+OWNER approval → sandbox implementation → focused tests → verified → separate
+promotion review), including the not_promotable path; the conversational
+development bridge, target-state G3, final evolution lifecycle, P7, semantic gap
+routing, Step 22/23/24/25, F9, Step 1/2 and L1 regressions were green; known
+limitations recorded in §34.34; §34.34).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

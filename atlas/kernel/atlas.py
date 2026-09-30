@@ -3040,7 +3040,16 @@ class Atlas:
 
         result = self.run_development_driver(request, metadata=metadata or None)
 
-        lines = [
+        # Temporary Roadmap Step 3 — report the EXISTING adjudication of the
+        # request (does a capability/knowledge surface already cover it?) and, for
+        # a genuine gap, the bounded design the EXISTING specification produced.
+        # Both are ADDITIVE: the governed development route below still runs and
+        # reports only what it actually did, and nothing is authorized, executed
+        # or promoted by understanding the request.
+        design_lines = list(self._development_request_adjudication_lines(request))
+        if design_lines:
+            design_lines.append("")
+        lines = design_lines + [
             "Governed self-development request routed through the existing "
             "DevelopmentDriver (deterministic; no external AI model used):",
             f"- Outcome: {result.terminal.value}",
@@ -3078,6 +3087,14 @@ class Atlas:
             lines.append(f"- Promotion Request: {result.promotion_request_id}")
         for stage, failure in tuple(result.failures)[:5]:
             lines.append(f"- {stage}: {failure}")
+        if result.execution_status:
+            # Temporary Roadmap Step 3 — say where that execution happened, so the
+            # report is exact about the authority boundary that still holds.
+            lines.append(
+                "- The execution above is the disposable, path-confined sandbox "
+                "only: the live repository is unchanged and no change was applied, "
+                "approved or promoted."
+            )
         lines.append(
             "Nothing is approved, executed, or promoted; promotion requires "
             "explicit OWNER authorization."
@@ -3087,6 +3104,123 @@ class Atlas:
             content="\n".join(lines),
             metadata={"development_driver": result.to_dict()},
         )
+
+    def _development_request_adjudication_lines(self, request: str) -> tuple[str, ...]:
+        """Temporary Roadmap Step 3 — the EXISTING adjudication of a dev request.
+
+        Reports, ADDITIVELY and read-only: the Step-22 verdict for the request
+        (does an existing capability/knowledge surface already cover it, or is the
+        capability genuinely absent?) and — when the request IS a genuine gap and
+        the EXISTING Step-23 surface produced one — the bounded design (what the
+        capability is for, its operations, the areas it would touch, how it must
+        be verified and the governance boundary it must respect).
+
+        It never replaces the governed development route, never authorizes,
+        executes or promotes anything, and never reads lexical overlap as
+        functional equivalence: the verdict comes from the EXISTING adjudicator
+        and the design from the EXISTING specification surface.
+        """
+        lines: list[str] = []
+        gap = self.capability_gap(request)
+        kind = str(getattr(getattr(gap, "kind", None), "value", "") or "")
+        if kind:
+            detail = str(getattr(gap, "reason", "") or "")
+            capability = str(getattr(gap, "capability", "") or "")
+            summary = f"- Verdict: {kind}"
+            if capability:
+                summary += f" (`{capability}`)"
+            lines.append(
+                "Existing capability/knowledge adjudication (Step 22; read-only):"
+            )
+            lines.append(summary)
+            if detail:
+                lines.append(f"- Reason: {detail}")
+            requires = tuple(getattr(gap, "requires", ()) or ())
+            if requires:
+                lines.append(
+                    "- Requires: " + ", ".join(f"`{item}`" for item in requires)
+                )
+
+        specification = self.capability_specification(request)
+        if bool(getattr(specification, "is_specified", False)):
+            if lines:
+                lines.append("")
+            lines.extend(self._development_request_specification_lines(request))
+        return tuple(lines)
+
+    @staticmethod
+    def _development_purpose_text(purpose: Any) -> str:
+        """The request text of a specification, without an utterance prefix.
+
+        Temporary Roadmap Step 3 — the specification echoes the request it was
+        built from, and the conversational transports may carry the same user
+        request with a bounded utterance prefix ("respond: …"). Stripping that
+        prefix keeps the reported design identical for the same user text on
+        every transport. Bounded and deterministic.
+        """
+        text = str(purpose or "").strip()
+        if not text:
+            return ""
+        lowered = text.lower()
+        for prefix in ("respond:", "answer:", "reply:", "say:", "acknowledge:"):
+            if lowered.startswith(prefix):
+                return text[len(prefix) :].strip()
+        return text
+
+    def _development_request_specification_lines(self, request: str) -> tuple[str, ...]:
+        """Temporary Roadmap Step 3 — the bounded DESIGN of a genuine gap.
+
+        Projects the EXISTING Step-23 specification (what the capability is for,
+        its operations, the areas it would touch, how it must be verified and the
+        governance boundary it must respect) plus the truthful next governed step.
+        Returns ``()`` when the request is not a specified, reviewable design.
+        """
+        specification = self.capability_specification(request)
+        if not bool(getattr(specification, "is_specified", False)):
+            return ()
+        lines = [
+            "Bounded capability design (from the EXISTING specification surface; "
+            "nothing was implemented, approved or executed):",
+            f"- Capability: `{getattr(specification, 'capability', '') or 'unnamed'}`",
+        ]
+        purpose = self._development_purpose_text(
+            getattr(specification, "purpose", "")
+        )
+        if purpose:
+            lines.append(f"- Purpose: {purpose}")
+        operations = tuple(getattr(specification, "operations", ()) or ())
+        if operations:
+            lines.append(
+                "- Operations: " + ", ".join(f"`{item}`" for item in operations)
+            )
+        areas = tuple(getattr(specification, "affected_areas", ()) or ())
+        if areas:
+            lines.append(
+                "- Affected areas: " + ", ".join(f"`{item}`" for item in areas)
+            )
+        verification = tuple(getattr(specification, "verification", ()) or ())
+        if verification:
+            lines.append(
+                "- Required verification: "
+                + "; ".join(str(item) for item in verification)
+            )
+        governance = tuple(getattr(specification, "governance", ()) or ())
+        if governance:
+            lines.append(
+                "- Governance boundary: "
+                + "; ".join(str(item) for item in governance)
+            )
+        unresolved = tuple(getattr(specification, "unresolved_questions", ()) or ())
+        if unresolved:
+            lines.append(
+                "- Still unresolved: " + "; ".join(str(item) for item in unresolved[:2])
+            )
+        lines.append(
+            "- Next governed step: the design is reviewable now; implementation "
+            "needs a bounded change payload and the EXISTING OWNER approval, and "
+            "verification runs in the sandbox before any promotion."
+        )
+        return tuple(lines)
 
     def _ensure_development_driver(self):
         """Build (once) the bounded DevelopmentDriver from kernel surfaces."""
