@@ -1839,6 +1839,82 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.36 Temporary Roadmap Step 5 — self-architecture understanding
+
+**Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
+phase and no Step 26).** Step 5 exposes the architecture facts the EXISTING
+architecture model already records — declared dependencies (forward and reverse),
+component/subsystem ownership, and the model's OWN knowledge boundary for
+contracts/extension points — so architectural understanding can inform the
+EXISTING capability specification and the governed development path instead of
+falling to an unrelated route.
+
+**Measured gap.** Through `Atlas.chat` on an isolated kernel, six bounded
+architecture *dependency* forms ("what does X depend on?", "what are X's
+dependencies?", "which components does X depend on?", "what depends on X?",
+"which components depend on X?", "who uses X?") were answered by an unrelated
+route (the validated-knowledge surface with a mangled query — "No validated
+knowledge matched 'subsystem depend'") or the unsupported floor, even though the
+model held exactly that data (`conversation_service.declared_dependencies =
+('ai_service', 'cognition_api', 'context_engine')`; `atlas.evolution`
+`outbound_component_dependencies = ('evolution_storage', 'execution_engine', …)`),
+and the contract/extension-point question reached the generic floor although the
+model's own knowledge boundary already states that interfaces/contracts are not
+represented. Ownership, responsibility, structure, governance and the
+knowledge-boundary questions were ALREADY answered correctly by the existing
+surface, so nothing there was changed.
+
+**What changed (one file, additive; 348 insertions / 1 replacement).**
+`atlas/conversation/builtin_response.py`: three bounded cue families added to the
+EXISTING architecture matcher (which both transports already call, so no new
+route or hook was introduced) with three read-only renderers:
+- forward dependencies — a component's `declared_dependencies` or a subsystem's
+  `outbound_component_dependencies`, each edge marked as registered or not;
+- reverse dependents — a bounded walk of the model's declared edges (with the
+  capability-ownership join for `provided_capabilities`), reported honestly when
+  nothing is declared;
+- contracts/extension points — the model's OWN knowledge boundary (contracts and
+  state/data-flow are not represented) plus the authoritative extension facts it
+  does hold (components and the capabilities they provide) and a pointer to the
+  capability-detail surface.
+A subsystem-qualified question now resolves to the subsystem (qualifier-stripped
+lookup) instead of a same-prefixed component, and an unresolvable target is
+reported honestly rather than guessed. Unrecognised turns, the five existing
+Step-14 forms and every other owner (Steps 1–4) are untouched.
+
+**Governance and model independence.** Every answer is a read-only projection of
+the existing model: no architecture model, knowledge store, planner, registry or
+route was added, no contract is invented, nothing is authorized, configured,
+approved, executed or promoted, and the metadata carries `model_used: false`. A
+missing architectural fact travels the EXISTING Step-4 governed path
+(deny-by-default host allowlist → acquisition → provenance → retention), and the
+retained knowledge then grounds the specification through the EXISTING Step-23
+mechanism.
+
+**Validation.** `tests/test_temporary_step5_self_architecture_understanding.py` —
+22 focused tests over the real path: the existing responsibility/structure and
+known-vs-missing answers; forward dependencies matching the model exactly;
+subsystem resolution; reverse dependents including a registered edge; the
+contract/extension-point boundary answer; the honest unresolvable-target report;
+a missing architectural fact researched, provenance-backed (`supported`) and
+retained through the authorized host policy; reuse afterwards without repeating
+research; the unauthorized source staying blocked; the architecture-grounded
+specification (affected areas checked against the model); the design reported
+conversationally; development stopping at the existing `awaiting_approval` with
+nothing executed or promoted; unrelated turns and non-architecture phrasings
+unchanged; stream/send agreement; blocked-network and `model_used` false; and
+isolated stores. Relevant architecture/self-knowledge, routing and Steps 1–4
+regressions were green.
+
+**Known limitations (truthful).** Only DECLARED edges are represented — the model
+records declared dependency names and static import edges, never runtime usage,
+interfaces or data-flow, and the answers state that; contracts/extension points
+therefore remain answerable only as a boundary plus the registry facts. The
+pre-existing capability-ownership form still declines when its target is not a
+registered capability, and the specification's affected-area matching stays the
+EXISTING lexical rule (unchanged here). Nothing here acquires outside the
+authorized host policy and nothing mutates state.
+
 ### 34.35 Temporary Roadmap Step 4 — research → learning → development
 
 **Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
@@ -4780,5 +4856,26 @@ with sandbox verification unchanged. No engine, store, planner, registry, route,
 authority or model dependency was added. 22 focused tests plus the research,
 knowledge, F8, conversation-cascade and Step 1-3 regressions were green; known
 limitations recorded in §34.35; §34.35).
+Temporary Roadmap Step 5 — self-architecture understanding added: 2026-09-30 (NOT
+a roadmap phase; no Step 26). The EXISTING architecture model's declared facts are
+now reachable conversationally beyond the forms already covered: forward
+dependencies (a component's declared dependencies, a subsystem's outbound
+component dependencies), reverse dependents (a bounded walk of the declared
+edges), and the contract/extension-point question (answered with the model's OWN
+knowledge boundary plus the authoritative registry facts). Measured gap: six
+bounded dependency phrasings and the extension-point question were answered by an
+unrelated route or the generic floor although the model held the data, while the
+existing ownership/responsibility/structure/governance/knowledge-boundary answers
+were already correct and were left untouched. The change is confined to
+atlas/conversation/builtin_response.py (three cue families plus three read-only
+renderers inside the EXISTING architecture matcher, which both transports already
+call, so no new route, hook, model, store, planner, registry or contract was
+added); a subsystem-qualified target resolves to the subsystem, an unresolvable
+target is reported honestly, and every answer is read-only with model_used false.
+A missing architectural fact travels the EXISTING Step-4 governed path and the
+retained knowledge grounds the EXISTING Step-23 specification, with development
+still stopping at the existing awaiting_approval boundary. 22 focused tests plus
+the architecture/self-knowledge, routing and Step 1-4 regressions were green;
+known limitations recorded in §34.36; §34.36).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

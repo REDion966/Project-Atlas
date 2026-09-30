@@ -372,6 +372,70 @@ _ARCH_KNOWLEDGE_BOUNDARY_RE = re.compile(
 #: target that does NOT resolve (reported honestly rather than guessed).
 _ARCH_COMPONENT_QUALIFIERS: tuple[str, ...] = ("component", "module", "subsystem")
 
+#: Temporary Roadmap Step 5 — bounded DEPENDENCY forms. The EXISTING architecture
+#: model already records the declared edges (a component's
+#: ``declared_dependencies``, a subsystem's ``outbound_component_dependencies``);
+#: these forms simply expose them conversationally, forward and in reverse, and
+#: fail closed on an unresolvable target. Nothing here is inferred: an edge is
+#: reported only when the model declares it.
+_ARCH_DEPENDENCY_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*what\s+does\s+(?:the\s+)?(?P<name>.{1,60}?)\s+"
+        r"(?:component\s+|module\s+|package\s+|subsystem\s+)?depend\s+(?:on|upon)\b"
+        r"[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*what\s+are\s+(?:the\s+)?dependenc(?:y|ies)\s+of\s+(?:the\s+)?"
+        r"(?P<name>.{1,60}?)[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*which\s+(?:components|modules|packages|subsystems)\s+does\s+(?:the\s+)?"
+        r"(?P<name>.{1,60}?)\s+depend\s+(?:on|upon)\b[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+)
+_ARCH_DEPENDENTS_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*what\s+depends\s+(?:on|upon)\s+(?:the\s+)?(?P<name>.{1,60}?)[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*which\s+(?:components|modules|packages|subsystems)\s+depend\s+"
+        r"(?:on|upon)\s+(?:the\s+)?(?P<name>.{1,60}?)[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*who\s+(?:uses|depends\s+on)\s+(?:the\s+)?(?P<name>.{1,60}?)[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+)
+#: Bounded CONTRACT / EXTENSION-POINT forms. The architecture model's OWN
+#: knowledge boundary states that interfaces/contracts are not represented, so
+#: these forms answer with that boundary plus the authoritative facts the model
+#: does hold (they never invent a contract).
+_ARCH_CONTRACTS_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*what\s+(?:contracts?|interfaces?)\s+(?:does|do)\s+(?:the\s+)?"
+        r"(?P<name>.{1,60}?)\s+(?:expose|define|provide|declare)[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*what\s+are\s+the\s+extension\s+points?\b.*$"
+        r"|^\s*how\s+(?:do|can)\s+i\s+(?:extend|add)\s+(?:a\s+)?"
+        r"capabilit(?:y|ies)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:what|which)\s+(?:contracts?|interfaces?)\s+are\s+"
+        r"(?:represented|known|available)\b.*$",
+        re.IGNORECASE,
+    ),
+)
+#: Bounded number of dependents/relations reported for one dependency question.
+_MAX_ARCHITECTURE_DEPENDENTS: int = 8
+
 # ---------------------------------------------------------------------------
 # Step 15 — bounded knowledge-need recognition
 #
@@ -2818,7 +2882,7 @@ class BuiltinResponseService:
             # A turn that names a SUBSYSTEM is answered by the subsystem's own
             # composition rather than by a same-named component.
             structure = self._render_structure(
-                name, prefer_subsystem="subsystem" in raw.lower()
+                name, prefer_subsystem="subsystem" in lowered
             )
             if structure is not None:
                 return structure
@@ -2830,7 +2894,299 @@ class BuiltinResponseService:
                 for qualifier in ("component", "subsystem", "module", "package")
             ):
                 return self._render_unknown_component(name)
+        # Temporary Roadmap Step 5 — bounded DEPENDENCY forms (forward), answered
+        # from the EXISTING model's declared edges only. An unresolvable target
+        # declines (fail closed) so an ordinary request keeps its existing route.
+        for pattern in _ARCH_DEPENDENCY_RES:
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            raw = match.group("name") or ""
+            name = self._clean_component_name(raw)
+            if not name:
+                continue
+            rendered = self._render_dependencies(
+                name, prefer_subsystem="subsystem" in lowered
+            )
+            if rendered is not None:
+                return rendered
+            if any(
+                qualifier in f"{raw.lower()} {lowered}"
+                for qualifier in ("component", "module", "package", "subsystem")
+            ):
+                return self._render_unknown_component(name)
+        # Temporary Roadmap Step 5 — bounded DEPENDENT forms (reverse): which
+        # components/subsystems declare a dependency on the named target.
+        for pattern in _ARCH_DEPENDENTS_RES:
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            raw = match.group("name") or ""
+            name = self._clean_component_name(raw)
+            if not name:
+                continue
+            rendered = self._render_dependents(
+                name, prefer_subsystem="subsystem" in lowered
+            )
+            if rendered is not None:
+                return rendered
+            if any(
+                qualifier in f"{raw.lower()} {lowered}"
+                for qualifier in ("component", "module", "package", "subsystem")
+            ):
+                return self._render_unknown_component(name)
+        # Temporary Roadmap Step 5 — bounded CONTRACT/EXTENSION-POINT forms: the
+        # model's OWN knowledge boundary says contracts are not represented, so
+        # these answer with that boundary and the authoritative facts instead of
+        # the generic unsupported floor.
+        for pattern in _ARCH_CONTRACTS_RES:
+            if pattern.match(lowered) is not None:
+                return self._render_architecture_contracts()
         return None
+
+    def _dependency_owner(
+        self, name: str, *, prefer_subsystem: bool = False
+    ) -> tuple[str, Any] | None:
+        """Resolve ``name`` to ``("component"|"subsystem", entry)`` or None.
+
+        The subsystem lookup also tries the QUALIFIER-STRIPPED form ("the evolution
+        subsystem" -> "evolution"), so a subsystem-named question resolves to the
+        subsystem rather than to a same-prefixed component. Bounded and
+        deterministic; an unresolvable name returns ``None`` (nothing is invented).
+        """
+        squashed = re.sub(
+            r"\b(?:the|a|an|component|module|package|subsystem|service)\b",
+            " ",
+            str(name or "").lower(),
+        ).strip()
+        if prefer_subsystem:
+            for candidate in (name, squashed):
+                subsystem = self._find_subsystem_entry(candidate)
+                if subsystem is not None:
+                    return ("subsystem", subsystem)
+        component = self._find_component_entry(name)
+        if component is not None:
+            return ("component", component)
+        for candidate in (name, squashed):
+            subsystem = self._find_subsystem_entry(candidate)
+            if subsystem is not None:
+                return ("subsystem", subsystem)
+        return None
+
+    def _render_dependencies(
+        self, name: str, *, prefer_subsystem: bool = False
+    ) -> Message | None:
+        """Report the DECLARED dependencies of a component/subsystem, or None.
+
+        Read-only projection of the EXISTING architecture model: a component's
+        ``declared_dependencies`` or a subsystem's
+        ``outbound_component_dependencies``. Each edge is marked as resolving to a
+        registered component or not, and the model's own limitation is restated
+        (only declared edges are represented). Nothing is inferred.
+        """
+        resolved = self._dependency_owner(name, prefer_subsystem=prefer_subsystem)
+        if resolved is None:
+            return None
+        kind, entry = resolved
+        label = str(
+            getattr(entry, "name", "") or getattr(entry, "package", "") or name
+        )
+        if kind == "component":
+            dependencies = tuple(
+                getattr(entry, "declared_dependencies", ()) or ()
+            )
+        else:
+            dependencies = tuple(
+                getattr(entry, "outbound_component_dependencies", ()) or ()
+            )
+        lines = [f"Declared dependencies of {kind} `{label}`:"]
+        if not dependencies:
+            lines.append(
+                "- None declared by the architecture model (an empty list is what "
+                "the model records, not a claim that nothing is used)."
+            )
+        else:
+            for dependency in dependencies[:_MAX_ARCHITECTURE_RELATIONS]:
+                known = self._find_component_entry(str(dependency)) is not None
+                suffix = (
+                    "registered component"
+                    if known
+                    else "not registered as a component"
+                )
+                lines.append(f"- `{dependency}` ({suffix})")
+        limitations = tuple(getattr(entry, "limitations", ()) or ())
+        for limitation in limitations[:_MAX_ARCHITECTURE_LIMITATIONS]:
+            lines.append(f"- Limitation: {limitation}")
+        lines.append(
+            "These are the DECLARED edges only: the model records declared "
+            "dependency names and static import edges, never runtime usage or "
+            "interfaces. Nothing was changed."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture_dependencies": {
+                    "kind": kind,
+                    "target": label,
+                    "dependencies": list(dependencies),
+                },
+            },
+        )
+
+    def _render_dependents(
+        self, name: str, *, prefer_subsystem: bool = False
+    ) -> Message | None:
+        """Report which registered components/subsystems depend on ``name``.
+
+        Reverse walk over the EXISTING model's declared edges only. The target must
+        resolve to a registered component, subsystem or capability; an empty result
+        is reported honestly (the model records declared edges only).
+        """
+        resolved = self._dependency_owner(name, prefer_subsystem=prefer_subsystem)
+        capability_entry = None
+        if resolved is None:
+            capability_entry = self._find_state_entry(name)
+            if capability_entry is None:
+                return None
+            target_names = {
+                str(getattr(capability_entry, "name", "") or "").lower(),
+                str(name).lower(),
+            }
+        else:
+            kind, entry = resolved
+            target_names = {
+                str(getattr(entry, "name", "") or "").lower(),
+                str(getattr(entry, "package", "") or "").lower(),
+                str(getattr(entry, "package", "") or "").rsplit(".", 1)[-1].lower(),
+                str(name).lower(),
+            }
+            target_names.discard("")
+        model = self._resolve_architecture_model()
+        if model is None:
+            return None
+        dependents: list[str] = []
+        for component in getattr(model, "components", ()) or ():
+            edges = {
+                str(edge).lower()
+                for edge in (getattr(component, "declared_dependencies", ()) or ())
+            }
+            provided = {
+                str(item).lower()
+                for item in (getattr(component, "provided_capabilities", ()) or ())
+            }
+            if edges & target_names:
+                name_text = getattr(component, "name", "")
+                dependents.append(
+                    f"component `{name_text}` (declared dependency)"
+                )
+            elif capability_entry is not None and provided & target_names:
+                name_text = getattr(component, "name", "")
+                dependents.append(f"component `{name_text}` (provides it)")
+        for subsystem in getattr(model, "subsystems", ()) or ():
+            edges = {
+                str(edge).lower()
+                for edge in (
+                    getattr(subsystem, "outbound_component_dependencies", ()) or ()
+                )
+            }
+            if edges & target_names:
+                dependents.append(
+                    f"subsystem `{getattr(subsystem, 'package', '')}` "
+                    "(declared outbound dependency)"
+                )
+        label = str(name)
+        lines = [f"Registered architecture depending on `{label}`:"]
+        if not dependents:
+            lines.append(
+                "- None declared: no registered component or subsystem declares a "
+                "dependency on it (the model records declared edges only, so this "
+                "is not a claim that nothing uses it)."
+            )
+        else:
+            for dependent in sorted(dependents)[:_MAX_ARCHITECTURE_DEPENDENTS]:
+                lines.append(f"- {dependent}")
+        lines.append(
+            "Declared edges only: runtime usage, interfaces and data-flow are not "
+            "represented. Nothing was changed."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture_dependents": {"target": label, "dependents": dependents},
+            },
+        )
+
+    def _render_architecture_contracts(self) -> Message:
+        """Answer a bounded CONTRACT/EXTENSION-POINT question honestly.
+
+        The EXISTING architecture model's own knowledge boundary states that
+        interfaces/contracts and state/data-flow are NOT represented; this reports
+        that boundary plus the authoritative extension facts the model DOES hold
+        (registered components and the capabilities each provides, and the
+        capability-detail surface for a named capability's operations). No contract
+        is invented and no module is guessed.
+        """
+        lines = [
+            "Architecture contracts (deterministic, read-only; no model used):",
+            "- Interfaces/contracts are NOT represented: no authoritative source "
+            "records them, so none is claimed or invented here.",
+            "- State/data-flow is NOT represented either (only declared dependency "
+            "names and static import edges are available).",
+        ]
+        model = self._resolve_architecture_model()
+        if model is None:
+            lines.append(
+                "- The architecture model is unavailable, so no component-level "
+                "extension facts can be reported."
+            )
+            return Message(
+                role="assistant",
+                content="\n".join(lines),
+                metadata={
+                    "builtin_response": True,
+                    "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                    "model_used": False,
+                    "architecture_contracts": {"status": "unavailable"},
+                },
+            )
+        entries = tuple(getattr(model, "components", ()) or ())[
+            :_MAX_ARCHITECTURE_RELATIONS
+        ]
+        lines.append(
+            "What IS authoritative for extension: each registered component and the "
+            "capabilities it provides (the registry is the extension mechanism):"
+        )
+        for entry in entries:
+            provided = tuple(getattr(entry, "provided_capabilities", ()) or ())
+            if not provided:
+                continue
+            lines.append(
+                f"- `{getattr(entry, 'name', '')}` provides "
+                + ", ".join(f"`{item}`" for item in provided[:4])
+            )
+        lines.append(
+            "For a named capability's own operations and requirements ask "
+            "'explain <capability>' or 'what does the <capability> capability "
+            "require?'. Nothing was changed, configured or authorized."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture_contracts": {"status": "not_represented"},
+            },
+        )
 
     def _find_subsystem_entry(self, name: str) -> Any | None:
         """Resolve ``name`` to a registered subsystem entry, or None (fail-closed).

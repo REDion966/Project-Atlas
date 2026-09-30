@@ -329,6 +329,15 @@ governance — its own governed development.
     capability specification. The host allowlist stays the authority (an
     unauthorized host is reported as denied and nothing is stored), external
     content is treated as data only, and research still authorizes nothing.
+  - **Self-architecture understanding** (temporary post-roadmap step, not a
+    roadmap phase): the existing architecture model's declared facts are now
+    reachable conversationally — what a component or subsystem depends on, which
+    registered components/subsystems depend on a given target, and an honest
+    answer for contracts/extension points (the model records no interfaces, so it
+    says so and reports the registry facts it does hold). A missing architectural
+    fact travels the existing governed research path, and the retained knowledge
+    grounds the existing capability specification. Nothing is invented, and no
+    architecture answer grants authority.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of
