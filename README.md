@@ -319,6 +319,16 @@ governance — its own governed development.
     authorizes nothing: implementation needs a bounded change payload and the
     OWNER's approval, focused tests run in the sandbox before any promotion, and
     a failed test yields no promotion request.
+  - **Research → learning → development** (temporary post-roadmap step, not a
+    roadmap phase): a request that names an explicit external source (a URL or a
+    GitHub repository) is now carried through the existing governed research
+    pipeline — deny-by-default host authorization, acquisition, provenance and
+    evaluation, retention of only justified knowledge — and then reused: the
+    retained knowledge resolves the original knowledge gap, retrieval answers
+    from it, and a development request that needed it reaches the existing
+    capability specification. The host allowlist stays the authority (an
+    unauthorized host is reported as denied and nothing is stored), external
+    content is treated as data only, and research still authorizes nothing.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of

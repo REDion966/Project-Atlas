@@ -3222,6 +3222,203 @@ class Atlas:
         )
         return tuple(lines)
 
+    def _external_research_bridge(self, text: str, target: Any) -> Message:
+        """Temporary Roadmap Step 4 — ONE governed external-research turn.
+
+        Carries a natural-language request that names an explicit external source
+        through the EXISTING mechanisms only: the Step-16 research orchestrator over
+        the D2 governed acquisition boundary (deny-by-default host policy), the
+        Step-17 provenance/evaluation, the Step-18 retention decision and the
+        Step-19/21 retained-knowledge read. The bounded conversation layer only
+        parsed the target; nothing here enables a source, allowlists a host,
+        approves, authorizes, executes, promotes or configures anything, and no
+        model is consulted. The answer states exactly what those mechanisms
+        returned, including a refusal.
+        """
+        from atlas.conversation.builtin_response import BUILTIN_INTENT_EXTERNAL_RESEARCH
+
+        spec = target if isinstance(target, dict) else {}
+        kind = str(spec.get("kind", "") or "")
+        address = str(spec.get("target", "") or "")
+        keywords = tuple(spec.get("keywords", ()) or ())
+        import re as _re
+
+        fallback_objective = _re.sub(r"https?://\S+", " ", str(text or "")).strip()
+        fallback_objective = _re.sub(
+            r"^(?:please\s+)?(?:i\s+(?:want|need|would\s+like)\s+you\s+to\s+|"
+            r"can\s+you\s+|could\s+you\s+|would\s+you\s+)?",
+            "",
+            fallback_objective,
+            flags=_re.IGNORECASE,
+        ).strip()
+        objective = " ".join(keywords) or fallback_objective or address
+        lines = [
+            "Governed external research (deny-by-default source authorization; "
+            "deterministic, no model used):",
+            f"- Source: `{address}` ({kind or 'unknown'})",
+            f"- Objective: {objective}",
+        ]
+        evidence: dict[str, Any] = {
+            "kind": kind,
+            "target": address,
+            "keywords": list(keywords),
+            "objective": objective,
+        }
+
+        if kind == "github":
+            return self._github_research_message(
+                text, address, keywords, lines, evidence
+            )
+
+        outcome = self.research_knowledge_need(objective, candidate_urls=(address,))
+        status = str(getattr(getattr(outcome, "status", None), "value", "") or "")
+        evidence["research_status"] = status
+        evidence["report_ids"] = list(getattr(outcome, "report_ids", ()) or ())
+        lines.append(f"- Acquisition: {status or 'unknown'}")
+        detail = str(getattr(outcome, "detail", "") or "")
+        if detail:
+            lines.append(f"- Acquisition detail: {detail}")
+
+        provenance = self.research_provenance(outcome)
+        sources = tuple(getattr(provenance, "sources", ()) or ())
+        claims = tuple(getattr(provenance, "claims", ()) or ())
+        standings = [str(getattr(claim, "standing", "") or "") for claim in claims]
+        source_uris = [
+            str(getattr(source, "source_uri", "") or "") for source in sources
+        ]
+        evidence["provenance"] = {
+            "sources": source_uris,
+            "standings": standings,
+        }
+        if sources or claims:
+            lines.append(
+                f"- Provenance: {len(sources)} source(s), {len(claims)} evaluated "
+                f"claim(s) with standing {standings}"
+            )
+        else:
+            lines.append(
+                "- Provenance: no evaluated source or claim (nothing was acquired "
+                "that Atlas recorded evidence for)"
+            )
+
+        retention = self.knowledge_retention(outcome)
+        retained = int(getattr(retention, "retained_count", 0) or 0)
+        refused = int(getattr(retention, "refused_count", 0) or 0)
+        contested = int(getattr(retention, "contested_count", 0) or 0)
+        established = int(getattr(retention, "established_count", 0) or 0)
+        evidence["retention"] = {
+            "retained": retained,
+            "refused": refused,
+            "contested": contested,
+            "established": established,
+        }
+        lines.append(
+            f"- Retention (governed knowledge mechanism): retained {retained}, "
+            f"refused {refused}, contested {contested}, established {established}"
+        )
+        for finding in tuple(getattr(retention, "findings", ()) or ())[:2]:
+            lines.append(f"- Retention note: {finding}")
+
+        for keyword in keywords[:3]:
+            try:
+                kept = self.retained_knowledge(keyword)
+            except Exception:
+                continue
+            kept_status = str(getattr(getattr(kept, "status", None), "value", "") or "")
+            count = len(tuple(getattr(kept, "records", ()) or ()))
+            lines.append(
+                f"- Retained knowledge for `{keyword}`: status "
+                f"{kept_status or 'unknown'}, {count} record(s)"
+            )
+
+        if objective:
+            try:
+                need = self.knowledge_need(objective)
+            except Exception:
+                need = None
+            if need is not None:
+                need_kind = str(getattr(getattr(need, "kind", None), "value", "") or "")
+                need_status = str(
+                    getattr(getattr(need, "status", None), "value", "") or ""
+                )
+                evidence["knowledge_need_after"] = {
+                    "kind": need_kind,
+                    "status": need_status,
+                }
+                lines.append(
+                    f"- Knowledge need now: {need_kind or 'unknown'} "
+                    f"({need_status or 'unknown'})"
+                )
+
+        lines.append(
+            "Nothing was authorized, allowlisted, configured, approved, executed or "
+            "promoted: source authorization stays deny-by-default and remains the "
+            "OWNER's configuration act, and any development still needs the "
+            "EXISTING OWNER approval and sandbox verification."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_EXTERNAL_RESEARCH,
+                "model_used": False,
+                "external_research": evidence,
+            },
+        )
+
+    def _github_research_message(
+        self, text: str, address: str, keywords: tuple, lines: list, evidence: dict
+    ) -> Message:
+        """The GitHub half of the Step-4 bridge (EXISTING repository mechanism)."""
+        from atlas.conversation.builtin_response import BUILTIN_INTENT_EXTERNAL_RESEARCH
+
+        try:
+            report = self.analyze_external_repository(
+                address, keywords=tuple(keywords)[:8]
+            )
+        except Exception as exc:  # fail closed: report the failure, claim nothing
+            lines.append(f"- Repository acquisition failed: {type(exc).__name__}")
+            report = {}
+        acquisition = (
+            report.get("acquisition", {}) if isinstance(report, dict) else {}
+        ) or {}
+        status = str(acquisition.get("status", "") or "unknown")
+        authorized = tuple(acquisition.get("authorized_sources", ()) or ())
+        evidence["repository"] = {
+            "status": status,
+            "authorized_sources": list(authorized),
+        }
+        lines.append(f"- Repository acquisition: {status}")
+        if authorized:
+            lines.append(f"- Authorized source(s): {tuple(authorized)}")
+        comparison = (
+            report.get("comparison", {}) if isinstance(report, dict) else {}
+        ) or {}
+        findings = tuple(comparison.get("findings", ()) or ())
+        for finding in findings[:3]:
+            lines.append(f"- Comparison finding: {finding}")
+        lines.append(
+            "External code is treated as DATA only: it is never executed, never "
+            "trusted, and reaches the governed development path as unvalidated "
+            "evidence at most."
+        )
+        lines.append(
+            "Nothing was authorized, allowlisted, configured, approved, executed or "
+            "promoted: source authorization stays deny-by-default and remains the "
+            "OWNER's configuration act."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_EXTERNAL_RESEARCH,
+                "model_used": False,
+                "external_research": evidence,
+            },
+        )
+
     def _ensure_development_driver(self):
         """Build (once) the bounded DevelopmentDriver from kernel surfaces."""
         if self._development_driver is not None:
@@ -5477,6 +5674,12 @@ class Atlas:
             # never imports atlas.evolution, never approves, never promotes, and
             # tick() never invokes it.
             development_driver_bridge=self._development_driver_bridge,
+            # Temporary Roadmap Step 4 — the governed external-research turn: the
+            # conversation layer parses the bounded URL/GitHub target and the kernel
+            # carries it through the EXISTING acquisition/provenance/retention
+            # mechanisms. Duck-typed and kernel-owned: the conversation layer never
+            # imports atlas.research, never enables a source, never authorizes.
+            external_research_bridge=self._external_research_bridge,
             orchestration_resolver=self._orchestration_bridge,
             session_context=self._session_context,
             fallback_resolver=self._deterministic_fallback,

@@ -495,6 +495,7 @@ class ConversationService:
         development_execution_bridge: Callable[..., Any] | None = None,
         proposal_change_supplier: Any | None = None,
         development_driver_bridge: Callable[..., Any] | None = None,
+        external_research_bridge: Callable[..., Any] | None = None,
         autonomy_check: Callable[..., AutonomyDecisionProtocol] | None = None,
         goal_orchestration_resolver: Callable[..., Any] | None = None,
         goal_resume_resolver: Callable[..., Any] | None = None,
@@ -592,6 +593,20 @@ class ConversationService:
                 this boundary keeps the dependency direction correct
                 (conversation -> kernel -> evolution). When ``None``, autonomy
                 requests fail closed and are denied.
+
+            external_research_bridge:
+                Temporary Roadmap Step 4 — optional duck-typed callable mapping a
+                bounded external-research turn into a conversational
+                :class:`Message`. Signature:
+
+                    (text, target) -> Message | None
+
+                where ``target`` is the parse of the turn's explicit external
+                source (a URL or a GitHub repository). The kernel performs the
+                acquisition through the EXISTING governed mechanisms; this module
+                never imports the research package, never enables a source, never
+                authorizes, and ``tick()`` never invokes it. When ``None`` (or
+                raising/declining), every existing route is preserved verbatim.
         """
 
         self._history = History()
@@ -621,6 +636,13 @@ class ConversationService:
         #: legacy F9 bridge. Duck-typed and fail-soft: absent or raising keeps the
         #: legacy route verbatim. It grants no authority here and never promotes.
         self._development_driver_bridge = development_driver_bridge
+        #: Temporary Roadmap Step 4 — optional duck-typed bridge that performs ONE
+        #: GOVERNED external-research turn. Signature: ``(text, target) -> Message
+        #: | None`` where ``target`` is the bounded parse of the turn's external
+        #: source. Kernel-owned and duck-typed (this module never imports
+        #: atlas.research). Absent, declining or raising keeps every existing route
+        #: verbatim; it authorizes nothing and acquires nothing by itself.
+        self._external_research_bridge = external_research_bridge
         self._orchestration_resolver = orchestration_resolver
         #: Step 2 — optional duck-typed bridge that SEQUENCES a bounded
         #: multi-step goal through the EXISTING OrchestrationExecutor. Signature:
@@ -884,6 +906,30 @@ class ConversationService:
         if self._builtin_response is None:
             return None
         return self._builtin_response.match_source_authorization_question(text)
+
+    def _maybe_handle_external_research(self, text: str) -> Message | None:
+        """Temporary Roadmap Step 4 — a GOVERNED external-research request.
+
+        The conversation layer only parses the bounded TARGET (a URL or a GitHub
+        repository) of a turn that also carries a research/acquisition cue; the
+        kernel's injected bridge performs the acquisition through the EXISTING
+        governed mechanisms (deny-by-default host policy, provenance, retention)
+        and reports exactly what they returned. Declines when the turn names no
+        target, when the bridge is unwired, or when the bridge raises — so every
+        other turn keeps its existing route and nothing is acquired implicitly.
+        """
+        if self._builtin_response is None or self._external_research_bridge is None:
+            return None
+        target = self._builtin_response.parse_external_research_target(text)
+        if not target:
+            return None
+        try:
+            message = self._external_research_bridge(text, target)
+        except Exception:  # fail closed -> the existing route is preserved
+            return None
+        if isinstance(message, Message):
+            return message
+        return None
 
     def _maybe_handle_evidence_self_knowledge(self, text: str) -> Message | None:
         """Evidence-driven: Atlas-specific self-knowledge topics (read-only).
@@ -2519,6 +2565,17 @@ class ConversationService:
         if source_authorization is not None:
             self._conversation.add_message(source_authorization)
             return source_authorization
+        # Temporary Roadmap Step 4 — a bounded GOVERNED external-research turn
+        # (an explicit URL/GitHub target in a research request) is carried through
+        # the EXISTING acquisition/provenance/retention mechanisms by the injected
+        # kernel bridge BEFORE the generic knowledge route can reinterpret the URL
+        # as a knowledge query. It runs AFTER the source-authorization owner, so a
+        # request to CHANGE authorization is never claimed here, and it declines
+        # when no target is named or the bridge is unwired/raising.
+        external_research = self._maybe_handle_external_research(text)
+        if external_research is not None:
+            self._conversation.add_message(external_research)
+            return external_research
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests are claimed deterministically
         # BEFORE the development/execution handlers, so an informational
@@ -2979,6 +3036,13 @@ class ConversationService:
         if source_authorization is not None:
             self._conversation.add_message(source_authorization)
             yield source_authorization.content
+            return
+        # Temporary Roadmap Step 4 — the send() mirror of the governed
+        # external-research route (same owner, same fail-closed rule).
+        external_research = self._maybe_handle_external_research(text)
+        if external_research is not None:
+            self._conversation.add_message(external_research)
+            yield external_research.content
             return
         # Evidence-driven improvement 1 — Atlas-informational self-knowledge
         # topics and external-knowledge requests (mirror of send()).

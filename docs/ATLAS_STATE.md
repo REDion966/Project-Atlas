@@ -1839,6 +1839,88 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.35 Temporary Roadmap Step 4 — research → learning → development
+
+**Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
+phase and no Step 26).** Step 4 closes the gap between a natural-language request
+that names an external source and Atlas's EXISTING governed research/learning
+pipeline: such a turn is now owned by a bounded conversational surface that
+carries it through the EXISTING Step-16 research orchestrator (over the D2
+deny-by-default acquisition boundary), the Step-17 provenance/evaluation, the
+Step-18 retention decision and the Step-19/21 retained-knowledge read, and reports
+exactly what those mechanisms returned.
+
+**Measured gap.** Through `Atlas.chat` on an isolated kernel, a turn that named an
+explicit source ("research https://… about X") was answered by the read-only
+validated-knowledge route on a mangled query ("No validated knowledge matched
+'https'"), so the governed acquisition boundary was never consulted, an
+authorized host and a denied host produced the *same* answer, and nothing in the
+conversation reported acquisition, provenance or retention — while the kernel
+seams (`research_knowledge_need`, `research_provenance`, `knowledge_retention`,
+`acquire_external_knowledge`, `analyze_external_repository`) already did all of
+it under the existing policy. Measured separately: research → provenance →
+retention → retrieval → gap resolution → specification all work when the
+acquisition is authorized, and the Step-25 loop composes them; only the
+conversational owner was missing.
+
+**What changed (additive; three files).**
+- `atlas/conversation/builtin_response.py`: the bounded `external_research`
+  intent and `parse_external_research_target` — the DISCRIMINATOR IS THE TARGET,
+  not the verb (the documented repository rule): a turn is claimed only when it
+  names an explicit source (a URL or a GitHub repository) together with a
+  research/acquisition cue, a request to CHANGE authorization is never claimed
+  (Step 1 keeps that owner), and an authorization verb is refused outright. The
+  surface only parses; it acquires nothing.
+- `atlas/conversation/conversation_service.py`: the `external_research_bridge`
+  seam (duck-typed, kernel-owned, never imports `atlas.research`) plus one
+  fail-closed hook in `send` and its `stream` mirror, placed AFTER the Step-1
+  source-authorization owner and before the generic knowledge route. An unwired,
+  declining or raising bridge preserves every existing route verbatim.
+- `atlas/kernel/atlas.py`: `_external_research_bridge` / `_github_research_message`
+  perform ONE governed turn through the EXISTING mechanisms and report the
+  acquisition status, the provenance (sources + claim standings), the retention
+  decision (retained / refused / contested / established + the honest
+  single-source note), the retained-knowledge status per keyword, the knowledge
+  need *after* acquisition (so the resolved gap is visible) and the authority
+  statement. No new engine, store, planner, registry or route; no model; nothing
+  is authorized, allowlisted, configured, approved, executed or promoted.
+
+**Governance and model independence.** The host allowlist stays the authority:
+the same turn against the same source is denied with an empty OWNER allowlist
+(`no_authorized_source`, nothing stored) and acquired when the host is listed.
+External content stays data: GitHub material is explicitly reported as
+unvalidated evidence that is never executed or trusted, contradicted or
+single-source claims are never called established, and research grants no
+development authority — implementation still stops at the EXISTING
+`awaiting_approval` boundary with the OWNER approval and sandbox verification
+unchanged. Every turn is deterministic and model-free (`model_used` false), and
+the tests block `socket.connect` while the authorized acquisition still succeeds.
+
+**Validation.** `tests/test_temporary_step4_research_learning_development.py` —
+22 focused tests over the real path with an operator-authorized host and a
+deterministic in-process transport: the genuine knowledge gap; authorized
+acquisition + provenance + retention through one conversational turn; the denied
+host (blocked, nothing stored); the OWNER allowlist as the authority; the GitHub
+route over the EXISTING repository mechanism; retrieval/reuse after acquisition;
+the retained knowledge resolving the original gap (`missing_knowledge` →
+`unsupported_capability`); the resolved request reaching the EXISTING
+specification and the governed approval boundary without executing; single-source
+and contradicted claims never trusted; non-research turns and authorization
+changes keeping their existing owners; stream/send agreement; blocked-network and
+`model_used` false; and an unchanged repository/HEAD. Relevant research,
+knowledge and conversation regressions were green.
+
+**Known limitations (truthful).** The conversational owner is bounded and
+target-discriminated: a research turn with no explicit URL/repository target keeps
+the read-only knowledge route, a GitHub acquisition through the kernel needs the
+configured hosts (`api.github.com` / `raw.githubusercontent.com`) and reaches the
+network, so an offline environment reports its own honest non-success status, and
+a bare "what is X" question is unchanged. Retention remains a decision over what
+the acquisition pipeline recorded: single-source knowledge is retained but never
+"established", and contradicted material is refused or left unestablished. The
+route reports; it never acquires outside the authorized host policy, never
+promotes and never configures anything.
+
 ### 34.34 Temporary Roadmap Step 3 — self-development loop closure
 
 **Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
@@ -4678,5 +4760,25 @@ promotion review), including the not_promotable path; the conversational
 development bridge, target-state G3, final evolution lifecycle, P7, semantic gap
 routing, Step 22/23/24/25, F9, Step 1/2 and L1 regressions were green; known
 limitations recorded in §34.34; §34.34).
+Temporary Roadmap Step 4 — research → learning → development added: 2026-09-30
+(NOT a roadmap phase; no Step 26). A natural-language turn that names an explicit
+external source is now owned by a bounded conversational surface that carries it
+through the EXISTING governed pipeline: the Step-16 research orchestrator over the
+D2 deny-by-default acquisition boundary, the Step-17 provenance/evaluation, the
+Step-18 retention decision and the Step-19/21 retained-knowledge read, reporting
+acquisition status, provenance, retention and the knowledge need after
+acquisition. The conversation layer only PARSES the bounded target (the
+discriminator is the target, not the verb), the kernel performs one governed turn
+through the EXISTING mechanisms, and the hook is fail-closed and placed after the
+Step-1 source-authorization owner so a request to change authorization keeps its
+own route. The host allowlist remains the authority (an empty OWNER allowlist
+denies the same turn and stores nothing), external content stays data (GitHub
+material is unvalidated evidence, never executed or trusted; contradicted or
+single-source claims are never established), and research grants no development
+authority — implementation still stops at the EXISTING awaiting_approval boundary
+with sandbox verification unchanged. No engine, store, planner, registry, route,
+authority or model dependency was added. 22 focused tests plus the research,
+knowledge, F8, conversation-cascade and Step 1-3 regressions were green; known
+limitations recorded in §34.35; §34.35).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

@@ -69,6 +69,14 @@ BUILTIN_INTENT_KNOWLEDGE_STATE = "knowledge_state"
 #: configuration act). It explains only; it never authorizes, allowlists, or
 #: changes any configuration.
 BUILTIN_INTENT_SOURCE_AUTHORIZATION = "source_authorization"
+#: Temporary Roadmap Step 4 — bounded GOVERNED external-research request: a turn
+#: that names an explicit external source (a URL or a GitHub repository) together
+#: with a research/acquisition cue. The conversation layer only PARSES the
+#: target; the kernel's injected bridge performs the acquisition through the
+#: EXISTING governed mechanisms (deny-by-default host policy, provenance,
+#: retention) and reports exactly what they returned. Nothing is authorized,
+#: configured, approved, executed or promoted by this surface.
+BUILTIN_INTENT_EXTERNAL_RESEARCH = "external_research"
 BUILTIN_INTENT_SELF_DESCRIPTION = "self_description"
 #: C5.1 — bounded self-knowledge question families (architecture/components,
 #: reference resolution, evidence/failure behaviour, current limitations,
@@ -516,6 +524,69 @@ _SOURCE_AUTHORIZATION_OBJECT_RE: "re.Pattern[str]" = re.compile(
     r"white\s?lists?|research\s+(?:hosts?|sources?|domains?))\b"
     r"|\b[a-z0-9][a-z0-9.\-]*\.(?:com|org|net|io|dev|ai|edu|gov|info)\b",
     re.IGNORECASE,
+)
+
+#: Temporary Roadmap Step 4 — bounded external-research parsing. The
+#: DISCRIMINATOR IS THE TARGET, not the verb (the documented repository rule):
+#: "research <topic>" keeps its existing read-only knowledge route, and a turn is
+#: claimed here ONLY when it names an explicit external source (a URL or a GitHub
+#: repository) together with a research/acquisition cue. The conversation layer
+#: extracts the target only; the kernel performs the governed acquisition.
+_EXTERNAL_SOURCE_URL_RE: "re.Pattern[str]" = re.compile(
+    r"https?://[^\s<>\"')\]]+",
+    re.IGNORECASE,
+)
+_EXTERNAL_SOURCE_GITHUB_RE: "re.Pattern[str]" = re.compile(
+    r"\bgithub\.com/(?P<owner>[A-Za-z0-9_.\-]{1,64})/(?P<repo>[A-Za-z0-9_.\-]{1,64})",
+    re.IGNORECASE,
+)
+_EXTERNAL_SOURCE_CUE_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:research|researching|look\s+up|look\s+into|look\s+at|fetch|fetched|"
+    r"retrieve|retrieving|acquire|acquiring|study|studying|review|reviewing|"
+    r"examine|examining|read\s+up\s+on|read|learn\s+from|pull|pull\s+from|"
+    r"scan|scanning|crawl|crawling|download|downloading)\b",
+    re.IGNORECASE,
+)
+_EXTERNAL_SOURCE_OBJECT_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:sources?|pages?|websites?|web\s?sites?|urls?|links?|repositor(?:y|ies)|"
+    r"repos?|github|docs?|documentation|readme|specifications?|specs?)\b",
+    re.IGNORECASE,
+)
+#: An authorization/configuration act keeps its EXISTING owner (Step 1), so a turn
+#: that asks to change authorization is never claimed by the research surface.
+_SOURCE_AUTHORIZATION_ACT_RE: "re.Pattern[str]" = re.compile(
+    r"\b(?:authori[sz]e|authori[sz]ed|allow|allowed|allow\s?list|white\s?list|"
+    r"permit|permitted|enable|enabled|disable|disabled|revoke|blocked)\b",
+    re.IGNORECASE,
+)
+#: Bound on the retained keywords handed to the kernel for one research turn.
+_MAX_EXTERNAL_RESEARCH_KEYWORDS: int = 8
+
+#: Words that describe the request shape (or the source itself) rather than the
+#: subject being researched; they never become research keywords.
+_EXTERNAL_RESEARCH_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the", "and", "for", "from", "with", "that", "this", "these", "those",
+        "into", "your", "you", "please", "can", "could", "would", "should",
+        "want", "wants", "wanted", "need", "needs", "like", "let", "lets",
+        "me", "my", "mine", "we", "our", "us", "it", "its", "their", "them",
+        "to", "of", "in", "on", "at", "as", "is", "are", "was", "were", "be",
+        "been", "being", "will", "shall", "may", "might", "must", "have",
+        "has", "had", "do", "does", "did", "so", "then", "than", "there",
+        "here", "when", "where", "which", "who", "whom", "whose", "all",
+        "any", "both", "each", "few", "other", "some", "such", "only", "own",
+        "same", "too", "very", "not", "but", "if", "because", "while",
+        "about", "look", "lookup", "research", "researching", "fetch", "fetched",
+        "retrieve", "retrieving", "acquire", "acquiring", "study", "studying",
+        "review", "reviewing", "examine", "examining", "read", "learn", "pull",
+        "scan", "scanning", "crawl", "crawling", "download", "downloading",
+        "source", "sources", "page", "pages", "site", "sites", "website",
+        "websites", "url", "urls", "link", "links", "repository", "repositories",
+        "repo", "repos", "github", "doc", "docs", "documentation", "readme",
+        "spec", "specs", "specification", "specifications", "new", "using",
+        "use", "get", "give", "find", "more", "info", "information", "content",
+        "contents", "something", "anything", "what", "whats", "how", "why",
+    }
 )
 
 #: Temporary Roadmap Step 1 — bounded REQUIREMENT phrasings for a named
@@ -2458,6 +2529,58 @@ class BuiltinResponseService:
             return provider(subject)
         except Exception:  # fail closed: a raising seam is not evidence
             return None
+
+    def parse_external_research_target(self, text: str) -> dict[str, Any] | None:
+        """Temporary Roadmap Step 4 — the bounded TARGET of an external-research turn.
+
+        Returns ``{"kind": "url"|"github", "target": ..., "keywords": (...)}`` for a
+        turn that names an explicit external source AND carries a research/
+        acquisition cue, and ``None`` otherwise (fail closed), so every other turn
+        keeps its existing route: "research <topic>" stays a read-only knowledge
+        question, and a request to CHANGE source authorization keeps its Step-1
+        owner. This surface only PARSES; it acquires nothing, enables no source,
+        and never grants authority.
+        """
+        if not isinstance(text, str) or not text.strip():
+            return None
+        lowered = re.sub(r"\s+", " ", text).strip()
+        if _SOURCE_AUTHORIZATION_ACT_RE.search(lowered) is not None:
+            # Changing authorization is the OWNER's act and keeps its own owner.
+            return None
+        target = ""
+        kind = ""
+        github = _EXTERNAL_SOURCE_GITHUB_RE.search(lowered)
+        url = _EXTERNAL_SOURCE_URL_RE.search(lowered)
+        if url is not None:
+            target = url.group(0).rstrip(".,;:")
+            kind = "github" if "github.com/" in target.lower() else "url"
+        elif github is not None:
+            target = f"{github.group('owner')}/{github.group('repo')}"
+            kind = "github"
+        if not target:
+            return None
+        has_cue = _EXTERNAL_SOURCE_CUE_RE.search(lowered) is not None
+        has_object = _EXTERNAL_SOURCE_OBJECT_RE.search(lowered) is not None
+        if not (has_cue or has_object):
+            return None
+        keywords = self._external_research_keywords(lowered, target)
+        return {"kind": kind, "target": target, "keywords": keywords}
+
+    @staticmethod
+    def _external_research_keywords(text: str, target: str) -> tuple[str, ...]:
+        """Bounded subject keywords for one research turn (deterministic)."""
+        stripped = text.replace(target, " ")
+        stripped = re.sub(r"https?://\S+", " ", stripped)
+        words: list[str] = []
+        for raw in re.findall(r"[A-Za-z0-9_.\-]{3,}", stripped):
+            word = raw.strip("._-").lower()
+            if not word or word in _EXTERNAL_RESEARCH_STOPWORDS:
+                continue
+            if word not in words:
+                words.append(word)
+            if len(words) >= _MAX_EXTERNAL_RESEARCH_KEYWORDS:
+                break
+        return tuple(words)
 
     def match_source_authorization_question(self, text: str) -> Message | None:
         """Explain the EXISTING source-authorization policy (never change it).
