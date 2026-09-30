@@ -97,7 +97,17 @@ class _Temporal:
 def _service(*, temporal=None, model=None, provider_wired=True):
     provider = None
     if provider_wired:
-        provider = (lambda query: temporal)
+        # Faithful to the real seam: a verdict exists only for a subject the
+        # store can resolve, so an unrelated subject yields nothing.
+        def provider(query):
+            if temporal is None:
+                return None
+            if getattr(temporal, "entries", None) and not any(
+                token in query for token in ("invoice", "ledger", "telemetry")
+            ):
+                return _Temporal("empty", message="No validated claim matched.")
+            return temporal
+
     return BuiltinResponseService(
         capability_model_provider=(lambda: model) if model is not None else None,
         knowledge_state_provider=provider,

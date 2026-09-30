@@ -298,6 +298,17 @@ governance — its own governed development.
     answered only by a bounded explanation of the existing deny-by-default
     policy; conversation never authorizes, configures, executes or promotes
     anything.
+  - **Conversational interface closure** (temporary post-roadmap step, not a
+    roadmap phase): natural variations of the same intent now reach the correct
+    existing surface — an explicit "what validated facts do you have about X?"
+    is answered by the knowledge store instead of a self-knowledge page,
+    subject-scoped staleness/currency questions are answered from the existing
+    temporal assessment (only when Atlas actually retains knowledge about the
+    subject, and scoped to that knowledge), structure/composition questions
+    ("how is the conversation service structured?") are answered from the
+    existing architecture model, and the bounded investigation idioms ("look
+    into X") reach the read-only investigation route. Nothing new is authorized
+    or executed by understanding a sentence.
   - The validated loop is the demonstrated evidence-gap remedy class
     (`untested_component` → deterministic coverage module) plus a
     specification-driven workflow and the integrated cycle above — every one of

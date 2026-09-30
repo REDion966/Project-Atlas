@@ -458,6 +458,50 @@ _KNOWLEDGE_STATE_RES: tuple["re.Pattern[str]", ...] = (
     ),
 )
 
+#: Temporary Roadmap Step 2 — a SUBJECT-scoped staleness/currency form
+#: ("has the X gone stale?", "is the X still accurate?"). Unlike the family
+#: above it does not name Atlas's knowledge, so it is claimed ONLY when Atlas
+#: actually retains knowledge about the captured subject — the answer is then
+#: scoped explicitly to that retained knowledge, and with no retained knowledge
+#: the turn keeps its existing route (never a guess about the world).
+_KNOWLEDGE_STATE_SUBJECT_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*(?:has|have)\s+(?:the\s+|your\s+|my\s+)?(?P<name>.{1,80}?)\s+"
+        r"(?:gone|become|grown)\s+"
+        r"(?:stale|outdated|obsolete|expired)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*is\s+(?:the\s+|your\s+|my\s+)?(?P<name>.{1,80}?)\s+"
+        r"still\s+(?:accurate|current|valid|correct|true|up[\s-]*to[\s-]*date)\b"
+        r".*$",
+        re.IGNORECASE,
+    ),
+)
+
+#: Temporary Roadmap Step 2 — bounded STRUCTURE/COMPOSITION forms for the
+#: architecture surface ("how is X structured?", "what components make up X?").
+#: The target must resolve to a registered component or subsystem; otherwise the
+#: form declines so an ordinary request keeps its existing route.
+_ARCH_STRUCTURE_RES: tuple["re.Pattern[str]", ...] = (
+    re.compile(
+        r"^\s*how\s+is\s+(?:the\s+)?(?P<name>.{1,60}?)\s+"
+        r"(?:structured|organi[sz]ed|laid\s+out|composed|put\s+together)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*what\s+is\s+the\s+structure\s+of\s+(?:the\s+)?"
+        r"(?P<name>.{1,60}?)\s*[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:what|which)\s+(?:components?|modules?|parts?)\s+"
+        r"(?:make\s+up|compose|are\s+in|belong\s+to)\s+(?:the\s+)?"
+        r"(?P<name>.{1,60}?)\s*[?.!]*\s*$",
+        re.IGNORECASE,
+    ),
+)
+
 #: Temporary Roadmap Step 1 — a turn counts as a source-authorization request
 #: only when it carries BOTH an allow/authorize verb AND an explicit source/host
 #: object. This keeps "authorize this proposal" (a development approval) on its
@@ -1934,6 +1978,13 @@ class BuiltinResponseService:
             return None
         if self._resolve_architecture_model() is None:
             return None
+        # Temporary Roadmap Step 2 — precedence: an EXPLICIT validated-knowledge
+        # request about a named subject is owned by the knowledge surface, so the
+        # bridge does not answer a knowledge question with a topic page. Only an
+        # explicit knowledge cue with an extractable topic triggers this, so every
+        # existing bridge behaviour is unchanged otherwise.
+        if self._claims_explicit_validated_knowledge(text.strip().lower()):
+            return None
         from atlas.conversation import semantic_frame as _sf
 
         frame = _sf.interpret(text)
@@ -1954,6 +2005,12 @@ class BuiltinResponseService:
         """
         if not isinstance(text, str) or self._resolve_architecture_model() is None:
             return None
+        # Temporary Roadmap Step 2 — precedence: an EXPLICIT validated-knowledge
+        # request about a named subject belongs to the knowledge surface, so this
+        # topic page declines rather than answering a knowledge question with a
+        # self-knowledge page (see ``_claims_explicit_validated_knowledge``).
+        if self._claims_explicit_validated_knowledge(text.strip().lower()):
+            return None
         # The bounded bridge families take precedence over the broad phrase
         # patterns, so the semantic source decides them consistently with
         # ``_classify`` (e.g. "after external research finds something useful"
@@ -1964,6 +2021,22 @@ class BuiltinResponseService:
         if topic is None:
             return None
         return self._build_message(BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+
+    def _claims_explicit_validated_knowledge(self, lowered: str) -> bool:
+        """True when the EXISTING explicit validated-knowledge cue family owns the turn.
+
+        Temporary Roadmap Step 2 — the self-knowledge topic families share
+        vocabulary with the validated-knowledge bridge ("validated facts",
+        "verified information"), so a topic page must decline whenever an
+        EXPLICIT knowledge cue with an extractable, non-self-referential topic is
+        present. Shared (recall) cues are deliberately NOT considered, so recall
+        behaviour and every other self-knowledge answer stay unchanged.
+        """
+        matched = _match_validated_knowledge_cue(lowered)
+        if matched is None:
+            return False
+        query, explicit = matched
+        return bool(explicit and query)
 
     def match_resolved_reference_answer(
         self, text: str, spec: TaskSpec | None
@@ -2359,7 +2432,32 @@ class BuiltinResponseService:
                 continue
             subject = self._clean_state_name(match.groupdict().get("name") or "")
             return self._render_knowledge_state(subject)
+        # Temporary Roadmap Step 2 — a SUBJECT-scoped staleness/currency form is
+        # claimed ONLY when Atlas actually retains knowledge about the subject, so
+        # the answer is a grounded report about that retained knowledge and an
+        # unknown subject keeps its existing route (never a guess about the world).
+        for pattern in _KNOWLEDGE_STATE_SUBJECT_RES:
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            subject = self._clean_state_name(match.groupdict().get("name") or "")
+            if not subject:
+                continue
+            temporal = self._read_knowledge_state(subject)
+            if temporal is None or not tuple(getattr(temporal, "entries", ()) or ()):
+                continue
+            return self._render_knowledge_state(subject, temporal=temporal, scoped=True)
         return None
+
+    def _read_knowledge_state(self, subject: str) -> Any | None:
+        """Read the EXISTING temporal verdict for ``subject`` (fail-closed)."""
+        provider = self._knowledge_state_provider
+        if provider is None:
+            return None
+        try:
+            return provider(subject)
+        except Exception:  # fail closed: a raising seam is not evidence
+            return None
 
     def match_source_authorization_question(self, text: str) -> Message | None:
         """Explain the EXISTING source-authorization policy (never change it).
@@ -2406,13 +2504,12 @@ class BuiltinResponseService:
             return self._render_capability_requirements(entry)
         return None
 
-    def _render_knowledge_state(self, subject: str) -> Message:
+    def _render_knowledge_state(
+        self, subject: str, *, temporal: Any = None, scoped: bool = False
+    ) -> Message:
         """Render the EXISTING temporal verdict for retained knowledge (facts only)."""
-        provider = self._knowledge_state_provider
-        try:
-            temporal = provider(subject) if provider is not None else None
-        except Exception:  # fail closed: a raising seam is not evidence
-            temporal = None
+        if temporal is None:
+            temporal = self._read_knowledge_state(subject)
         if temporal is None:
             # Fail closed and say so honestly: an unwired/raising temporal seam
             # means the state is simply not readable, never that it is fresh.
@@ -2438,6 +2535,12 @@ class BuiltinResponseService:
         lines = [
             f"Knowledge state{scope} (deterministic; read-only; no model used):"
         ]
+        if scoped:
+            lines.append(
+                "This reports the freshness of the validated knowledge Atlas "
+                f"itself retains about '{subject}' (not a claim about the subject "
+                "itself)."
+            )
         if not entries:
             lines.append(
                 "No retained validated knowledge matched, so there is no "
@@ -2577,7 +2680,159 @@ class BuiltinResponseService:
                 return self._render_component_responsibility(component)
             if self._resolve_architecture_model() is not None:
                 return self._render_unknown_component(name)
+        # Temporary Roadmap Step 2 — bounded STRUCTURE/COMPOSITION forms
+        # ("how is X structured?", "what components make up X?"). The target must
+        # resolve to a registered component or subsystem; otherwise the form
+        # declines (fail closed) so an ordinary request keeps its existing route.
+        for pattern in _ARCH_STRUCTURE_RES:
+            match = pattern.match(lowered)
+            if match is None:
+                continue
+            raw = match.group("name") or ""
+            name = self._clean_component_name(raw)
+            if not name:
+                continue
+            # A turn that names a SUBSYSTEM is answered by the subsystem's own
+            # composition rather than by a same-named component.
+            structure = self._render_structure(
+                name, prefer_subsystem="subsystem" in raw.lower()
+            )
+            if structure is not None:
+                return structure
+            # A component/subsystem-shaped question naming no registered target is
+            # reported honestly (the same fail-closed rule the other Step-14 forms
+            # use) rather than resolved to a spurious structure.
+            if any(
+                qualifier in raw.lower()
+                for qualifier in ("component", "subsystem", "module", "package")
+            ):
+                return self._render_unknown_component(name)
         return None
+
+    def _find_subsystem_entry(self, name: str) -> Any | None:
+        """Resolve ``name`` to a registered subsystem entry, or None (fail-closed).
+
+        Deterministic: the cleaned name is matched against each subsystem's
+        package, its final segment, or its ``atlas.<name>`` form. An unknown name
+        returns ``None`` — a subsystem is never invented.
+        """
+        model = self._resolve_architecture_model()
+        if model is None:
+            return None
+        candidate = (name or "").strip().lower().replace(" ", "_").replace("-", "_")
+        if not candidate:
+            return None
+        for subsystem in getattr(model, "subsystems", ()) or ():
+            package = str(getattr(subsystem, "package", "") or "")
+            if not package:
+                continue
+            folded = package.lower().replace("-", "_")
+            if candidate in (folded, folded.rsplit(".", 1)[-1], f"atlas.{candidate}"):
+                return subsystem
+        return None
+
+    def _render_structure(
+        self, name: str, *, prefer_subsystem: bool = False
+    ) -> Message | None:
+        """Render the declared structure of a component or subsystem, or None."""
+        if prefer_subsystem:
+            subsystem = self._find_subsystem_entry(name)
+            if subsystem is not None:
+                return self._render_subsystem_structure(subsystem)
+        component = self._find_component_entry(name)
+        if component is not None:
+            return self._render_component_structure(component)
+        subsystem = self._find_subsystem_entry(name)
+        if subsystem is not None:
+            return self._render_subsystem_structure(subsystem)
+        return None
+
+    def _render_component_structure(self, component: Any) -> Message:
+        """Report a component's declared structure (grounded and bounded)."""
+        name = str(getattr(component, "name", "") or "")
+        lines = [f"Structure of component `{name}`:"]
+        module_path = str(getattr(component, "module_path", "") or "")
+        package = str(getattr(component, "package", "") or "")
+        if module_path:
+            lines.append(f"- Entry module: `{module_path}`")
+        if package:
+            lines.append(f"- Package: `{package}`")
+        dependencies = tuple(getattr(component, "declared_dependencies", ()) or ())
+        if dependencies:
+            lines.append(
+                "Declared dependencies: "
+                + ", ".join(
+                    f"`{dep}`" for dep in dependencies[:_MAX_ARCHITECTURE_RELATIONS]
+                )
+            )
+        else:
+            lines.append("No declared dependencies are recorded for this component.")
+        provided = tuple(getattr(component, "provided_capabilities", ()) or ())
+        if provided:
+            lines.append(
+                "Provided capabilities: "
+                + ", ".join(
+                    f"`{cap}`" for cap in provided[:_MAX_ARCHITECTURE_RELATIONS]
+                )
+            )
+        lines.append(
+            "This is a bounded projection of Atlas's existing component registry; "
+            "nothing was executed or modified."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {"kind": "component_structure", "component": name},
+            },
+        )
+
+    def _render_subsystem_structure(self, subsystem: Any) -> Message:
+        """Report a subsystem's declared composition (grounded and bounded)."""
+        package = str(getattr(subsystem, "package", "") or "")
+        components = tuple(getattr(subsystem, "components", ()) or ())
+        lines = [f"Structure of subsystem `{package}`:"]
+        listed = ", ".join(
+            f"`{c}`" for c in components[:_MAX_ARCHITECTURE_RELATIONS]
+        )
+        component_list = f" ({listed})" if components else ""
+        lines.append(f"- Registered components: {len(components)}{component_list}")
+        lines.append(f"- Repository modules: {getattr(subsystem, 'module_count', 0)}")
+        provided = tuple(getattr(subsystem, "provided_capabilities", ()) or ())
+        if provided:
+            caps = ", ".join(
+                f"`{cap}`" for cap in provided[:_MAX_ARCHITECTURE_RELATIONS]
+            )
+            lines.append(f"Provided capabilities: {caps}")
+        outbound = tuple(
+            getattr(subsystem, "outbound_component_dependencies", ()) or ()
+        )
+        if outbound:
+            deps = ", ".join(
+                f"`{dep}`" for dep in outbound[:_MAX_ARCHITECTURE_RELATIONS]
+            )
+            lines.append(f"Outbound component dependencies: {deps}")
+        for limitation in tuple(getattr(subsystem, "limitations", ()) or ())[
+            :_MAX_ARCHITECTURE_LIMITATIONS
+        ]:
+            lines.append(f"Limitation: {limitation}")
+        lines.append(
+            "This is a bounded projection of Atlas's existing architecture model; "
+            "nothing was executed or modified."
+        )
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "builtin_response": True,
+                "builtin_intent": BUILTIN_INTENT_ARCHITECTURE,
+                "model_used": False,
+                "architecture": {"kind": "subsystem_structure", "subsystem": package},
+            },
+        )
 
     @staticmethod
     def _clean_component_name(raw: str) -> str:
@@ -2861,9 +3116,16 @@ class BuiltinResponseService:
                         lowered
                     ) and self._matches_architecture(lowered):
                         return (BUILTIN_INTENT_ARCHITECTURE, text)
-                    topic = _match_self_knowledge_topic(lowered)
-                    if topic is not None:
-                        return (BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
+                    # Temporary Roadmap Step 2 — precedence: an EXPLICIT
+                    # validated-knowledge request about a named subject is owned
+                    # by the knowledge surface below. The topic families share
+                    # vocabulary with it ("what validated facts do you have
+                    # about X?"), so a self-knowledge page must not answer a
+                    # knowledge question.
+                    if not self._claims_explicit_validated_knowledge(lowered):
+                        topic = _match_self_knowledge_topic(lowered)
+                        if topic is not None:
+                            return (BUILTIN_INTENT_SELF_KNOWLEDGE, topic)
                 # C6.1 — the same precedence seam carries the bounded
                 # validated-knowledge bridge: Intake types a verified-knowledge
                 # question ("what verified information do you have about X?") as
@@ -4794,9 +5056,14 @@ class BuiltinResponseService:
 
     @staticmethod
     def _render_unsupported() -> str:
+        # Temporary Roadmap Step 2 — the refusal states the real reason (a bounded
+        # surface set) rather than implying that an external model would supply
+        # the answer: no model is Atlas's intelligence or authority.
         return (
-            "I operate deterministically without an external AI model, so I "
-            "cannot answer that conversationally yet. I do support: greeting, "
+            "I cannot answer that conversationally: it is outside the bounded set "
+            "of deterministic surfaces. I operate deterministically without an "
+            "external AI model — no model is my intelligence or my authority, so "
+            "nothing is guessed at. I do support: greeting, "
             "help, identity ('who are you'), capabilities ('what can you do'), "
             "capability detail ('explain <name>'), status, memory/knowledge "
             "recall ('do you remember <topic>'), and commands ('what commands "

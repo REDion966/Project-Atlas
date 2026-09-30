@@ -203,6 +203,26 @@ _INVESTIGATION_LEAD_CUES: frozenset[str] = frozenset(
 #: as an investigation request only when its target is an Atlas/repository thing
 #: or a self reference. A globally added cue word regressed pinned NLU-1/NLU-2/C3
 #: behaviour, so the discriminator is the TARGET, not the verb alone.
+#: Temporary Roadmap Step 2 — bounded multi-word INVESTIGATION IDIOMS. A single
+#: word such as "check" is a research cue, and "look into the Europa Clipper
+#: mission" is a KNOWLEDGE request, so the discriminator is the TARGET (as it
+#: already is for the audit/review family): the idiom counts only when it names
+#: an Atlas/repository target or a system failure. The identical rule therefore
+#: keeps knowledge paraphrases on their existing route.
+_INVESTIGATION_PHRASE_TARGET_RE = re.compile(
+    r"\b(?:look(?:s|ing)?|dig(?:ging|s)?|check(?:ing|ed|s)?)\s+(?:into|out)\b"
+    r"[^.?]{0,40}\b(?:"
+    r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
+    r"components?|subsystems?|sandbox|approval|authori[sz]ation|promotion|gates?|"
+    r"boundar(?:y|ies)|lifecycles?|implementation|pipelines?|systems?|engines?|"
+    r"handlers?|registr(?:y|ies)|dispatcher|governance|evolution|conversation|"
+    r"knowledge|memory|atlas|code|tests?|sources?|evidence|proposals?|"
+    r"capabilit(?:y|ies)|routing|deployments?|failures?|errors?|crashes?|"
+    r"regressions?|incidents?|runtime"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _INVESTIGATION_SUBJECT_RE = re.compile(
     r"\b(?:audit|review|assess|study|probe|scan|evaluate)\b[^.?]{0,40}\b(?:"
     r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
@@ -1048,6 +1068,12 @@ def _investigation_lead_present(normalized: str) -> bool:
         for match in re.finditer(rf"\b{re.escape(cue)}\b", lowered):
             if not _occurrence_is_negated(lowered, match.start()):
                 return True
+    # Temporary Roadmap Step 2 — the bounded idioms ("look into X", "dig into X")
+    # are imperative leads too (same Atlas/system-target discrimination), so the
+    # same protection applies to them.
+    for match in _INVESTIGATION_PHRASE_TARGET_RE.finditer(lowered):
+        if not _occurrence_is_negated(lowered, match.start()):
+            return True
     return False
 
 
@@ -1505,9 +1531,14 @@ class TaskIntake:
         # "code_inspector" from triggering broad investigation cues such as
         # "inspect"; genuine investigation language ("inspect the repo") still
         # matches because the cue appears as a standalone word.
-        investigation = _first_hit(
-            lowered, _INVESTIGATION_CUES, word_boundary=True
-        ) or bool(_INVESTIGATION_SUBJECT_RE.search(lowered))
+        investigation = (
+            _first_hit(lowered, _INVESTIGATION_CUES, word_boundary=True)
+            or bool(_INVESTIGATION_SUBJECT_RE.search(lowered))
+            # Temporary Roadmap Step 2 — the bounded idioms ("look into X",
+            # "dig into X") are investigation requests only for an Atlas/system
+            # target, so knowledge paraphrases keep their route.
+            or bool(_INVESTIGATION_PHRASE_TARGET_RE.search(lowered))
+        )
         # Only an imperative investigation cue marks the requested operation.
         # A recall/remembrance request targets an existing conversation result,
         # so an investigation noun in its target must not hijack it.

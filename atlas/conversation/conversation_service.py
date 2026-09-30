@@ -1116,6 +1116,13 @@ class ConversationService:
             getattr(ambiguity, "ambiguities", ()) or ()
         ):
             return None
+        # Temporary Roadmap Step 2 — precedence: a turn the deterministic intake
+        # classified as an INVESTIGATION request keeps the read-only investigation
+        # route. Investigation is the authoritative owner for its language
+        # ("look into why X fails" also matches a knowledge cue), so this generic
+        # knowledge route declines rather than answering it as a knowledge lookup.
+        if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
+            return None
         objective = ""
         if spec is not None:
             objective = str(

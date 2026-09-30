@@ -1839,6 +1839,81 @@ fails closed. The analyzer itself remains read-only; the later, separately
 authorized step arc that connects such a gap to governed development and
 promotion is recorded in §34.10.
 
+### 34.33 Temporary Roadmap Step 2 — conversational interface closure
+
+**Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
+phase and no Step 26).** Step 2 closes the remaining language/routing gaps found
+by the real-world validation passes: natural variations of the same intent must
+reach the correct EXISTING surface instead of a neighbouring one, a generic
+answer or the unsupported floor. No new engine, registry, store, planner, model
+dependency or authority was introduced, and the Step-1 exposure policy and
+precedence are unchanged.
+
+**Confirmed gaps (measured through `Atlas.chat` on an isolated kernel).**
+1. an EXPLICIT knowledge request about a named subject ("what validated facts do
+   you have about X?") was answered by the *evidence-and-trust self-knowledge
+   page*: the bridge topic and the self-knowledge topic families share vocabulary
+   with the validated-knowledge cues and were consulted earlier;
+2. subject-scoped staleness/currency questions ("has the telemetry_index gone
+   stale?", "is the invoice_ledger still accurate?") reached the unsupported
+   floor although the temporal seam held the answer;
+3. structure/composition architecture questions ("how is the conversation service
+   structured?", "what components make up the research subsystem?") were
+   unanswered or answered by a knowledge lookup with a mangled topic;
+4. the bounded multi-word investigation idioms ("look into X", "dig into X",
+   "check out X") were not recognized as investigation requests, and a turn the
+   intake DID classify as an investigation could still be claimed by the generic
+   knowledge route;
+5. the unsupported floor attributed its refusal to the absence of an external
+   model, implying a model would supply the answer.
+
+**What changed.**
+- `atlas/conversation/builtin_response.py`: the validated-knowledge precedence
+  guard (`_claims_explicit_validated_knowledge`, applied in `_classify`, in
+  `match_self_knowledge_topic` and in `_bridge_topic`) so an explicit knowledge
+  request about a named subject is owned by the knowledge surface; the
+  subject-scoped knowledge-state family (`_KNOWLEDGE_STATE_SUBJECT_RES`) claimed
+  ONLY when Atlas actually retains knowledge about the subject, with the answer
+  scoped explicitly to that retained knowledge; the bounded structure forms
+  (`_ARCH_STRUCTURE_RES`) with component/subsystem renderers over the EXISTING
+  architecture model, failing closed (an unresolved component-shaped target is
+  reported honestly); and the honest unsupported-floor wording.
+- `atlas/conversation/conversation_service.py`: the generic knowledge route
+  declines a turn the deterministic intake classified as an investigation
+  request, so investigation keeps the read-only route it already owns.
+- `atlas/conversation/task_intake.py`: the bounded multi-word investigation
+  idioms (`_INVESTIGATION_PHRASES`) classify as investigation leads, including in
+  the existing mention-guard that prevents an approval hijack.
+
+**Validation.** `tests/test_temporary_step2_conversational_closure.py` — 48
+focused tests covering each gap and its negative cases: the knowledge surface
+owns three explicit-cue phrasings while self-knowledge topics and plain knowledge
+questions are unchanged; subject-scoped forms for several phrasings, scoped
+wording, and non-claiming for unknown subjects and unrelated turns (including
+capability-state and research phrasings); structure forms for components and
+subsystems with honest reporting for unresolved targets and unchanged
+ownership/governance answers; the idiom family classifying as investigation while
+knowledge/research phrasings are not captured and the approval hijack guard still
+holds; the unsupported refusal no longer blaming a missing model; Step-1 surfaces
+and precedence preserved; reference/clarification and multi-turn subject handling
+preserved; stream/non-stream agreement for the new surfaces; and no network,
+`model_used` false, no promotion review and an unchanged git HEAD. Relevant
+regressions (Step 1 and L1 suites, the builtin response surfaces, the
+self-knowledge bridge and routing suites, intake, investigation, Step 5/6/10/11/13/14,
+L9/L10, the C6.1/D3 knowledge bridges and the conversation-service cascade) were
+green.
+
+**Known limitations (truthful).** The surface set stays bounded and phrase-based:
+a structure question whose target names no registered component/subsystem is
+reported honestly rather than resolved, a bare staleness question with no subject
+and a staleness question about a subject Atlas holds nothing about keep their
+previous route, and a two-clause turn whose clauses are each deterministic is
+still executed as a bounded orchestration plan (its narration being truthful
+about the failing step) rather than answered clause-by-clause; a bare follow-up
+after a retained result resolves to that retained result through the pre-existing
+reference machinery. Nothing here acquires, refreshes, authorizes, approves,
+executes, promotes or configures anything.
+
 ### 34.32 Temporary Roadmap Step 1 — conversational exposure policy & internal-state precedence
 
 **Status: COMPLETE (temporary post-roadmap step; additive — NOT a roadmap
@@ -4493,5 +4568,23 @@ and no authority, acquisition, execution or promotion is introduced. 63 focused
 tests plus relevant builtin/capability/Step-12-14/temporal/C6.1/routing
 regressions green; known limitations recorded in §34.32 (bounded phrase-based
 forms, no architecture composition renderer, no allow-list disclosure); §34.32).
+Temporary Roadmap Step 2 — conversational interface closure added: 2026-09-29
+(NOT a roadmap phase; no Step 26). Measured the remaining language/routing gaps
+through Atlas.chat and closed them without new mechanism: an explicit
+validated-knowledge request about a named subject is now owned by the knowledge
+surface (the self-knowledge topic/bridge families shared its vocabulary and were
+consulted earlier), subject-scoped staleness/currency questions are answered from
+the EXISTING temporal seam only when Atlas actually retains knowledge about the
+subject (and are scoped to that retained knowledge), bounded structure/
+composition architecture forms resolve a component or subsystem from the EXISTING
+architecture model and report an unresolved component-shaped target honestly, the
+bounded multi-word investigation idioms classify as investigation and a classified
+investigation keeps its read-only route, and the unsupported floor states the real
+reason (a bounded surface set) instead of implying an external model would answer.
+Step-1 exposure policy/precedence, model independence, fail-closed behaviour and
+every governance boundary are unchanged; 48 focused tests plus the Step 1/L1,
+builtin, self-knowledge, routing, intake, investigation, Step 5/6/10/11/13/14,
+L9/L10 and knowledge-bridge regressions green; known limitations recorded in
+§34.33; §34.33).
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*
