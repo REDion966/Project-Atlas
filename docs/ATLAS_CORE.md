@@ -164,7 +164,7 @@ Understand → Design → Implement → Verify → Record → Improve
 
 **Implement:** Additive changes only. Prefer new files over modifying existing ones.
 
-**Verify:** Run the full test suite. Fix failures before proceeding.
+**Verify:** Run focused/targeted tests for the change plus targeted regression for affected behavior; run broad/full regression at a coherent checkpoint. Fix failures before proceeding — a newly introduced failure or regression blocks progression, while a failure shown to predate the change is classified as pre-existing rather than silently ignored.
 
 **Record:** Update documentation, ADRs, and state files.
 
@@ -488,7 +488,8 @@ The reasoning pipeline components and `ReasoningRecorder` are **private Atlas-ow
 - Use `tempfile` and `unittest.mock.patch` for isolation.
 - Never use shared file state between tests.
 - Pure logic layers must be testable without mocking infrastructure.
-- Run the full test suite before finishing any task.
+- Test precisely: run focused/targeted tests during incremental work and targeted regression for affected behavior, and defer broad/full regression to a coherent checkpoint rather than requiring the entire pytest suite after every small task.
+- A feature is not complete while a **newly introduced** failure or regression remains unresolved. A failure shown to predate the change may be classified **pre-existing**; that classification is not permission to disregard a new failure.
 
 ---
 
@@ -506,7 +507,7 @@ The current agent/development rules are in `docs/ATLAS_STATE.md` §21; the prior
 5. Understand current state and architecture
 6. Confirm the requested task
 7. Implement only approved changes
-8. Verify changes (run the full test suite)
+8. Verify changes (focused/targeted tests for the change + targeted regression; broad regression at a coherent checkpoint)
 9. Record updates and report result
 ```
 

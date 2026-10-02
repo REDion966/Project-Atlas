@@ -28,6 +28,11 @@ governance — its own governed development.
 
 - **Atlas Core** (Phase 22) and **Phase C** are complete; released baseline
   **v0.20.0** (tag `v0.20.0`). No Phase 23 exists.
+- **The additive L0 → L10 language-understanding roadmap is COMPLETE and
+  FROZEN** (Phase 1, items 1.1–1.12). No L11+ language stage, no G4, and no C10
+  is currently defined or authorized; the project is in an **evidence-driven**
+  state, and completed stage labels are not authorization to start speculative
+  future stages.
 - **Phase 1–5 direct-evolution program is COMPLETE:**
   - **Phase 1** — Atlas self-knowledge (capability/architecture model).
   - **Phase 2** — deterministic natural-language understanding and conversational
@@ -60,10 +65,10 @@ governance — its own governed development.
     from the request's own words. The Development Envelope stays disabled by
     default, promotion remains OWNER-only, and nothing is approved, executed, or
     promoted by conversation.
-- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 23)** — additive,
+- **The post-L10 evidence-driven step arc is COMPLETE (Steps 1 → 25)** — additive,
   model-independent, and owner-gated; no new engine, planner, scheduler or store
   was introduced, and no later step is defined (see `docs/ATLAS_STATE.md` §34.10
-  through §34.29):
+  through §34.31):
   - **Step 1** — open-ended conversation over the existing provider seam, with
     Atlas (not any model) remaining the authority.
   - **Step 2** — goal-centered orchestration: compound requests sequence as
@@ -369,24 +374,27 @@ governance — its own governed development.
     specification-driven workflow and the integrated cycle above — every one of
     them stopping at each existing governance boundary — **not** unrestricted
     autonomous self-development. **Steps 1 → 25 are COMPLETE**; no later roadmap
-    step exists or is implied, and the work in progress is a bounded temporary
-    step rather than a new roadmap phase.
+    step exists or is implied. The evidence-driven conversational architecture
+    stages 1–10 and the compound-delegation / NL-interaction cluster are also
+    **committed** (at `95a18d2`), and the bounded temporary post-roadmap steps
+    are complete — none of these is a new roadmap phase.
 - Atlas is **not** autonomously self-modifying: development is sandbox-only,
   promotion/activation are OWNER-only, and there is no tick/daemon autonomy.
-- **Full-suite baseline (measured at the Step 25 checkpoint):** 9,602 passed, 3
-  skipped, 368 subtests passed, **30 failed** (3:43:48). All 30 failures were
-  reproduced identically against a pristine HEAD — they are **pre-existing** and
-  entirely in conversation/reference-resolution and evidence-gap-remedy suites
-  (`test_reference_consumption`, `test_lexical_canonicalization`,
-  `test_last_operation_repeat`, `test_p15_2_conversation_continuity`,
-  `test_ambiguity_uncertainty`, `test_nlu6_model_independence_failure_proof`,
-  `test_l9_*`, `test_c3_*`, `test_c5_*`, `test_c6_*`,
-  `test_continuous_self_improvement_validation`,
-  `test_evolution_model_assisted_activation`, and the evidence-development suites
-  that report "no resolvable real evidence gap"); none is caused by Step 25 and
-  none is in Step-25 scope. The earlier 5,945-item/0-failure figure predates the
-  post-L10 steps 14-24, which were validated with focused suites only. Current
-  schema version: **11**.
+- **Test baseline — no single authoritative exact current count.** Testing uses
+  **focused/targeted tests** for the change plus **targeted regression** for
+  affected behavior, with **broad/full regression deferred to a coherent
+  checkpoint** (see `docs/ATLAS_STATE.md` §21 rule 10). Two superseded numbers are
+  recorded historically and must not be read as the current acceptance state:
+  - an older `5,945 items / 0 failed` figure, which the repository no longer
+    presents as reproducible (see `docs/audits/`); and
+  - the **Step-25 checkpoint** snapshot `9,602 passed, 3 skipped, 368 subtests
+    passed, 30 failed` (3:43:48), whose 30 failures were reproduced identically
+    against a pristine HEAD (conversation/reference-resolution and
+    evidence-gap-remedy families) and are classed **pre-existing**.
+  "Pre-existing" is a classification, not an acceptance shortcut: any **newly
+  introduced** failure or regression blocks completion until it is diagnosed,
+  resolved, and re-verified, and historical failures are not treated as the
+  current acceptance state. Current schema version: **11**.
 
 ---
 

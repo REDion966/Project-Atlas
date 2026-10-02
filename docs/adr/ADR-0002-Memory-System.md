@@ -6,6 +6,16 @@
 
 ---
 
+> **Historical note — implementation superseded (documentation pass).** This
+> record captures the original Alpha-stage decision to begin with a **JSON-based**
+> memory storage. That backend is **historical**: the current implementation uses
+> **SQLite** through the shared additive migration framework (current schema
+> **v11**; see `docs/ATLAS_STATE.md` §7–§8). The decision context and the
+> "Future Direction" below (the Memory Manager interface is designed to survive a
+> backend change) are preserved as recorded history and do **not** describe the
+> current backend. Formally superseding this ADR would require a new ADR, which is
+> out of scope for this pass.
+
 # Context
 
 Atlas requires persistent memory to maintain information across sessions.

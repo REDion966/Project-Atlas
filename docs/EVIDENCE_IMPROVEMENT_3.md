@@ -1,5 +1,12 @@
 # Evidence-Driven Improvement 3 — Conversational Knowledge Integration
 
+> **Historical / superseded snapshot.** This document records an evidence-driven
+> improvement captured against an **older repository state** (it names its own
+> baseline HEAD below). It is preserved as **historical evidence** and must
+> **not** be read as the current Atlas baseline, current test status, or current
+> architecture. For current state see `docs/ATLAS_STATE.md`; for current
+> direction see `docs/ROADMAP.md`.
+
 Post-Phase-D refinement implementing the single gap identified by Re-Baseline 2
 (G-A/G-B/G-C, plus the G-I reporting defect where it is caused by this
 integration). No new phase, no new engine, store, provider, planner, dispatcher

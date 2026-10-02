@@ -1,5 +1,12 @@
 # Evidence-Driven Improvement 2 — Conversational State Semantics
 
+> **Historical / superseded snapshot.** This document records an evidence-driven
+> improvement captured against an **older repository state** (it names its own
+> baseline HEAD below). It is preserved as **historical evidence** and must
+> **not** be read as the current Atlas baseline, current test status, or current
+> architecture. For current state see `docs/ATLAS_STATE.md`; for current
+> direction see `docs/ROADMAP.md`.
+
 Post-Phase-D refinement of the D1 conversation layer. No new phase, no new
 engine, no external model, no `config.toml` change. Baseline: HEAD
 `8ec67fb58de3643591fe3e588512a47d96e3f0dd` (Improvement 1 uncommitted on top).

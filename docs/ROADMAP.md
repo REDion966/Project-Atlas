@@ -356,8 +356,8 @@ validated capabilities and the classified remaining limitations are recorded in
 **evidence-driven and separately authorized**; this record neither authorizes nor
 schedules them.
 
-**Post-L10 evidence-driven step arc (Steps 1 → 7) — COMPLETE (NOT a roadmap
-phase).** Seven additive steps were completed after L10 and after the C1 → C5
+**Post-L10 evidence-driven step arc (Steps 1 → 25) — COMPLETE (NOT a roadmap
+phase).** Twenty-five additive steps were completed after L10 and after the C1 → C5
 conversational validation, each authorized only after the actual capability gap
 was demonstrated:
 

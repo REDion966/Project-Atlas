@@ -57,6 +57,10 @@ Rules:
 | `docs/ATLAS_CORE.md` | Permanent architectural principles |
 | `docs/ATLAS_VISION.md` | Identity and purpose |
 | `docs/adr/` | Architectural decision records |
+| `docs/D1_CONVERSATION_ENGINE.md` … `docs/D5_DEVELOPMENT_INDEPENDENCE.md` | Subsystem specifications for the D1–D5 conversation / knowledge / orchestration / development layers (descriptive; current-state facts defer to this file) |
+| `docs/INDEPENDENCE.md`, `docs/CONTINUOUS_EVOLUTION.md` | Subsystem reports (runtime independence; bounded continuous-evolution model) |
+| `docs/EVIDENCE_IMPROVEMENT_1.md` … `docs/EVIDENCE_IMPROVEMENT_3.md` | Historical evidence snapshots (superseded; not the current baseline) |
+| `docs/audits/` | Dated read-only audit / validation snapshots (historical; not current guidance) |
 | `CHANGELOG.md`, `docs/archive/` | Historical record only |
 
 Everything else (phase designs, handoffs, prior roadmap/workflow copies,
@@ -89,11 +93,12 @@ mechanism by which Atlas may change its own operational state.
 | Direct-evolution program | **Phase 1–5 COMPLETE** — Phase 3 knowledge acquisition & research (deterministic source selection + verifier correction); Phase 4 governed self-development (4.2/4.3); Phase 5 direct Atlas evolution (5.2 IMPLEMENTED; 5.3 VALIDATED with G1 capability activation closed) — see §32 |
 | Target-state gates | **G1 COMPLETE · G2 COMPLETE · G3 COMPLETE (Governed Self-Development)** — owner-scoped, additive gates on top of the frozen roadmap and the direct-evolution program; deterministic-first, model-independent, no new engine/planner/router/store/authority — see §33. **No G4 is defined or authorized.** |
 | Post-L10 evidence-driven step arc | **Steps 1 → 25 COMPLETE** — open-ended conversation; goal-centered orchestration; evidence → self-development; continuous self-improvement validation; natural-language understanding; intent & goal understanding (bounded multi-intent handling); context & reference understanding (existing references preserved, unresolved earlier-item references represented instead of guessed); and onward through conversational world state, multi-intent/multi-step handling, response realization, the unified capability model and capability state, architecture self-understanding, autonomous knowledge-need detection, autonomous research, source provenance, knowledge representation, temporal knowledge, refresh, monitoring, capability-gap adjudication, capability specification, direct self-development and the integrated autonomous intelligence loop — all additive, model-independent, OWNER-gated, sandbox-verified, fail-closed, with **no new engine/planner/scheduler/store/authority** — see §34.10–§34.31. **No later step exists or is implied** (see `docs/ROADMAP.md`): development stays evidence-driven and separately authorized. **The separate temporary post-roadmap conversational/evidence-driven arc — Temporary Roadmap Steps 1 → 7 — is COMPLETE and frozen** (see §34.32–§34.37, §34.38). |
+| Post-L10 conversational architecture | **COMPLETE & COMMITTED** — the evidence-driven conversational architecture stages 1–10 and the compound-delegation / NL-interaction cluster are committed at `95a18d2` (`feat(conversation): complete compound delegation and NL interaction cluster`); additive, deterministic, model-independent, no new state/engine/authority — see the post-L10 conversational sections at the end of §34 |
 | Completed roadmap | Historical Core (Phase A → P18) + Phase C (C0 → C9); C5.2 NOT AUTHORIZED; C8 CLOSED with no evidence-backed gap; C9 READINESS COMPLETE with no evidence-backed gap |
 | Track D release | **Released in v0.20** (tag `v0.20` exists in git history) |
 | Current schema version | **11** |
 | Intelligence level | Level 5 — Persistent Self-Model (Level 6+ Bounded Autonomy via Phase 16) |
-| Verified test baseline | **5,945 test items executed: 5,876 test cases passed (plus 67 subtests passed), 0 failed, 0 errors, 2 skipped** (pytest exit 0) |
+| Verified test baseline | **No single authoritative exact count is published as "current".** The former `5,945 items / 5,876 passed / 0 failed` figure is a **historical, non-reproducible** snapshot (see §15) and is **not** the current baseline; later measured totals (e.g. the Step-25 checkpoint in §34.31 / `README.md`) are **point-in-time** records that already carry documented **pre-existing** failures. Current testing policy: focused/targeted tests per change, broad regression at a coherent checkpoint (see §21 rule 10). |
 | Era | **Post-Roadmap Operational Era** (supersedes the Capability Track Era) |
 
 **CURRENT IMPLEMENTATION:** Atlas v0.20.0 is released at tag `v0.20.0`
@@ -470,18 +475,21 @@ Shutdown explicitly clears `_advanced_reasoning_*` state and closes storage.
 > **Precision rule:** Only an actually-executed number may be stated as a test
 > result. A collected/inventory count is not a passing test count.
 
-**CURRENT VERIFIED BASELINE — the only current test result:**
+**TEST BASELINE STATUS — no single authoritative exact count is currently published.**
 
-```
-5,945 test items executed: 5,876 test cases passed (plus 67 subtests passed)
-0 failed
-0 errors
-2 skipped
-```
+The former "current verified baseline" of **5,945 items / 5,876 passed / 0
+failed / 0 errors / 2 skipped** is a **historical, non-reproducible snapshot**.
+It is **not** the current baseline: later full-suite runs measured different
+totals with a number of **pre-existing** failures (e.g. the Step-25 checkpoint
+recorded in §34.31 and `README.md`), and the dated audits under `docs/audits/`
+state explicitly that the 5,945 / 0-failed figure is not reproducible as stated.
+No exact current count is asserted here — an exact figure must come from an
+actually-executed run, never from this document (see the precision rule above).
 
-This is the authoritative current baseline (pytest exit 0). Every other number
-in this section is a **historical** execution record for the milestone named
-beside it; none of them is the current baseline.
+The numbers below are **historical** execution records for the milestone named
+beside each; none of them is the current baseline. For the current testing policy
+(focused/targeted tests per change; broad regression at a coherent checkpoint)
+see §21 rule 10.
 
 **Historical — Track D Batch 2 execution** (decision-gate result, ~9 minutes):
 
@@ -641,8 +649,16 @@ tests (e.g. `test_advanced_reasoning_import_scan.py`).
    state directly. Track-private services are not added to the ServiceContainer.
 9. **Fail closed.** Missing dependency, governance, or sink ⇒ refusal with a
    meaningful error and audit record.
-10. **Test first.** Write tests alongside implementation; run the full suite
-    before finishing; fix failures, never hide them.
+10. **Test precisely, not exhaustively.** Write tests alongside implementation
+    and run the **focused/targeted** tests for the capability or acceptance
+    criteria being changed, plus **targeted regression** tests for affected
+    existing behavior. Do **not** run the entire pytest suite after every small
+    change; run **broad/full regression at a coherent checkpoint** when it is
+    genuinely warranted. Fix failures, never hide them: a failure shown to
+    predate the change may be classified **pre-existing**, but that is not an
+    acceptance shortcut — any **newly introduced** failure or regression must be
+    diagnosed, resolved, and re-verified before progression (a milestone is not
+    complete while a new failure is unresolved).
 11. **One focused change at a time.** Prefer new files over edits; do not modify
     unrelated code.
 12. **Record changes.** When a major milestone completes, update
@@ -4262,7 +4278,11 @@ correction phrasing beyond the existing bounded markers is not recognised. These
 remain evidence-driven, separately authorized work — no L11+/G4/C10 phase is
 created or implied, and nothing beyond Step 5 was implemented.
 
-### 34.10 Post-L10 evidence-driven step arc (Steps 1 → 4) — COMPLETE
+### 34.10 Post-L10 evidence-driven step arc, Steps 1 → 4 (of the full Steps 1 → 25 arc) — COMPLETE
+
+> The complete post-L10 evidence-driven arc is **Steps 1 → 25** (this section
+> through §34.31; see also §2). This section documents its first four steps
+> (Steps 1 → 4); the remaining steps follow in §34.11–§34.31.
 
 Four additive, evidence-driven steps were completed after L10. None of them is a
 numbered roadmap phase, none introduces a new engine, planner, scheduler,
@@ -5080,8 +5100,9 @@ paths, directory requests and symlink escapes refused with 404), and binding is
 loopback-only. 30 + 35 focused gateway/interface tests plus 46 narrow conversation
 regressions are green, and the interface passed an independent read-only audit;
 known limitations recorded in §34.38. §34.38).
-Evidence-driven conversational architecture stages 1–10 added: 2026-10-01 (working
-tree, pending review; NOT a roadmap phase, no Step 26, no new capability system, no
+Evidence-driven conversational architecture stages 1–10 added: 2026-10-01 (COMPLETE
+& COMMITTED at `95a18d2` — `feat(conversation): complete compound delegation and NL
+interaction cluster`; NOT a roadmap phase, no Step 26, no new capability system, no
 new dependency, and no external/local model made authoritative). The conversational
 layer now has a bounded, deterministic, model-independent stack over the EXISTING
 conversation service: AtlasMeaning (Stage 1, bounded language/meaning boundary);
