@@ -412,7 +412,110 @@ def thread_outcome_from(
     )
 
 
+#: Bounded conversational-SUBJECT vocabulary. These words denote a subject
+#: OCCURRENCE (a retained thread episode), never a discourse referent.
+SUBJECT_NOUNS: frozenset[str] = frozenset(
+    {
+        "problem", "problems", "issue", "issues", "subject", "subjects",
+        "topic", "topics", "investigation", "investigations",
+    }
+)
+
+#: "previous ⟨subject⟩" anchors.
+_SUBJECT_PREVIOUS_WORDS: frozenset[str] = frozenset({"previous", "prior", "last"})
+
+#: Ordinal subject anchors (1-based words -> 0-based position in creation order).
+_SUBJECT_ORDINALS: dict[str, int] = {
+    "first": 0,
+    "1st": 0,
+    "second": 1,
+    "2nd": 1,
+    "third": 2,
+    "3rd": 2,
+    "fourth": 3,
+    "4th": 3,
+    "fifth": 4,
+    "5th": 4,
+}
+
+#: Whole-phrase bounded subject reference: an optional determiner, an optional
+#: "previous"/ordinal anchor, and a subject noun.
+_SUBJECT_PHRASE_RE = re.compile(
+    r"^\s*(?:the|that|this|my)?\s*"
+    r"(?:(?P<previous>previous|prior|last)"
+    r"|(?P<ordinal>first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th))?"
+    r"\s*(?P<noun>problem|problems|issue|issues|subject|subjects|topic|topics"
+    r"|investigation|investigations)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def subject_occurrence_phrase(text: Any) -> tuple[str, str] | None:
+    """Return ``(anchor, noun)`` for a bounded subject reference, else ``None``.
+
+    ``anchor`` is ``"previous"``, an ordinal word, or ``""`` for a bare definite
+    reference ("the issue"). Nothing here resolves anything.
+    """
+    if not isinstance(text, str):
+        return None
+    match = _SUBJECT_PHRASE_RE.match(text)
+    if match is None:
+        return None
+    anchor = (match.group("previous") or match.group("ordinal") or "").lower()
+    return (anchor, match.group("noun").lower())
+
+
+def select_subject_occurrence(
+    state: Any, text: Any
+) -> tuple[str, tuple["Thread", ...]]:
+    """Select retained subject OCCURRENCES for a bounded subject reference.
+
+    Returns ``(status, occurrences)`` where ``status`` is one of
+    ``"not_subject"`` (the phrase is not a bounded subject reference),
+    ``"none"`` (nothing retained satisfies it), ``"resolved"`` (exactly one
+    occurrence) or ``"ambiguous"`` (more than one — the caller must clarify).
+
+    Ordering is thread CREATION order (ascending ``created_turn``), the canonical
+    conversational-occurrence order. Purely read-only: it never mutates state,
+    never creates a thread and never consults a model.
+    """
+    parsed = subject_occurrence_phrase(text)
+    if parsed is None:
+        return ("not_subject", ())
+    anchor, _noun = parsed
+    threads = tuple(getattr(state, "threads", ()) or ())
+    if not threads:
+        return ("none", ())
+    ordered = tuple(
+        sorted(threads, key=lambda thread: (thread.created_turn, thread.thread_id))
+    )
+    if anchor in _SUBJECT_PREVIOUS_WORDS:
+        # The retained occurrence immediately PRECEDING the active occurrence.
+        active_id = str(getattr(state, "active_thread_id", "") or "")
+        index = next(
+            (i for i, thread in enumerate(ordered) if thread.thread_id == active_id),
+            len(ordered) - 1,
+        )
+        if index == 0:
+            return ("none", ())
+        return ("resolved", (ordered[index - 1],))
+    if anchor in _SUBJECT_ORDINALS:
+        position = _SUBJECT_ORDINALS[anchor]
+        if position >= len(ordered):
+            return ("none", ())
+        return ("resolved", (ordered[position],))
+    # A bare definite reference ("the issue") ranges over every retained
+    # occurrence: exactly one is resolved, more than one is ambiguous (never a
+    # silent salience pick).
+    if len(ordered) == 1:
+        return ("resolved", ordered)
+    return ("ambiguous", ordered)
+
+
 __all__ = [
+    "SUBJECT_NOUNS",
+    "select_subject_occurrence",
+    "subject_occurrence_phrase",
     "MAX_THREADS",
     "MAX_QUD_HISTORY",
     "STATUS_THREAD_ACTIVE",

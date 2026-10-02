@@ -370,9 +370,9 @@ class TestBehaviourPreservation:
     def test_stage0_query_turns_do_not_start_new_operations(self):
         """Stage 4 fix: the query turns no longer start a NEW investigation.
 
-        (The compound lead turn still retains no result, so the follow-up fails
-        closed; that recording/sequencing gap is outside the Stage 4 boundary and
-        is documented by the Stage 4 tests.)
+        (The compound lead turn now retains its result through the delegated
+        investigation, so the follow-up resolves from it instead of failing
+        closed.)
         """
         recording = _RecordingInvestigation()
         service = _service(recording)

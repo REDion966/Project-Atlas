@@ -41,6 +41,13 @@ FUNCTION_REQUEST_OPERATION: str = "request_operation"
 FUNCTION_QUERY_RESULT: str = "query_result"
 FUNCTION_QUERY_CAUSE: str = "query_cause"
 FUNCTION_QUERY_STATUS: str = "query_status"
+#: A COMPARISON of recorded results ("compare this with what you found earlier").
+#: Bounded: it consumes the same discourse referents as the other queries.
+FUNCTION_COMPARE: str = "query_comparison"
+#: A relation QUESTION ("does A relate to B?"). Deliberately NOT in
+#: ``QUERY_FUNCTIONS``: it is answered by its own bounded consumer from RECORDED
+#: direct edges, never by the single-target contextual result route.
+FUNCTION_RELATION: str = "query_relation"
 FUNCTION_UNKNOWN: str = "unknown"
 
 FUNCTIONS: frozenset[str] = frozenset(
@@ -49,13 +56,59 @@ FUNCTIONS: frozenset[str] = frozenset(
         FUNCTION_QUERY_RESULT,
         FUNCTION_QUERY_CAUSE,
         FUNCTION_QUERY_STATUS,
+        FUNCTION_COMPARE,
+        FUNCTION_RELATION,
         FUNCTION_UNKNOWN,
     }
 )
 
 #: The functions that ask about prior output and therefore consume referents.
 QUERY_FUNCTIONS: frozenset[str] = frozenset(
-    {FUNCTION_QUERY_RESULT, FUNCTION_QUERY_CAUSE, FUNCTION_QUERY_STATUS}
+    {
+        FUNCTION_QUERY_RESULT,
+        FUNCTION_QUERY_CAUSE,
+        FUNCTION_QUERY_STATUS,
+        FUNCTION_COMPARE,
+    }
+)
+
+#: A bounded RELATION question ("does A relate to B?"). Recognized so the turn is
+#: represented explicitly for routing; the wording itself never decides an answer.
+_RELATION_QUERY_RE = re.compile(
+    r"^\s*(?:and\s+)?does\s+(?P<a>.{2,60}?)\s+relate\s+(?:to|with)\s+"
+    r"(?P<b>.{2,60}?)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def relation_query_parts(text: Any) -> tuple[str, str] | None:
+    """Return ``(a, b)`` for a bounded relation question, else ``None``.
+
+    Bounded and whole-turn anchored, so a generic architectural "relate" usage
+    ("how do the modules relate to each other?") never enters this route.
+    """
+    if not isinstance(text, str):
+        return None
+    match = _RELATION_QUERY_RE.match(text)
+    if match is None:
+        return None
+    a = match.group("a").strip()
+    b = match.group("b").strip()
+    if not a or not b:
+        return None
+    return (a, b)
+
+
+#: The L3 operation value that marks a request to COMPARE recorded results.
+_COMPARE_OP: str = "compare"
+
+#: G1.1 — a bounded EXPLANATION request whose whole object is a bare anaphor
+#: ("can you explain that?"). The object is supplied by the existing reference/
+#: state machinery, so the turn is a query about the retained result.
+_EXPLAIN_ANAPHOR_RE = re.compile(
+    r"^\s*(?:can|could|would|will)\s+you\s+(?:please\s+)?explain\s+"
+    r"(?:that|it|this|those|these|them)\s*[.?]*\s*$",
+    re.IGNORECASE,
 )
 
 #: Output nouns that orient a question/explain request at an existing result.
@@ -88,6 +141,27 @@ _EXPLAIN_OP: str = "explain"
 #: L3 operation values that, as an IMPERATIVE, direct a NEW operation.
 _NEW_OPERATION_OPS: frozenset[str] = frozenset(
     {"investigate", "develop", "act", "research"}
+)
+
+#: A bounded POLITE REQUEST wrapper. The interrogative form of an operation
+#: request ("Can you investigate X?", "Could you develop a plan for Y?") is a
+#: REQUEST, not a question ABOUT a past occurrence, so it must not be excluded
+#: from the operation-request function merely by its trailing "?".
+_POLITE_REQUEST_RE = re.compile(
+    r"^\s*(?:can|could|would|will|please)\s+you\b", re.IGNORECASE
+)
+
+#: Question AUXILIARIES that open a question ABOUT a past occurrence
+#: ("Did you investigate X?", "Has X been investigated?"). They must never
+#: select the operation-request function, so the leading-operation-verb
+#: discriminator below can be read from the order.
+_QUESTION_AUXILIARIES: frozenset[str] = frozenset(
+    {
+        "do", "did", "does", "done", "has", "have", "had", "was", "were",
+        "is", "are", "am", "be", "been", "being", "will", "would", "can",
+        "could", "should", "shall", "may", "might", "must", "what", "which",
+        "who", "when", "where", "why", "how",
+    }
 )
 
 #: Explicit target extraction: an output/operation noun bound to a name by a
@@ -185,6 +259,12 @@ def classify_function(
     retrospective = bool(lemmas & _RETROSPECTIVE_VERBS)
     explain = operation == _EXPLAIN_OP
 
+    # 0. A bounded RELATION question ("does A relate to B?") is its own function:
+    #    it asks whether a RECORDED relationship exists between two targets and is
+    #    never downgraded to a result query or a comparison.
+    if _RELATION_QUERY_RE.match(text):
+        return FUNCTION_RELATION
+
     # 1. A retrospective CAUSE question ("why did you investigate that?").
     if why and question:
         return FUNCTION_QUERY_CAUSE
@@ -194,6 +274,20 @@ def classify_function(
     #     referent — never a new operation.
     if not operation and _named_follow_up_target(text):
         return FUNCTION_QUERY_RESULT
+
+    # 1c. A bounded EXPLANATION request whose whole object is a bare anaphor
+    #     ("can you explain that?") asks about the RETAINED result. The L3
+    #     operation ("explain") is preserved; the existing reference/state
+    #     machinery supplies the target, and with no retained result the route
+    #     fails closed rather than inventing one.
+    if explain and _EXPLAIN_ANAPHOR_RE.search(text):
+        return FUNCTION_QUERY_RESULT
+
+    # 1d. A COMPARISON request keeps its own bounded function: "compare this with
+    #     what you found earlier" must not be downgraded to a single-result query
+    #     by its retrospective wording ("found").
+    if operation == _COMPARE_OP:
+        return FUNCTION_COMPARE
 
     # 2. A question/explain request aimed at an OUTPUT. A turn that IMPERATIVELY
     #    directs a NEW operation is never a query, so operation-topic vocabulary
@@ -209,7 +303,43 @@ def classify_function(
     if not question and operation in _NEW_OPERATION_OPS:
         return FUNCTION_REQUEST_OPERATION
 
+    # 3b. A POLITE question form of the same request ("Can you investigate X?",
+    #     "Investigate the cache layer?") still DIRECTS a new operation. The L3
+    #     frame already owns the operation and a new objective, so only the
+    #     interrogative wrapper differs. Bounded to an explicit request
+    #     illocution, a leading polite auxiliary, or a LEADING operation verb
+    #     that is not a question auxiliary — so a genuine question about a PAST
+    #     occurrence ("Did you investigate the cache layer?", "Has X been
+    #     investigated?") stays unknown instead of starting a second
+    #     investigation.
+    if (
+        question
+        and operation in _NEW_OPERATION_OPS
+        and (
+            illocution == "request"
+            or _POLITE_REQUEST_RE.match(text)
+            or _opens_with_the_operation(text)
+        )
+    ):
+        return FUNCTION_REQUEST_OPERATION
+
     return FUNCTION_UNKNOWN
+
+
+def _opens_with_the_operation(text: str) -> bool:
+    """True when the turn's FIRST content token is its own operation verb.
+
+    The bounded lemmatizer preserves order, so a direct operation request
+    ("Investigate the cache layer?") is distinguishable from an interrogative
+    question ABOUT an operation ("Did you investigate the cache layer?"), which
+    always opens with a question auxiliary instead.
+    """
+    ordered = tokens(text)
+    for token in ordered:
+        if token in _QUESTION_AUXILIARIES:
+            return False
+        return token in _NEW_OPERATION_OPS
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,6 +430,11 @@ def resolve_routing(
             reason="not a contextual query about prior output",
             evidence=("function", function),
         )
+
+    # 1d-comparison. A comparison consumes TWO recorded results and never falls
+    # back to the single most recent one.
+    if function == FUNCTION_COMPARE:
+        return _compare_decision(function, discourse)
 
     explicit = _explicit_target(text)
     if explicit and (frozenset(tokens(explicit)) & _DEICTIC_WORDS):
@@ -446,7 +581,49 @@ def _clarify_decision(
     )
 
 
+def _compare_decision(function: str, discourse: Any) -> RoutingDecision:
+    """Resolve a COMPARISON to the two most recent recorded results.
+
+    Deterministic and fail-closed: a comparison needs TWO recorded results, so a
+    turn with fewer than two fails closed instead of silently presenting the
+    single most recent one. Only existing discourse referents are read — no
+    target is invented and no relationship between them is asserted.
+    """
+    results = [
+        referent
+        for referent in (getattr(discourse, "referents", ()) or ())
+        if getattr(referent, "kind", "") == _ds.KIND_RESULT
+        and getattr(referent, "label", "")
+    ]
+    if len(results) < 2:
+        return RoutingDecision(
+            communicative_function=function,
+            target_kind="comparison",
+            route="fail_closed",
+            reason="a comparison needs two recorded results",
+            evidence=("comparison-insufficient",),
+        )
+    latest, earlier = results[-1], results[-2]
+    assessment = _salience.SalienceAssessment(
+        status=_salience.STATUS_RESOLVED,
+        reason="two recorded results are available to compare",
+    )
+    return RoutingDecision(
+        communicative_function=function,
+        target_kind="comparison",
+        target_referent_id=latest.referent_id,
+        target_label=latest.label,
+        candidates=(latest.label, earlier.label),
+        route="result",
+        reason="two recorded results are available to compare",
+        evidence=("comparison",),
+        assessment=assessment.to_dict(),
+    )
+
+
 __all__ = [
+    "FUNCTION_COMPARE",
+    "FUNCTION_RELATION",
     "FUNCTION_REQUEST_OPERATION",
     "FUNCTION_QUERY_RESULT",
     "FUNCTION_QUERY_CAUSE",
@@ -455,6 +632,7 @@ __all__ = [
     "FUNCTIONS",
     "QUERY_FUNCTIONS",
     "RoutingDecision",
+    "relation_query_parts",
     "classify_function",
     "resolve_routing",
     "assess",

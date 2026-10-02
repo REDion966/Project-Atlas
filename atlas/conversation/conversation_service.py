@@ -46,6 +46,7 @@ from atlas.conversation.clarification import (
     candidate_matches,
 )
 from atlas.conversation.multi_step import (
+    DEP_NONE,
     DEP_RESULT,
     EXEC_ANALYSIS,
     STATUS_BLOCKED,
@@ -84,20 +85,34 @@ from atlas.conversation.meaning import (
     build_atlas_meaning,
 )
 from atlas.conversation.dialogue_state import outcome_from
+from atlas.conversation.lexicon import tokens
 from atlas.conversation.communicative_function import (
+    FUNCTION_COMPARE,
     FUNCTION_QUERY_CAUSE,
     FUNCTION_QUERY_RESULT,
     FUNCTION_QUERY_STATUS,
+    FUNCTION_RELATION,
+    FUNCTION_REQUEST_OPERATION,
     QUERY_FUNCTIONS,
+    _EXPLAIN_ANAPHOR_RE,
+    _named_follow_up_target,
+    _RESULT_NOUNS,
+    relation_query_parts,
     resolve_routing,
 )
-from atlas.conversation.dialogue_thread import thread_outcome_from
+from atlas.conversation.dialogue_thread import (
+    select_subject_occurrence,
+    subject_occurrence_phrase,
+    thread_outcome_from,
+)
 from atlas.conversation.response import (
     SHAPE_CLARIFICATION,
+    SHAPE_COMPARISON,
     SHAPE_EXPLANATION,
     SHAPE_RESULT_SUMMARY,
     SHAPE_UNAVAILABLE,
     compose_from_decision,
+    compose_response,
     render_response,
 )
 from atlas.conversation.linguistic import (
@@ -108,8 +123,14 @@ from atlas.conversation.linguistic import (
 )
 from atlas.conversation.learned_proposer import REFERENCE_PROPOSALS_KEY
 from atlas.conversation.message import Message
+from atlas.conversation import semantic_frame as _semantic_frame
 from atlas.conversation.prompt_builder import PromptBuilder
-from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
+from atlas.conversation.task_intake import (
+    TaskIntake,
+    TaskSpec,
+    TaskType,
+    _NL_INVESTIGATION_DEEPENING_RE,
+)
 from atlas.memory.context.context_engine import ContextEngine
 from atlas.ai.ai_service import AIService
 from atlas.storage.conversation_storage import ConversationStorage
@@ -173,6 +194,28 @@ _SELF_KNOWLEDGE_DOMAIN: str = "self_knowledge"
 #: The shared semantic frame's CASUAL domain value: open-ended conversation with
 #: no operational subject, owned by the open-ended/model path.
 _CASUAL_DOMAIN: str = "casual"
+
+#: A bounded RESULT-REQUEST form: a second-person retrospective object ("tell me
+#: what you find", "explain what you found", "show me what you found") asking for
+#: the output the assistant just produced. Used ONLY to let a compound clause — or
+#: a standalone imperative turn — reach the EXISTING result-query surface when a
+#: result is actually retained; it is never a general imperative pass (an
+#: operation request such as "find out what module handles this capability" does
+#: not match, so it stays deferred).
+_CLAUSE_RESULT_REQUEST_RE = re.compile(
+    r"\bwhat\s+(?:you|we)\s+(?:just\s+)?"
+    r"(?:find|found|find\s+out|found\s+out|learn|learned|learnt|discover|discovered|"
+    r"conclude|concluded|get|got|produce|produced)\b"
+)
+
+#: A bounded RESULT-DEPENDENT clause: the user asks for the OUTPUT of the work
+#: the compound just requested ("…, and summarize the results", "…, and compare
+#: the results"). It is the EXISTING ``semantic_frame`` recognizer, so the
+#: decomposer and the dispatcher agree by construction about what counts as a
+#: result-dependent clause (no second, competing vocabulary). It never authorizes
+#: a summary: the existing result route answers it from RECORDED results or fails
+#: closed.
+_CLAUSE_RESULT_DEPENDENT_RE = _semantic_frame._RESULT_DEPENDENT_CLAUSE_RE
 
 #: Stage 1–10 audit (ownership boundary) — deterministic TaskTypes owned by an
 #: EXISTING surface whose handler must keep FIRST opportunity over the additive
@@ -1080,6 +1123,12 @@ class ConversationService:
         """
         if spec is None or self._builtin_response is None:
             return None
+        # A bounded EXPLANATION request ("can you explain that?") is owned by the
+        # contextual result route: it resolves the RETAINED RESULT rather than the
+        # operation that produced it, so it must not be answered as a bare
+        # reference to the active investigation.
+        if _EXPLAIN_ANAPHOR_RE.search(text):
+            return None
         from atlas.conversation import semantic_frame as _frame
 
         frame = _frame.interpret(text)
@@ -1674,6 +1723,288 @@ class ConversationService:
             },
         )
 
+    #: Relation-query evidence outcomes.
+    _RELATION_NO_EDGE: str = "no_direct_edge"
+    _RELATION_NO_TARGET: str = "target_not_retained"
+    _RELATION_NO_REFERENT: str = "referent_unavailable"
+
+    def _maybe_handle_relation_query(self, text: str) -> Message | None:
+        """Answer a bounded RELATION question from RECORDED direct edges only.
+
+        The function layer recognizes the bounded question ("does A relate to B?")
+        as ``FUNCTION_RELATION``. This consumer resolves BOTH targets with the
+        EXISTING machinery — a subject-occurrence reference ("the previous
+        problem", "the second issue") through the retained dialogue threads, and
+        anything else through the existing contextual reference/routing — then
+        checks for a DIRECT recorded discourse edge between the resolved referents
+        in EITHER stored direction, over the five existing relation types.
+
+        Nothing is inferred: a shared thread, a shared topic, proximity, salience
+        or a common third referent is never evidence, and the ABSENCE of an edge is
+        reported as insufficient evidence — never as "unrelated". Nothing is
+        executed, authorized, or mutated here.
+        """
+        meaning = self._last_meaning
+        if meaning is None or self._state_manager is None:
+            return None
+        if getattr(meaning, "communicative_function", "") != FUNCTION_RELATION:
+            return None
+        parts = relation_query_parts(text)
+        if parts is None:
+            return None
+        state = self._state_manager.state
+        discourse = getattr(state, "discourse_state", None)
+        thread_state = getattr(state, "thread_state", None)
+
+        sides: list[tuple[str, str, tuple[str, ...]]] = []
+        for phrase in parts:
+            status, label, ids = self._resolve_relation_target(
+                phrase, discourse, thread_state
+            )
+            if status == "clarify":
+                return self._relation_clarification(text, ids)
+            if status != "ok":
+                return self._relation_unavailable(phrase, status)
+            sides.append((phrase, label, ids))
+
+        (_a_phrase, a_label, a_ids), (_b_phrase, b_label, b_ids) = sides
+        edge = self._direct_relation_edge(discourse, a_ids, b_ids)
+        if edge is None:
+            return Message(
+                role="assistant",
+                content=(
+                    f"I found no direct recorded relationship between {a_label} and "
+                    f"{b_label}. The absence of a recorded relationship is not evidence "
+                    "that they are unrelated, so I cannot say more."
+                ),
+                metadata={
+                    "relation_query": {
+                        "status": self._RELATION_NO_EDGE,
+                        "a": a_label,
+                        "b": b_label,
+                    },
+                    "builtin_response": True,
+                    "model_used": False,
+                },
+            )
+        relation, source_id, target_id = edge
+        source_label = self._relation_referent_label(discourse, source_id) or a_label
+        target_label = self._relation_referent_label(discourse, target_id) or b_label
+        return Message(
+            role="assistant",
+            content=(
+                "The record contains a direct relationship:\n"
+                f"- {source_label} — {relation} — {target_label}\n"
+                "This is what the record states; nothing was executed or authorized."
+            ),
+            metadata={
+                "relation_query": {
+                    "status": "established",
+                    "a": a_label,
+                    "b": b_label,
+                    "relation": relation,
+                    "source_referent_id": source_id,
+                    "target_referent_id": target_id,
+                },
+                "builtin_response": True,
+                "model_used": False,
+            },
+        )
+
+    def _relation_referent_label(self, discourse: Any, referent_id: str) -> str:
+        """The bounded label of a retained referent (``""`` when not retained)."""
+        find = getattr(discourse, "find", None)
+        if discourse is None or not referent_id or find is None:
+            return ""
+        try:
+            referent = find(referent_id)
+        except Exception:  # fail-soft: a lookup never breaks the turn
+            return ""
+        return str(getattr(referent, "label", "") or "")
+
+    def _resolve_relation_target(
+        self, phrase: str, discourse: Any, thread_state: Any
+    ) -> tuple[str, str, tuple[str, ...]]:
+        """Resolve ONE side of a relation question: ``(status, label, referent_ids)``.
+
+        A bounded subject occurrence resolves through the retained dialogue
+        threads (creation order); anything else keeps the EXISTING contextual
+        reference machinery. No second resolver, no new ontology.
+        """
+        status, occurrences = select_subject_occurrence(thread_state, phrase)
+        if status == "ambiguous":
+            labels = tuple(
+                str(getattr(thread, "objective", "") or "")
+                for thread in occurrences
+                if getattr(thread, "objective", "")
+            )
+            return ("clarify", "", labels)
+        if status == "resolved":
+            occurrence = occurrences[0]
+            label = str(getattr(occurrence, "objective", "") or "") or phrase
+            referent_ids = tuple(
+                referent_id
+                for referent_id in (
+                    str(getattr(occurrence, "result_referent_id", "") or ""),
+                    str(getattr(occurrence, "operation_referent_id", "") or ""),
+                )
+                if referent_id
+                and self._relation_referent_label(discourse, referent_id)
+            )
+            if not referent_ids:
+                return (self._RELATION_NO_REFERENT, label, ())
+            return ("ok", label, referent_ids)
+        if status == "none":
+            return (self._RELATION_NO_TARGET, "", ())
+        decision = resolve_routing(phrase, FUNCTION_QUERY_RESULT, discourse, thread_state)
+        if decision.route == "result" and decision.target_referent_id:
+            label = (
+                str(decision.target_label or "")
+                or self._relation_referent_label(discourse, decision.target_referent_id)
+                or phrase
+            )
+            return ("ok", label, (decision.target_referent_id,))
+        if decision.route == "clarify":
+            return ("clarify", "", tuple(decision.candidates or ()))
+        return (self._RELATION_NO_TARGET, "", ())
+
+    def _direct_relation_edge(
+        self, discourse: Any, a_ids: tuple[str, ...], b_ids: tuple[str, ...]
+    ) -> tuple[str, str, str] | None:
+        """The first RECORDED direct edge between the two referent sets, or ``None``.
+
+        One hop only, either stored direction, over the five existing relation
+        types. Transitive paths, shared threads/topics and third referents are
+        deliberately NOT evidence.
+        """
+        from atlas.conversation.discourse_state import RELATIONS
+
+        if discourse is None or not a_ids or not b_ids:
+            return None
+        for relation in getattr(discourse, "relations", ()) or ():
+            name = str(getattr(relation, "relation", "") or "")
+            if name not in RELATIONS:
+                continue
+            source = str(getattr(relation, "source_id", "") or "")
+            target = str(getattr(relation, "target_id", "") or "")
+            if (source in a_ids and target in b_ids) or (
+                source in b_ids and target in a_ids
+            ):
+                return (name, source, target)
+        return None
+
+    def _relation_unavailable(self, phrase: str, status: str) -> Message:
+        """An honest, reason-specific insufficiency answer (never "unrelated")."""
+        if status == self._RELATION_NO_REFERENT:
+            content = (
+                f"The retained occurrence for '{phrase}' no longer has an available "
+                "operation or result referent, so I cannot relate it."
+            )
+        else:
+            content = (
+                f"I have no retained conversational subject or contextual referent "
+                f"for '{phrase}', so I cannot relate it."
+            )
+        return Message(
+            role="assistant",
+            content=content,
+            metadata={
+                "relation_query": {"status": status, "phrase": phrase},
+                "builtin_response": True,
+                "model_used": False,
+            },
+        )
+
+    def _relation_clarification(self, text: str, candidates: tuple[str, ...]) -> Message:
+        """Ambiguity uses the EXISTING clarification convention."""
+        plan = compose_response(
+            function=FUNCTION_RELATION,
+            route="clarify",
+            candidates=tuple(c for c in candidates if c),
+        )
+        question = render_response(plan)
+        self._record_pending_clarification(
+            KIND_SUBJECT, question, plan.candidates, text
+        )
+        return Message(
+            role="assistant",
+            content=question,
+            metadata={
+                "relation_query": {
+                    "status": "ambiguous",
+                    "candidates": list(plan.candidates),
+                },
+                "builtin_response": True,
+                "model_used": False,
+            },
+        )
+
+    #: The bounded semantic role/operation an existing CORRECTION reading carries.
+    _CORRECTION_ROLE: str = "correction"
+
+    def _maybe_handle_correction(self, text: str) -> Message | None:
+        """Consume a bounded CORRECTION whose corrected reading names a RESULT.
+
+        The deterministic engine ALREADY records the correction (the superseded
+        reading and its replacement) in ``ConversationState.corrections`` and
+        installs the corrected objective, but nothing consumed it at the
+        conversation boundary: the turn fell into the earlier-item reference
+        surface, which failed closed with a clarification that denied the very
+        result the user was pointing at.
+
+        This consumer reuses the EXISTING routing/salience machinery — the same
+        ``resolve_routing`` assessment the contextual result route uses — to
+        establish the target, then presents the RECORDED result with an explicit
+        correction acknowledgement. It never fabricates a target: a correction
+        whose reading names no result, or whose target cannot be established,
+        returns ``None`` so the existing honest surfaces own the turn. Nothing is
+        executed, authorized, or re-routed, and no state is mutated here (the
+        correction record and the corrected objective are the engine's).
+        """
+        meaning = self._last_meaning
+        if meaning is None or self._state_manager is None:
+            return None
+        role = str(getattr(meaning, "turn_role", "") or getattr(meaning, "role", ""))
+        if role != self._CORRECTION_ROLE:
+            return None
+        state = self._state_manager.state
+        corrections = tuple(getattr(state, "corrections", ()) or ())
+        if not corrections:
+            return None
+        record = corrections[-1]
+        corrected = str(getattr(record, "corrected", "") or "").strip()
+        if not corrected:
+            return None
+        # The corrected reading must NAME a result ("the previous result"). A
+        # correction that installs a new subject keeps its existing path.
+        if not (frozenset(tokens(corrected)) & _RESULT_NOUNS):
+            return None
+        decision = resolve_routing(
+            corrected,
+            FUNCTION_QUERY_RESULT,
+            getattr(state, "discourse_state", None),
+            getattr(state, "thread_state", None),
+        )
+        if decision.route != "result" or not decision.target_label:
+            return None
+        return Message(
+            role="assistant",
+            content=(
+                "Understood — I recorded that correction. Here is the result you "
+                f"meant:\n\n{decision.target_label}"
+            ),
+            metadata={
+                "correction": {
+                    "previous": str(getattr(record, "previous", "") or ""),
+                    "corrected": corrected,
+                    "target_kind": decision.target_kind,
+                    "target_referent_id": decision.target_referent_id,
+                },
+                "builtin_response": True,
+                "model_used": False,
+            },
+        )
+
     def _maybe_handle_ordinal_reference(self, text: str) -> Message | None:
         """Step 7 — represent an UNRESOLVED earlier-item reference honestly.
 
@@ -1770,6 +2101,22 @@ class ConversationService:
             return None
         if request is None or not request.has_operational_step:
             return None
+        # Compound clause delegation — when EVERY step is already owned by an
+        # authoritative surface AND no step depends on an earlier RESULT, the turn
+        # belongs to that path: Step 6 hands each clause to its existing handler, so
+        # the operation/result/discourse/thread lifecycle is recorded by the ONE
+        # existing seam. The orchestration bridge executes steps (including the
+        # dependency between them) but does NOT touch the conversation lifecycle, so
+        # claiming such a turn here would leave the operation unrecorded and a later
+        # result request fail-closed. A request the bridge alone can run — a
+        # governed/unsupported/blocked step, or a step that reasons over an earlier
+        # result — keeps this route unchanged.
+        if all(
+            step.dependency == DEP_NONE
+            and self._compound_clause_is_delegable(step.clause)
+            for step in request.steps
+        ):
+            return None
         plan = build_execution_steps(request)
         if not plan:
             return None
@@ -1833,6 +2180,265 @@ class ConversationService:
         metadata["multi_step"] = representation
         return Message(role="assistant", content="\n".join(lines), metadata=metadata)
 
+    #: Compound clause delegation — the governed OPERATION surfaces a decomposed
+    #: clause may be handed to, mapping the clause's deterministic ``TaskType`` to
+    #: the authoritative handler the main cascade uses for it (``True`` = the
+    #: handler also takes the clause text). Authority TRANSITIONS (approval /
+    #: rejection / execution / autonomy) are deliberately absent: a compound turn
+    #: must never perform one on the human's behalf.
+    _DELEGATED_CLAUSE_HANDLERS: dict[str, tuple[str, bool]] = {
+        TaskType.INVESTIGATION_REQUEST.value: (
+            "_maybe_handle_investigation_request",
+            True,
+        ),
+        TaskType.REPOSITORY_IMPACT_REQUEST.value: (
+            "_maybe_handle_repository_impact_request",
+            True,
+        ),
+        TaskType.REPORT_REQUEST.value: ("_maybe_handle_report", False),
+        TaskType.VERIFICATION_REQUEST.value: ("_maybe_handle_verify", False),
+        TaskType.RECOVERY_REQUEST.value: ("_maybe_handle_recovery_request", False),
+        TaskType.PLANNING_REQUEST.value: ("_maybe_handle_planning_request", False),
+    }
+
+    #: A RESEARCH/knowledge clause is delegated to the SAME
+    #: ``_maybe_handle_knowledge_request`` a standalone research turn uses, so the
+    #: knowledge path keeps its own authority: its fail-closed subject gate, the
+    #: validated-knowledge result snapshot and the world-topic observation all
+    #: stay on the one existing seam. It is handled through a dedicated wrapper
+    #: because that handler takes ``(text, spec)`` rather than ``(spec)``.
+    #: Research is deliberately NOT turned into an investigation: a compound must
+    #: not fabricate an operation/result lifecycle the knowledge path does not define.
+    def _dispatch_knowledge_clause(self, clause: str, spec: TaskSpec) -> Message | None:
+        """Delegate ONE research clause to the EXISTING authoritative knowledge path.
+
+        Returns ``None`` whenever the knowledge path does not own the clause
+        (underspecified or ambiguous subject, no validated-knowledge provider,
+        a governed clause), so the caller keeps its truthful "not attempted"
+        report. It never records an operation/result referent, thread or QUD:
+        those belong only to operations the knowledge path really performs.
+        """
+        if self._builtin_response is None:
+            return None
+        if self._builtin_response.validated_knowledge_provider is None:
+            return None
+        reply = self._maybe_handle_knowledge_request(clause, spec)
+        if reply is None:
+            return None
+        if reply.metadata and reply.metadata.get("builtin_intent") == "unsupported":
+            return None
+        return reply
+
+    def _intake_clause(self, clause: str) -> TaskSpec | None:
+        """Interpret ONE decomposed clause with the EXISTING deterministic intake.
+
+        Returns the clause's :class:`TaskSpec` and exposes the clause's OWN Stage 1
+        :class:`AtlasMeaning` as :attr:`last_meaning` (the caller restores the
+        turn-level meaning). No second parser and no engine state updates: the
+        clause is read exactly as a standalone turn's text would be.
+        """
+        if self._task_intake is None:
+            return None
+        try:
+            spec = self._task_intake.intake(
+                clause, history_length=len(self._conversation.messages)
+            )
+        except Exception:  # fail-soft: an unreadable clause keeps the builtin answer
+            return None
+        try:
+            self._last_meaning = build_atlas_meaning(
+                clause,
+                spec=spec,
+                semantic=None,
+                turn_role=None,
+                has_prior_objective=bool(
+                    self._state_manager is not None
+                    and self._state_manager.state.current_objective
+                ),
+                has_knowledge_context=False,
+            )
+        except Exception:  # fail-soft: clause meaning is advisory evidence only
+            self._last_meaning = None
+        return spec
+
+    def _compound_clause_is_delegable(self, clause: str) -> bool:
+        """True when an EXISTING surface already owns this decomposed clause.
+
+        An OPERATIONAL clause is delegable when its deterministic ``TaskType`` has a
+        dedicated authoritative handler; a bounded RESULT-REQUEST clause ("tell me
+        what you find") is delegable because the existing result-query route owns
+        it; and a RESEARCH/knowledge clause is delegable when the existing
+        authoritative knowledge path can actually own it (it is wired AND has a
+        validated-knowledge provider), so a compound never falls back to the
+        orchestration bridge merely because research has no operation lifecycle.
+        Everything else keeps the caller's existing builtin behaviour.
+        """
+        turn_meaning = self._last_meaning
+        try:
+            spec = self._intake_clause(clause)
+            if spec is None:
+                return False
+            if getattr(spec.task_type, "value", "") in self._DELEGATED_CLAUSE_HANDLERS:
+                return True
+            if self._is_delegable_knowledge_clause(spec):
+                return True
+            return bool(
+                _CLAUSE_RESULT_REQUEST_RE.search(clause)
+                or _CLAUSE_RESULT_DEPENDENT_RE.match(clause)
+            )
+        finally:
+            self._last_meaning = turn_meaning
+
+    def _is_delegable_knowledge_clause(self, spec: TaskSpec) -> bool:
+        """True when the EXISTING knowledge path is wired for this research clause.
+
+        Ownership test only — it decides whether a research clause may be handed
+        to :meth:`_dispatch_knowledge_clause` instead of the orchestration bridge.
+        It never answers the clause and never mutates state.
+        """
+        if spec.task_type is not TaskType.INFORMATION_REQUEST:
+            return False
+        if self._builtin_response is None:
+            return False
+        return self._builtin_response.validated_knowledge_provider is not None
+
+    def _clause_has_an_executing_owner(self, clause: str) -> bool:
+        """True when an EXISTING handler will actually EXECUTE this clause.
+
+        Ownership test only. An operation clause is executed by its dedicated
+        handler and a research clause by the wired knowledge path; a clause that
+        only REPORTS prior output ("summarize what you find") is deliberately not
+        an executing owner, so a research-led compound that only adds a report
+        keeps the EXISTING compound answer. Ownership is read from the clause's
+        OWN bounded meaning: a retrospective RESULT clause asks about prior
+        output rather than requesting it, so it never executes. A clause that
+        names an operation is always an executing owner — the L3 frame may mark
+        a continuation as a REFERENCE, which never means "not owned". Never
+        mutates state and never answers the clause.
+        """
+        if not isinstance(clause, str) or not clause.strip():
+            return False
+        turn_meaning = self._last_meaning
+        try:
+            spec = self._intake_clause(clause)
+            if spec is None:
+                return False
+            if getattr(spec.task_type, "value", "") in self._DELEGATED_CLAUSE_HANDLERS:
+                return True
+            # A clause whose OWN bounded meaning is a QUERY about prior output
+            # ("summarize what you find", "summarize the results", "compare the
+            # results") asks about a result rather than requesting one, so it
+            # never executes new work and is never an executing owner. Read from
+            # the EXISTING Stage 4 function rather than a word list, so it
+            # tracks the architecture's own definition of a result query.
+            if (
+                getattr(self._last_meaning, "communicative_function", "")
+                in QUERY_FUNCTIONS
+            ):
+                return False
+            return self._is_delegable_knowledge_clause(spec)
+        finally:
+            self._last_meaning = turn_meaning
+
+    def _operational_clause_readings(self, clause: str) -> tuple[str, ...]:
+        """The operational readings ONE clause carries (EXISTING decomposition).
+
+        ``semantic_frame.decompose`` is the existing finer reading of a compound: a
+        clause the word-splitter kept together ("Investigate X, then investigate Y")
+        exposes each operation separately through it. Returns ``()`` when the clause
+        carries no separate operational reading, so the caller delegates it whole.
+        """
+        try:
+            from atlas.conversation import semantic_frame as _frame
+
+            readings = tuple(
+                str(getattr(sub, "subject", "") or "").strip()
+                for sub in _frame.decompose(clause)
+                if str(getattr(sub, "domain", "") or "") == "investigation"
+            )
+        except Exception:  # fail-soft: no readings -> delegate the clause whole
+            return ()
+        return tuple(reading for reading in readings if reading)
+
+    def _dispatch_operation_reading(self, text: str) -> Message | None:
+        """Route ONE operational reading to its EXISTING authoritative handler."""
+        spec = self._intake_clause(text)
+        if spec is None:
+            return None
+        entry = self._DELEGATED_CLAUSE_HANDLERS.get(
+            getattr(spec.task_type, "value", "")
+        )
+        if entry is None:
+            return None
+        handler_name, wants_text = entry
+        handler = getattr(self, handler_name, None)
+        if handler is None:
+            return None
+        if wants_text:
+            return handler(spec, original_text=text)
+        return handler(spec)
+
+    def _dispatch_decomposed_clause(self, clause: str) -> Message | None:
+        """Hand ONE decomposed compound clause to its EXISTING authoritative surface.
+
+        A compound utterance is decomposed by the EXISTING
+        ``semantic_frame.split_intents``. An OPERATIONAL clause is routed to the
+        SAME handler a standalone turn uses, so the operation/result/discourse/
+        thread lifecycle is recorded by the ONE existing seam rather than a
+        parallel one; a bounded RESULT-REQUEST clause goes to the EXISTING
+        result-query route. A clause that carries SEVERAL operational readings is
+        delegated per reading, so no requested operation is silently dropped.
+        Nothing is authorized here (each handler keeps its own governance), and
+        ``None`` is returned whenever no existing surface owns the clause, so the
+        caller keeps its current builtin answer.
+        """
+        if not isinstance(clause, str) or not clause.strip():
+            return None
+        turn_meaning = self._last_meaning
+        try:
+            spec = self._intake_clause(clause)
+            if spec is None:
+                return None
+            if getattr(spec.task_type, "value", "") in self._DELEGATED_CLAUSE_HANDLERS:
+                readings = self._operational_clause_readings(clause)
+                if len(readings) > 1:
+                    parts: list[str] = []
+                    for reading in readings:
+                        reply = self._dispatch_operation_reading(reading)
+                        if reply is None:
+                            continue
+                        parts.append(f"**{reading}**")
+                        parts.append(reply.content)
+                    if not parts:
+                        return None
+                    return Message(role="assistant", content="\n\n".join(parts))
+                return self._dispatch_operation_reading(clause)
+            if (
+                _CLAUSE_RESULT_REQUEST_RE.search(clause)
+                or _named_follow_up_target(clause)
+                or _CLAUSE_RESULT_DEPENDENT_RE.match(clause)
+            ):
+                # A clause that asks for the output just produced — by the bounded
+                # imperative form or by naming a prior referent — goes to the
+                # EXISTING Stage 4/6/7 route. Checked BEFORE the knowledge
+                # clause because a retrospective result request ("tell me what
+                # you find") is also a research cue: the EXISTING result route
+                # owns the retained result and the knowledge path would answer it
+                # as a fresh lookup. The clause's OWN bounded meaning is in place,
+                # so the route (and its ownership gate) decides — a compound
+                # clause is never captured by imperative wording alone.
+                return self._maybe_handle_result_query(clause, spec)
+            if self._is_delegable_knowledge_clause(spec):
+                # A research clause goes to the EXISTING knowledge path, which
+                # keeps its own fail-closed subject handling and knowledge
+                # lifecycle. It never impersonates an investigation.
+                return self._dispatch_knowledge_clause(clause, spec)
+            return None
+        except Exception:  # fail-soft: delegation never breaks the turn
+            return None
+        finally:
+            self._last_meaning = turn_meaning
+
     def _maybe_handle_multi_intent(self, text: str) -> Message | None:
         """Step 6 — answer every understood intent and REPORT the unhandled one.
 
@@ -1865,22 +2471,33 @@ class ConversationService:
             if not clause:
                 continue
             reply = None
+            delegated = False
             if not bool(getattr(sub, "governance_sensitive", False)):
-                try:
-                    reply = self._builtin_response.respond(
-                        clause,
-                        spec=None,
-                        message_count=len(self._conversation.messages),
-                        context=None,
-                    )
-                except Exception:
-                    reply = None
+                # Compound clause delegation — an OPERATIONAL clause is handed to
+                # the SAME authoritative handler a standalone turn uses, so the
+                # operation/result/discourse/thread lifecycle is recorded exactly
+                # once, by the existing seam. A clause that no authoritative surface
+                # owns keeps the existing builtin answer.
+                reply = self._dispatch_decomposed_clause(clause)
+                delegated = reply is not None
+                if reply is None:
+                    try:
+                        reply = self._builtin_response.respond(
+                            clause,
+                            spec=None,
+                            message_count=len(self._conversation.messages),
+                            context=None,
+                        )
+                    except Exception:
+                        reply = None
             intent = (
                 (reply.metadata or {}).get("builtin_intent")
                 if reply is not None
                 else ""
             )
-            if reply is not None and intent and intent != "unsupported":
+            if reply is not None and (
+                delegated or (intent and intent != "unsupported")
+            ):
                 handled.append((clause, reply.content))
             else:
                 unhandled.append(clause)
@@ -1924,6 +2541,14 @@ class ConversationService:
         governance-sensitive clause is reported as requiring the existing OWNER
         approval flow). Nothing is planned, dispatched, or executed here, and
         the frame never grants authority.
+
+        A turn whose LEADING clause is research is deferred (``None``) whenever a
+        FOLLOWING clause already has an authoritative surface — a delegated
+        operation, a research clause, or a result request. Step 6 then hands
+        every clause to its own existing handler in the order the user wrote them,
+        so a later investigation is actually executed through its authoritative
+        handler instead of being swallowed and merely reported as recognized. A
+        compound with no such later clause keeps this route unchanged.
         """
         if self._builtin_response is None or not isinstance(text, str):
             return None
@@ -1936,6 +2561,17 @@ class ConversationService:
         if lead.domain != "knowledge" or lead.operation != "research":
             return None
         if lead.governance_sensitive:
+            return None
+        if any(
+            self._clause_has_an_executing_owner(str(getattr(sub, "subject", "") or ""))
+            for sub in subs[1:]
+        ):
+            # A later clause that will actually DO something through an existing
+            # authoritative handler (an operation, a knowledge lookup) belongs to
+            # the per-clause path, which runs every clause in the order the user
+            # wrote it. A clause that merely REPORTS an output ("and summarize
+            # what you find") is not executable here, so this route still answers
+            # the lead from the knowledge path and reports the rest — unchanged.
             return None
         topic = knowledge_topic(lead.subject)
         if topic is None:
@@ -2255,6 +2891,23 @@ class ConversationService:
             is not None
         ):
             return None
+        # Fail closed: a turn the FRAME merely CLASSIFIED as knowledge (a generic
+        # "check / look / dig" cue) is not a knowledge request on its own. Without
+        # a bounded knowledge-QUESTION form the derived topic is stopword residue
+        # ("happen", "should next", "whether still true", "second issue"), and the
+        # store must never be queried with an invented subject. The frame's own
+        # subject-gap gate above is defined only for research-CUED turns, so it
+        # cannot protect this path.
+        if not any(
+            pattern.search(text)
+            for pattern in (
+                self._KNOWLEDGE_MORE_ABOUT_RE,
+                self._KNOWLEDGE_ABOUT_RE,
+                self._KNOWLEDGE_KNOW_ABOUT_RE,
+                self._KNOWLEDGE_ABOUT_REQUEST_RE,
+            )
+        ):
+            return None
         topic = knowledge_topic(_frame.knowledge_subject(text))
         if topic is None:
             return None
@@ -2305,6 +2958,16 @@ class ConversationService:
     _KNOWLEDGE_KNOW_ABOUT_RE = re.compile(
         r"^\s*(?:and\s+)?what\s+do\s+you\s+(?:know|remember)\s+about\s+"
         r"(?P<topic>.+?)\s*[.?]*\s*$",
+        re.IGNORECASE,
+    )
+    #: A bounded knowledge REQUEST form that names an "about <topic>" subject
+    #: anywhere in the turn ("I'd like to know more about X", "what can you tell
+    #: me about X?"). It admits the ordinary knowledge paraphrase to the frame
+    #: fallback without admitting a generic "check/look" cue.
+    _KNOWLEDGE_ABOUT_REQUEST_RE = re.compile(
+        r"\b(?:tell|show|give)\s+me\s+(?:more\s+)?about\b"
+        r"|\b(?:know|learn|hear|read|find)\s+(?:out\s+)?(?:more\s+)?about\b"
+        r"|\bmore\s+about\b",
         re.IGNORECASE,
     )
 
@@ -2836,6 +3499,21 @@ class ConversationService:
         if multi_intent is not None:
             self._conversation.add_message(multi_intent)
             return multi_intent
+        # Relation query — a bounded "does A relate to B?" question is answered
+        # from RECORDED direct discourse edges only, or reports insufficient
+        # evidence; relatedness is never inferred.
+        relation_query = self._maybe_handle_relation_query(text)
+        if relation_query is not None:
+            self._conversation.add_message(relation_query)
+            return relation_query
+        # D1 — a CORRECTION the deterministic engine has already recorded
+        # ("actually, I meant the previous result") is answered from the recorded
+        # target BEFORE the earlier-item reference surface, which would otherwise
+        # fail closed while denying the result the user is pointing at.
+        correction = self._maybe_handle_correction(text)
+        if correction is not None:
+            self._conversation.add_message(correction)
+            return correction
         # Step 7 — an earlier-item reference the existing surfaces could not
         # resolve is represented honestly instead of guessing.
         ordinal_reference = self._maybe_handle_ordinal_reference(text)
@@ -3326,6 +4004,19 @@ class ConversationService:
         if multi_intent is not None:
             self._conversation.add_message(multi_intent)
             yield multi_intent.content
+            return
+        # Relation query — mirror of send().
+        relation_query = self._maybe_handle_relation_query(text)
+        if relation_query is not None:
+            self._conversation.add_message(relation_query)
+            yield relation_query.content
+            return
+        # D1 — mirror of send(): a recorded CORRECTION is answered from the
+        # recorded target before the earlier-item reference surface.
+        correction = self._maybe_handle_correction(text)
+        if correction is not None:
+            self._conversation.add_message(correction)
+            yield correction.content
             return
         # Step 7 — mirror of send().
         ordinal_reference = self._maybe_handle_ordinal_reference(text)
@@ -3947,7 +4638,24 @@ class ConversationService:
             or getattr(spec.task_type, "value", "")
             != TaskType.INVESTIGATION_REQUEST.value
         ):
-            return True
+            # EXCEPT a bounded RESULT request ("tell me what you find", "explain what
+            # you found") when a result is actually RETAINED: that is a retrieval of
+            # prior output, not an operation request — and this gate is only reached
+            # for a bounded QUERY function. With no retained result it stays deferred,
+            # so an imperative operation request ("find out what module handles this
+            # capability") is never captured.
+            retained_result = bool(
+                self._state_manager is not None
+                and self._state_manager.state.latest_result
+            )
+            if not (
+                (retained_result and _CLAUSE_RESULT_REQUEST_RE.search(text))
+                # A bounded COMPARISON of recorded results is a retrieval too: it
+                # consumes existing referents and fails closed when there are not
+                # two, so imperative wording alone must not defer it.
+                or function == FUNCTION_COMPARE
+            ):
+                return True
         if not isinstance(text, str) or not text.strip():
             return False
         try:
@@ -4017,7 +4725,12 @@ class ConversationService:
             )
             return Message(role="assistant", content=question, metadata=metadata)
 
-        if plan.shape in (SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_UNAVAILABLE):
+        if plan.shape in (
+            SHAPE_RESULT_SUMMARY,
+            SHAPE_EXPLANATION,
+            SHAPE_COMPARISON,
+            SHAPE_UNAVAILABLE,
+        ):
             if plan.shape == SHAPE_RESULT_SUMMARY:
                 # Preserve the existing reference metadata contract.
                 metadata["builtin_intent"] = "reference"
@@ -4854,6 +5567,23 @@ class ConversationService:
             metadata={"repeat": {"status": "not_repeated", "kind": kind}},
         )
 
+    def _deepening_subject_phrase(self, text: str) -> str:
+        """The bounded SUBJECT phrase a DEEPENING turn targets, or ``""``.
+
+        Returns the tail a bounded deepening idiom points at ("go deeper on the
+        previous problem" -> "the previous problem") and ``""`` for a bare
+        reference or modifier-only tail ("…look further into that",
+        "investigate this more deeply"), so the SHIPPED retained-objective
+        continuation keeps owning those turns. Read-only: it resolves nothing.
+        """
+        match = _NL_INVESTIGATION_DEEPENING_RE.search(text or "")
+        if match is None:
+            return ""
+        tail = text[match.end():].strip(" \t.,;:!?").strip()
+        if subject_occurrence_phrase(tail) is None:
+            return ""
+        return tail
+
     def _maybe_handle_investigation_request(
         self,
         spec: TaskSpec,
@@ -4899,6 +5629,59 @@ class ConversationService:
                 else None
             )
             objective = retained or ""
+
+        # Bounded DEEPENING continuation: when a deepening turn targets a SUBJECT
+        # OCCURRENCE ("go deeper on the previous problem", "dig deeper into the
+        # second issue"), the occurrence's RETAINED objective IS the target — the
+        # deepening modifier is never the objective. Resolution reuses the
+        # EXISTING subject-occurrence machinery; ambiguity uses the existing
+        # clarification; no occurrence keeps the turn fail-closed. No new
+        # resolver, no new state, no depth/scope parameter.
+        deepening_phrase = self._deepening_subject_phrase(original_text or "")
+        if deepening_phrase:
+            thread_state = getattr(
+                self._state_manager.state if self._state_manager is not None else None,
+                "thread_state",
+                None,
+            )
+            status, occurrences = select_subject_occurrence(thread_state, deepening_phrase)
+            if status == "ambiguous":
+                candidates = tuple(
+                    str(getattr(thread, "objective", "") or "")
+                    for thread in occurrences
+                    if getattr(thread, "objective", "")
+                )
+                plan = compose_response(
+                    function=FUNCTION_REQUEST_OPERATION,
+                    route="clarify",
+                    candidates=candidates,
+                )
+                question = render_response(plan)
+                self._record_pending_clarification(
+                    KIND_SUBJECT, question, plan.candidates, original_text or ""
+                )
+                return Message(role="assistant", content=question)
+            if status != "resolved":
+                return Message(
+                    role="assistant",
+                    content=(
+                        f"I have no retained conversational subject for "
+                        f"'{deepening_phrase}' to investigate further, so I cannot "
+                        "continue."
+                    ),
+                )
+            retained_objective = str(getattr(occurrences[0], "objective", "") or "")
+            if not retained_objective:
+                return Message(
+                    role="assistant",
+                    content=(
+                        "The retained occurrence has no usable objective to "
+                        "continue, so I cannot investigate further."
+                    ),
+                )
+            target = retained_objective
+            objective = retained_objective
+
         report = self._investigation_service.investigate(target, objective=objective)
 
         # C3.3 — Retain the produced report (evidence only) so a later report

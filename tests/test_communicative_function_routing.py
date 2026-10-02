@@ -478,25 +478,29 @@ class TestStageCompatibility:
 
 
 class TestCompoundRequestDocumented:
-    """The Stage 0 compound failure is a multi-intent/orchestration limitation.
+    """The Stage 0 compound failure — now FIXED (compound clause delegation).
 
-    The lead turn is claimed by the casual multi-intent surface (Step 6), which
-    answers only its casual clause and never runs the operation, so no result is
-    retained. That recording/sequencing gap is OUTSIDE the Stage 4
-    communicative-function/routing boundary; Stage 4 only ensures the follow-up
-    fails closed instead of fabricating or starting a new operation.
+    The lead turn is decomposed into two conversational moves. The operational
+    clause is delegated to the SAME authoritative investigation handler a
+    standalone turn uses, so the operation/result/discourse/thread lifecycle is
+    recorded once by the existing seam, and the result clause is answered by the
+    existing result-query route. The follow-up therefore resolves from the
+    retained result instead of failing closed.
     """
 
-    def test_compound_lead_does_not_retain_a_result(self):
+    def test_compound_lead_retains_the_operation_and_result(self):
         rec = _RecordingInvestigation()
         service = _service(rec)
         service.send(
             "Investigate the current conversation architecture and tell me what you find."
         )
-        assert service.state_manager.state.discourse_state is None
-        assert len(rec.calls) == 0
+        assert len(rec.calls) == 1
+        state = service.state_manager.state
+        assert state.last_operation is not None
+        assert state.discourse_state is not None
+        assert state.thread_state is not None
 
-    def test_follow_up_fails_closed_not_new_operation(self):
+    def test_follow_up_resolves_without_a_new_operation(self):
         rec = _RecordingInvestigation()
         service = _service(rec)
         service.send(
@@ -505,4 +509,4 @@ class TestCompoundRequestDocumented:
         before = len(rec.calls)
         message = service.send("What did you find?")
         assert len(rec.calls) == before  # no new investigation
-        assert "no recorded result" in message.content.lower()
+        assert "conversation architecture" in message.content.lower()

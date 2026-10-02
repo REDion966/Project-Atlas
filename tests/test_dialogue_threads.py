@@ -559,15 +559,15 @@ class TestEndToEndSequences:
 
 
 # ---------------------------------------------------------------------------
-# Stage 0 compound regression — remaining orchestration boundary
+# Stage 0 compound regression — FIXED by compound clause delegation
 # ---------------------------------------------------------------------------
 
 
 class TestCompoundRegression:
-    def test_compound_still_records_no_operation_and_no_thread(self):
+    def test_compound_records_the_operation_and_thread(self):
         service = _service()
         service.send(
             "Investigate the current conversation architecture and tell me what you find."
         )
-        assert service.state_manager.state.thread_state is None
-        assert service.state_manager.state.discourse_state is None
+        assert service.state_manager.state.thread_state is not None
+        assert service.state_manager.state.discourse_state is not None

@@ -24,6 +24,7 @@ from atlas.conversation.discourse_state import (
 from atlas.conversation.investigation import InvestigationReport
 from atlas.conversation.response import (
     SHAPE_CLARIFICATION,
+    SHAPE_COMPARISON,
     SHAPE_EXPLANATION,
     SHAPE_RESULT_SUMMARY,
     SHAPE_UNAVAILABLE,
@@ -113,11 +114,18 @@ class TestRepresentation:
                                 uncertainty=UNCERTAINTY_RESOLVED).to_dict())
 
     def test_shapes_are_bounded(self):
-        assert {SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_CLARIFICATION, SHAPE_UNAVAILABLE} == {
-            "result_summary", "explanation", "clarification", "unavailable",
+        assert {
+            SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_COMPARISON,
+            SHAPE_CLARIFICATION, SHAPE_UNAVAILABLE,
+        } == {
+            "result_summary", "explanation", "comparison", "clarification",
+            "unavailable",
         }
         assert SHAPES == frozenset(
-            {SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_CLARIFICATION, SHAPE_UNAVAILABLE}
+            {
+                SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_COMPARISON,
+                SHAPE_CLARIFICATION, SHAPE_UNAVAILABLE,
+            }
         )
 
     def test_no_authority_fields(self):
@@ -310,13 +318,13 @@ class TestBoundaries:
         message = service.send("Who are you?")
         assert "response_plan" not in (message.metadata or {})  # builtin, not Stage 7
 
-    def test_compound_limitation_preserved(self):
+    def test_compound_now_records_the_lifecycle(self):
         service = _service()
         message = service.send(
             "Investigate the current conversation architecture and tell me what you find."
         )
         assert "response_plan" not in (message.metadata or {})  # never a fabricated result
-        assert service.state_manager.state.discourse_state is None
+        assert service.state_manager.state.discourse_state is not None
 
 
 # ---------------------------------------------------------------------------

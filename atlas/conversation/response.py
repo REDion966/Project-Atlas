@@ -29,17 +29,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from atlas.conversation.communicative_function import FUNCTION_QUERY_CAUSE
+from atlas.conversation.communicative_function import (
+    FUNCTION_COMPARE,
+    FUNCTION_QUERY_CAUSE,
+)
 from atlas.conversation.discourse_state import REL_PRODUCED, REL_SUPPORTED_BY
 
 #: Response shapes (bounded vocabulary).
 SHAPE_RESULT_SUMMARY: str = "result_summary"
 SHAPE_EXPLANATION: str = "explanation"
+#: A COMPARISON of two recorded results. It presents both records and states
+#: explicitly that no relationship between them is inferred.
+SHAPE_COMPARISON: str = "comparison"
 SHAPE_CLARIFICATION: str = "clarification"
 SHAPE_UNAVAILABLE: str = "unavailable"
 
 SHAPES: frozenset[str] = frozenset(
-    {SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_CLARIFICATION, SHAPE_UNAVAILABLE}
+    {
+        SHAPE_RESULT_SUMMARY,
+        SHAPE_EXPLANATION,
+        SHAPE_COMPARISON,
+        SHAPE_CLARIFICATION,
+        SHAPE_UNAVAILABLE,
+    }
 )
 
 #: Uncertainty classification carried by a plan.
@@ -167,6 +179,19 @@ def compose_response(
         )
 
     # route == "result" — a resolved target with recorded content.
+    # A COMPARISON carries its two bounded labels and asserts no relationship
+    # between them (the decision already failed closed when fewer than two
+    # recorded results existed).
+    if bounded_function == FUNCTION_COMPARE:
+        return ResponsePlan(
+            function=bounded_function,
+            shape=SHAPE_COMPARISON,
+            uncertainty=UNCERTAINTY_RESOLVED,
+            target_kind=_bounded(target_kind, 40),
+            target_referent_id=_bounded(target_referent_id, 16),
+            target_label=_bounded(target_label),
+            candidates=bounded_candidates,
+        )
     objective = (
         _referent_label(discourse, target_referent_id)
         if target_kind == "operation"
@@ -228,6 +253,16 @@ def render_response(plan: ResponsePlan) -> str:
             f"happened. {body}{evidence}"
         )
 
+    if plan.shape == SHAPE_COMPARISON:
+        lines = ["Recorded results:"]
+        lines.extend(f"- {candidate}" for candidate in plan.candidates)
+        lines.append("")
+        lines.append(
+            "I compare only what is recorded: no relationship between these "
+            "results is inferred."
+        )
+        return "\n".join(lines)
+
     # SHAPE_RESULT_SUMMARY
     if plan.objective:
         head = f"Result of {_clean_objective(plan.objective)}:"
@@ -253,7 +288,7 @@ def compose_from_decision(
     """Convenience: compose a plan from a Stage 4 ``RoutingDecision`` (duck-typed)."""
     assessment = getattr(decision, "assessment", None)
     assessment = assessment if isinstance(assessment, dict) else {}
-    candidates = tuple(
+    candidates = tuple(getattr(decision, "candidates", ()) or ()) + tuple(
         entry.get("label")
         for entry in (assessment.get("candidates") or ())
         if isinstance(entry, dict) and entry.get("label")

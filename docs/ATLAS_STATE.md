@@ -5122,12 +5122,256 @@ instead of fabricating. ConversationState remains the
 single state owner and ConversationStateManager the controlled mutation boundary;
 governance (OWNER approval, sandbox verification, separate promotion) and model
 independence are unchanged, and no learned/provider/ResponsePlan/referent/salience
-path can execute, approve, promote, or grant authority. Known remaining limitation
-(deliberately not addressed): the compound operation/orchestration gap
-("Investigate X and tell me what you find."). Historical baseline failures remain the
+path can execute, approve, promote, or grant authority. Compound conversational
+moves now delegate rather than rebuild: a decomposed clause whose TaskType is a
+governed OPERATION is handed to the SAME authoritative handler a standalone turn
+uses (so the operation/result/discourse/thread lifecycle is recorded once, by the
+existing seam), a bounded result-request clause ("tell me what you find") is
+answered by the existing result-query route, and Step 10 defers to that path when
+every attempted step is already owned by an existing surface. No new state, no
+parallel lifecycle, and authority transitions (approval/rejection/execution/
+autonomy) are deliberately never delegated. Residual: a compound that MIXES a
+governed operation with a step only the orchestration bridge can run keeps the
+existing orchestration route, and its operation is still not mirrored into the
+conversation lifecycle. Historical baseline failures remain the
 same 5 (4 SUBFAILEDs in
 tests/test_reference_consumption.py::TestResultQualifierAliasesEndToEnd and 1 in
 tests/test_ambiguity_uncertainty.py::TestPendingQuestionRecording), reproduced at
 pristine HEAD before Stage 1.
+Relationship & conversational-subject semantics — decision record (read-only audit,
+no implementation). Two natural-language requests are deliberately NOT implemented
+because the semantic contract they need does not exist: "Does that relate to the
+previous problem?" and "Can you dig deeper into the second issue?".
+Evidence. (a) The discourse ontology is explicitly bounded to STRUCTURAL edges with
+repository evidence — `discourse_state.py` documents `operation --produced--> result`,
+`result --supported_by--> evidence`, `proposal --concerns--> operation`,
+`operation --verified_by--> verification`, `result --supersedes--> result` — and no
+relation means generic relatedness; the only "relate" cue in the conversation layer
+(`builtin_response.py`) is the ARCHITECTURE sense ("modules relate/connect"), served
+by the architecture relationship provider. (b) "problem"/"issue" are documented
+conversational-SUBJECT words, not referent kinds: `conversation_state.py` names
+"that problem" among the state's purposes, and `_apply_entity_identification` names
+"this topic" / "that issue" / "the problem" as subject references. Live probes show
+"that issue" and "that problem" resolving to `current_investigation`, while
+"the problem" / "the previous problem" resolve to nothing. The six referent kinds are
+operation, result, finding, evidence, proposal, verification — none is a
+problem/issue.
+Decision. Relatedness is NOT defined by Atlas's discourse ontology; a union of the
+existing structural edges would be an implementation convenience rather than a
+semantic definition and is therefore rejected. "Problem"/"issue" denote the
+documented conversational subject/objective (`ConversationState.current_subject` /
+`current_objective`, `DialogueThread.objective`), never a result or operation.
+Ordinal selection ("the second …") is defined ONLY inside a pending clarification's
+bounded candidate list (`clarification.candidate_matches`) and returns nothing with no
+candidate list, so no discourse-wide ordinal exists — although a principled ordering
+basis does (`Thread.created_turn`, `Referent.turn_index`). Two-target representation
+already exists and is proven by the compare work (`RoutingDecision.candidates` +
+`ResponsePlan.candidates` + `target_kind`); on that side only the PREDICATE is
+missing, not the representation.
+Non-decisions. This record authorizes no relation type, referent kind, ordinal
+behavior, deepening behavior, response shape, state field, or routing change. Whether
+plural discussed subjects need their own identity/order remains OPEN.
+Future implementation prerequisite. A relation question requires a formally defined
+relation predicate over recorded discourse evidence with an explicit boundary (what
+counts as related and what explicitly does not), failing closed when the predicate
+cannot be established; a deepening question additionally requires an explicit decision
+that definite/ordinal references to conversational subjects range over the retained
+thread objectives. Until that contract exists, both requests correctly fail closed.
+Relation-query & conversational-subject CONTRACT (decision record, read-only audit;
+no implementation, no behaviour change; follow-up to the record above).
+Relation predicate (QUERY-ONLY; NO new stored relation type). INCLUDED evidence: a
+DIRECT recorded discourse edge between the two resolved referents, in either stored
+direction, over the five existing types (produced, supported_by, concerns,
+verified_by, supersedes), reported verbatim from the record — the ontology is closed
+and evidence-gated (`discourse_state.py`: "only those with repository evidence"), and
+every existing consumer reads a single hop in a specific direction. EXCLUDED
+meanings (coexistence artefacts that would invent ontology): same dialogue thread,
+same topic or shared tokens, temporal proximity, mere co-occurrence, evidence reached
+only through a third referent, and any salience/ordering coincidence. TRANSITIVE
+scope: NOT DEFINED — no consumer traverses chains and no documentation states that a
+chain carries meaning beyond its edges, so "A related to C" from A→B→C is not
+authorized. DIRECTION/SYMMETRY: UNRESOLVED — the five types are directional and are
+read direction-specifically, but no rule for generic relatedness is stated, so
+symmetry is neither asserted nor denied.
+Evidence status (three-valued, mandatory). POSITIVE: a recorded edge establishes the
+relation and is reported grounded in that edge. NEGATIVE: not representable today —
+no recorded structure asserts the absence of a relation, so an absent edge is never
+evidence of "unrelated". INSUFFICIENT: an absent edge, or either target resolving
+unreliably, yields an honest inability/clarification — never "no relation" and never
+an inferred answer.
+Conversational subject scope. "problem"/"issue"/"subject"/"topic" denote the
+documented conversational subject/objective concept (`ConversationState.current_subject`
+/ `current_objective`, `DialogueThread.objective`) — never a result, operation or
+evidence referent (distinct from all six referent kinds). "that issue"/"that problem"
+already resolve to the active investigation; definite and plural forms do not. A
+future rule letting subject references range over RETAINED THREAD OBJECTIVES is
+justified in principle (threads retain objectives in a deterministic order,
+`Thread.created_turn`, bounded) but the relation between a thread objective and
+`current_subject` is NOT defined and stays OPEN.
+Ordinal contract (as shipped; unchanged). `clarification.candidate_matches` applies,
+in order: (1) normalized equality/containment, (2) explicit ordinal selection where
+1-based words map to 0-based indices over the CALLER-SUPPLIED candidate order,
+(3) distinctive-token containment; it returns `()` when nothing or more than one
+candidate is selected. Ordinal meaning is therefore CALLER-SCOPED (the just-asked
+clarification's bounded candidates); a discourse-wide "the second issue" is NOT
+defined, although the ordering basis such a rule would need exists
+(`Thread.created_turn`, `Referent.turn_index`). Recorded observation: "the second one"
+over single-character candidates returned the third element because rule (1)
+containment fired first ("c" is a substring of "second") — a degenerate-input artifact
+of the documented containment rule, NOT an off-by-one; the ordinal rule itself is
+consistent (first→index 0, second→index 1, third→index 2) with realistic labels.
+Deepening prerequisites ("Can you dig deeper into the second issue?"), none present:
+(1) definite/ordinal subject resolution per the scope above; (2) a defined
+continuation meaning for "deeper"; (3) an explicit decision mapping it onto an
+EXISTING operation (no new operation is authorized); (4) preservation of the existing
+investigation lifecycle.
+Two-target fit: the existing representation already hosts the eventual contract
+(`RoutingDecision.candidates` + `target_kind` + `ResponsePlan.candidates`, proven by
+the compare work); only the predicate above is missing. This record authorizes no new
+function constant, relation type, referent kind, state field, routing architecture,
+response behaviour or ordinal behaviour.
+Conversational-subject identity & ordinal scope — decision record (read-only audit;
+no implementation, no behaviour change; third record in this series).
+Canonical subject identity: NONE exists today, and none is claimed. `current_subject`
+is the L4 entity-identification slot (written only by `_apply_entity_identification`
+when exactly one catalog entity is named, and by `replace_topic`; read as the
+"established subject" by `reference_resolution._ESTABLISHED_SUBJECT_FIELD`) — a catalog
+ENTITY, not the linguistic subject: probed, it held `"conversation"` while the
+conversation's objective was `"Investigate the memory service."`. `current_objective`
+is the D1 conversational objective (written by `engine.state_updates` for a new
+objective and by a correction's corrected reading; read as the prior-objective
+signal). `DialogueThread.objective` is the objective that CAUSED that thread, not an
+identity: `dialogue_thread.apply_turn` creates a NEW thread (`thr-####`, stable id,
+superseding the active one) for every completed operation, so probed repeats of the
+identical objective produced DISTINCT threads (thr-0001/0002/0004 for the same text).
+`DialogueState.objective`/`subject` are documented MIRRORS of the two ConversationState
+fields, not independent concepts. The three are therefore different lifecycle
+concepts, are NOT aliases, and the repository does not document an equivalence; they
+can and do diverge (example above).
+Reference population, ordering and retention (facts, not yet a contract). The only
+retained, deterministically ordered population that corresponds to "what the
+conversation was about" is the bounded set of THREAD OBJECTIVES, ordered by
+`Thread.created_turn` (unique, monotonic, one per operation; `Referent.turn_index`
+orders referents but not subjects). Retention differs by representation: referents are
+evicted oldest-first under the existing referent bound (probed: a thread's result
+referent was evicted while its thread and objective remained), so a subject can remain
+valid after its operation/result referents are gone — the thread objective is the only
+surviving carrier. Ambiguity would be resolved by the existing
+clarification/candidate machinery, and absent evidence stays fail-closed.
+"previous" and "second": UNRESOLVED. Neither definite nor ordinal subject reference is
+defined anywhere (definite subject forms do not resolve; ordinal selection is
+caller-scoped to a just-asked clarification's candidates). "previous subject" and
+"second subject" are therefore not equivalent and neither is defined.
+Correction interaction: a correction replaces `current_objective` with the corrected
+reading and records the superseded reading in `ConversationState.corrections`; it
+changes the ACTIVE INTERPRETATION only — never subject identity and never result
+identity. A future subject resolver must therefore not inherit result-resolution
+semantics (a "problem"/"issue" must never resolve to the latest result merely because
+it is salient).
+Impact: the relation predicate contract above is complete; the single remaining
+prerequisite for BOTH the relation query and deepening is a defined subject identity
+plus definite/ordinal semantics over the retained thread-objective population. This
+record authorizes no new referent kind, identifier, state field, resolver, ordinal
+system, routing, operation or behaviour.
+Conversational-subject occurrence & definite/ordinal reference — FINAL contract
+(decision record; read-only audit; no implementation, no behaviour change; fourth in
+this series).
+Subject occurrence. A conversational subject OCCURRENCE is one completed operation's
+retained conversational episode, carried by its DialogueThread. Its identity is the
+THREAD (stable `thr-####` id; position given by `created_turn`, which is the
+conversation turn index) — NOT the objective text: probed, two identical
+"Investigate the conversation architecture." turns produced two distinct threads
+(thr-0001 superseded, thr-0002 active), and X/Y/X produced three. The objective string
+is the occurrence's LABEL, not a global identity. A thread is an EPISODE CONTAINER (the
+repository creates one per completed operation and supersedes the previously active
+one) — not a topic identity and not a discourse referent. A thread records
+`operation_referent_id` / `result_referent_id`, so an occurrence is bound to its
+operation/result referents by existing recorded data; the occurrence is not itself a
+referent and never replaces operation/result identity.
+Candidate population and ordering. The retained subject occurrences are the retained
+threads (their objectives). The canonical order is thread CREATION order (ascending
+`created_turn` = conversation turn order), i.e. oldest-first — the only retained,
+deterministic, conversation-time ordering of "what the conversation was about"
+(`Referent.turn_index` orders referents, not subjects). Numbering is DYNAMIC over the
+retained set: `MAX_THREADS = 12` with oldest-first eviction (probed: a 13th
+investigation left created_turns 4…26, the earliest occurrences evicted). Repeated
+objectives receive SEPARATE ordinal positions because they are separate occurrences.
+Reference semantics. "the problem" / "the issue" / "the subject" / "the topic" denote
+subject occurrences — never results or operations. "previous ⟨subject⟩" = the retained
+occurrence immediately PRECEDING the ACTIVE occurrence in creation order.
+"first / second / third ⟨subject⟩" = the 1st / 2nd / 3rd retained occurrence in
+creation order (1-based). With more than one matching retained occurrence the
+expression is AMBIGUOUS and must clarify through the existing clarification machinery —
+it must never silently select the most recent occurrence merely because it is salient;
+with no retained occurrence the turn fails closed.
+Retention/eviction. An occurrence stays addressable while its thread is retained, even
+after its operation/result referents have been evicted (probed: a thread outlived its
+result referent), because the objective is carried by the thread; its recorded referent
+ids may then dangle, which is insufficient evidence for any answer that needs them.
+Correction. A correction creates NO subject occurrence (probed: a correction between
+two investigations added no thread); it replaces the ACTIVE OBJECTIVE interpretation and
+records the superseded reading in `ConversationState.corrections`. "I meant the previous
+result." and "I meant the previous problem." therefore install different readings
+(result-reading vs subject-reading); a subject reference must never inherit result
+identity.
+Impact. Relation query: the second target is now a DEFINED subject occurrence, and the
+predicate bridge is the occurrence's RECORDED operation/result referent ids — so the
+query is answerable when those referents remain retained, and is insufficient-evidence
+(fail closed) otherwise; no new ontology is required. Deepening: the TARGET side is now
+resolvable ("the second issue" = the second retained occurrence); the remaining
+prerequisite is a defined "deeper" continuation meaning and its explicit mapping onto
+an EXISTING operation.
+Non-decisions. This record authorizes no new referent kind, subject id, state field,
+thread-lifecycle change, resolver, ordinal system, routing, operation, response or
+retention-bound change. Any later implementation must use the thread as the occurrence,
+`created_turn` as the order, and must fail closed.
+"deeper" continuation semantics — decision record (read-only audit; no
+implementation, no behaviour change; fifth in this series).
+Evidence examined (probed through TaskIntake / SemanticFrame / AtlasMeaning /
+turn_role / classify_function AND the live service). "Investigate this further." is
+ALREADY SHIPPED as a bare-reference continuation: it types as
+INVESTIGATION_REQUEST, `_maybe_handle_investigation_request` gives it the RETAINED
+objective when `operation_object()` finds none and the frame reads a
+reference/follow-up, and the probe shows a NEW investigation against the retained
+subject ("Objective: Investigate the conversation architecture."). "Investigate that
+again." behaves the same. `TurnRole.CONTINUATION` already covers "continue / go on /
+keep going / carry on", and `evidence_gap_analysis` already owns "Can you analyze the
+findings further?" (probed True) — an existing mechanism that examines the RETAINED
+findings. No investigation SCOPE/DEPTH concept exists anywhere (no scope/depth/
+thorough parameter on the investigation service or in conversation state).
+Decision — recognized meaning. In a deepening request, "deeper" / "further" / "more
+deeply" denotes a CONTINUATION OF THE RETAINED INVESTIGATION OBJECTIVE: the same
+target investigated again as a NEW operation occurrence — exactly the semantic the
+repository already ships for "Investigate this further." It does NOT denote a greater
+scope/depth/effort parameter, which Atlas does not model; that reading is explicitly
+NOT adopted.
+Operation mapping. The EXISTING `TaskType.INVESTIGATION_REQUEST` — no new operation.
+Targets: a bare reference ("this" / "that" / "it") resolves to the retained objective
+through the shipped bare-reference continuation path; a bounded subject occurrence
+("the previous problem", "the second issue") resolves through the retained threads per
+the occurrence contract above; an explicit target is used verbatim. Existing reference
+machinery only — no second resolver.
+Lifecycle. A deepening request creates a NEW operation and result referent (the
+repository creates one thread per completed operation and has NO "continue or update an
+existing operation" concept), the new result relates to the previous one through the
+EXISTING `supersedes` relation, and a later "What did you find?" resolves to the new
+result as the latest. Thread lifecycle, retention bounds and `MAX_THREADS` are
+unchanged.
+Ambiguity / missing evidence. More than one matching retained occurrence clarifies
+through the existing clarification machinery; with no retained objective or occurrence
+the turn fails closed and never invents a target.
+Explicitly EXCLUDED interpretations. "Tell me more about X" (knowledge request);
+"Explain … in more detail" (explanation/follow-up); "Can you verify that result?" (the
+existing result/verification route); "What did you find?" (result query); "Compare …"
+(comparison); "Research more about X" (research); "analyze the findings further" (the
+EXISTING evidence-gap analysis); architectural "deeply related" (a statement); and
+"Does this relate to the previous problem?" (the relation query).
+Prerequisites for any implementation. Bounded cue coverage for the deeper/further
+phrasings that routes them onto the SHIPPED continuation path, plus objective binding
+for forms such as "investigate this more deeply" (probed: the adverb currently becomes
+the objective — "deeply" — instead of the retained target).
+Non-decisions. This record authorizes no new operation, referent kind, relation type,
+state field, scope/depth parameter, thread-lifecycle change, resolver, routing
+architecture, provider, or retention-bound change.
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

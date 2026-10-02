@@ -223,6 +223,46 @@ _INVESTIGATION_PHRASE_TARGET_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: G1.1 — bounded NATURAL-LANGUAGE investigation paraphrases over an Atlas/
+#: system target: "take a look at how X works" and "I want to understand why X
+#: is not working properly". Both ask for the EXISTING read-only investigation,
+#: so they select the SAME TaskType a canonical investigation does and reuse the
+#: existing investigation handler/target extraction. The target alternation
+#: mirrors ``_INVESTIGATION_PHRASE_TARGET_RE`` (the subject must name an Atlas/
+#: system thing), so an ordinary knowledge paraphrase keeps its route.
+_NL_INVESTIGATION_TARGETS: str = (
+    r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
+    r"components?|subsystems?|sandbox|approval|authori[sz]ation|promotion|gates?|"
+    r"boundar(?:y|ies)|lifecycles?|implementation|pipelines?|systems?|engines?|"
+    r"handlers?|registr(?:y|ies)|dispatcher|governance|evolution|conversation|"
+    r"knowledge|memory|atlas|code|tests?|sources?|evidence|proposals?|"
+    r"capabilit(?:y|ies)|routing|deployments?|failures?|errors?|crashes?|"
+    r"regressions?|incidents?|runtime"
+)
+
+_NL_INVESTIGATION_PARAPHRASE_RE = re.compile(
+    r"\b(?:take|takes|taking|have|has)\s+a\s+look\s+at\b[^.?]{0,60}\b(?:"
+    + _NL_INVESTIGATION_TARGETS
+    + r")\b"
+    r"|\b(?:want\s+to\s+)?understand\s+why\b[^.?]{0,60}\b(?:"
+    + _NL_INVESTIGATION_TARGETS
+    + r")\b",
+    re.IGNORECASE,
+)
+
+#: G1.2 — bounded DEEPENING paraphrases of the investigation CONTINUATION. The
+#: modifier continues the EXISTING investigation objective (a new occurrence
+#: against the retained target); it is never an operation object. Bounded by
+#: construction, so "analyze the findings further", "tell me more about X",
+#: "explain this in more detail", "research more about X" and the relation query
+#: keep their own routes.
+_NL_INVESTIGATION_DEEPENING_RE = re.compile(
+    r"\b(?:dig|go)\s+deeper\b[^.?]{0,40}\b(?:into|on)\b"
+    r"|\blook\s+further\s+into\b"
+    r"|\binvestigate\b[^.?]{0,24}\bmore\s+deeply\b",
+    re.IGNORECASE,
+)
+
 _INVESTIGATION_SUBJECT_RE = re.compile(
     r"\b(?:audit|review|assess|study|probe|scan|evaluate)\b[^.?]{0,40}\b(?:"
     r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
@@ -1538,6 +1578,10 @@ class TaskIntake:
             # "dig into X") are investigation requests only for an Atlas/system
             # target, so knowledge paraphrases keep their route.
             or bool(_INVESTIGATION_PHRASE_TARGET_RE.search(lowered))
+            # G1.1 — bounded natural-language paraphrases of the same request.
+            or bool(_NL_INVESTIGATION_PARAPHRASE_RE.search(lowered))
+            # G1.2 — bounded DEEPENING continuations of the same request.
+            or bool(_NL_INVESTIGATION_DEEPENING_RE.search(lowered))
         )
         # Only an imperative investigation cue marks the requested operation.
         # A recall/remembrance request targets an existing conversation result,

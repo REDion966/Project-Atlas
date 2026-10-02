@@ -621,9 +621,9 @@ class TestStage0Regression:
         """Stage 4 fix: "explain the result of the investigation ..." no longer
         starts a NEW investigation.
 
-        (The compound lead turn still retains no result, so the follow-up fails
-        closed; that recording/sequencing gap is outside the Stage 4 boundary and
-        is documented by the Stage 4 tests.)
+        (The compound lead turn now retains its result through the delegated
+        investigation, so the follow-up resolves from it instead of failing
+        closed.)
         """
         recording = _RecordingInvestigation()
         service = _service(recording)

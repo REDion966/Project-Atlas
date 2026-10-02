@@ -371,13 +371,13 @@ class TestExistingBehavior:
         message = service.send("Who are you?")
         assert "response_plan" not in (message.metadata or {})
 
-    def test_compound_limitation_preserved(self):
+    def test_compound_now_records_the_lifecycle(self):
         service = _service()
         service.send(
             "Investigate the current conversation architecture and tell me what you find."
         )
-        assert service.state_manager.state.discourse_state is None
-        assert service.state_manager.state.thread_state is None
+        assert service.state_manager.state.discourse_state is not None
+        assert service.state_manager.state.thread_state is not None
 
     def test_governance_unchanged(self):
         service = _service()

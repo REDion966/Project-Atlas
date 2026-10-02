@@ -190,6 +190,15 @@ _OBJECT_IGNORE: frozenset[str] = _SUBJECT_STOP | FOLLOW_UP_WORDS | {
     "out", "into", "up", "here", "now", "again", "difference", "detail", "care",
     "like", "want", "wish", "prefer", "kindly", "anything", "something",
     "everything", "nothing",
+    # Bounded DEEPENING modifiers: they continue an existing objective, so they
+    # are never the object of the operation ("investigate this more deeply" must
+    # not make "deeply" the objective).
+    "deeper", "deeply", "deepest", "further",
+    # Replacement/adverb fillers: "Forget that; investigate this instead." must
+    # not turn "instead" into the objective. Only the trailing filler form is
+    # dropped, so a genuine subject that merely contains a replacement word
+    # ("Investigate the instead policy.") is unaffected.
+    "instead", "rather",
 }
 
 #: Every operation verb class, unioned (used by object resolution).
@@ -1114,6 +1123,12 @@ def _governance_sensitive(
 #: Word CLASSES, not literal phrases, and ordered LONGEST FIRST so the most
 #: specific coordinator wins. Used only by :func:`split_intents`, which leaves
 #: :func:`decompose` (and therefore goal planning) untouched.
+#:
+#: "then" is WEAK: like a bare "and", it only separates clauses when BOTH sides
+#: name a bounded OPERATION, so a single multi-clause intent ("investigate the
+#: component that handles X then Y") is never over-split. It is matched with the
+#: surrounding punctuation stripped, because the ordinary written form is
+#: "…, then research Y" — a comma before the coordinator, not a space.
 _INTENT_COORDINATORS: tuple[str, ...] = (
     "and also",
     "and then",
@@ -1122,11 +1137,67 @@ _INTENT_COORDINATORS: tuple[str, ...] = (
     "plus also",
     "also",
     "plus",
+    "then",
     "and",
 )
 
 #: Bound on the independent readings returned for one request.
 _MAX_INTENTS: int = 4
+
+
+#: A bounded RESULT-DEPENDENT clause: the user asks for the OUTPUT of the work
+#: the compound just requested ("…, and summarize the results", "…, and compare
+#: the results"). It is deliberately narrow — a request for prior output, never a
+#: new operation — and is the ONLY thing that may split off a clause which names
+#: no operation, so an enumerative subject ("handles references and memory") is
+#: never mistaken for a second intent. Purely a bounded recognizer: it decides
+#: nothing, executes nothing, and grants no authority.
+_RESULT_DEPENDENT_CLAUSE_RE = re.compile(
+    r"^\s*(?:summari[sz]e|summari[sz]ing|compare|explain|summari[sz]ation\s+of)\b"
+    r"[^.?!]{0,40}?\b(?:the\s+|those\s+|these\s+|its\s+)?"
+    r"(?:results?|findings?|outputs?|report|reports)\b",
+    re.IGNORECASE,
+)
+
+
+def _coordinator_match(lowered: str, coordinator: str):
+    """Return the whole-word match of ``coordinator`` in ``lowered``, else ``None``.
+
+    The ordinary written form of an ordered compound puts punctuation before the
+    coordinator ("…, then research Y"), so a plain ``" then "`` search misses the
+    most common ordering. Any run of space/comma/semicolon/colon between the words
+    is accepted, which keeps the match whole-word (it can never fire inside
+    "android" or "thenar") while covering the punctuated form. Returning the real
+    ``end()`` keeps the caller free of offset arithmetic.
+    """
+    pattern = r"[\s,;:]+".join(re.escape(word) for word in coordinator.split())
+    return re.search(
+        rf"(?:(?<=\s)|(?<=,)|(?<=;)|(?<=:)){pattern}(?=\s|[,;:.!?]|$)", lowered
+    )
+
+
+def _operation_comma_index(lowered: str, remainder: str) -> int | None:
+    """Index of the first comma whose BOTH sides name a bounded OPERATION.
+
+    The third, weakest join: an explicit enumerative join that only fires when
+    each side independently reads as an operation, so a single intent with a
+    comma-separated subject ("investigate the memory service, the cache layer")
+    is never split. A comma that merely precedes a COORDINATOR ("X, then
+    research Y") is not a boundary at all — the coordinator already marks it —
+    so it is skipped here rather than cutting the coordinator off its clause.
+    """
+    for match in re.finditer(r"(?<=,)\s", lowered):
+        head = remainder[: match.start()].strip()
+        tail = remainder[match.end():].strip()
+        if not head or not tail:
+            continue
+        if tail.split(" ", 1)[0].lower() in _INTENT_COORDINATORS:
+            continue
+        if (interpret(head).operation or "").strip() and (
+            interpret(tail).operation or ""
+        ).strip():
+            return match.start()
+    return None
 
 #: STRONG coordinators. These join genuinely separate intents even when the
 #: following clause only *states* what is wanted. Every other coordinator
@@ -1167,20 +1238,40 @@ def split_intents(text: Any) -> tuple[SubRequest, ...]:
     remainder = text.strip()
     for _ in range(_MAX_INTENTS - 1):
         lowered = remainder.lower()
-        chosen: tuple[int, str] | None = None
+        chosen: tuple[int, str, int] | None = None
         for coordinator in _INTENT_COORDINATORS:
-            needle = f" {coordinator} "
-            index = lowered.find(needle)
-            if index > 0:
-                chosen = (index, coordinator)
-                break
+            match = _coordinator_match(lowered, coordinator)
+            if match is None or match.start() <= 0:
+                continue
+            # The LEFTMOST boundary wins, so a compound that mixes coordinators
+            # splits at the earliest real join: "Investigate X, research Y, and
+            # summarize the results" separates "Investigate X" from "research Y"
+            # before the trailing "and" clause. Longest-first preference still
+            # applies at the SAME position.
+            if chosen is None or match.start() < chosen[0]:
+                chosen = (match.start(), coordinator, match.end())
+        # A bare comma between two clauses that EACH name a bounded OPERATION is
+        # the same explicit join as a coordinator ("Investigate X, research Y"),
+        # and is a boundary the EXISTING decompose already recognises. Weak by
+        # construction: it needs an operation on BOTH sides, so an ordinary
+        # enumerative subject ("the memory service, the cache layer") is never
+        # split. It competes on position like any coordinator, so the earliest
+        # real boundary still wins.
+        comma = _operation_comma_index(lowered, remainder)
+        if comma is not None and (chosen is None or comma < chosen[0]):
+            chosen = (comma, ",", comma + 1)
         if chosen is None:
             break
-        index, coordinator = chosen
+        index, coordinator, after = chosen
         head = remainder[:index].strip(" ,;.")
         if head:
             clauses.append(head)
-        remainder = remainder[index + len(coordinator) + 2 :].strip(" ,;.")
+        remainder = remainder[after:].strip(" ,;.")
+        if coordinator != "," and remainder[: len(coordinator)].lower() == coordinator:
+            # The coordinator is the JOIN, not part of the next clause: a clause
+            # is read exactly as the user wrote it, without a leading
+            # "then"/"and" that would change its bounded reading.
+            remainder = remainder[len(coordinator):].lstrip(" ,;.")
     if remainder:
         clauses.append(remainder)
     if len(clauses) < 2:
@@ -1192,14 +1283,26 @@ def split_intents(text: Any) -> tuple[SubRequest, ...]:
     # therefore never split.
     lowered_text = f" {text.lower()} "
     strong = any(
-        f" {connector} " in lowered_text
+        _coordinator_match(f" {lowered_text} ", connector) is not None
         for connector in _STRONG_INTENT_COORDINATORS
     )
     if not strong and any(
         not (interpret(clause).operation or "").strip()
         for clause in clauses[:_MAX_INTENTS]
     ):
-        return ()
+        # A clause that names no operation is only a genuine separate reading
+        # when it REQUESTS THE OUTPUT of the preceding work ("…, and summarize
+        # the results", "…, and compare the results"). That is a bounded,
+        # result-DEPENDENT clause the EXISTING decompose already recognises.
+        # Anything else is the tail of a single multi-clause intent — an
+        # enumerative subject ("investigate the component that handles
+        # references and memory") — and must not be split.
+        if not all(
+            _RESULT_DEPENDENT_CLAUSE_RE.match(clause)
+            for clause in clauses[:_MAX_INTENTS]
+            if not (interpret(clause).operation or "").strip()
+        ):
+            return ()
 
     readings: list[SubRequest] = []
     for clause in clauses[:_MAX_INTENTS]:
