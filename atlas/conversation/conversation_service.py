@@ -6,6 +6,7 @@ Coordinates Atlas conversations.
 
 from __future__ import annotations
 
+import json
 import re
 
 from pathlib import Path
@@ -69,11 +70,43 @@ from atlas.conversation.builtin_response import (
     BUILTIN_INTENT_VALIDATED_KNOWLEDGE,
     is_bounded_reference_subject,
     is_explanatory_self_knowledge,
+    is_store_recall_shaped,
+    is_validated_knowledge_shaped,
     knowledge_topic,
     research_request_subject,
     substitute_reference_subject,
 )
+from atlas.conversation.turn_role import TurnRole, detect_turn_role
 from atlas.conversation.turn_meaning import TurnMeaning, build_turn_meaning
+from atlas.conversation.meaning import (
+    ATLAS_MEANING_KEY,
+    AtlasMeaning,
+    build_atlas_meaning,
+)
+from atlas.conversation.dialogue_state import outcome_from
+from atlas.conversation.communicative_function import (
+    FUNCTION_QUERY_CAUSE,
+    FUNCTION_QUERY_RESULT,
+    FUNCTION_QUERY_STATUS,
+    QUERY_FUNCTIONS,
+    resolve_routing,
+)
+from atlas.conversation.dialogue_thread import thread_outcome_from
+from atlas.conversation.response import (
+    SHAPE_CLARIFICATION,
+    SHAPE_EXPLANATION,
+    SHAPE_RESULT_SUMMARY,
+    SHAPE_UNAVAILABLE,
+    compose_from_decision,
+    render_response,
+)
+from atlas.conversation.linguistic import (
+    LINGUISTIC_EVIDENCE_KEY,
+    LinguisticEvidence,
+    LinguisticEvidenceService,
+    NeutralLinguisticProvider,
+)
+from atlas.conversation.learned_proposer import REFERENCE_PROPOSALS_KEY
 from atlas.conversation.message import Message
 from atlas.conversation.prompt_builder import PromptBuilder
 from atlas.conversation.task_intake import TaskIntake, TaskSpec, TaskType
@@ -131,6 +164,45 @@ _CASUAL_TASK_TYPES: frozenset[TaskType] = frozenset(
 #: are deliberately absent: they keep their own governed route.
 _INFORMATIONAL_TASK_TYPES: frozenset[str] = frozenset(
     {task.value for task in _CASUAL_TASK_TYPES} | {TaskType.INFORMATION_REQUEST.value}
+)
+
+#: The shared semantic frame's SELF_KNOWLEDGE domain value (``SemanticDomain``):
+#: questions about Atlas itself, owned by the self-knowledge/architecture surfaces.
+_SELF_KNOWLEDGE_DOMAIN: str = "self_knowledge"
+
+#: The shared semantic frame's CASUAL domain value: open-ended conversation with
+#: no operational subject, owned by the open-ended/model path.
+_CASUAL_DOMAIN: str = "casual"
+
+#: Stage 1–10 audit (ownership boundary) — deterministic TaskTypes owned by an
+#: EXISTING surface whose handler must keep FIRST opportunity over the additive
+#: contextual result-query route. Two groups:
+#:
+#:   * a DEDICATED governed operation surface (impact / development / planning /
+#:     execution / recovery / verification / report / autonomy / action);
+#:   * the INFORMATIONAL family, owned by the existing local-first knowledge path
+#:     and the builtin knowledge / self-knowledge / architecture / recall
+#:     surfaces.
+#:
+#: Investigation is deliberately EXCLUDED: its cue family is noisy (noun forms),
+#: so the communicative-function layer must adjudicate those turns — that is the
+#: Stage 4 capability this route exists to provide.
+_CONTEXTUAL_DEFERRED_TASK_TYPES: frozenset[str] = frozenset(
+    {
+        TaskType.REPOSITORY_IMPACT_REQUEST.value,
+        TaskType.DEVELOPMENT_REQUEST.value,
+        TaskType.ACTION_REQUEST.value,
+        TaskType.PLANNING_REQUEST.value,
+        TaskType.EXECUTION_REQUEST.value,
+        TaskType.RECOVERY_REQUEST.value,
+        TaskType.VERIFICATION_REQUEST.value,
+        TaskType.REPORT_REQUEST.value,
+        TaskType.AUTONOMY_REQUEST.value,
+        TaskType.L2_AUTONOMY_REQUEST.value,
+        TaskType.L3_AUTONOMY_REQUEST.value,
+        TaskType.L4_AUTONOMY_REQUEST.value,
+        TaskType.L5_AUTONOMY_REQUEST.value,
+    }
 )
 
 #: Step 2 — bounded, explicit status forms for the ACTIVE goal/plan. A turn is
@@ -499,6 +571,8 @@ class ConversationService:
         autonomy_check: Callable[..., AutonomyDecisionProtocol] | None = None,
         goal_orchestration_resolver: Callable[..., Any] | None = None,
         goal_resume_resolver: Callable[..., Any] | None = None,
+        linguistic_provider: Any | None = None,
+        learned_reference_proposer: Any | None = None,
     ):
         """
         Initialize the conversation service.
@@ -696,6 +770,47 @@ class ConversationService:
         # re-gathering evidence. Conversation-scoped and never persisted;
         # mirrors the existing transient registries above.
         self._last_investigation_report: InvestigationReport | None = None
+
+        # Stage 1 — the bounded L1 meaning of the most recent interpreted turn.
+        # Conversation-scoped, transient and authority-free; observable by tests
+        # and available to later conversational stages. Never persisted.
+        self._last_meaning: AtlasMeaning | None = None
+
+        # Stage 4 — the most recent communicative-function routing decision
+        # (inspectable/testing seam). Conversation-scoped, transient, and
+        # descriptive only: it never authorizes or executes anything.
+        self._last_routing_decision: Any | None = None
+
+        # Stage 6 — expose the bounded salience/ambiguity assessment this turn
+        # produced (inspectable/testing seam; descriptive only).
+        self._last_salience_assessment: dict | None = None
+
+        # Stage 7 — the bounded response plan this turn produced (inspectable/
+        # testing seam; descriptive only, never authority).
+        self._last_response_plan: dict | None = None
+
+        # Stage 8 — optional linguistic-evidence seam. Advisory only: it produces
+        # bounded evidence for the turn; Atlas's deterministic interpretation
+        # remains authoritative. Defaults to the Atlas-native deterministic
+        # provider, so the seam is live without any external dependency.
+        self._linguistic = LinguisticEvidenceService(
+            providers=(linguistic_provider,)
+            if linguistic_provider is not None
+            else (NeutralLinguisticProvider(),)
+        )
+        self._last_linguistic_evidence: LinguisticEvidence | None = None
+        self._last_linguistic_adjudication: dict | None = None
+
+        # Stage 9 — optional LOCAL learned reference proposer. OFF by default
+        # (None): deterministic operation is unchanged. When wired, its bounded
+        # proposals are advisory evidence only — Atlas (Stage 6) decides.
+        self._learned_proposer = learned_reference_proposer
+        self._last_reference_proposals: dict | None = None
+
+        # Stage 5 — the latest discourse-operation referent id from BEFORE the
+        # current turn, so the thread update can tell a NEWLY completed operation
+        # from a previously retained one. Conversation-scoped and transient.
+        self._pre_turn_operation_id: str = ""
 
         # Create the initial conversation.
         self._conversation = self._history.create()
@@ -2443,6 +2558,53 @@ class ConversationService:
         text: str,
         session_context: SessionContext | None = None,
     ) -> Message:
+        """Send a user message through Atlas.
+
+        Stage 2 — the public entry point records the bounded dialogue turn AFTER
+        the existing cascade completes. Every turn funnels through here, so the
+        recording is route-independent (which handler ran never decides whether
+        dialogue state is recorded). Recording is representation-only and
+        fail-soft; it changes no routing.
+        """
+        self._last_meaning = None
+        self._pre_turn_operation_id = self._discourse_latest_operation_id()
+        pre_turn_projection = self._authoritative_projection()
+        message = self._send_turn(text, session_context)
+        if self._authoritative_projection() != pre_turn_projection:
+            self._record_dialogue_turn()
+        self._record_thread_turn(text)
+        return message
+
+    #: The conversational snapshots added by Stages 2/3/5 — METADATA, not
+    #: authoritative state (see :meth:`_authoritative_projection`).
+    _CONVERSATIONAL_SNAPSHOTS: tuple[str, ...] = (
+        "dialogue_state",
+        "discourse_state",
+        "thread_state",
+    )
+
+    def _authoritative_projection(self) -> str:
+        """The state WITHOUT the conversational snapshots (Stage 1–10 audit).
+
+        Stages 2/3/5 add ``dialogue_state`` / ``discourse_state`` / ``thread_state``
+        to :class:`ConversationState` as conversational METADATA. They are persisted
+        together with a turn that changed authoritative state, but a turn that
+        changed nothing else is not a state mutation: pure no-op turns
+        (acknowledgement / recall / refused repeat) keep the existing state object,
+        exactly as they did before these stages.
+        """
+        if self._state_manager is None:
+            return ""
+        data = self._state_manager.state.to_dict()
+        for key in self._CONVERSATIONAL_SNAPSHOTS:
+            data.pop(key, None)
+        return json.dumps(data, sort_keys=True, default=str)
+
+    def _send_turn(
+        self,
+        text: str,
+        session_context: SessionContext | None = None,
+    ) -> Message:
         """
         Send a user message through Atlas.
         """
@@ -2680,6 +2842,17 @@ class ConversationService:
         if ordinal_reference is not None:
             self._conversation.add_message(ordinal_reference)
             return ordinal_reference
+        # Stage 4 — communicative-function-aware routing. A QUERY about prior
+        # output ("what did you find?", "can you explain the result of the
+        # investigation you just completed?", "why did you investigate that?") is
+        # answered from the retained result, so a TOPIC word such as
+        # "investigation" cannot by itself start a new investigation. It runs
+        # AFTER every builtin/reference/knowledge surface (they keep precedence)
+        # and BEFORE the operation handlers.
+        result_query = self._maybe_handle_result_query(text, spec)
+        if result_query is not None:
+            self._conversation.add_message(result_query)
+            return result_query
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
         if spec is not None and spec.task_type is TaskType.INVESTIGATION_REQUEST:
@@ -2934,6 +3107,25 @@ class ConversationService:
         text: str,
         session_context: SessionContext | None = None,
     ):
+        """Stream a response through Atlas.
+
+        Stage 2 — matches :meth:`send`: the bounded dialogue turn is recorded
+        AFTER the existing cascade completes, through the same single seam, so the
+        recording is route-independent and send/stream stay equivalent.
+        """
+        self._last_meaning = None
+        self._pre_turn_operation_id = self._discourse_latest_operation_id()
+        pre_turn_projection = self._authoritative_projection()
+        yield from self._stream_turn(text, session_context)
+        if self._authoritative_projection() != pre_turn_projection:
+            self._record_dialogue_turn()
+        self._record_thread_turn(text)
+
+    def _stream_turn(
+        self,
+        text: str,
+        session_context: SessionContext | None = None,
+    ):
         """
         Stream a response through Atlas.
         """
@@ -3051,6 +3243,15 @@ class ConversationService:
             self._conversation.add_message(evidence_self_knowledge)
             yield evidence_self_knowledge.content
             return
+        # Checkpoint 4 (mirror of send()) — a bound reference is ANSWERED from the
+        # retained conversation fact by the existing reference surface, BEFORE any
+        # research/knowledge/operation route can reinterpret the turn as a new
+        # operation. This mirror removes a pre-existing send/stream asymmetry.
+        reference_answer = self._maybe_answer_resolved_reference(text, spec)
+        if reference_answer is not None:
+            self._conversation.add_message(reference_answer)
+            yield reference_answer.content
+            return
         # Step 8 — returning to a prior topic (mirror of send(): same handler,
         # same placement, same semantics). Reactivates a matching prior topic;
         # never executes and fails closed.
@@ -3131,6 +3332,12 @@ class ConversationService:
         if ordinal_reference is not None:
             self._conversation.add_message(ordinal_reference)
             yield ordinal_reference.content
+            return
+        # Stage 4 — same communicative-function-aware result-query route as send().
+        result_query = self._maybe_handle_result_query(text, spec)
+        if result_query is not None:
+            self._conversation.add_message(result_query)
+            yield result_query.content
             return
         # Investigation semantics — read-only, takes precedence over
         # development because investigation cannot mutate state.
@@ -3482,6 +3689,7 @@ class ConversationService:
             state = (
                 self._state_manager.state if self._state_manager is not None else None
             )
+            prior_objective = bool(state is not None and state.current_objective)
             interpretation = self._engine.interpret(
                 text, history_length=history_length, state=state
             )
@@ -3492,10 +3700,334 @@ class ConversationService:
                 updates = self._engine.state_updates(interpretation, state)
                 if updates:
                     self._state_manager.update(**updates)
-            return self._engine.with_semantic(spec, interpretation.semantic)
+            spec = self._engine.with_semantic(spec, interpretation.semantic)
+            # Stage 1 — attach the bounded L1 meaning projection. Additive and
+            # PROCEED-only: it changes no routing and is fail-soft.
+            return self._attach_meaning(text, spec, interpretation, prior_objective)
         if self._task_intake is None:
             return None
         return self._task_intake.intake(text, history_length=history_length)
+
+    def _attach_meaning(
+        self,
+        text: str,
+        spec: TaskSpec,
+        interpretation: Any,
+        prior_objective: bool,
+    ) -> TaskSpec:
+        """Attach the bounded L1 meaning projection to ``spec`` (Stage 1).
+
+        Representation only and PROCEED-only: it projects the EXISTING
+        deterministic interpretation into an :class:`AtlasMeaning`, records it
+        on ``spec.context`` (the same additive channel ``semantic_intake`` uses)
+        and exposes it via :attr:`last_meaning`. It never routes, authorizes, or
+        executes, and it is fail-soft — an empty result or any failure leaves
+        ``spec`` unchanged so no turn can be broken. The legacy intake-less path
+        never reaches here.
+        """
+        from dataclasses import replace as _replace
+
+        self._last_meaning = None
+        try:
+            has_knowledge_context = False
+            try:
+                has_knowledge_context = bool(self._active_knowledge_subject())
+            except Exception:  # fail-soft: context probe never breaks a turn
+                has_knowledge_context = False
+            meaning = build_atlas_meaning(
+                text,
+                spec=spec,
+                semantic=getattr(interpretation, "semantic", None),
+                turn_role=getattr(interpretation, "turn_role", None),
+                has_prior_objective=bool(prior_objective),
+                has_knowledge_context=has_knowledge_context,
+            )
+        except Exception:  # fail-soft: meaning construction is never fatal
+            return spec
+        self._last_meaning = meaning
+        context = dict(spec.context) if isinstance(spec.context, dict) else {}
+        context[ATLAS_MEANING_KEY] = meaning.to_dict()
+        # Stage 8 — optional linguistic evidence (advisory, bounded, fail-safe).
+        # It NEVER routes, authorizes, or overwrites meaning; it rides the context
+        # as a separate evidence projection for later consumers (e.g. Stage 6).
+        try:
+            evidence = self._linguistic.analyse(text)
+            semantic = getattr(meaning, "semantic_intake", None)
+            illocution = getattr(semantic, "act", "") if semantic is not None else ""
+            adjudication = self._linguistic.adjudicate(
+                evidence, deterministic_illocution=illocution
+            )
+            self._last_linguistic_evidence = evidence
+            self._last_linguistic_adjudication = adjudication.to_dict()
+            context[LINGUISTIC_EVIDENCE_KEY] = {
+                **evidence.to_dict(),
+                "adjudication": adjudication.to_dict(),
+            }
+        except Exception:  # fail-soft: linguistic evidence never breaks a turn
+            self._last_linguistic_evidence = LinguisticEvidence()
+            self._last_linguistic_adjudication = None
+        # Stage 9 — optional LOCAL learned reference proposals (OFF by default).
+        # Advisory evidence only: they never route, resolve, or authorize, and
+        # Atlas (Stage 6) decides. A failure here never breaks a turn.
+        if self._learned_proposer is not None:
+            try:
+                discourse = (
+                    self._state_manager.state.discourse_state
+                    if self._state_manager is not None
+                    else None
+                )
+                candidate_list = [
+                    (referent.referent_id, referent.label)
+                    for referent in (getattr(discourse, "referents", ()) or ())
+                    if getattr(referent, "kind", "") in ("result", "operation")
+                    and getattr(referent, "referent_id", "")
+                ]
+                proposal_result = self._learned_proposer.propose(
+                    text, candidates=candidate_list
+                )
+                payload = proposal_result.to_dict()
+                self._last_reference_proposals = payload
+                context[REFERENCE_PROPOSALS_KEY] = payload
+            except Exception:  # fail-soft: learned proposals never break a turn
+                self._last_reference_proposals = None
+        return _replace(spec, context=context)
+
+    @property
+    def last_meaning(self) -> AtlasMeaning | None:
+        """The bounded L1 meaning of the most recent interpreted turn, or None."""
+        return self._last_meaning
+
+    @property
+    def last_linguistic_evidence(self) -> LinguisticEvidence | None:
+        """The optional provider's bounded evidence for the last turn, or None."""
+        return self._last_linguistic_evidence
+
+    def _record_dialogue_turn(self) -> None:
+        """Record the bounded dialogue turn through the single state seam (Stage 2).
+
+        Route-independent: invoked once per turn from the public ``send``/``stream``
+        entry points AFTER the existing cascade completes, so whichever handler ran
+        does not decide whether dialogue state is recorded. It consumes the EXISTING
+        Stage 1 :class:`AtlasMeaning` (no re-parsing, no second interpretation path)
+        plus the EXISTING state facts, and folds them into ``ConversationState`` via
+        the manager's single ``apply_dialogue_turn`` seam. Representation only and
+        fail-soft: it never routes, authorizes, or mutates governed state.
+        """
+        meaning = self._last_meaning
+        if meaning is None or self._state_manager is None:
+            return
+        try:
+            outcome = outcome_from(
+                meaning,
+                self._state_manager.state,
+                turn_index=len(self._conversation.messages),
+            )
+            self._state_manager.apply_dialogue_turn(outcome)
+        except Exception:  # fail-soft: dialogue recording never breaks a turn
+            return
+
+    def _discourse_latest_operation_id(self) -> str:
+        """Return the latest discourse Operation referent id, or ``""``."""
+        if self._state_manager is None:
+            return ""
+        discourse = self._state_manager.state.discourse_state
+        return getattr(discourse, "latest_operation_id", "") or ""
+
+    def _active_thread_result_label(self) -> str:
+        """Return the ACTIVE Stage 5 thread's result label, or ``""`` (Stage 6).
+
+        Used so a bound RESULT reference prefers the active conversation thread's
+        result (strong contextual evidence) over the single most-recent result
+        (weak recency evidence). Representation only; fail-soft.
+        """
+        if self._state_manager is None:
+            return ""
+        try:
+            thread_state = self._state_manager.state.thread_state
+            active = thread_state.active() if thread_state is not None else None
+            if active is None:
+                return ""
+            result_id = getattr(active, "result_referent_id", "")
+            if not result_id:
+                return ""
+            discourse = self._state_manager.state.discourse_state
+            if discourse is None:
+                return ""
+            referent = discourse.find(result_id)
+            return referent.label if referent is not None else ""
+        except Exception:  # fail-soft: never breaks a turn
+            return ""
+
+    def _record_thread_turn(self, text: str) -> None:
+        """Record the bounded QUD/thread transition through the single seam (Stage 5).
+
+        Consumes already-derived evidence only — the Stage 4 communicative
+        function (from :attr:`last_meaning`), the Stage 3 referents recorded for
+        the turn, the Stage 4 routing target (when the result-query route ran) and
+        the turn text — and folds them into ``ConversationState.thread_state`` via
+        the manager's single ``apply_thread_turn`` seam. It never re-parses raw
+        text, routes, authorizes or executes anything, and it is fail-soft.
+        """
+        meaning = self._last_meaning
+        if meaning is None or self._state_manager is None:
+            return
+        try:
+            state = self._state_manager.state
+            discourse = state.discourse_state
+            latest_operation = getattr(discourse, "latest_operation_id", "") or ""
+            new_operation = (
+                latest_operation
+                if latest_operation and latest_operation != self._pre_turn_operation_id
+                else ""
+            )
+            latest_result = getattr(discourse, "latest_result_id", "") or ""
+            operation_label = ""
+            if new_operation and discourse is not None:
+                referent = discourse.find(new_operation)
+                if referent is not None:
+                    operation_label = referent.label
+            decision = self._last_routing_decision
+            outcome = thread_outcome_from(
+                function=getattr(meaning, "communicative_function", ""),
+                turn_index=len(self._conversation.messages),
+                text=text,
+                objective=operation_label or state.current_objective or "",
+                operation_referent_id=new_operation,
+                result_referent_id=(latest_result if new_operation else ""),
+                target_referent_id=(
+                    getattr(decision, "target_referent_id", "") if decision else ""
+                ),
+            )
+            self._state_manager.apply_thread_turn(outcome)
+        except Exception:  # fail-soft: thread recording never breaks a turn
+            return
+
+    def _contextual_query_defers_to_another_surface(
+        self, text: str, spec: TaskSpec | None
+    ) -> bool:
+        """True when an EXISTING surface must keep ownership of this turn.
+
+        Stage 1–10 audit — the contextual result-query route is ADDITIVE and must
+        not become a universal pre-router. Two authoritative signals are used:
+
+          * the deterministic ``TaskType``: a turn a dedicated governed operation
+            handler owns (impact / development / planning / execution / recovery /
+            verification / report / autonomy / action) is never claimed here;
+          * the EXISTING knowledge/recall surface recognizers: a turn shaped like a
+            memory-store recall, a validated-knowledge request, or a conversation
+            recall ("what did we find?") keeps its own surface.
+
+        Investigation is deliberately NOT in the operation set: its cue family is
+        noisy (noun forms), so Stage 4 must adjudicate it — that is the Stage 4
+        capability this route exists to provide.
+        """
+        if spec is not None and getattr(
+            spec.task_type, "value", ""
+        ) in _CONTEXTUAL_DEFERRED_TASK_TYPES:
+            return True
+        evidence = getattr(self._last_meaning, "communicative_function_evidence", {}) or {}
+        function = getattr(self._last_meaning, "communicative_function", "")
+        domain = evidence.get("frame_domain")
+        # A question about ATLAS ITSELF (the frame's SELF_KNOWLEDGE domain) belongs
+        # to the existing self-knowledge / architecture surfaces — EXCEPT when the
+        # bounded reading is a retrospective CAUSE query, where this route's honest
+        # "no recorded result" must not be replaced by an architectural guess.
+        if domain == _SELF_KNOWLEDGE_DOMAIN and function != FUNCTION_QUERY_CAUSE:
+            return True
+        # A CAUSE question about a CASUAL/external topic ("why was it built?") is
+        # not a question about prior OUTPUT at all: it keeps its open-ended path.
+        if function == FUNCTION_QUERY_CAUSE and domain == _CASUAL_DOMAIN:
+            return True
+        # An IMPERATIVE whose bounded reading is a query is an OPERATION REQUEST
+        # ("find out what module handles this capability"), not a retrieval: the
+        # surface that owns the operation keeps it. The noisy investigation family
+        # is exempt — the function layer must adjudicate those (Stage 4).
+        if evidence.get("illocution") == "request" and (
+            spec is None
+            or getattr(spec.task_type, "value", "")
+            != TaskType.INVESTIGATION_REQUEST.value
+        ):
+            return True
+        if not isinstance(text, str) or not text.strip():
+            return False
+        try:
+            if is_store_recall_shaped(text) or is_validated_knowledge_shaped(text):
+                return True
+        except Exception:  # fail-soft: an ownership probe never breaks a turn
+            pass
+        try:
+            if detect_turn_role(text, has_prior_objective=True) is TurnRole.RECALL:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _maybe_handle_result_query(self, text: str, spec: TaskSpec | None) -> Message | None:
+        """Stage 4 — communicative-function-aware routing for result queries.
+
+        Recognizes a turn whose COMMUNICATIVE FUNCTION is a query about prior
+        output ("what did you find?", "can you explain the result of the
+        investigation you just completed?", "why did you investigate that?") and
+        answers it from the retained result/referent — so a TOPIC word such as
+        "investigation" can no longer, by itself, start a NEW investigation.
+
+        Deterministic and fail-closed: an explicit target that cannot be matched,
+        or an ambiguous one, asks for clarification; a clear query with no
+        retained result is refused honestly (never a fabricated result and never a
+        new investigation). Representation only: nothing is executed or
+        authorized. Returns ``None`` for every other turn, so the existing
+        cascade is unchanged.
+        """
+        meaning = self._last_meaning
+        if meaning is None or self._builtin_response is None:
+            return None
+        function = getattr(meaning, "communicative_function", "")
+        if function not in QUERY_FUNCTIONS:
+            return None
+        # Stage 1–10 audit — OWNERSHIP BOUNDARY: this route is additive. When an
+        # EXISTING governed operation surface or knowledge/recall surface owns the
+        # turn, defer (fall through) so that established surface handles it. Only
+        # a genuine contextual query about prior output is claimed here.
+        if self._contextual_query_defers_to_another_surface(text, spec):
+            return None
+        state = self._state_manager.state if self._state_manager is not None else None
+        discourse = getattr(state, "discourse_state", None)
+        thread_state = getattr(state, "thread_state", None)
+        decision = resolve_routing(text, function, discourse, thread_state)
+        self._last_routing_decision = decision
+        # Stage 6 — the bounded salience/ambiguity assessment behind the decision.
+        self._last_salience_assessment = dict(decision.assessment or {}) or None
+        if decision.route == "existing":
+            # Stage 10 — a named-topic follow-up that matched no referent falls
+            # through unchanged, so the existing cascade owns the turn (fail-closed).
+            return None
+        # Stage 7 — bounded, evidence-grounded response composition. The SAME
+        # composition is used by send() and stream() (this handler is shared).
+        plan = compose_from_decision(function, decision, discourse)
+        self._last_response_plan = plan.to_dict()
+        metadata: dict[str, Any] = {
+            "communicative_function": decision.to_dict(),
+            "response_plan": plan.to_dict(),
+        }
+
+        if plan.shape == SHAPE_CLARIFICATION:
+            question = render_response(plan)
+            self._record_pending_clarification(
+                KIND_REFERENCE, question, plan.candidates, text
+            )
+            return Message(role="assistant", content=question, metadata=metadata)
+
+        if plan.shape in (SHAPE_RESULT_SUMMARY, SHAPE_EXPLANATION, SHAPE_UNAVAILABLE):
+            if plan.shape == SHAPE_RESULT_SUMMARY:
+                # Preserve the existing reference metadata contract.
+                metadata["builtin_intent"] = "reference"
+                metadata["reference_field"] = "latest_result"
+            return Message(
+                role="assistant",
+                content=render_response(plan),
+                metadata=metadata,
+            )
+        return None
 
     @staticmethod
     def _attach_session_to_spec(spec: TaskSpec, session_context: SessionContext) -> TaskSpec:
@@ -3630,9 +4162,15 @@ class ConversationService:
                 return spec, self._orchestration_clarification_message(clarified)
 
             if result.status is ReferenceResolutionStatus.RESOLVED:
-                return self._attach_resolved_reference(
-                    spec, result.resolved_field, result.resolved_value
-                ), None
+                field, value = result.resolved_field, result.resolved_value
+                # Stage 6 — a bound reference to a RESULT prefers the ACTIVE
+                # thread's result (the strongest contextual evidence) over the
+                # single most-recent result. Recency is only a fallback.
+                if field == "latest_result":
+                    active_label = self._active_thread_result_label()
+                    if active_label:
+                        value = active_label
+                return self._attach_resolved_reference(spec, field, value), None
 
             # UNRESOLVED -> fall through to the bounded contextual resolver.
 
@@ -4188,6 +4726,10 @@ class ConversationService:
         Invoked ONLY from a handler's completion point — never from
         classification — so a request that was rejected, is awaiting
         clarification/approval, or did not actually run is never recorded.
+
+        Stage 3 — this single helper is also the one seam that mirrors the
+        completed operation into the discourse referent lifecycle, so the
+        recording is not duplicated per handler/route.
         """
         if self._state_manager is None:
             return
@@ -4196,6 +4738,59 @@ class ConversationService:
             operand=operand,
             proposal_id=proposal_id,
         )
+        self._record_discourse_operation(kind, operand, proposal_id)
+
+    def _record_discourse_operation(
+        self,
+        kind: TaskType,
+        operand: str | None,
+        proposal_id: str | None,
+    ) -> None:
+        """Record a completed operation into the discourse referent registry.
+
+        Stage 3 — the single, centralized operation-lifecycle recording point
+        (reached through :meth:`_record_operation`, the one helper every operation
+        handler already funnels through). It reads EXISTING facts only — the
+        operation kind/operand/proposal reference, the retained ``latest_result``,
+        and (for a read-only investigation) the bounded findings/evidence of the
+        retained report — and folds them into ``ConversationState.discourse_state``
+        via the single ``apply_discourse_turn`` seam. Representation only and
+        fail-soft: it never routes, authorizes, executes or mutates governed state.
+        """
+        try:
+            from atlas.conversation.discourse_state import DiscourseTurnOutcome
+
+            kind_value = kind.value if hasattr(kind, "value") else str(kind)
+            state = self._state_manager.state
+            result_label = state.latest_result or ""
+            findings: tuple[str, ...] = ()
+            evidence: tuple[str, ...] = ()
+            if kind_value == TaskType.INVESTIGATION_REQUEST.value and isinstance(
+                self._last_investigation_report, InvestigationReport
+            ):
+                report = self._last_investigation_report
+                findings = tuple(
+                    finding.description or finding.category
+                    for finding in report.findings
+                )
+                evidence = tuple(
+                    finding.evidence
+                    for finding in report.findings
+                    if finding.evidence
+                )
+            outcome = DiscourseTurnOutcome(
+                turn_index=len(self._conversation.messages),
+                operation_origin=kind_value,
+                operation_label=str(operand or ""),
+                operation_status="completed",
+                result_label=result_label,
+                findings=findings,
+                evidence=evidence,
+                proposal_ref=str(proposal_id or ""),
+            )
+            self._state_manager.apply_discourse_turn(outcome)
+        except Exception:  # fail-soft: referent recording never breaks a turn
+            return
 
     def _maybe_handle_repeat_request(
         self,

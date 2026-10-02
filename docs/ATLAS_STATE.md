@@ -5080,5 +5080,54 @@ paths, directory requests and symlink escapes refused with 404), and binding is
 loopback-only. 30 + 35 focused gateway/interface tests plus 46 narrow conversation
 regressions are green, and the interface passed an independent read-only audit;
 known limitations recorded in §34.38. §34.38).
+Evidence-driven conversational architecture stages 1–10 added: 2026-10-01 (working
+tree, pending review; NOT a roadmap phase, no Step 26, no new capability system, no
+new dependency, and no external/local model made authoritative). The conversational
+layer now has a bounded, deterministic, model-independent stack over the EXISTING
+conversation service: AtlasMeaning (Stage 1, bounded language/meaning boundary);
+DialogueState (Stage 2, bounded semantic turn state); DiscourseState (Stage 3,
+bounded referents + operation/result graph); CommunicativeFunction (Stage 4,
+context-aware routing); DialogueThread/QUD (Stage 5, active objective, bounded
+threads, thread switching); Salience (Stage 6, evidence hierarchy EXPLICIT > QUD >
+ACTIVE_THREAD > RECENCY; ambiguity → clarification; insufficient → fail closed);
+ResponsePlan (Stage 7, evidence-grounded response composition); a linguistic-provider
+seam (Stage 8, optional, bounded, fail-safe, advisory evidence only); a learned
+reference-proposer seam (Stage 9, OFF by default, bounded and schema-validated;
+tested with controlled proposers and NOT promoted because the baseline showed no
+measurable benefit); and deterministic named-topic follow-up resolution (Stage 10).
+Stage 10 measurable result: the Stage 9 coreference corpus moved from 7 resolutions
+/ 2 clarifications / 1 unsupported to 8 / 2 / 0, and the named-topic probe from
+3 resolved / 4 unsupported to 6 resolved / 1 unsupported (the fresh/no-candidate
+case remains correctly fail-closed). A cumulative Stage 1–10 audit (full-suite
+comparison against pristine HEAD plus a live ConversationService matrix) then found
+and fixed ONE ownership defect: the Stage 4/6 contextual result-query route ran before
+the established governed operation surfaces and could claim a turn another surface
+owned — a retrospective cue such as the verb "change" made "What would be affected if
+I change <target>?" a `query_result`, so the route returned its honest "no recorded
+result" refusal instead of letting the repository-impact surface answer. The route is
+now gated by authority the existing code already computes — the deterministic
+TaskType (a dedicated governed operation surface keeps its own turns), the frame's
+SELF_KNOWLEDGE/CASUAL domains, the imperative illocution, and the existing knowledge/
+recall shape recognizers (store-recall, validated-knowledge, conversation recall) —
+and it FALLS THROUGH, rather than capturing, any turn one of those surfaces owns; the
+bounded dialogue/discourse/thread snapshots are also recorded only on turns that wrote
+authoritative state, so pure no-op turns keep the existing ConversationState object
+exactly as before. All 34 audit-identified Stage 1–10 regressions are resolved with no
+new failures, and Stage 10's named-topic follow-up is unchanged. Known interaction
+(not addressed here, not a regression): the Stage 3 referent bound is a bounded
+oldest-first window (MAX_REFERENTS = 24) while one real kernel investigation emits
+roughly 19 referents, so an earlier operation's anchor can be evicted before a later
+"what about <older target>?" turn — that turn then falls through fail-closed by design
+instead of fabricating. ConversationState remains the
+single state owner and ConversationStateManager the controlled mutation boundary;
+governance (OWNER approval, sandbox verification, separate promotion) and model
+independence are unchanged, and no learned/provider/ResponsePlan/referent/salience
+path can execute, approve, promote, or grant authority. Known remaining limitation
+(deliberately not addressed): the compound operation/orchestration gap
+("Investigate X and tell me what you find."). Historical baseline failures remain the
+same 5 (4 SUBFAILEDs in
+tests/test_reference_consumption.py::TestResultQualifierAliasesEndToEnd and 1 in
+tests/test_ambiguity_uncertainty.py::TestPendingQuestionRecording), reproduced at
+pristine HEAD before Stage 1.
 Project Atlas — docs/ATLAS_STATE.md. This document is the authoritative
 current architecture handbook and replaces all earlier ATLAS_STATE revisions.*

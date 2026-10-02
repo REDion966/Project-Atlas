@@ -29,6 +29,21 @@ from typing import Any, Optional
 import uuid
 
 from atlas.conversation.clarification import PendingClarification
+from atlas.conversation.dialogue_state import (
+    DialogueState,
+    DialogueTurnOutcome,
+    apply_turn,
+)
+from atlas.conversation.discourse_state import (
+    DiscourseState,
+    DiscourseTurnOutcome,
+    apply_turn as apply_discourse_transition,
+)
+from atlas.conversation.dialogue_thread import (
+    DialogueThreadState,
+    ThreadTurnOutcome,
+    apply_turn as apply_thread_transition,
+)
 from atlas.conversation.entity_capture import CapturedEntity
 from atlas.conversation.world_state import (
     ConversationWorld,
@@ -284,6 +299,32 @@ class ConversationState:
     # state, and it is not a second store.
     pending_clarification: Optional[PendingClarification] = None
 
+    # Stage 2 — bounded DIALOGUE / INFORMATION STATE: the semantic-dialogue
+    # section of THIS state (current objective/subject/topic, the current turn's
+    # bounded reading, clarification status, the active plan's bounded status,
+    # and a small bounded window of recent semantic turn summaries). It is a
+    # field of this state — never a second store — written only through the
+    # manager's single ``apply_dialogue_turn`` seam. Representation only: no
+    # authority, no routing.
+    dialogue_state: Optional[DialogueState] = None
+
+    # Stage 3 — bounded DISCOURSE REFERENTS + operation/result lifecycle: the
+    # structured registry of operations, results, findings, evidence, proposals
+    # and verifications (and their typed relationships) that later stages use for
+    # context-aware reference resolution. It is a field of THIS state — never a
+    # second store — written only through the manager's single
+    # ``apply_discourse_turn`` seam. Representation only: a referent describes an
+    # operation/proposal/verification and is never authority.
+    discourse_state: Optional[DiscourseState] = None
+
+    # Stage 5 — bounded QUD / active-objective / dialogue-thread state: which
+    # question is under discussion, which objective is being pursued, and which
+    # conversational thread a turn belongs to (threads reference Stage 3
+    # referents by ID; they never copy them). A field of THIS state — never a
+    # second store — written only through the manager's single
+    # ``apply_thread_turn`` seam. Descriptive only: a thread/QUD never authorizes.
+    thread_state: Optional[DialogueThreadState] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -344,6 +385,21 @@ class ConversationState:
             "pending_clarification": (
                 self.pending_clarification.to_dict()
                 if isinstance(self.pending_clarification, PendingClarification)
+                else None
+            ),
+            "dialogue_state": (
+                self.dialogue_state.to_dict()
+                if isinstance(self.dialogue_state, DialogueState)
+                else None
+            ),
+            "discourse_state": (
+                self.discourse_state.to_dict()
+                if isinstance(self.discourse_state, DiscourseState)
+                else None
+            ),
+            "thread_state": (
+                self.thread_state.to_dict()
+                if isinstance(self.thread_state, DialogueThreadState)
                 else None
             ),
             "turn_id": self.turn_id,
@@ -443,6 +499,31 @@ class ConversationStateManager:
             merged["pending_clarification"] = PendingClarification.from_dict(raw_pending)
         else:
             merged["pending_clarification"] = None
+        # Stage 2 — rebuild the bounded dialogue state so a to_dict round-trip
+        # preserves its typed value (fail closed to None on malformed input).
+        raw_dialogue = merged.get("dialogue_state")
+        if isinstance(raw_dialogue, DialogueState):
+            merged["dialogue_state"] = raw_dialogue
+        elif isinstance(raw_dialogue, dict):
+            merged["dialogue_state"] = DialogueState.from_dict(raw_dialogue)
+        else:
+            merged["dialogue_state"] = None
+        # Stage 3 — rebuild the bounded discourse state (fail closed to None).
+        raw_discourse = merged.get("discourse_state")
+        if isinstance(raw_discourse, DiscourseState):
+            merged["discourse_state"] = raw_discourse
+        elif isinstance(raw_discourse, dict):
+            merged["discourse_state"] = DiscourseState.from_dict(raw_discourse)
+        else:
+            merged["discourse_state"] = None
+        # Stage 5 — rebuild the bounded QUD/thread state (fail closed to None).
+        raw_threads = merged.get("thread_state")
+        if isinstance(raw_threads, DialogueThreadState):
+            merged["thread_state"] = raw_threads
+        elif isinstance(raw_threads, dict):
+            merged["thread_state"] = DialogueThreadState.from_dict(raw_threads)
+        else:
+            merged["thread_state"] = None
         self._state = ConversationState(**merged)
         return self._state
 
@@ -703,3 +784,82 @@ class ConversationStateManager:
         if self._state.pending_clarification is None:
             return self._state
         return self.update(pending_clarification=None)
+
+    # ------------------------------------------------------------------
+    # Stage 2 — dialogue / information state seam
+    # ------------------------------------------------------------------
+
+    def apply_dialogue_turn(self, outcome: DialogueTurnOutcome) -> ConversationState:
+        """Apply ONE dialogue-state transition through the single centralized seam.
+
+        This is the one place dialogue state is written: every turn's bounded
+        outcome (produced from the existing :class:`AtlasMeaning` and the existing
+        state facts via :func:`atlas.conversation.dialogue_state.outcome_from`) is
+        folded into the retained :class:`DialogueState` by the pure
+        :func:`atlas.conversation.dialogue_state.apply_turn`. WHICH handler ran is
+        irrelevant — the recording is route-independent.
+
+        Representation only, authority-free and fail-closed: a malformed outcome is
+        ignored, it never routes, authorizes, executes or mutates governed state.
+        """
+        if not isinstance(outcome, DialogueTurnOutcome):
+            return self._state
+        current = (
+            self._state.dialogue_state
+            if isinstance(self._state.dialogue_state, DialogueState)
+            else None
+        )
+        return self.update(dialogue_state=apply_turn(current, outcome))
+
+    def apply_discourse_turn(self, outcome: DiscourseTurnOutcome) -> ConversationState:
+        """Apply ONE discourse/referent transition through the single owner seam.
+
+        The one place the referent lifecycle is written: an operation/result
+        outcome (built from the EXISTING operation/result facts) is folded into
+        the retained :class:`DiscourseState` by the pure
+        :func:`atlas.conversation.discourse_state.apply_turn`. It is invoked from
+        the existing single operation-recording helper, so recording is not
+        duplicated per handler.
+
+        Representation only, authority-free and fail-closed: a malformed outcome
+        is ignored, it never routes, authorizes, executes or mutates governed
+        state, and a proposal/verification referent is a DESCRIPTION, never
+        authority.
+        """
+        if not isinstance(outcome, DiscourseTurnOutcome):
+            return self._state
+        current = (
+            self._state.discourse_state
+            if isinstance(self._state.discourse_state, DiscourseState)
+            else None
+        )
+        return self.update(
+            discourse_state=apply_discourse_transition(current, outcome)
+        )
+
+    def apply_thread_turn(self, outcome: ThreadTurnOutcome) -> ConversationState:
+        """Apply ONE QUD / active-objective / thread transition (single seam).
+
+        The one place Stage 5 thread state is written: a bounded turn outcome
+        (built from the EXISTING Stage 4 function + Stage 3 referents via
+        :func:`atlas.conversation.dialogue_thread.thread_outcome_from`) is folded
+        into the retained :class:`DialogueThreadState` by the pure
+        :func:`atlas.conversation.dialogue_thread.apply_turn`.
+
+        Descriptive only, authority-free and fail-closed: a malformed outcome is
+        ignored, and it never routes, authorizes, executes or mutates governed
+        state.
+        """
+        if not isinstance(outcome, ThreadTurnOutcome):
+            return self._state
+        current = (
+            self._state.thread_state
+            if isinstance(self._state.thread_state, DialogueThreadState)
+            else None
+        )
+        updated = apply_thread_transition(current, outcome)
+        # A turn that established no thread keeps the state unset (a stray
+        # greeting/statement never creates an operational thread).
+        if current is None and not updated.threads:
+            return self._state
+        return self.update(thread_state=updated)
