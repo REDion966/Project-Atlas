@@ -2739,7 +2739,9 @@ class ConversationService:
     # Step 2 — Goal-Centered Orchestration (bounded two-stage slice)
     # ------------------------------------------------------------------
 
-    def _maybe_handle_goal_request(self, text: str) -> Message | None:
+    def _maybe_handle_goal_request(
+        self, text: str, spec: TaskSpec | None = None
+    ) -> Message | None:
         """Sequence a bounded multi-stage conversational goal.
 
         Builds a SMALL ordered plan from the EXISTING semantic decomposition
@@ -2750,8 +2752,30 @@ class ConversationService:
         continue the goal. This layer never dispatches, authorizes, or executes
         anything itself, and it claims a turn ONLY when the existing
         decomposition yields at least two composable steps.
+
+        Real-kernel self-development routing defect: a governed development
+        request that ALSO carries an investigation/explanation clause ("add a
+        deterministic regression test ... first investigate the implementation,
+        then tell me what you would change") decomposes into an
+        investigation/explanation pair, so this route claimed it and answered
+        with a read-only investigation/explanation plan whose step label was
+        the MALFORMED subject the word-splitter produced ("Investigate: want add
+        small deterministic regression test ..."). The governed development
+        route below states the opposite contract ("Development semantics win —
+        run it first and never reroute development through orchestration"), but
+        it sits AFTER this one and was therefore unreachable for such a turn.
+
+        This is restored by declining the turn when the ALREADY-COMPUTED
+        ``TaskSpec`` classifies it as ``DEVELOPMENT_REQUEST``. It introduces no
+        new parser, no new authority and no new precedence: it reuses the
+        existing deterministic intake result the cascade already computed, and
+        only makes the existing later development route reachable again.
+        Every non-development goal is unchanged, and a plan is still composed
+        only from the EXISTING decomposition.
         """
         if self._goal_orchestration_resolver is None or not isinstance(text, str):
+            return None
+        if spec is not None and spec.task_type is TaskType.DEVELOPMENT_REQUEST:
             return None
         from atlas.orchestration.goal_plan import build_goal_plan
 
@@ -3596,7 +3620,7 @@ class ConversationService:
         # sequences through the EXISTING kernel-owned OrchestrationExecutor, and
         # an EXACT bounded status form with an active plan is answered from the
         # retained plan. Anything else returns None and keeps its existing route.
-        goal_response = self._maybe_handle_goal_request(text)
+        goal_response = self._maybe_handle_goal_request(text, spec)
         if goal_response is not None:
             self._conversation.add_message(goal_response)
             return goal_response
@@ -4125,7 +4149,7 @@ class ConversationService:
             yield gap_analysis.content
             return
         # Step 2 — Goal-Centered Orchestration (mirror of send()).
-        goal_response = self._maybe_handle_goal_request(text)
+        goal_response = self._maybe_handle_goal_request(text, spec)
         if goal_response is not None:
             self._conversation.add_message(goal_response)
             yield goal_response.content

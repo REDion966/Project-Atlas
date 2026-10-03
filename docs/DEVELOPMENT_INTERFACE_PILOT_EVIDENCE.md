@@ -235,17 +235,33 @@ broader conversation/intake regressions 327 passed with only the 3
 already-documented pre-existing acknowledgement-surface failures (re-verified
 against a pristine HEAD extraction).
 
-### Residual, deliberately NOT changed
+### Residual — since CORRECTED (the original diagnosis was wrong)
 
-On the real kernel the turn is still answered by the EXISTING multi-intent route
-(`ConversationService._maybe_handle_multi_intent`, which runs before the
-development route and delegates the "First investigate …" clause to the same
-authoritative per-clause handler). That is the documented Step 6 behaviour — a
-compound turn is answered clause-by-clause rather than as one development need —
-so the malformed-looking subject still appears in the delegated clause label.
-Changing it would mean re-ordering the multi-intent cascade relative to the
-governed development path, which is an architectural precedence decision beyond
-this bounded correction. It is recorded as an observed limitation, not a defect
-fixed here. Critically, the malformed label is now COSMETIC: the read-only
-investigation still ran, no approval was created, nothing was executed, and the
-`no_modification` stance was honoured.
+The earlier note here blamed `ConversationService._maybe_handle_multi_intent` and
+recorded the behaviour as an unfixable limitation. Tracing the real `send`
+cascade disproves that: `_maybe_handle_multi_intent` sits at line 3651 and is
+**never reached** for this turn — `_maybe_handle_goal_request` (line 2742,
+invoked at line 3623) returns first.
+
+**Actual root cause.** `_maybe_handle_goal_request` composed its plan from raw
+text via `build_goal_plan` and never consulted the `TaskSpec` the cascade had
+already computed at line 3463. The request decomposes into an
+investigation/explanation pair, so the goal route claimed a turn that
+`TaskIntake` had correctly classified `DEVELOPMENT_REQUEST`, and the governed
+route `_development_request_route` (line 3812) — which states the opposite
+contract, *"Development semantics win — run it first and never reroute
+development through orchestration"* — became unreachable.
+
+**Correction (bounded, existing path).** The goal route now declines when the
+already-computed `TaskSpec` is `DEVELOPMENT_REQUEST`. No new module, router,
+parser, authority, or approval rule; the plan composition itself is unchanged.
+The turn now reaches the existing governed route, which reports its real outcome
+(`envelope_disabled`) with no approval created and no modification.
+
+**Verification.** `tests/test_self_development_goal_precedence.py` — 20 passed
+(real kernel, model-OFF). Preserved: clean two-stage goals, plain development
+requests, plain investigations, multi-intent non-development goals, and explicit
+negation. Noted: three `test_step11_natural_response_generation.py` and two
+`test_step10_multi_intent_multi_step.py` real-kernel failures are **pre-existing
+at HEAD** (investigation + research compounds), re-verified by stashing this
+change; they are unrelated to it and were not touched.
