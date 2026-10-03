@@ -250,3 +250,52 @@ class TestAuthoringBoundary:
         assert supplied is not None
         assert supplied.origin == "deterministic-scaffold"
         assert supplied.code_changes[0][0] == "atlas/example/demo_handlers.py"
+
+
+class TestRealWorldDevelopmentTargets:
+    """Development requests naming a code/test/repository work target.
+
+    The real-world development-interface pilot showed that a developer talking
+    to Atlas asks for changes to "a test" / "the bug" / "the code" without naming
+    Atlas or a capability. Those are genuine development requests, but the
+    original self-target gate dropped them onto the unsupported floor instead of
+    the EXISTING governed development path. A code/test/repository target now
+    qualifies the request exactly as a self-target does; the development cue is
+    still required and negation still wins.
+    """
+
+    CODE_TARGET_REQUESTS = (
+        "Add a small deterministic test for this behavior.",
+        "Fix this specific documented bug.",
+        "Fix the bug in Atlas.",
+    )
+
+    def test_code_target_request_enters_the_governed_development_path(self):
+        for text in self.CODE_TARGET_REQUESTS:
+            assert is_development_request(_spec(text)) is True, text
+
+    def test_code_target_request_is_clarified_when_underspecified(self):
+        # An under-specified request must fail closed into clarification and must
+        # NOT become an executable need.
+        for text in self.CODE_TARGET_REQUESTS:
+            spec = _spec(text)
+            if not needs_clarification(spec):
+                continue
+            assert task_spec_to_development_need(spec) is None, text
+
+    def test_explicit_self_target_behaviour_is_unchanged(self):
+        spec = _spec("add a new capability to Atlas for scheduling")
+        assert is_development_request(spec) is True
+        assert needs_clarification(spec) is False
+
+    def test_negated_development_cue_still_wins(self):
+        assert is_development_request(_spec("Don't fix anything yet.")) is False
+
+    def test_a_bare_noun_is_not_a_development_request(self):
+        for text in (
+            "Thanks, that helps.",
+            "Explain the code to me.",
+            "I fixed the tests myself.",
+            "What handles development requests?",
+        ):
+            assert is_development_request(_spec(text)) is False, text

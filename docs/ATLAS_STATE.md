@@ -1298,6 +1298,24 @@ P18 — Controlled Autonomy.
   `test_l10_evidence_driven_expansion.py::TestAcknowledgementSurface` failures
   were reproduced against a pristine HEAD extraction and therefore PRE-DATE C4
   (unrelated acknowledgement-surface drift, outside C4 scope).
+- **Development-interface real-world pilot — evidence + one bounded fix.** A
+  compact deterministic corpus of realistic developer utterances was exercised
+  through the real conversation/development path, model-OFF (zero provider
+  calls). Investigation, result grounding, compound investigate-and-propose, and
+  approval fail-closed all behaved correctly. It exposed ONE genuine gap:
+  development requests naming a code/test/repository work object ("Add a small
+  deterministic test for this behavior.", "Fix this specific documented bug.")
+  fell to the unsupported floor because the intake's development gate required an
+  explicit SELF target (atlas/capability/module). A whole-word
+  `_DEVELOPMENT_CODE_TARGETS` set now qualifies such a request exactly as a self
+  target does — the development cue is still required, negation still wins, and
+  under-specified requests still fail closed into bounded clarification on the
+  EXISTING governed path. No new route, handler, state, authority, model,
+  dependency or architecture. Evidence:
+  `tests/test_conversation_development_intake.py::TestRealWorldDevelopmentTargets`;
+  full record in `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md`. No new
+  regression: the acknowledgement-surface failures were again reproduced against
+  a pristine HEAD extraction and pre-date this work.
 - **C4.2** — deterministic repository impact analysis and conversational
   exposure (`atlas/conversation/repository_impact.py`), reusing
   `RepositoryMap.dependencies_of/dependents_of/impact_set`; full

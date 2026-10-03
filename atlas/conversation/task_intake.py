@@ -167,6 +167,31 @@ _SELF_TARGETS: frozenset[str] = frozenset(
     {"atlas", "yourself", "your self", "a module", "a capability", "the framework"}
 )
 
+#: Real-world development-interface pilot — code/test/repository work targets.
+#: A developer talking TO Atlas routinely asks for a change to "a test", "the
+#: bug", "the code", "the repository" or "the documentation" without naming Atlas
+#: or a capability. Those are genuine development requests, but the original gate
+#: required an explicit self-target ("Atlas"/"capability"/"module"), so they fell
+#: through to the unsupported floor instead of the EXISTING governed development
+#: path. The gate is not removed: a development cue is still REQUIRED, negation
+#: still wins, and these are whole-word targets only, so a bare mention of a
+#: noun is never enough on its own.
+_DEVELOPMENT_CODE_TARGETS: frozenset[str] = frozenset(
+    {
+        "test",
+        "tests",
+        "code",
+        "bug",
+        "implementation",
+        "repository",
+        "repo",
+        "documentation",
+        "readme",
+        "docstring",
+        "unit test",
+    }
+)
+
 _INVESTIGATION_CUES: frozenset[str] = frozenset(
     {
         "investigate",
@@ -1626,6 +1651,11 @@ class TaskIntake:
             _first_hit(lowered, _SELF_TARGETS)
             or "capability" in lowered
             or "module" in lowered
+            # Real-world development-interface pilot: an explicit code/test/
+            # repository work target qualifies the request exactly like a
+            # self-target does. The cue is still required, so this cannot make
+            # an ordinary sentence a development request.
+            or _first_hit(lowered, _DEVELOPMENT_CODE_TARGETS, word_boundary=True)
         )
         research = _first_hit(lowered, _RESEARCH_CUES)
         greeting = bool(_GREETING_RE.search(lowered))

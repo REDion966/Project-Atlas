@@ -232,6 +232,15 @@ bounded source of truth. No new phase was created, no roadmap ordering changed,
 and no model, embedding, proposer, state, memory, dialogue or execution authority
 was introduced.
 
+**Development-interface real-world pilot — COMPLETE (evidence, NOT a phase).**
+A compact model-OFF corpus of realistic developer requests was exercised through
+the real conversation/development path. One genuine gap was found and closed with
+a bounded deterministic intake fix (a code/test/repository work target now
+qualifies a development request; the cue is still required and governance is
+unchanged). Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md`. No new
+milestone, phase, or capability requirement follows from it; further development
+stays evidence-driven.
+
 ---
 
 ## Additive language roadmap — L0 → L10
