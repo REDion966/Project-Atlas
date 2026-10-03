@@ -209,17 +209,39 @@ _INVESTIGATION_LEAD_CUES: frozenset[str] = frozenset(
 #: already is for the audit/review family): the idiom counts only when it names
 #: an Atlas/repository target or a system failure. The identical rule therefore
 #: keeps knowledge paraphrases on their existing route.
-_INVESTIGATION_PHRASE_TARGET_RE = re.compile(
-    r"\b(?:look(?:s|ing)?|dig(?:ging|s)?|check(?:ing|ed|s)?)\s+(?:into|out)\b"
-    r"[^.?]{0,40}\b(?:"
+#:
+#: C4 / G1 — the SINGLE bounded source of truth for the investigation TARGET
+#: vocabulary. Every bounded investigation detector below (the "look into X"
+#: idiom, the "take a look at X" / "understand why X" paraphrases, and the
+#: subject-aware audit/review family) interpolates this one alternation, so the
+#: list can no longer drift between detectors: before C4 the same vocabulary was
+#: copied into three places, and real Atlas subsystems (storage, reasoning,
+#: toolchain, ...) were recognised by the canonical cue route while the natural
+#: paraphrase routes silently declined them.
+#:
+#: It stays deliberately narrow. Every entry is a real Atlas/repository/system
+#: concept; generic nouns are NOT added merely because they sound
+#: investigation-related, so ordinary knowledge paraphrases keep their route.
+#: The trailing real subsystem concepts mirror Atlas's own registered core
+#: components (``atlas.lifecycle.component_definitions.CORE_COMPONENTS``).
+_ATLAS_INVESTIGATION_TARGETS: str = (
     r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
     r"components?|subsystems?|sandbox|approval|authori[sz]ation|promotion|gates?|"
     r"boundar(?:y|ies)|lifecycles?|implementation|pipelines?|systems?|engines?|"
     r"handlers?|registr(?:y|ies)|dispatcher|governance|evolution|conversation|"
     r"knowledge|memory|atlas|code|tests?|sources?|evidence|proposals?|"
     r"capabilit(?:y|ies)|routing|deployments?|failures?|errors?|crashes?|"
-    r"regressions?|incidents?|runtime"
-    r")\b",
+    r"regressions?|incidents?|runtime|"
+    # real Atlas subsystems missing before C4 (G1)
+    r"storage|reasoning|toolchain|experience|learning|intelligence|"
+    r"understanding|world[ _-]?model|identity|outcome|planner|"
+    r"dispatch(?:ing)?|configuration"
+)
+_INVESTIGATION_PHRASE_TARGET_RE = re.compile(
+    r"\b(?:look(?:s|ing)?|dig(?:ging|s)?|check(?:ing|ed|s)?)\s+(?:into|out)\b"
+    r"[^.?]{0,40}\b(?:"
+    + _ATLAS_INVESTIGATION_TARGETS
+    + r")\b",
     re.IGNORECASE,
 )
 
@@ -227,18 +249,10 @@ _INVESTIGATION_PHRASE_TARGET_RE = re.compile(
 #: system target: "take a look at how X works" and "I want to understand why X
 #: is not working properly". Both ask for the EXISTING read-only investigation,
 #: so they select the SAME TaskType a canonical investigation does and reuse the
-#: existing investigation handler/target extraction. The target alternation
-#: mirrors ``_INVESTIGATION_PHRASE_TARGET_RE`` (the subject must name an Atlas/
+#: existing investigation handler/target extraction. The target alternation is
+#: the shared ``_ATLAS_INVESTIGATION_TARGETS`` (the subject must name an Atlas/
 #: system thing), so an ordinary knowledge paraphrase keeps its route.
-_NL_INVESTIGATION_TARGETS: str = (
-    r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
-    r"components?|subsystems?|sandbox|approval|authori[sz]ation|promotion|gates?|"
-    r"boundar(?:y|ies)|lifecycles?|implementation|pipelines?|systems?|engines?|"
-    r"handlers?|registr(?:y|ies)|dispatcher|governance|evolution|conversation|"
-    r"knowledge|memory|atlas|code|tests?|sources?|evidence|proposals?|"
-    r"capabilit(?:y|ies)|routing|deployments?|failures?|errors?|crashes?|"
-    r"regressions?|incidents?|runtime"
-)
+_NL_INVESTIGATION_TARGETS: str = _ATLAS_INVESTIGATION_TARGETS
 
 _NL_INVESTIGATION_PARAPHRASE_RE = re.compile(
     r"\b(?:take|takes|taking|have|has)\s+a\s+look\s+at\b[^.?]{0,60}\b(?:"
@@ -265,13 +279,8 @@ _NL_INVESTIGATION_DEEPENING_RE = re.compile(
 
 _INVESTIGATION_SUBJECT_RE = re.compile(
     r"\b(?:audit|review|assess|study|probe|scan|evaluate)\b[^.?]{0,40}\b(?:"
-    r"repositor(?:y|ies)|repo|codebase|architecture|modules?|services?|"
-    r"components?|subsystems?|sandbox|approval|authori[sz]ation|promotion|"
-    r"gates?|boundar(?:y|ies)|lifecycles?|implementation|pipeline|systems?|"
-    r"engines?|handlers?|registr(?:y|ies)|dispatcher|governance|evolution|"
-    r"conversation|knowledge|memory|atlas|code|tests?|sources?|evidence|"
-    r"proposals?|capabilit(?:y|ies)|routing|lifecycle"
-    r")\b"
+    + _ATLAS_INVESTIGATION_TARGETS
+    + r")\b"
     r"|\b(?:your|atlas)\b[^.?]{0,30}\b(?:audit|review|assess|study|probe)\b",
     re.IGNORECASE,
 )

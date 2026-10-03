@@ -70,6 +70,18 @@ Both reuse existing seams; no new state, resolver, or authority.
 - **INTENTIONAL FAIL-CLOSED:** causal "why" (no cause inference); "The other
   one."/"what about the previous result?" ambiguity handling where no unique
   referent exists; elaboration/recall with insufficient evidence.
+- **Bounded investigation-language vocabulary (CLOSED by the later C4 milestone).**
+  At the time of this Phase 3 record, the bounded target alternation in
+  `atlas/conversation/task_intake.py` (`_NL_INVESTIGATION_TARGETS`,
+  `_INVESTIGATION_PHRASE_TARGET_RE`, `_INVESTIGATION_SUBJECT_RE`) was duplicated
+  across three detectors and omitted several real Atlas subsystems (e.g.
+  `storage`, `reasoning`, `toolchain`), so natural paraphrase forms such as
+  "Take a look at the storage layer." / "Look into the storage layer." fell to the
+  honest floor while the canonical "Investigate the storage layer." worked. This
+  was classified as genuine **bounded deterministic coverage of an EXISTING
+  seam** — not a semantic gap. It was subsequently validated as gap **G1** by the
+  C3 evidence milestone and **closed by C4** via the single bounded source of truth
+  `_ATLAS_INVESTIGATION_TARGETS`; see `docs/ATLAS_STATE.md` §31.
 - **MISSING CAPABILITY (bounded, documented, NOT implemented):** a
   next-step/suggestion surface ("what should we investigate next?" currently runs
   the literal noisy investigation cue); a bounded reference family for

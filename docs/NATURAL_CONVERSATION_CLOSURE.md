@@ -41,7 +41,9 @@ deadlocks; no authority leakage; deterministic-first; architecture preserved;
 external-model optionality.
 
 PASS WITH BOUNDED LIMITATION: **investigation paraphrase/phrase coverage is
-bounded by an explicit target vocabulary** — see limitations.
+bounded by an explicit target vocabulary** — see limitations. (The G1 vocabulary
+gap recorded at this closure was subsequently CLOSED by the C4 milestone; see
+the "Post-closure amendment" note below and `docs/ATLAS_STATE.md` §31.)
 
 INTENTIONAL FAIL-CLOSED: causal "why" without causal evidence; unsupported
 semantic questions; insufficient-evidence elaboration/recall.
@@ -66,15 +68,22 @@ surface; bounded reference "that's the one I was talking about.".
 
 ## Remaining bounded limitations
 
-1. **Investigation paraphrase/phrase target vocabulary.** The bounded target
-   alternation in `atlas/conversation/task_intake.py` (`_NL_INVESTIGATION_TARGETS`
-   / `_INVESTIGATION_PHRASE_TARGET_RE` / `_INVESTIGATION_SUBJECT_RE`) omits several
-   real Atlas subsystems (e.g. `storage`, `reasoning`, `toolchain`). Consequently
-   "Take a look at the storage layer." / "Look into the storage layer." fall to the
-   honest floor, while the canonical "Investigate the storage layer." and the same
-   forms on listed names ("Take a look at the memory service.") work. This is
-   **bounded deterministic coverage** of an EXISTING seam — not a semantic gap, and
-   not a regression introduced by Phases 0–3.
+1. ~~**Investigation paraphrase/phrase target vocabulary.**~~ **RESOLVED by the C4
+   milestone** (after this closure was recorded). At closure time the bounded
+   target alternation in `atlas/conversation/task_intake.py` was duplicated
+   across three detectors and omitted several real Atlas subsystems (e.g.
+   `storage`, `reasoning`, `toolchain`), so "Take a look at the storage layer." /
+   "Look into the storage layer." fell to the honest floor while the canonical
+   "Investigate the storage layer." worked. C3 subsequently classified this as a
+   genuine bounded understanding gap (G1), and C4 closed it by introducing the
+   single bounded source of truth `_ATLAS_INVESTIGATION_TARGETS` — reused by
+   `_NL_INVESTIGATION_TARGETS`, `_INVESTIGATION_PHRASE_TARGET_RE` and
+   `_INVESTIGATION_SUBJECT_RE` — extended only with validated Atlas subsystem
+   targets grounded in the repository's registered `CORE_COMPONENTS`. The natural
+   forms now reach the EXISTING read-only investigation and ordinary knowledge
+   questions remain non-investigation. Deterministic and model-independent; no new
+   architecture or authority. Evidence: `docs/ATLAS_STATE.md` §31 (C4/G1). The
+   historical observation above is preserved as written at closure time.
 2. No next-step/suggestion surface ("what should we investigate next?" runs the
    literal noisy investigation cue).
 3. Bounded reference vocabulary ("that's the one I was talking about." fails closed).
@@ -113,3 +122,16 @@ justified; architecture and governance are intact. The roadmap can be formally
 closed. The smallest optional future evidence-driven improvement (NOT scheduled,
 NOT a phase) is the bounded target-vocabulary extension for natural investigation
 paraphrases.
+
+## Post-closure amendment — G1 closed by C4
+
+The "smallest optional future evidence-driven improvement" named above was
+subsequently validated by the **C3** milestone as a genuine bounded understanding
+gap (G1: the investigation-target vocabulary was duplicated across three bounded
+detectors in `atlas/conversation/task_intake.py`, so real Atlas subsystems such as
+`storage`, `reasoning` and `toolchain` were recognised by the canonical cue route
+while natural paraphrase forms declined them), and was then **closed by C4** with a
+single bounded source of truth (`_ATLAS_INVESTIGATION_TARGETS`). See
+`docs/ATLAS_STATE.md` §31. This amendment records that history; it does not reopen
+the Natural Conversation roadmap, change its determination, or create any new
+phase, milestone or capability requirement.

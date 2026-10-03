@@ -274,3 +274,67 @@ class TestSendStreamParity:
 
     def test_comparison_is_identical_on_both_paths(self):
         assert self._run(False) == self._run(True)
+
+
+# ---------------------------------------------------------------------------
+# C4 / G1 — real-Atlas-subsystem investigation vocabulary
+# ---------------------------------------------------------------------------
+
+
+class TestRealSubsystemInvestigationTargets:
+    """Every bounded investigation detector shares ONE target alternation.
+
+    Before C4 the same vocabulary was copied into three regexes, so real Atlas
+    subsystems missing from the copies ("storage", "reasoning", "toolchain", ...)
+    were recognised by the canonical cue route ("Investigate the storage layer.")
+    while the natural paraphrase routes silently declined the same request
+    ("Take a look at the storage layer." -> the unsupported floor).
+    """
+
+    NATURAL_FORMS = (
+        "Take a look at the storage layer.",
+        "Look into the storage layer.",
+        "Take a look at the reasoning core.",
+        "Take a look at the toolchain.",
+    )
+
+    KNOWLEDGE_FORMS = (
+        "Why is the meaning of life?",
+        "What is the meaning of life?",
+        "Look into the Europa Clipper mission.",
+    )
+
+    def test_natural_paraphrases_select_the_existing_investigation(self):
+        for text in self.NATURAL_FORMS:
+            assert (
+                TaskIntake().intake(text).task_type is TaskType.INVESTIGATION_REQUEST
+            ), text
+
+    def test_full_path_reaches_the_existing_investigation(self):
+        for text in self.NATURAL_FORMS:
+            service, investigation = _service()
+            message = service.send(text)
+            assert investigation.calls == [text], text
+            state = service.state_manager.state
+            assert state.last_operation is not None, text
+            assert state.last_operation.kind == TaskType.INVESTIGATION_REQUEST.value, text
+            assert state.latest_result, text
+            assert "## Investigation" in message.content, text
+
+    def test_canonical_form_still_works(self):
+        assert (
+            TaskIntake().intake("Investigate the storage layer.").task_type
+            is TaskType.INVESTIGATION_REQUEST
+        )
+
+    def test_ordinary_knowledge_questions_are_not_converted(self):
+        for text in self.KNOWLEDGE_FORMS:
+            assert (
+                TaskIntake().intake(text).task_type is not TaskType.INVESTIGATION_REQUEST
+            ), text
+
+    def test_knowledge_form_does_not_execute_an_investigation(self):
+        for text in self.KNOWLEDGE_FORMS:
+            service, investigation = _service()
+            service.send(text)
+            assert investigation.calls == [], text

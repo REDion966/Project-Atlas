@@ -1276,6 +1276,28 @@ P18 — Controlled Autonomy.
 - **C2** — conversational development recovery cycle (fail-closed, truthful
   reporting, sandbox isolation, governed recovery).
 - **C3.3** — deterministic investigation synthesis/reporting (GAP-C31-01).
+- **C4/G1 — real-Atlas-subsystem investigation-language vocabulary (C3
+  evidence-backed gap, CLOSED).** The bounded investigation-target vocabulary
+  was duplicated across three detectors in `atlas/conversation/task_intake.py`
+  (`_INVESTIGATION_PHRASE_TARGET_RE`, `_NL_INVESTIGATION_TARGETS`,
+  `_INVESTIGATION_SUBJECT_RE`), so real Atlas subsystems missing from the
+  copies (`storage`, `reasoning`, `toolchain`, ...) were recognised by the
+  canonical cue route ("Investigate the storage layer.") while the natural
+  paraphrase routes declined the same request ("Take a look at the storage
+  layer."). C4 introduced `_ATLAS_INVESTIGATION_TARGETS` as the SINGLE bounded
+  source of truth reused by all three detectors, and extended it only with
+  validated Atlas subsystem targets grounded in the repository's registered
+  `CORE_COMPONENTS`. Natural forms for those subsystems now reach the EXISTING
+  read-only investigation; ordinary knowledge questions remain non-investigation;
+  no generic noun vocabulary was added. Deterministic, model-independent,
+  bounded, additive: no new architecture, authority, routing, state, memory,
+  orchestration, approval or execution mechanism. Evidence:
+  `tests/test_nl_semantic_function_gap.py::TestRealSubsystemInvestigationTargets`
+  (21 passed in that module); intake/routing suites 171 passed; conversation
+  regression sets 76 passed. No new regression; the
+  `test_l10_evidence_driven_expansion.py::TestAcknowledgementSurface` failures
+  were reproduced against a pristine HEAD extraction and therefore PRE-DATE C4
+  (unrelated acknowledgement-surface drift, outside C4 scope).
 - **C4.2** — deterministic repository impact analysis and conversational
   exposure (`atlas/conversation/repository_impact.py`), reusing
   `RepositoryMap.dependencies_of/dependents_of/impact_set`; full

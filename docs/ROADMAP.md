@@ -224,6 +224,14 @@ onward, development must be driven by validated real-world capability gaps.**
 The detailed evidence and limitations live in `docs/ATLAS_STATE.md` §31 and
 `docs/archive/phase-c/`.
 
+**C4 — Evidence-Driven Capability Evolution — COMPLETE.** Driven by validated C3
+real-world evidence, the one demonstrated bounded gap (G1: real Atlas subsystems
+missing from the duplicated investigation-target vocabulary in
+`atlas/conversation/task_intake.py`) was closed deterministically with a single
+bounded source of truth. No new phase was created, no roadmap ordering changed,
+and no model, embedding, proposer, state, memory, dialogue or execution authority
+was introduced.
+
 ---
 
 ## Additive language roadmap — L0 → L10
