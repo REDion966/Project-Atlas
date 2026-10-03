@@ -1329,6 +1329,22 @@ P18 — Controlled Autonomy.
   promotion boundaries are unchanged. Exact usage is documented in `README.md`
   ("Talking to Atlas (interactive REPL)"). No new interface was implemented
   because none was needed.
+- **Live interaction trial — capability-detail routing gap (CLOSED).** A live
+  model-OFF trial through `python main.py` showed "Explain the investigation
+  capability." and "Can you tell me more about the investigation capability."
+  falling through to repository investigation (and a development proposal),
+  while "What does the investigation capability do?" worked. Root cause: the
+  bounded capability-detail vocabulary accepted the qualifier only BEFORE the
+  name, so the name was captured as "the investigation capability", resolved to
+  nothing, and the turn fell through; "tell me more about" was also missing from
+  the verb list. Correction: one new bounded `_CAPABILITY_DETAIL_TRAILING_RE`
+  (tried first) plus the missing verb, with both original regexes otherwise
+  unchanged, so an unresolvable name still declines (fail-closed). Genuine
+  investigation requests, negation and governance are unchanged; no approval or
+  development proposal is produced by an informational question. The related
+  "those 24 capabilities" case is a SEPARATE contextual-reference limitation and
+  remains an observed, unresolved gap. Details in
+  `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §6.
 - **C4.2** — deterministic repository impact analysis and conversational
   exposure (`atlas/conversation/repository_impact.py`), reusing
   `RepositoryMap.dependencies_of/dependents_of/impact_set`; full

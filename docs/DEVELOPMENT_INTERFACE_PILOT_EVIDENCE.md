@@ -111,3 +111,65 @@ requests once a code/test/repository work target is recognised as a development
 target. No new architecture, planning system, agent, or model capability is
 required or justified by this evidence. Further development remains
 evidence-driven.
+
+---
+
+## 6. Post-pilot addition — live interaction trial: capability-detail routing gap
+
+A subsequent **live interactive trial** through the documented human entry point
+(`python main.py`), model-OFF, produced a reproducible natural-language routing
+mismatch. Recorded here as a subsequent evidence-driven change; the sections
+above are preserved as originally written.
+
+### Observed
+
+| Input | Observed result (before) |
+|---|---|
+| "What does the investigation capability do?" | **correct** — existing capability detail |
+| "Explain the investigation capability." | **wrong** — repository investigation + development proposal |
+| "Can you tell me more about the investigation capability?" | **wrong** — repository investigation + development proposal |
+| "Explain the investigation capability. What can it do, what can it not do, and how does it work?" | **wrong** — first clause routed to repository investigation; the remaining questions unanswered |
+| "Can you explain those 24 capabilities in a way I can understand?" | **wrong** — declined as out of scope (separate contextual-reference limitation) |
+
+### Root cause (read from the implementation)
+
+`BuiltinResponseService._match_capability_detail` resolves a named capability
+through bounded regexes in `atlas/conversation/builtin_response.py`. The detail
+question accepted the qualifier ("capability"/"tool") only **BEFORE** the name
+(`(?:the )?(capability|tool) `), so "explain the investigation capability"
+captured the name as `the investigation capability`, which resolved to nothing.
+The unresolved name made the turn fall through to the investigation surface. A
+second, narrower gap: `tell me more about` was absent from the verb list (only
+`tell me about` was present). The "what does X do?" form worked because
+`_CAPABILITY_DETAIL_DO_RE` has its own, correct trailing-qualifier handling.
+
+### Correction
+
+One bounded deterministic change in `atlas/conversation/builtin_response.py`:
+a new `_CAPABILITY_DETAIL_TRAILING_RE` (same verb vocabulary, qualifier AFTER
+the name, qualifier excluded from the capture) is tried FIRST, and
+`tell me more about` was added to the shared verb group. The original
+`_CAPABILITY_DETAIL_RE` and `_CAPABILITY_DETAIL_DO_RE` are otherwise unchanged,
+so every form they already accepted keeps its exact previous behaviour. An
+unresolvable name still declines (fail-closed) exactly as before.
+
+### Verification (model-OFF, real kernel)
+
+Capability-detail positives now answer with the capability detail; the genuine
+investigation controls ("Investigate the storage layer.", "Investigate the
+conversation system.", "Investigate the memory service but do not modify
+anything.", "Investigate the investigation capability implementation.") still
+route to repository investigation; no approval or development proposal is
+created by an informational question. Focused suites: 99 passed
+(`test_builtin_self_knowledge.py`) and the investigation/conversation regression
+set passed (exit 0).
+
+### Separately unresolved (left unchanged)
+
+"Can you explain those 24 capabilities in a way I can understand?" is a distinct
+**contextual-reference** limitation: "those 24 capabilities" must be resolved
+against the immediately preceding capability inventory. It is not the same
+defect (the capability-detail surface is never reached), and resolving it would
+require broader discourse/context machinery than this bounded routing
+correction. It is recorded as an observed gap only and was deliberately NOT
+changed.

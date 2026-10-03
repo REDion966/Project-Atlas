@@ -248,10 +248,34 @@ _CAPABILITIES_RE = re.compile(
 #: resolves the actual registered name ("reasoning.causal") rather than
 #: greedily capturing the surrounding words. An unresolved name still
 #: declines (fail-closed).
+#:
+#: Real-world routing gap: the qualifier may sit BEFORE the name ("explain the
+#: capability investigate") or AFTER it ("explain the investigation capability"),
+#: which is how people actually speak. Only the leading form was accepted, so
+#: "Explain the investigation capability." captured the name as
+#: "the investigation capability", failed to resolve, and fell through to
+#: repository investigation. ``_CAPABILITY_DETAIL_TRAILING_RE`` therefore
+#: consumes an optional leading qualifier and a TRAILING qualifier, excluding
+#: both from the name. The original ``_CAPABILITY_DETAIL_RE`` is unchanged, so
+#: every form it already accepted keeps its exact capture. "tell me more about"
+#: is the same natural family as the existing "tell me about".
 _CAPABILITY_DETAIL_RE = re.compile(
-    r"(?:explain|describe|what is|tell me about|how does|details? (?:on|about|for))\s+"
+    r"(?:explain|describe|what is|tell me (?:more )?about|how does"
+    r"|details? (?:on|about|for))\s+"
     r"(?:(?:the\s+)?(?:capabilit(?:y|ies)|tools?)\s+)?"
     r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-/ ]{0,60})"
+)
+
+#: The same bounded detail question with the qualifier AFTER the name. Ordered
+#: BEFORE ``_CAPABILITY_DETAIL_RE`` so the trailing qualifier is never captured
+#: as part of the name; the name here is the LAST word-shaped run before the
+#: qualifier, so a dotted/underscored registered name still resolves whole.
+_CAPABILITY_DETAIL_TRAILING_RE = re.compile(
+    r"(?:explain|describe|what is|tell me (?:more )?about|how does"
+    r"|details? (?:on|about|for))\s+"
+    r"(?:the\s+)?"
+    r"(?P<name>[a-zA-Z0-9_][a-zA-Z0-9_.:\-]*)"
+    r"\s+(?:capabilit(?:y|ies)|tools?)\b"
 )
 
 #: "what does <name> do?" — the natural singular capability/tool-purpose form.
@@ -3912,7 +3936,11 @@ class BuiltinResponseService:
         capability handler or tool. Anything else is not a confident
         match, so the caller falls through to the unsupported response.
         """
-        for pattern in (_CAPABILITY_DETAIL_RE, _CAPABILITY_DETAIL_DO_RE):
+        for pattern in (
+            _CAPABILITY_DETAIL_TRAILING_RE,
+            _CAPABILITY_DETAIL_RE,
+            _CAPABILITY_DETAIL_DO_RE,
+        ):
             match = pattern.search(lowered)
             if match is None:
                 continue

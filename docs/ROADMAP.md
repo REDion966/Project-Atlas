@@ -248,6 +248,17 @@ point: `python main.py` → `AtlasCLI.run()` → the production kernel
 everywhere else. It was verified live and model-OFF. Nothing was implemented
 because nothing was needed; the exact usage is now documented in `README.md`.
 
+**Live interaction trial — capability-detail routing gap CLOSED (evidence, NOT a
+phase).** "Explain the investigation capability." and "Can you tell me more
+about the investigation capability." were routed to repository investigation
+instead of the capability-detail surface, because the bounded detail vocabulary
+only accepted the qualifier before the name. One bounded deterministic
+correction (`_CAPABILITY_DETAIL_TRAILING_RE` plus the missing "tell me more
+about" verb) fixes it; genuine investigation requests and governance are
+unchanged. A related "those 24 capabilities" contextual-reference limitation was
+observed and deliberately left unchanged. Evidence:
+`docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §6.
+
 ---
 
 ## Additive language roadmap — L0 → L10

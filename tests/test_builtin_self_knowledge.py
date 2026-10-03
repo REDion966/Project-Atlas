@@ -221,6 +221,95 @@ class TestCapabilityDetailDoForm:
         assert "toolchain.execute_chain" in msg.content
 
 
+class TestCapabilityDetailTrailingQualifier:
+    """Real-world routing gap — the qualifier can follow the NAME.
+
+    A live model-OFF trial showed that "Explain the investigation capability."
+    and "Can you tell me more about the investigation capability?" were routed to
+    REPOSITORY INVESTIGATION instead of the capability-detail surface, while the
+    "what does X do?" form worked. Cause: the detail vocabulary accepted the
+    qualifier only BEFORE the name, so the name was captured as
+    "the investigation capability", failed to resolve, and the turn fell through.
+    The trailing qualifier is now consumed and excluded from the name, and
+    "tell me more about" is recognised as the same natural family as the existing
+    "tell me about".
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Explain the reasoning.causal capability.",
+            "Can you tell me more about the reasoning.causal capability?",
+            "Tell me more about the reasoning.causal capability.",
+            "Explain the reasoning.causal capability to me.",
+            "explain the reasoning.causal capability",
+            "What is the reasoning.causal capability",
+            "Describe the reasoning.causal capability.",
+            "How does the reasoning.causal capability work?",
+            "Details about the reasoning.causal capability",
+        ],
+    )
+    def test_trailing_qualifier_resolves_capability_detail(self, text):
+        message = _service().respond(text)
+        assert message is not None
+        assert _intent(message) == "capability_detail", text
+        assert "reasoning.causal" in message.content
+
+    def test_operational_capability_resolves_trailing_qualifier(self):
+        # The reported real-world failure named the OPERATIONAL "investigate"
+        # capability, which resolves through the unified capability model rather
+        # than the fixture registry. The real-kernel path for this utterance is
+        # covered by tests/test_c3_real_world_capability_evidence.py; here we
+        # only pin that the trailing-qualifier form is CLAIMED by a
+        # self-knowledge surface (never by repository investigation).
+        svc = BuiltinResponseService(
+            tool_registry=_tool_registry(),
+            capability_registry=_capability_registry(),
+            architecture_model_provider=lambda: build_architecture_model(
+                ComponentRegistry()
+            ),
+        )
+        message = svc.respond("Explain the investigation capability.")
+        assert message is not None
+        assert _intent(message) in ("capability_detail", "capabilities")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Explain the reasoning.causal capability.",
+            "Tell me more about the reasoning.causal capability.",
+        ],
+    )
+    def test_dotted_name_survives_the_trailing_qualifier(self, text):
+        message = _service().respond(text)
+
+        assert _intent(message) == "capability_detail", text
+        assert "reasoning.causal" in message.content
+
+    def test_unknown_trailing_qualifier_name_stays_fail_closed(self):
+        # No capability detail may be fabricated for an unresolvable name.
+        assert _intent(_service().respond("Explain the nonsense_xyz capability.")) in (
+            "unsupported",
+            "capabilities",
+        )
+
+    def test_existing_leading_qualifier_forms_are_unchanged(self):
+        for text, expected in (
+            ("Explain the capability reasoning.causal", "reasoning.causal"),
+            ("tell me about reasoning.causal", "reasoning.causal"),
+            ("describe reasoning.causal", "reasoning.causal"),
+        ):
+            capabilities = CapabilityRegistry()
+            capabilities.register("reasoning.causal", lambda *_a, **_k: None)
+            svc = BuiltinResponseService(
+                tool_registry=_tool_registry(),
+                capability_registry=capabilities,
+            )
+            message = svc.respond(text)
+            assert _intent(message) == "capability_detail", text
+            assert expected in message.content
+
+
 # ---------------------------------------------------------------------------
 # GAP 2 — module-connection question must not be a greeting
 # ---------------------------------------------------------------------------
