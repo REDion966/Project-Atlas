@@ -146,6 +146,21 @@ _ELABORATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: P3 — a bounded IMPERATIVE result-request ("tell me what you find/found"). It is
+#: the same retrieval as "what did you find?" (a query about prior output), so it
+#: must reach the EXISTING retained-result route; with no retained result the route
+#: fails closed rather than inventing one.
+#: Whole-turn anchored: a bounded leading filler ("just", "please", "okay,") is
+#: allowed, but the request must BE the turn — so it never matches a clause inside
+#: a compound ("Investigate X and tell me what you find.").
+_RESULT_REQUEST_RE = re.compile(
+    r"^\s*(?:just\s+|please\s+|ok(?:ay)?[,\s]+|alright[,\s]+|so\s+|and\s+)*"
+    r"(?:tell|show|give)\s+me\s+what\s+(?:you|we)\s+(?:just\s+)?"
+    r"(?:find|found|learn|learned|learnt|discover|discovered|conclude|concluded|"
+    r"get|got|produce|produced|see|saw)\b[.?!\s]*$",
+    re.IGNORECASE,
+)
+
 #: Output nouns that orient a question/explain request at an existing result.
 #: Deliberately excludes broad words ("output", "produce") that describe an
 #: arbitrary object rather than a PRIOR operation's produced result.
@@ -323,6 +338,12 @@ def classify_function(
     #     the RETAINED result through a bare anaphor, so it is a query about prior
     #     output. A named object ("explain the memory service") is not matched.
     if _ELABORATION_RE.search(text):
+        return FUNCTION_QUERY_RESULT
+
+    # 1c-ter. P3 — a bounded IMPERATIVE result-request ("tell me what you find")
+    #     is the same retrieval as "what did you find?" and reaches the same
+    #     retained-result route (fail-closed when no result is retained).
+    if _RESULT_REQUEST_RE.search(text):
         return FUNCTION_QUERY_RESULT
 
     # 1d. A COMPARISON request keeps its own bounded function: "compare this with

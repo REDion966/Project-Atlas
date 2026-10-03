@@ -96,6 +96,8 @@ from atlas.conversation.communicative_function import (
     QUERY_FUNCTIONS,
     _EXPLAIN_ANAPHOR_RE,
     _ELABORATION_RE,
+    _COMPARE_ANAPHOR_RE,
+    _COMPARE_CONTEXT_RE,
     _named_follow_up_target,
     _RESULT_NOUNS,
     relation_query_parts,
@@ -1127,8 +1129,17 @@ class ConversationService:
         # A bounded EXPLANATION request ("can you explain that?") is owned by the
         # contextual result route: it resolves the RETAINED RESULT rather than the
         # operation that produced it, so it must not be answered as a bare
-        # reference to the active investigation.
-        if _EXPLAIN_ANAPHOR_RE.search(text) or _ELABORATION_RE.search(text):
+        # reference to the active investigation. P3 extends this to a bounded
+        # CONTEXTUAL COMPARISON ("how is this different?"), which the existing
+        # comparison route must own rather than the bare reference surface.
+        if (
+            _EXPLAIN_ANAPHOR_RE.search(text)
+            or _ELABORATION_RE.search(text)
+            or (
+                _COMPARE_CONTEXT_RE.search(text)
+                and _COMPARE_ANAPHOR_RE.search(text)
+            )
+        ):
             return None
         from atlas.conversation import semantic_frame as _frame
 
