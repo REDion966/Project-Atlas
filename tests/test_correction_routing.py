@@ -132,6 +132,44 @@ class TestCorrectionAfterResult:
         assert service.state_manager.state.latest_result  # prior result intact
 
 
+class TestNewSubjectCorrectionHandoff:
+    """P1-4 — a new-subject correction COMPLETES its hand-off."""
+
+    def test_is_acknowledged_and_not_answered_as_a_result(self):
+        service, investigation = _service()
+        service.send(f"Investigate {X}.")
+        before = list(investigation.calls)
+        message = service.send(NEW_SUBJECT_CORRECTION)
+        assert "I recorded that correction" not in message.content
+        assert "corrected the active subject" in message.content
+        metadata = message.metadata or {}
+        assert metadata.get("correction", {}).get("target_kind") == "subject"
+        assert metadata.get("correction", {}).get("corrected") == "memory service"
+        # nothing executed and the prior result is untouched
+        assert investigation.calls == before
+        assert service.state_manager.state.latest_result
+
+    def test_supersedes_the_stale_investigation(self):
+        service, _ = _service()
+        service.send(f"Investigate {X}.")
+        assert service.state_manager.state.current_investigation
+        service.send(NEW_SUBJECT_CORRECTION)
+        assert service.state_manager.state.current_investigation is None
+
+    def test_same_subject_correction_keeps_the_investigation(self):
+        service, _ = _service()
+        service.send(f"Investigate {X}.")
+        service.send(f"Actually, I meant {X}.")
+        assert service.state_manager.state.current_investigation is not None
+
+    def test_grants_no_authority(self):
+        service, _ = _service()
+        service.send(f"Investigate {X}.")
+        message = service.send(NEW_SUBJECT_CORRECTION)
+        for key in ("execution", "approval", "promotion"):
+            assert key not in (message.metadata or {})
+
+
 # ---------------------------------------------------------------------------
 # B. Correction with no established target
 # ---------------------------------------------------------------------------

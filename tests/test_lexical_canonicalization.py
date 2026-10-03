@@ -285,11 +285,16 @@ class TestEndToEndVariations(unittest.TestCase):
                 self.assertEqual(_FailingAI.calls, 0)
                 self.assertIsNone(service.state_manager.state.last_operation)
 
-    def test_non_reference_boundary_case_remains_unsupported(self):
+    def test_non_reference_boundary_case_is_represented_honestly(self):
+        # Reconciled (Phase 1): the already-shipped Step 7 surface represents a
+        # bare earlier-item reference ("The other one.") honestly instead of
+        # fabricating an answer; the earlier "unsupported" expectation is
+        # superseded. Nothing is invented and no operation ran.
         service = _service()
         message = service.send("The other one.")
-        self.assertEqual(_intent(message), "unsupported")
-        self.assertTrue(message.content)
+        self.assertIsNone(_intent(message))
+        self.assertIn("cannot tell which earlier item", message.content)
+        self.assertIsNone(service.state_manager.state.last_operation)
 
     def test_no_overmatch_remains_unsupported(self):
         service = _service()
@@ -372,11 +377,17 @@ class TestReferenceRepeatConservation(unittest.TestCase):
             "Investigate the memory architecture",
         )
 
-    def test_ambiguity_behavior_unchanged(self):
+    def test_result_recall_returns_the_recorded_result(self):
+        # Reconciled (Phase 1 / Phase-0 finding): "What did you find?" now
+        # correctly answers from the recorded result instead of the old generic
+        # "more detail" floor; that stale expectation is superseded.
         service = _service(investigation=True)
         service.send("Investigate the memory architecture.")
         message = service.send("What did you find?")
-        self.assertIn("I need a bit more detail", message.content)
+        self.assertIn("The most recent result:", message.content)
+        self.assertEqual(
+            (message.metadata or {}).get("builtin_intent"), "reference"
+        )
 
 
 # ---------------------------------------------------------------------------

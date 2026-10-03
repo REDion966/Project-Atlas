@@ -210,7 +210,6 @@ class TestReferenceConsumptionEndToEnd(unittest.TestCase):
     def test_unsupported_contextual_questions_are_unchanged(self):
         service = self._after_governed_turn()
         for text in (
-            "No, I meant the cognition pipeline.",
             "How is the quality of the output?",
             "blorptastic quux",
         ):
@@ -222,6 +221,20 @@ class TestReferenceConsumptionEndToEnd(unittest.TestCase):
                     text,
                 )
                 self.assertIn("cannot answer", message.content, text)
+
+    def test_new_subject_correction_is_not_a_reference(self):
+        # Reconciled (Phase 1 / P1-4): a new-subject correction COMPLETES its
+        # hand-off (bounded corrected-subject acknowledgement) rather than the old
+        # "unsupported"/"cannot answer" floor; it is still never a result
+        # reference and grants no authority.
+        service = self._after_governed_turn()
+        message = service.send("No, I meant the cognition pipeline.")
+        self.assertNotEqual(
+            (message.metadata or {}).get("builtin_intent"), BUILTIN_INTENT_REFERENCE
+        )
+        self.assertIn("corrected the active subject", message.content)
+        for key in ("execution", "approval", "promotion"):
+            self.assertNotIn(key, message.metadata)
 
     def test_repeat_uses_read_only_operation_not_subject_restatement(self):
         # Stage C: "Check that again." is a bounded repeat of the most recent

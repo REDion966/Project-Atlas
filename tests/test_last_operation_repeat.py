@@ -451,8 +451,14 @@ class TestExistingBehaviorRegression:
             ]
         )
 
-    def test_correction_still_unsupported(self):
+    def test_new_subject_correction_completes_the_handoff(self):
+        # Reconciled (Phase 1 / P1-4): a correction installing a NEW subject now
+        # COMPLETES its hand-off (bounded corrected-subject acknowledgement)
+        # instead of falling through to "unsupported"; the correction is still
+        # recorded, nothing is executed, and it is never a result reference.
         service = _service()
         service.send(INVESTIGATION)
         message = service.send("No, I meant the cognition pipeline.")
-        assert message.metadata.get("builtin_intent") == "unsupported"
+        assert message.metadata.get("builtin_intent") != "unsupported"
+        assert message.metadata.get("builtin_intent") != "reference"
+        assert "corrected the active subject" in message.content

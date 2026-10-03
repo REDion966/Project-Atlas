@@ -328,8 +328,11 @@ class TestClassDCorrection:
         assert "no validated knowledge matched" in first.content.lower()
         assert "done" not in first.content.lower()
         corrected = service.send("Actually, I meant the S26 Ultra's video recording.")
-        assert "without an external ai model" in corrected.content.lower()
-        assert corrected.metadata.get("builtin_intent") in {"unsupported", "conversation"}
+        # Reconciled (Phase 1 / P1-4): a new-subject correction now COMPLETES its
+        # hand-off as a bounded, deterministic, model-free corrected-subject
+        # acknowledgement (never a fabricated result, never "unsupported").
+        assert "corrected the active subject" in corrected.content.lower()
+        assert corrected.metadata.get("builtin_intent") not in {"reference"}
 
     def test_correction_capture_is_imperfect(self, kernel):
         """Observed: the possessive fragment 'S26 Ultra's' is captured as an

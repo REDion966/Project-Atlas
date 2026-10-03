@@ -214,6 +214,51 @@ class TestComparison:
 
 
 # ---------------------------------------------------------------------------
+# P1-3 — reference-shaped investigation idioms
+# ---------------------------------------------------------------------------
+
+
+class TestContextualInvestigationIdiom:
+    """A reference-shaped investigation idiom starts a NEW investigation.
+
+    "Look into this.", "Dig into this.", "Dig into the remaining problem." and
+    "Check what's going on with this." carry no explicit target; with a retained
+    investigation subject they start a NEW read-only investigation of it. With no
+    retained subject they decline (fail-closed), so an ordinary status request is
+    never captured.
+    """
+
+    IDIOMS = (
+        "Look into this.",
+        "Dig into this.",
+        "Dig into the remaining problem.",
+        "Check what's going on with this.",
+    )
+
+    def test_retained_subject_starts_a_new_investigation(self):
+        for text in self.IDIOMS:
+            service, investigation = _service()
+            service.send(f"Investigate {X}.")
+            before = len(investigation.calls)
+            message = service.send(text)
+            assert len(investigation.calls) == before + 1, text
+            assert "## Investigation" in message.content, text
+
+    def test_no_retained_subject_declines(self):
+        for text in self.IDIOMS:
+            service, investigation = _service()
+            message = service.send(text)
+            assert investigation.calls == [], text
+            assert "## Investigation" not in message.content, text
+
+    def test_ordinary_status_is_not_stolen(self):
+        service, investigation = _service()
+        message = service.send("What's going on?")
+        assert (message.metadata or {}).get("builtin_intent") == "status"
+        assert investigation.calls == []
+
+
+# ---------------------------------------------------------------------------
 # send()/stream() parity for the new paths
 # ---------------------------------------------------------------------------
 

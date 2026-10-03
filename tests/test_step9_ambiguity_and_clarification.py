@@ -393,6 +393,58 @@ class TestNoOverClarification:
         assert service.state_manager.state.pending_clarification is None
 
 
+class TestPendingClarificationLifecycle:
+    """P1-1 — an outstanding clarification must not trap unrelated turns."""
+
+    @staticmethod
+    def _pending() -> ConversationService:
+        service = _two_fact_service()
+        service.send("Tell me more about it.")
+        assert service.state_manager.state.pending_clarification is not None
+        return service
+
+    def test_casual_follow_up_releases_the_stale_clarification(self):
+        service = self._pending()
+        message = service.send("Okay, use that approach.")
+        assert service.state_manager.state.pending_clarification is None
+        assert (
+            (message.metadata or {}).get("clarification", {}).get("status")
+            != "unresolved"
+        )
+
+    def test_unrelated_question_releases_the_stale_clarification(self):
+        service = self._pending()
+        message = service.send("How's it going?")
+        assert service.state_manager.state.pending_clarification is None
+        assert (
+            (message.metadata or {}).get("clarification", {}).get("status")
+            != "unresolved"
+        )
+
+    def test_genuine_candidate_reply_still_resolves(self):
+        service = self._pending()
+        message = service.send("auth module")
+        assert message.metadata.get("clarification_resolved", {}).get("resolved") == (
+            "auth module"
+        )
+        assert service.state_manager.state.pending_clarification is None
+
+    def test_bare_reference_pointer_keeps_the_clarification_open(self):
+        service = self._pending()
+        message = service.send("it")
+        assert service.state_manager.state.pending_clarification is not None
+        assert (
+            (message.metadata or {}).get("clarification", {}).get("status")
+            == "unresolved"
+        )
+
+    def test_new_objective_supersedes_and_proceeds(self):
+        service = self._pending()
+        message = service.send("Investigate the storage layer.")
+        assert (message.metadata or {}).get("investigation") is not None
+        assert service.state_manager.state.pending_clarification is None
+
+
 # ---------------------------------------------------------------------------
 # 5. Real Atlas/kernel multi-turn validation
 # ---------------------------------------------------------------------------

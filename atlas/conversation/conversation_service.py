@@ -1478,6 +1478,50 @@ class ConversationService:
         except Exception:  # fail-soft: recording must never break a turn
             return
 
+    #: Phase 1 (P1-1) — bounded lexical vocabulary of a clarification-POINTER turn.
+    #: A FOLLOW_UP whose tokens are ALL drawn from this set is a bare reference /
+    #: demonstrative / earlier-item form that could still be selecting one of the
+    #: outstanding candidates, so it keeps the clarification open (fail-closed). A
+    #: FOLLOW_UP carrying any other content word is a genuinely separate turn and
+    #: must not be trapped by a stale clarification.
+    _CLARIFICATION_POINTER_TOKENS: frozenset[str] = frozenset(
+        {
+            # referent / demonstrative / generic-noun vocabulary
+            "the", "a", "an", "one", "ones", "it", "its", "that", "this",
+            "these", "those", "them", "they", "he", "she", "him", "her",
+            "previous", "prior", "last", "former", "earlier", "first", "second",
+            "third", "fourth", "fifth", "next", "other", "another",
+            "result", "results", "subject", "subjects", "topic", "topics",
+            "task", "tasks", "item", "items", "thing", "things",
+            "investigation", "investigations", "answer", "answers",
+            "issue", "issues", "problem", "problems", "question", "questions",
+            "finding", "findings", "option", "options", "choice", "choices",
+            # bounded elaboration / query scaffolding
+            "tell", "tells", "told", "say", "says", "said", "me", "us", "about",
+            "more", "again", "please", "kindly", "and", "or", "on", "of", "to",
+            "for", "in", "with", "at", "know", "what", "which", "is", "are",
+            "was", "were", "do", "does", "did", "can", "could", "would", "will",
+            "you", "your", "i", "we",
+            # bounded reference-request verbs ("can you check it?")
+            "check", "checking", "checked", "verify", "see", "view", "show",
+            "find", "get", "look", "inspect", "examine", "review", "confirm",
+        }
+    )
+
+    def _is_bounded_clarification_reference(self, text: str) -> bool:
+        """True when ``text`` is only a bounded reference/demonstrative form.
+
+        Used by the pending-clarification lifecycle (P1-1): a FOLLOW_UP with no
+        content word beyond a reference pointer may still be selecting one of the
+        outstanding candidates, so it keeps the clarification open. A FOLLOW_UP
+        with any other content ("Okay, use that approach.", "How's it going?") is
+        a genuinely separate turn and must not be trapped.
+        """
+        tokens = re.findall(r"[a-z0-9']+", str(text or "").lower())
+        if not tokens:
+            return False
+        return all(token in self._CLARIFICATION_POINTER_TOKENS for token in tokens)
+
     def _maybe_resolve_clarification(
         self, text: str, spec: TaskSpec | None
     ) -> Message | None:
@@ -1521,21 +1565,20 @@ class ConversationService:
                     },
                 )
 
-        # No unique selection. A turn that is NOT a reference/follow-up is a
-        # genuine new request (or a casual/meta turn): it supersedes the
-        # clarification and keeps its existing route.
-        from atlas.conversation import semantic_frame as _frame
-
-        frame = _frame.interpret(
-            text,
-            has_prior_objective=bool(self._has_prior_objective()),
-            has_knowledge_context=bool(self._active_knowledge_subject()),
-        )
-        if frame.role not in (_frame.SemanticRole.REFERENCE, _frame.SemanticRole.FOLLOW_UP):
+        # No unique selection. Only a BOUNDED REFERENCE POINTER — a bare
+        # pronoun/demonstrative/earlier-item form that could plausibly name one of
+        # the outstanding candidates — keeps the ambiguity open (fail-closed).
+        # Every OTHER turn supersedes the stale clarification and keeps its own
+        # route, so an outstanding clarification can never trap unrelated
+        # conversation ("Okay, use that approach.", "How's it going?", a casual or
+        # status turn, or an explicit new objective). Nothing is guessed,
+        # executed, authorized or mutated.
+        keeps_open = self._is_bounded_clarification_reference(text)
+        if not keeps_open:
             self._state_manager.clear_pending_clarification()
             return None
 
-        # A reference/follow-up that did not select a candidate keeps the
+        # A bounded reference pointer that did not select a candidate keeps the
         # ambiguity open (no candidate is invented).
         return Message(
             role="assistant",
@@ -1618,11 +1661,23 @@ class ConversationService:
     #: item in a LIST of earlier things; Atlas retains the ACTIVE context (and the
     #: single most recent result), not a numbered history, so such a reference can
     #: only be answered by saying so — never by guessing which one was meant.
+    #: NOTE (Phase 1 / P1-2): the surface still RECOGNIZES the "…result" noun,
+    #: but ``_maybe_handle_ordinal_reference`` DEFERS a result qualifier to the
+    #: result-query / reference machinery when a result is retained (see the guard
+    #: there), so a unique, resolvable result is no longer diverted into a
+    #: spurious "which earlier item?" clarification. With no retained result the
+    #: honest earlier-item representation still owns the turn.
     _ORDINAL_REFERENCE_RE = re.compile(
         r"\b(?:the\s+)?(?:previous|last|former|earlier|first|second|third|other)\s+"
         r"(?:one|ones|result|investigation|answer|subject|topic|item|thing)\b"
         r"|\bthe\s+one\s+(?:we|i)\s+(?:discussed|talked\s+about|mentioned|looked\s+at)\b"
         r"|\b(?:go\s+back|back)\s+to\s+(?:that|the\s+one)\b",
+        re.IGNORECASE,
+    )
+
+    #: Phase 1 (P1-2) — a bounded RESULT qualifier ("previous/last/prior result").
+    _RESULT_QUALIFIER_RE = re.compile(
+        r"\b(?:previous|last|prior|former|earlier)\s+results?\b",
         re.IGNORECASE,
     )
 
@@ -1975,10 +2030,42 @@ class ConversationService:
         corrected = str(getattr(record, "corrected", "") or "").strip()
         if not corrected:
             return None
-        # The corrected reading must NAME a result ("the previous result"). A
-        # correction that installs a new subject keeps its existing path.
+        # The corrected reading must NAME a result ("the previous result"): that
+        # keeps the EXISTING result consumer below unchanged.
         if not (frozenset(tokens(corrected)) & _RESULT_NOUNS):
-            return None
+            # P1-4 — a correction that installs a NEW subject must COMPLETE its
+            # hand-off rather than fall through to "unsupported" while a stale
+            # investigation lingers. An earlier-item / ordinal corrected reading
+            # keeps its existing (fail-closed) surface untouched.
+            if self._ORDINAL_REFERENCE_RE.search(corrected) or not tokens(corrected):
+                return None
+            current = str(getattr(state, "current_investigation", "") or "")
+            if (
+                self._state_manager is not None
+                and current
+                and corrected.lower() not in current.lower()
+            ):
+                # The correction genuinely changes the active subject, so the
+                # RETAINED investigation no longer describes it: supersede it.
+                # The prior result is untouched. Nothing is executed or authorized.
+                self._state_manager.update(current_investigation=None)
+            return Message(
+                role="assistant",
+                content=(
+                    f"Understood — I corrected the active subject to '{corrected}'. "
+                    "The previous investigation is no longer the active subject. "
+                    f"Tell me what you would like me to do with '{corrected}'."
+                ),
+                metadata={
+                    "correction": {
+                        "previous": str(getattr(record, "previous", "") or ""),
+                        "corrected": corrected,
+                        "target_kind": "subject",
+                    },
+                    "builtin_response": True,
+                    "model_used": False,
+                },
+            )
         decision = resolve_routing(
             corrected,
             FUNCTION_QUERY_RESULT,
@@ -2019,6 +2106,24 @@ class ConversationService:
         if not isinstance(text, str) or not text.strip():
             return None
         if self._ORDINAL_REFERENCE_RE.search(text.strip()) is None:
+            return None
+        # P1-2 — a RESULT qualifier ("previous/last/prior result") is a bounded
+        # alias to the SINGLE retained ``latest_result``, owned by the
+        # result-query / reference machinery. DEFER it there instead of diverting
+        # it into a spurious "which earlier item?" clarification (it resolves when
+        # a result is retained, and fails closed honestly when none is). A
+        # correction-SHAPED turn whose corrected reading names a result keeps this
+        # honest earlier-item surface when nothing else owns it (no recorded
+        # correction), so that case is unchanged.
+        correction_shaped = False
+        try:
+            correction_shaped = (
+                detect_turn_role(text, has_prior_objective=True)
+                is TurnRole.CORRECTION
+            )
+        except Exception:  # fail-soft: never break the turn on a classifier error
+            correction_shaped = False
+        if self._RESULT_QUALIFIER_RE.search(text) and not correction_shaped:
             return None
 
         active = ""
@@ -3409,6 +3514,17 @@ class ConversationService:
         if evidence_self_knowledge is not None:
             self._conversation.add_message(evidence_self_knowledge)
             return evidence_self_knowledge
+        # Phase 1 (P1-3) — a bounded, REFERENCE-SHAPED investigation idiom
+        # ("look into this", "dig into the remaining problem", "check what's going
+        # on with this") with a RETAINED investigation subject starts a NEW
+        # read-only investigation of that subject. Narrow ownership guard: with no
+        # retained subject it declines, so an ordinary status request ("What's
+        # going on?") is never captured and the reference/status surfaces are
+        # otherwise unchanged.
+        contextual_investigation = self._maybe_handle_contextual_investigation(text, spec)
+        if contextual_investigation is not None:
+            self._conversation.add_message(contextual_investigation)
+            return contextual_investigation
         # Checkpoint 4 — a bound reference is ANSWERED from the retained
         # conversation fact by the existing reference surface, BEFORE any
         # research/knowledge/orchestration route can reinterpret the turn as a
@@ -3920,6 +4036,15 @@ class ConversationService:
         if evidence_self_knowledge is not None:
             self._conversation.add_message(evidence_self_knowledge)
             yield evidence_self_knowledge.content
+            return
+        # Phase 1 (P1-3) — bounded, reference-shaped investigation idiom (mirror of
+        # send(): same handler, same placement, same semantics). Starts a NEW
+        # read-only investigation of the retained subject; declines with none, so
+        # an ordinary status request is never captured.
+        contextual_investigation = self._maybe_handle_contextual_investigation(text, spec)
+        if contextual_investigation is not None:
+            self._conversation.add_message(contextual_investigation)
+            yield contextual_investigation.content
             return
         # Checkpoint 4 (mirror of send()) — a bound reference is ANSWERED from the
         # retained conversation fact by the existing reference surface, BEFORE any
@@ -4925,8 +5050,14 @@ class ConversationService:
                 # Step 9 — a GENERAL contextual ambiguity (e.g. two distinct
                 # established facts, or two candidate subjects). It is surfaced
                 # ONLY for a genuine reference/follow-up turn, so a new objective
-                # is never preempted. The competing candidates are preserved and
-                # listed; nothing is chosen and nothing is executed.
+                # is never preempted. Phase 1 (P1-1) adds one bounded ownership
+                # guard: the turn must be a WHOLE-TURN reference/demonstrative
+                # pointer. A turn that merely *contains* a demonstrative but
+                # carries its own content ("Okay, use that approach.", "How's it
+                # going?") is not an ambiguous referent, so a stale clarification
+                # can never be re-created and trap unrelated conversation. The
+                # competing candidates are preserved and listed; nothing is
+                # chosen and nothing is executed.
                 from atlas.conversation import semantic_frame as _frame
 
                 frame = _frame.interpret(
@@ -4937,6 +5068,7 @@ class ConversationService:
                     frame.role
                     in (_frame.SemanticRole.REFERENCE, _frame.SemanticRole.FOLLOW_UP)
                     and candidates
+                    and self._is_bounded_clarification_reference(text)
                 ):
                     question = build_question(
                         KIND_REFERENCE, candidates, "Which subject do you mean?"
@@ -5583,6 +5715,53 @@ class ConversationService:
         if subject_occurrence_phrase(tail) is None:
             return ""
         return tail
+
+    #: Phase 1 (P1-3) — bounded, REFERENCE-SHAPED investigation idioms. These
+    #: carry no explicit target of their own; when a retained investigation
+    #: subject exists they start a NEW read-only investigation of that subject
+    #: (the same mechanism "Investigate this further." already uses). Deliberately
+    #: narrow: the ordinary status request ("What's going on?") is NOT matched, and
+    #: explicit "look further into that" / "dig deeper into ..." forms keep their
+    #: existing deepening route, so no status/operation surface is stolen.
+    _CONTEXTUAL_INVESTIGATION_RE = re.compile(
+        r"\b(?:look|dig|check)\s+(?:into|out)\s+(?:this|that|it)\b"
+        r"|\bdig\s+into\s+the\s+(?:remaining|same|other|current|last)\s+"
+        r"(?:problem|issue|subject|topic|thing|investigation|area|one)\b"
+        r"|\bcheck\s+what(?:'s| is)\s+(?:going\s+on|happening)\s+with\s+"
+        r"(?:this|that|it)\b"
+        r"|\bcheck\s+on\s+(?:this|that|it)\b",
+        re.IGNORECASE,
+    )
+
+    def _maybe_handle_contextual_investigation(
+        self, text: str, spec: TaskSpec | None
+    ) -> Message | None:
+        """Route a bounded, reference-shaped investigation idiom to a NEW
+        investigation of the RETAINED subject (Phase 1 / P1-3).
+
+        "Look into this.", "Look into that.", "Dig into this.", "Dig into the
+        remaining problem." and "Check what's going on with this." carry no
+        explicit target; when a retained investigation subject exists they start a
+        NEW read-only investigation of that subject by reusing the EXISTING
+        investigation handler and its state recording (the same path "Investigate
+        this further." already uses). With no retained subject the turn falls
+        through unchanged (fail-closed), so an ordinary status request ("What's
+        going on?") is never captured. Nothing is guessed, executed, authorized or
+        invented; there is no new state, resolver or subsystem.
+        """
+        if self._investigation_service is None or self._state_manager is None:
+            return None
+        if (
+            not isinstance(text, str)
+            or self._CONTEXTUAL_INVESTIGATION_RE.search(text) is None
+        ):
+            return None
+        retained = str(
+            getattr(self._state_manager.state, "current_investigation", "") or ""
+        ).strip()
+        if not retained:
+            return None
+        return self._maybe_handle_investigation_request(spec, original_text=retained)
 
     def _maybe_handle_investigation_request(
         self,
