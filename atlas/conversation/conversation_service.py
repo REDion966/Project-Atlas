@@ -95,6 +95,7 @@ from atlas.conversation.communicative_function import (
     FUNCTION_REQUEST_OPERATION,
     QUERY_FUNCTIONS,
     _EXPLAIN_ANAPHOR_RE,
+    _ELABORATION_RE,
     _named_follow_up_target,
     _RESULT_NOUNS,
     relation_query_parts,
@@ -1127,7 +1128,7 @@ class ConversationService:
         # contextual result route: it resolves the RETAINED RESULT rather than the
         # operation that produced it, so it must not be answered as a bare
         # reference to the active investigation.
-        if _EXPLAIN_ANAPHOR_RE.search(text):
+        if _EXPLAIN_ANAPHOR_RE.search(text) or _ELABORATION_RE.search(text):
             return None
         from atlas.conversation import semantic_frame as _frame
 
@@ -1681,6 +1682,17 @@ class ConversationService:
         re.IGNORECASE,
     )
 
+    #: Phase 2 — a correction whose corrected reading still carries a NEW-operation
+    #: directive ("Forget that; investigate this instead.") is NOT a subject-only
+    #: correction: the bounded correction consumer must DEFER so the existing
+    #: operation route still runs. Subject-only corrections are unaffected.
+    _CORRECTION_OPERATION_RE = re.compile(
+        r"\b(?:investigate|investigation|research|analy[sz]e|analysis|inspect|"
+        r"examine|review|trace|debug|develop|build|create|add|implement|"
+        r"look\s+into|dig\s+into|check\s+(?:into|out))\b",
+        re.IGNORECASE,
+    )
+
     #: Step 8 — bounded "return to a prior topic" surface. These name a TOPIC the
     #: conversation has already covered ("go back to the storage layer"), so the
     #: world state can reactivate it. A pure reference target ("go back to that")
@@ -2038,6 +2050,11 @@ class ConversationService:
             # investigation lingers. An earlier-item / ordinal corrected reading
             # keeps its existing (fail-closed) surface untouched.
             if self._ORDINAL_REFERENCE_RE.search(corrected) or not tokens(corrected):
+                return None
+            # A corrected reading that still carries a NEW-operation directive is
+            # not a subject-only correction: defer so the existing operation route
+            # still runs ("Forget that; investigate this instead.").
+            if self._CORRECTION_OPERATION_RE.search(corrected):
                 return None
             current = str(getattr(state, "current_investigation", "") or "")
             if (
@@ -3514,6 +3531,15 @@ class ConversationService:
         if evidence_self_knowledge is not None:
             self._conversation.add_message(evidence_self_knowledge)
             return evidence_self_knowledge
+        # Phase 2 (P2-3) — a bounded conversational CONSTRAINT/stance ("don't
+        # change anything yet", "only investigate for now") is REPRESENTED on the
+        # existing ConversationState and acknowledged. It grants no authority and
+        # executes/blocks nothing; a turn that also directs an operation at a real
+        # target defers so the existing route still runs.
+        stance_response = self._maybe_handle_stance_constraint(text, spec)
+        if stance_response is not None:
+            self._conversation.add_message(stance_response)
+            return stance_response
         # Phase 1 (P1-3) — a bounded, REFERENCE-SHAPED investigation idiom
         # ("look into this", "dig into the remaining problem", "check what's going
         # on with this") with a RETAINED investigation subject starts a NEW
@@ -3759,6 +3785,15 @@ class ConversationService:
         if coordinated is not None:
             self._conversation.add_message(coordinated)
             return coordinated
+
+        # Phase 2 (P2-1) — bounded work/completion recall ("what have we
+        # completed?", "what were we working on?") is answered from EXISTING
+        # retained state (threads / operation referents / retained operation). It
+        # invents no history and reports unsupported temporal precision.
+        work_recall = self._maybe_handle_work_recall(text)
+        if work_recall is not None:
+            self._conversation.add_message(work_recall)
+            return work_recall
 
         # Model-independent conversational path (Phase 1): casual turns are
         # answered deterministically without any AI provider. Governed turns
@@ -4037,6 +4072,14 @@ class ConversationService:
             self._conversation.add_message(evidence_self_knowledge)
             yield evidence_self_knowledge.content
             return
+        # Phase 2 (P2-3) — bounded conversational constraint/stance (mirror of
+        # send(): same handler, same placement, same semantics). Represented on the
+        # existing ConversationState; grants no authority.
+        stance_response = self._maybe_handle_stance_constraint(text, spec)
+        if stance_response is not None:
+            self._conversation.add_message(stance_response)
+            yield stance_response.content
+            return
         # Phase 1 (P1-3) — bounded, reference-shaped investigation idiom (mirror of
         # send(): same handler, same placement, same semantics). Starts a NEW
         # read-only investigation of the retained subject; declines with none, so
@@ -4283,6 +4326,14 @@ class ConversationService:
         if coordinated is not None:
             self._conversation.add_message(coordinated)
             yield coordinated.content
+            return
+
+        # Phase 2 (P2-1) — bounded work/completion recall (mirror of send()):
+        # answered from EXISTING retained state; invents no history.
+        work_recall = self._maybe_handle_work_recall(text)
+        if work_recall is not None:
+            self._conversation.add_message(work_recall)
+            yield work_recall.content
             return
 
         # Model-independent conversational path (Phase 1): same placement as
@@ -4775,6 +4826,18 @@ class ConversationService:
             )
             if not (
                 (retained_result and _CLAUSE_RESULT_REQUEST_RE.search(text))
+                # Phase 2 (P2-2) — a bounded result-grounded ELABORATION /
+                # SIMPLIFICATION request ("explain that in simpler terms") is a
+                # retrieval of prior output, not an operation request; with a
+                # result retained this route owns it (and with none it stays
+                # deferred, so nothing is fabricated).
+                or (
+                    retained_result
+                    and (
+                        _EXPLAIN_ANAPHOR_RE.search(text)
+                        or _ELABORATION_RE.search(text)
+                    )
+                )
                 # A bounded COMPARISON of recorded results is a retrieval too: it
                 # consumes existing referents and fails closed when there are not
                 # two, so imperative wording alone must not defer it.
@@ -5762,6 +5825,228 @@ class ConversationService:
         if not retained:
             return None
         return self._maybe_handle_investigation_request(spec, original_text=retained)
+
+    # ------------------------------------------------------------------
+    # Phase 2 (P2-1) — bounded work / completion recall
+    # ------------------------------------------------------------------
+    #: Bounded COMPLETION-recall vocabulary ("what have we completed/done?").
+    _WORK_COMPLETION_RE = re.compile(
+        r"\bwhat\s+(?:have|did|has)\s+(?:we|you|i)\s+"
+        r"(?:complete|completed|finish|finished|do|done|accomplish|accomplished)\b"
+        r"|\bwhat(?:'s| is| has)\s+(?:been\s+)?(?:completed|done|finished|accomplished)\b"
+        r"|\bcompleted\s+so\s+far\b"
+        r"|\bwhat\s+we\s+(?:have\s+)?(?:completed|finished|did|done|accomplished)\b"
+        r"|\bremind\s+me\s+what\s+we\s+(?:have\s+)?"
+        r"(?:completed|finished|did|done|accomplished)\b",
+        re.IGNORECASE,
+    )
+    #: Bounded ACTIVITY-recall vocabulary ("what were we working on?").
+    _WORK_ACTIVITY_RE = re.compile(
+        r"\bwhat\s+(?:were|are|was)\s+(?:we|you|i)\s+(?:working\s+on|doing|up\s+to)\b"
+        r"|\bwhat\s+(?:did|have|had)\s+(?:we|you|i)\s+"
+        r"(?:work\s+on|been\s+working\s+on)\b"
+        r"|\bwhat\s+we\s+(?:were|are|have\s+been)\s+working\s+on\b"
+        r"|\bremind\s+me\s+what\s+we\s+(?:were|are|have\s+been)\s+working\s+on\b",
+        re.IGNORECASE,
+    )
+    #: Bounded temporal words whose precision the retained record cannot support.
+    _WORK_TEMPORAL_RE = re.compile(
+        r"\b(?:yesterday|today|this\s+morning|this\s+afternoon|last\s+night|"
+        r"last\s+week|last\s+month|earlier\s+today)\b",
+        re.IGNORECASE,
+    )
+
+    def _maybe_handle_work_recall(self, text: str) -> Message | None:
+        """P2-1 — bounded work/completion recall from RETAINED state.
+
+        Answers a bounded question about work COMPLETED or recently worked on from
+        the EXISTING conversation evidence only (recorded dialogue-thread
+        objectives, discourse OPERATION referents, the retained operation, and the
+        current objective/investigation). It creates no store, invents no history,
+        and consults no model. A request for temporal precision the record cannot
+        support ("yesterday") is answered honestly: no trustworthy per-work
+        timestamp exists, so the limitation is reported and only the work Atlas
+        actually retains is offered.
+        """
+        if self._state_manager is None or not isinstance(text, str) or not text.strip():
+            return None
+        completion = self._WORK_COMPLETION_RE.search(text) is not None
+        activity = self._WORK_ACTIVITY_RE.search(text) is not None
+        if not (completion or activity):
+            return None
+        state = self._state_manager.state
+        items = self._retained_work_items(state, text)
+        temporal = self._WORK_TEMPORAL_RE.search(text) is not None
+        lines: list[str] = []
+        if temporal:
+            lines.append(
+                "I do not retain trustworthy per-work timestamps, so I cannot "
+                "filter by that time range."
+            )
+        if items:
+            lines.append("Work recorded so far:" if completion else "Recent work:")
+            lines.extend(f"- {item}" for item in items)
+        else:
+            lines.append(
+                "I have no record of completed or recent work in this conversation "
+                "yet."
+            )
+        lines.append("Nothing was executed or authorized.")
+        return Message(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "work_recall": {
+                    "kind": "completion" if completion else "activity",
+                    "count": len(items),
+                    "temporal_supported": not temporal,
+                },
+                "builtin_response": True,
+                "model_used": False,
+            },
+        )
+
+    @staticmethod
+    def _retained_work_items(state: Any, current_text: str = "") -> tuple[str, ...]:
+        """Bounded, de-duplicated work labels from EXISTING retained evidence.
+
+        Only OPERATION evidence is consulted (dialogue-thread objectives,
+        discourse OPERATION referents, the retained operation, and the current
+        investigation). The current turn's own text is excluded, so a recall
+        question can never report itself as work.
+        """
+        items: list[str] = []
+        skip = str(current_text or "").strip().lower()
+
+        def add(label: Any) -> None:
+            if isinstance(label, str) and label.strip():
+                value = label.strip()[:160]
+                if value and value.lower() != skip and value not in items:
+                    items.append(value)
+
+        thread_state = getattr(state, "thread_state", None)
+        for thread in reversed(getattr(thread_state, "threads", ()) or ()):
+            add(getattr(thread, "objective", ""))
+        discourse = getattr(state, "discourse_state", None)
+        for referent in reversed(getattr(discourse, "referents", ()) or ()):
+            if getattr(referent, "kind", "") == "operation":
+                add(getattr(referent, "label", ""))
+        operation = getattr(state, "last_operation", None)
+        if operation is not None:
+            add(getattr(operation, "operand", ""))
+        add(getattr(state, "current_investigation", ""))
+        return tuple(items[:6])
+
+    # ------------------------------------------------------------------
+    # Phase 2 (P2-3) — bounded conversational stance / constraints
+    # ------------------------------------------------------------------
+    _STANCE_NO_MODIFICATION_RE = re.compile(
+        r"\b(?:don'?t|do\s+not|does\s+not|never|without)\s+"
+        r"(?:change|modify|modifying|touch|alter|edit|apply|"
+        r"make\s+(?:any\s+)?changes?)\b"
+        r"|\bno\s+(?:changes?|modifications?)\b"
+        r"|\bdon'?t\s+change\s+anything\b",
+        re.IGNORECASE,
+    )
+    _STANCE_READ_ONLY_RE = re.compile(
+        r"\b(?:only|just)\s+(?:investigate|look|research|analy[sz]e|inspect|review|"
+        r"examine|diagnose)\b"
+        r"|\b(?:investigate|look|research|analy[sz]e|inspect|review|examine|diagnose)"
+        r"\s+only\b"
+        r"|\bfor\s+now\b"
+        r"|\bdon'?t\s+modify\s+anything\b",
+        re.IGNORECASE,
+    )
+    #: Tokens that may appear in a "stance target" without constituting a real
+    #: operation object, so a pure stance turn is not mistaken for an operation.
+    _STANCE_TARGET_FILLER: frozenset[str] = frozenset(
+        {
+            "only", "just", "for", "now", "investigate", "investigating", "look",
+            "looking", "into", "at", "research", "researching", "analyze", "analyse",
+            "inspect", "inspection", "review", "examine", "diagnose", "diagnosis",
+            "it", "this", "that", "them", "those", "these", "anything", "something",
+            "nothing", "the", "a", "an", "and", "don't", "dont", "do", "not", "never",
+            "without", "yet", "modify", "modifying", "change", "changes", "changed",
+            "make", "making", "any", "no", "please", "can", "you", "could", "would",
+            "will", "keep", "keeping", "let", "let's", "lets", "s",
+        }
+    )
+
+    def _maybe_handle_stance_constraint(
+        self, text: str, spec: TaskSpec | None
+    ) -> Message | None:
+        """P2-3 — recognize a bounded conversational constraint/stance.
+
+        A turn that states a read-only or no-modification constraint and does NOT
+        direct an operation at a real target is represented as a bounded ACTIVE
+        STANCE on ``ConversationState`` and acknowledged. It executes, authorizes,
+        blocks and approves nothing — approval stays authoritative. When the same
+        turn ALSO directs an operation at a real target ("Investigate X; don't
+        modify anything."), the stance is recorded and this handler DEFERS so the
+        existing investigation/development route still runs. A later explicit
+        objective supersedes a prior stance (cleared here). Bounded, fail-closed:
+        an unrecognized constraint is left to the existing surfaces.
+        """
+        if self._state_manager is None or not isinstance(text, str) or not text.strip():
+            return None
+        no_mod = self._STANCE_NO_MODIFICATION_RE.search(text) is not None
+        read_only = self._STANCE_READ_ONLY_RE.search(text) is not None
+        if not (no_mod or read_only):
+            # A later explicit objective supersedes a prior conversational stance.
+            if (
+                self._state_manager.state.active_stance
+                and self._turn_directs_operation_at_target(text)
+            ):
+                self._record_active_stance(None)
+            return None
+        stance = "no_modification" if no_mod else "read_only"
+        self._record_active_stance(stance)
+        if self._turn_directs_operation_at_target(text):
+            # The turn also names a real operation target: keep the existing route.
+            return None
+        if stance == "no_modification":
+            label = "read-only, no-modification"
+        else:
+            label = "read-only"
+        return Message(
+            role="assistant",
+            content=(
+                f"Understood — I will treat this as a {label} request. I will not "
+                "change anything, and nothing was executed or authorized; any "
+                "actual change would still require your explicit approval."
+            ),
+            metadata={
+                "stance": {"kind": stance, "recognized": True},
+                "builtin_response": True,
+                "model_used": False,
+            },
+        )
+
+    def _record_active_stance(self, stance: Optional[str]) -> None:
+        """Record (or clear) the bounded active stance. Fail-soft, no authority."""
+        if self._state_manager is None:
+            return
+        try:
+            self._state_manager.update(
+                active_stance=(str(stance)[:32] or None) if stance else None
+            )
+        except Exception:  # fail-soft: a stance record never breaks a turn
+            return
+
+    def _turn_directs_operation_at_target(self, text: str) -> bool:
+        """True when the turn names a real operation target (not a stance filler)."""
+        try:
+            from atlas.conversation.semantic_frame import operation_object
+
+            obj = operation_object(text) or ""
+        except Exception:
+            return False
+        tokens = [
+            tok
+            for tok in re.findall(r"[a-z0-9']+", str(obj).lower())
+            if tok not in self._STANCE_TARGET_FILLER
+        ]
+        return bool(tokens)
 
     def _maybe_handle_investigation_request(
         self,

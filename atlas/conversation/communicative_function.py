@@ -102,12 +102,47 @@ def relation_query_parts(text: Any) -> tuple[str, str] | None:
 #: The L3 operation value that marks a request to COMPARE recorded results.
 _COMPARE_OP: str = "compare"
 
+#: P2-4 — bounded CONTEXTUAL COMPARISON vocabulary. A comparison whose operands
+#: are anaphoric/contextual ("that", "the previous result", "what we had before")
+#: resolves against RECORDED referents; a comparison naming external subjects
+#: ("compare the S26 and the iPhone") is NOT matched by the anaphor gate below and
+#: keeps its existing route.
+_COMPARE_CONTEXT_RE = re.compile(
+    r"\b(?:compare|comparison|comparing|differ|differs|differed|difference|"
+    r"differences|different)\b",
+    re.IGNORECASE,
+)
+_COMPARE_ANAPHOR_RE = re.compile(
+    r"\b(?:that|this|those|these|previous|prior|last|former|earlier|"
+    r"what\s+we\s+had|what\s+we've\s+had)\b",
+    re.IGNORECASE,
+)
+
 #: G1.1 — a bounded EXPLANATION request whose whole object is a bare anaphor
 #: ("can you explain that?"). The object is supplied by the existing reference/
 #: state machinery, so the turn is a query about the retained result.
 _EXPLAIN_ANAPHOR_RE = re.compile(
     r"^\s*(?:can|could|would|will)\s+you\s+(?:please\s+)?explain\s+"
     r"(?:that|it|this|those|these|them)\s*[.?]*\s*$",
+    re.IGNORECASE,
+)
+
+#: P2-2 — bounded RESULT-GROUNDED ELABORATION / SIMPLIFICATION requests
+#: ("can you explain that more simply?", "explain that in simpler terms",
+#: "can you clarify that?", "what does that mean?", "can you elaborate on that?").
+#: Each form refers to a PRIOR output through a bare anaphor (or an explicit
+#: simplification phrase), so it is a query about the RETAINED result. A named
+#: object ("explain the memory service") is deliberately NOT matched.
+_ELABORATION_RE = re.compile(
+    r"\b(?:explain|clarify|elaborate|simplify|rephrase|restate)\b[^.?!]{0,40}"
+    r"\b(?:simpl(?:e|er|y)|plain(?:ly)?|plain\s+terms|simpler\s+terms|"
+    r"more\s+simply|in\s+other\s+words)\b"
+    r"|\bwhat\s+(?:does|did)\s+(?:that|this|it)\s+mean\b"
+    r"|\bwhat\s+do\s+you\s+mean\s+by\s+(?:that|this|it)\b"
+    r"|\b(?:can|could|would)\s+you\s+(?:please\s+)?(?:elaborate|clarify|simplify|"
+    r"rephrase|restate)(?:\s+on)?\s+(?:that|this|it)\b"
+    r"|\b(?:elaborate|expand)\s+(?:on\s+)?(?:that|this|it)\b"
+    r"|\b(?:clarify|simplify|rephrase|restate)\s+(?:that|this|it)\b",
     re.IGNORECASE,
 )
 
@@ -283,10 +318,23 @@ def classify_function(
     if explain and _EXPLAIN_ANAPHOR_RE.search(text):
         return FUNCTION_QUERY_RESULT
 
+    # 1c-bis. P2-2 — a bounded RESULT-GROUNDED ELABORATION / SIMPLIFICATION
+    #     request ("explain that more simply", "what does that mean?") refers to
+    #     the RETAINED result through a bare anaphor, so it is a query about prior
+    #     output. A named object ("explain the memory service") is not matched.
+    if _ELABORATION_RE.search(text):
+        return FUNCTION_QUERY_RESULT
+
     # 1d. A COMPARISON request keeps its own bounded function: "compare this with
     #     what you found earlier" must not be downgraded to a single-result query
-    #     by its retrospective wording ("found").
-    if operation == _COMPARE_OP:
+    #     by its retrospective wording ("found"). P2-4 extends the family with
+    #     bounded CONTEXTUAL comparison forms whose operands are anaphoric
+    #     ("what's different from what we had before?"); a comparison naming
+    #     external subjects ("compare the S26 and the iPhone") is NOT matched by
+    #     the anaphor gate and keeps its existing route.
+    if operation == _COMPARE_OP or (
+        _COMPARE_CONTEXT_RE.search(text) and _COMPARE_ANAPHOR_RE.search(text)
+    ):
         return FUNCTION_COMPARE
 
     # 2. A question/explain request aimed at an OUTPUT. A turn that IMPERATIVELY

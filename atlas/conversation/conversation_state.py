@@ -325,6 +325,14 @@ class ConversationState:
     # ``apply_thread_turn`` seam. Descriptive only: a thread/QUD never authorizes.
     thread_state: Optional[DialogueThreadState] = None
 
+    # Phase 2 (P2-3) — bounded ACTIVE CONVERSATIONAL STANCE: the user's stated
+    # conversational constraint on the current work (``"read_only"`` /
+    # ``"no_modification"``). REPRESENTATION ONLY — it never authorizes, blocks,
+    # executes, approves, or bypasses governance; approval remains authoritative.
+    # Superseded by a later explicit objective and cleared when the conversation
+    # moves on. Bounded value; never a second policy engine.
+    active_stance: Optional[str] = None
+
     # Turn/reference identity distinguishing this state across turns.
     turn_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -402,6 +410,7 @@ class ConversationState:
                 if isinstance(self.thread_state, DialogueThreadState)
                 else None
             ),
+            "active_stance": self.active_stance,
             "turn_id": self.turn_id,
         }
 
