@@ -428,6 +428,49 @@ python main.py                      # interactive Atlas
 pytest -q                           # test suite
 ```
 
+### Talking to Atlas (interactive REPL)
+
+`python main.py` starts the real interactive entry point: `main.py` →
+`atlas.cli.cli.AtlasCLI.run()` → the production kernel
+(`Atlas.start()` / `Atlas.stream()`), which is the SAME conversation and
+governed-development path used everywhere else. It is not a test harness or a
+second conversation implementation.
+
+```text
+=============================================
+         Atlas AI Assistant
+=============================================
+Type '/help' for commands.
+Type '/exit' or 'exit' to quit.
+
+You > What is Atlas?
+Atlas > I am Atlas, a long-term, modular AI operating framework — ...
+
+You > Investigate the storage layer.
+Atlas > ## Investigation: Investigate the storage layer ...
+
+You > exit
+Goodbye!
+```
+
+- **Enter a request:** type plain natural language at the `You >` prompt. No
+  command syntax is required — anything that is not a `/` command is sent
+  verbatim to `Atlas.stream()`.
+- **Exit:** `exit`, `/exit`, or `quit`.
+- **Slash commands:** `/help`, `/version`, `/provider`, `/models`, `/save`,
+  `/load`, `/exit`.
+- **Model-OFF by default:** `config.toml` ships `external_providers = false`, so
+  the deterministic path is authoritative and no external model is contacted.
+  Run `/provider` to see the active tier (the shipped default reports
+  `Mock Provider`). Enabling a real provider is an explicit opt-in in
+  `config.toml`.
+- **Governance is not bypassed by using the REPL.** The REPL is a thin
+  communication boundary over the existing services. Investigation stays
+  read-only; a development request is routed through the existing governed
+  development path (bounded clarification when under-specified, OWNER approval
+  before any change, sandboxed execution and verification, and a separate
+  promotion decision). Atlas never modifies anything on its own.
+
 ## Repository layout (brief)
 
 ```

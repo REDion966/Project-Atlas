@@ -241,6 +241,13 @@ unchanged). Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md`. No new
 milestone, phase, or capability requirement follows from it; further development
 stays evidence-driven.
 
+**Human entry-point readiness — VERIFIED EXISTING (no new interface, NOT a
+phase).** The repository already ships a practical human-facing interactive entry
+point: `python main.py` → `AtlasCLI.run()` → the production kernel
+(`Atlas.stream()`), i.e. the same conversation and governed-development path used
+everywhere else. It was verified live and model-OFF. Nothing was implemented
+because nothing was needed; the exact usage is now documented in `README.md`.
+
 ---
 
 ## Additive language roadmap — L0 → L10

@@ -1316,6 +1316,19 @@ P18 — Controlled Autonomy.
   full record in `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md`. No new
   regression: the acknowledgement-surface failures were again reproduced against
   a pristine HEAD extraction and pre-date this work.
+- **Human-to-Atlas entry-point readiness — VERIFIED EXISTING (no new interface).**
+  A practical human-facing interactive entry point already exists and reaches the
+  real path: `main.py` → `atlas.cli.cli.AtlasCLI.run()` → production kernel
+  `Atlas.start()` / `Atlas.stream()`. Verified live, model-OFF (`/provider`
+  reports `Mock Provider`): informational, self-investigation, development
+  investigation, explicitly read-only investigation, under-specified development
+  request (bounded clarification), and an approval request without context (fails
+  closed) all behaved correctly, and no approval was ever created. The REPL is a
+  thin communication boundary: no new conversation implementation, state,
+  orchestration or authority was added, and approval/sandbox/verification/
+  promotion boundaries are unchanged. Exact usage is documented in `README.md`
+  ("Talking to Atlas (interactive REPL)"). No new interface was implemented
+  because none was needed.
 - **C4.2** — deterministic repository impact analysis and conversational
   exposure (`atlas/conversation/repository_impact.py`), reusing
   `RepositoryMap.dependencies_of/dependents_of/impact_set`; full
