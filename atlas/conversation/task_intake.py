@@ -908,6 +908,16 @@ def _occurrence_is_negated(lowered: str, idx: int) -> bool:
     return any(prefix.endswith(neg) for neg in _NEGATION_PREFIXES)
 
 
+def _word_cue_present(lowered: str, cue: str) -> bool:
+    """Return True when ``cue`` occurs in ``lowered`` as a whole word.
+
+    The presence counterpart of :func:`_word_cue_is_negated`, so the negation
+    decision can consider every cue the utterance actually carries rather than
+    only the first match of any one cue.
+    """
+    return re.search(rf"\b{re.escape(cue)}\b", lowered) is not None
+
+
 def _word_cue_is_negated(lowered: str, cue: str) -> bool:
     """Return True when ``cue`` occurs as a whole word AND that occurrence is
     immediately negated (e.g. "don't modify" -> ``modify`` is negated).
@@ -1589,6 +1599,55 @@ class TaskIntake:
         if l5_autonomy:
             return TaskType.L5_AUTONOMY_REQUEST
 
+        # Development cues are matched as explicit accepted WHOLE-WORD forms
+        # (never as broad substrings) and are only treated as development when
+        # NOT negated. "don't modify" must not become a development request,
+        # and "address"/"prefix"/"implementation" must not match add/fix/implement.
+        #
+        # Real-world development-intake gap: negation is evaluated PER CUE, not
+        # per utterance. "Add a deterministic test. Do not modify anything yet."
+        # contains BOTH an un-negated "add" and a negated "modify"; a single
+        # negated cue therefore cancelled the whole request and it fell to the
+        # unsupported floor, even though the existing stance surface had already
+        # recorded the read-only constraint correctly. A request is now negated
+        # only when EVERY development cue it carries is negated, so a genuine
+        # development request that merely carries a trailing constraint survives
+        # with that constraint intact.
+        development_cue_hit = _first_hit(
+            lowered, _DEVELOPMENT_CUE_FORMS, word_boundary=True
+        ) or _first_hit(lowered, _DEVELOPMENT_VERB_CUES, word_boundary=True)
+        development_cue_occurrences = tuple(
+            cue
+            for cue in (*_DEVELOPMENT_CUE_FORMS, *_DEVELOPMENT_VERB_CUES)
+            if _word_cue_present(lowered, cue)
+        )
+        development_negated = bool(development_cue_occurrences) and all(
+            _word_cue_is_negated(lowered, cue)
+            for cue in development_cue_occurrences
+        )
+        development = (development_cue_hit and not development_negated) and (
+            _first_hit(lowered, _SELF_TARGETS)
+            or "capability" in lowered
+            or "module" in lowered
+            # Real-world development-interface pilot: an explicit code/test/
+            # repository work target qualifies the request exactly like a
+            # self-target does. The cue is still required, so this cannot make
+            # an ordinary sentence a development request.
+            or _first_hit(lowered, _DEVELOPMENT_CODE_TARGETS, word_boundary=True)
+        )
+        # Real-world development-intake gap: this decision used to be evaluated
+        # AFTER the investigation branch, so any turn that also carried an
+        # investigation cue ("Add a regression test. First investigate the
+        # implementation.") was claimed as an INVESTIGATION_REQUEST and the
+        # development request was lost entirely. The existing L3 rule — an
+        # explicitly development-framed request is development — is applied
+        # BEFORE the investigation/planning checks, so a genuine development
+        # request keeps its own route while a plain investigation request, an
+        # investigation-first compound, and every other existing precedence rule
+        # keep their current behaviour.
+        if development and not _leading_operation_is_research(meaning):
+            return TaskType.DEVELOPMENT_REQUEST
+
         # Explicit planning phrases are checked next. They indicate the user
         # wants to convert an investigation proposal into a development
         # proposal. Checked before investigation because some planning phrases
@@ -1636,27 +1695,6 @@ class TaskIntake:
         if looks_like_repository_impact_request(normalized):
             return TaskType.REPOSITORY_IMPACT_REQUEST
 
-        # Development cues are matched as explicit accepted WHOLE-WORD forms
-        # (never as broad substrings) and are only treated as development when
-        # NOT negated. "don't modify" must not become a development request,
-        # and "address"/"prefix"/"implementation" must not match add/fix/implement.
-        development_cue_hit = _first_hit(
-            lowered, _DEVELOPMENT_CUE_FORMS, word_boundary=True
-        ) or _first_hit(lowered, _DEVELOPMENT_VERB_CUES, word_boundary=True)
-        development_negated = any(
-            _word_cue_is_negated(lowered, cue)
-            for cue in (*_DEVELOPMENT_CUE_FORMS, *_DEVELOPMENT_VERB_CUES)
-        )
-        development = (development_cue_hit and not development_negated) and (
-            _first_hit(lowered, _SELF_TARGETS)
-            or "capability" in lowered
-            or "module" in lowered
-            # Real-world development-interface pilot: an explicit code/test/
-            # repository work target qualifies the request exactly like a
-            # self-target does. The cue is still required, so this cannot make
-            # an ordinary sentence a development request.
-            or _first_hit(lowered, _DEVELOPMENT_CODE_TARGETS, word_boundary=True)
-        )
         research = _first_hit(lowered, _RESEARCH_CUES)
         greeting = bool(_GREETING_RE.search(lowered))
         question = "?" in normalized or (
@@ -1667,13 +1705,10 @@ class TaskIntake:
         ) or _first_hit(lowered, _ACTION_COMPOUND_FORMS, word_boundary=True)
 
         # Development wins over generic research/action because it names
-        # Atlas itself or its capabilities as the target.
+        # Atlas itself or its capabilities as the target. (The development
+        # decision itself is returned above, before the investigation check.)
         # L3 — the LEADING requested operation outranks a later development cue:
         # "Research how Atlas could improve ..." is research, not development.
-        # The precedence table itself is unchanged; only the structured
-        # evidence supplied to it is.
-        if development and not _leading_operation_is_research(meaning):
-            return TaskType.DEVELOPMENT_REQUEST
         if research:
             return TaskType.INFORMATION_REQUEST
         if greeting:

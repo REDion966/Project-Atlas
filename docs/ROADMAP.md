@@ -259,6 +259,15 @@ unchanged. A related "those 24 capabilities" contextual-reference limitation was
 observed and deliberately left unchanged. Evidence:
 `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §6.
 
+**Live trial — compound development-request intake gap CLOSED (evidence, NOT a
+phase).** A real development request that also carried an investigation clause
+and a "Do not modify anything yet" constraint was claimed as an investigation.
+Two bounded deterministic defects in the existing intake (per-utterance negation
+and precedence of the investigation branch over the development evidence) were
+corrected in place; investigation-first compounds, plain investigation and all
+existing negatives are unchanged, and no new module, state, memory or authority
+was added. Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §7.
+
 ---
 
 ## Additive language roadmap — L0 → L10

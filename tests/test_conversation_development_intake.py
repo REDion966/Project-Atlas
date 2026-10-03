@@ -299,3 +299,69 @@ class TestRealWorldDevelopmentTargets:
             "What handles development requests?",
         ):
             assert is_development_request(_spec(text)) is False, text
+
+
+class TestCompoundDevelopmentRequestWithTrailingConstraint:
+    """Live REPL trial — a real development request that also carries an
+    investigation clause and a "do not modify yet" constraint.
+
+    Observed failure: the request below was classified INVESTIGATION_REQUEST and
+    turned into a malformed investigation subject
+    ("want add small deterministic regression test capability explanation
+    behavior just") plus a development proposal, instead of the governed
+    development path. Two bounded causes: the investigation branch was evaluated
+    before the development evidence, and negation was applied per-utterance, so
+    the negated "modify" in the trailing constraint cancelled the un-negated
+    "add". Both are corrected in the existing deterministic intake; the
+    contextual phrase "we just discussed" is NOT the cause (the single-sentence
+    form already routed correctly) and no reference machinery was added.
+    """
+
+    ORIGINAL = (
+        "I want you to add a small deterministic regression test for the "
+        "capability-explanation behavior we just discussed. First investigate "
+        "the relevant implementation and existing tests, then explain what you "
+        "would change and why. Do not modify anything yet."
+    )
+
+    def test_original_request_is_a_development_request(self):
+        assert is_development_request(_spec(self.ORIGINAL)) is True
+
+    def test_trailing_no_modification_constraint_does_not_erase_the_request(self):
+        # The constraint is a separate, already-supported stance: it must not
+        # cancel the development request it is attached to.
+        spec = _spec(
+            "Add a deterministic test. Do not modify anything yet."
+        )
+        assert is_development_request(spec) is True
+
+    def test_development_survives_an_investigation_clause(self):
+        for text in (
+            "Add a test. Investigate the implementation.",
+            "I want you to add a regression test. First investigate the "
+            "implementation and existing tests.",
+        ):
+            assert is_development_request(_spec(text)) is True, text
+
+    def test_negation_still_wins_when_every_cue_is_negated(self):
+        for text in (
+            "Do not modify anything yet.",
+            "Don't fix anything yet.",
+        ):
+            assert is_development_request(_spec(text)) is False, text
+
+    def test_plain_investigation_requests_are_unchanged(self):
+        for text in (
+            "First investigate the relevant implementation and existing tests.",
+            "Investigate the storage layer.",
+            "Investigate the memory service but do not modify anything.",
+            "Investigate the conversation system, create a development proposal, "
+            "and present it for my approval.",
+        ):
+            assert _spec(text).task_type is TaskType.INVESTIGATION_REQUEST, text
+
+    def test_research_lead_is_still_research(self):
+        assert (
+            _spec("Research how Atlas could improve scheduling.").task_type
+            is TaskType.INFORMATION_REQUEST
+        )

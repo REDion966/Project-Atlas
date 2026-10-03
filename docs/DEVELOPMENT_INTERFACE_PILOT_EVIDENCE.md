@@ -173,3 +173,79 @@ defect (the capability-detail surface is never reached), and resolving it would
 require broader discourse/context machinery than this bounded routing
 correction. It is recorded as an observed gap only and was deliberately NOT
 changed.
+
+---
+
+## 7. Post-pilot addition — live trial: compound development-request intake gap
+
+A further live REPL trial issued a genuine self-directed development request:
+
+> "I want you to add a small deterministic regression test for the
+> capability-explanation behavior we just discussed. First investigate the
+> relevant implementation and existing tests, then explain what you would change
+> and why. Do not modify anything yet."
+
+Atlas answered with a repository-investigation report over the malformed subject
+`"want add small deterministic regression test capability explanation behavior
+just"`, then a development proposal.
+
+### Root cause (two bounded deterministic defects)
+
+1. **Negation scope.** `TaskIntake` decided development per *utterance*: a single
+   negated cue cancelled the whole request. "Add a deterministic test. Do not
+   modify anything yet." carries an un-negated `add` and a negated `modify`, so
+   the request was cancelled and fell to the unsupported floor — even though the
+   existing stance surface had already recorded `no_modification` correctly.
+   Corrected to per-cue: a request is negated only when EVERY development cue
+   it carries is negated, so existing negatives ("don't fix anything yet") are
+   unchanged.
+2. **Precedence.** The investigation branch was evaluated BEFORE the development
+   evidence, so any turn also carrying an investigation cue ("Add a test. First
+   investigate the implementation.") was claimed as `INVESTIGATION_REQUEST` and
+   the development request was lost. The existing L3 rule (an explicitly
+   development-framed request is development) now applies before the
+   investigation/planning checks. An investigation-FIRST compound
+   ("Investigate the conversation system, create a development proposal, and
+   present it for my approval") is still investigation.
+
+The malformed subject is a *consequence* of (2): once the investigation route
+claims the turn, `_extract_objective` returns everything from the earliest cue
+onward and the route strips stop-words. It is not an independent defect.
+
+**Contextual reference is NOT involved.** The single-sentence form
+("I want you to add a test for the capability-explanation behavior we just
+discussed.") already routed as `DEVELOPMENT_REQUEST` before any change, so
+"we just discussed" was never the cause and no discourse/memory machinery was
+added or required.
+
+### Correction
+
+`atlas/conversation/task_intake.py` only: a `_word_cue_present` helper, the
+per-cue negation rule, and the development decision moved ahead of the
+investigation/planning checks (its duplicate later evaluation removed). No new
+module, classifier, router, state, memory or authority.
+
+### Verification
+
+Intake-level: the original request and 12 controlled variants/negatives all
+classify correctly, including the plain-investigation and
+investigation-first-compound controls. Focused suites: 102 passed
+(`test_conversation_development_intake.py`, `test_conversation_task_intake.py`);
+broader conversation/intake regressions 327 passed with only the 3
+already-documented pre-existing acknowledgement-surface failures (re-verified
+against a pristine HEAD extraction).
+
+### Residual, deliberately NOT changed
+
+On the real kernel the turn is still answered by the EXISTING multi-intent route
+(`ConversationService._maybe_handle_multi_intent`, which runs before the
+development route and delegates the "First investigate …" clause to the same
+authoritative per-clause handler). That is the documented Step 6 behaviour — a
+compound turn is answered clause-by-clause rather than as one development need —
+so the malformed-looking subject still appears in the delegated clause label.
+Changing it would mean re-ordering the multi-intent cascade relative to the
+governed development path, which is an architectural precedence decision beyond
+this bounded correction. It is recorded as an observed limitation, not a defect
+fixed here. Critically, the malformed label is now COSMETIC: the read-only
+investigation still ran, no approval was created, nothing was executed, and the
+`no_modification` stance was honoured.

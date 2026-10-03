@@ -1345,6 +1345,22 @@ P18 — Controlled Autonomy.
   "those 24 capabilities" case is a SEPARATE contextual-reference limitation and
   remains an observed, unresolved gap. Details in
   `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §6.
+- **Live trial — compound development-request intake gap (CLOSED).** A real
+  self-directed request that carried BOTH a development ask and an
+  investigation clause plus a "Do not modify anything yet" constraint was claimed
+  as an investigation over a malformed subject. Two bounded defects in
+  `atlas/conversation/task_intake.py`: negation was applied per utterance (one
+  negated "modify" cancelled an un-negated "add"), and the investigation branch
+  was evaluated before the development evidence. Both corrected in place: a
+  request is negated only when EVERY development cue is negated, and the existing
+  L3 development rule now applies before the investigation/planning checks.
+  Investigation-first compounds, plain investigation, and all existing negatives
+  are unchanged; contextual reference was NOT a cause (the single-sentence form
+  already routed correctly), and no discourse/memory machinery was added. The
+  EXISTING multi-intent route still answers this compound turn clause-by-clause
+  before the development route, so a cosmetic malformed clause label can still
+  appear; that precedence question is recorded as an observed limitation, not
+  fixed here. Details in `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §7.
 - **C4.2** — deterministic repository impact analysis and conversational
   exposure (`atlas/conversation/repository_impact.py`), reusing
   `RepositoryMap.dependencies_of/dependents_of/impact_set`; full
