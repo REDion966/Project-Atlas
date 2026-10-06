@@ -368,3 +368,180 @@ class TestPreviousMilestoneUnchanged:
         result = kernel.run_development_driver("Improve the investigation capability.")
         assert result.terminal.value == "already_supported"
         assert kernel.pending_promotion_reviews() == []
+
+
+# ---------------------------------------------------------------------------
+# K. Target anchoring — the declared target wins over an unrelated BM25 hit
+# ---------------------------------------------------------------------------
+
+#: A realistic natural-language request whose BM25 ranking puts an UNRELATED
+#: module first (``atlas.understanding.storage_interface``, matched on
+#: "interface"/"existing") while the declared target is the development-gap
+#: module. This is the exact measured defect.
+LONG_REQUEST = (
+    "Modify the target component while preserving its existing public "
+    "interface and behavior, and make sure the relevant tests continue to pass."
+)
+
+
+def _long_need(target=TARGET):
+    return DevelopmentNeed(
+        title=LONG_REQUEST,
+        summary=LONG_REQUEST,
+        target_components=(target,) if target is not None else (),
+    )
+
+
+def _ranked_modules(context):
+    return [
+        line.split(" ", 2)[2].split(" (", 1)[0]
+        for line in context.splitlines()
+        if line.startswith("- ")
+    ]
+
+
+def _listed_tests(context):
+    return [
+        line.strip()
+        for line in context.splitlines()
+        if line.startswith("        tests/")
+    ]
+
+
+def _boundary_line(context):
+    return next(
+        (line.strip() for line in context.splitlines() if "declared boundary for" in line),
+        "",
+    )
+
+
+class TestTargetAnchoring:
+    def test_unrelated_top_rank_does_not_capture_the_projection(
+        self, repository_map, kernel
+    ):
+        """The measured defect: declared target must win over BM25 rank 1."""
+        context = _context(
+            repository_map, kernel.architecture_model(), _long_need()
+        )
+        ranked = _ranked_modules(context)
+        assert ranked, "the ranked evidence list must still be present"
+        # The premise of the defect: an unrelated module IS ranked first.
+        assert ranked[0] != TARGET
+
+        listed = _listed_tests(context)
+        assert listed, "the target's relevant tests must still be projected"
+        expected = set(repository_map.tests_for_module(TARGET, limit=1000))
+        assert set(listed) <= expected, (
+            "projected tests must belong to the declared target, "
+            f"got {listed[:3]}"
+        )
+
+        # The boundary is the declared target's owner, not the rank-1 module's.
+        from atlas.evolution.model_assisted_supplier import _owning_component
+
+        target_owner = _owning_component(kernel.architecture_model(), TARGET)
+        unrelated_owner = _owning_component(kernel.architecture_model(), ranked[0])
+        boundary = _boundary_line(context)
+        assert boundary
+        if target_owner is not None and str(target_owner.name):
+            assert str(target_owner.name) in boundary
+        if (
+            unrelated_owner is not None
+            and str(unrelated_owner.name)
+            and str(unrelated_owner.name) != str(getattr(target_owner, "name", ""))
+        ):
+            assert str(unrelated_owner.name) not in boundary
+
+    def test_declared_target_ranked_first_is_unchanged(
+        self, repository_map, kernel
+    ):
+        context = _context(
+            repository_map, kernel.architecture_model(),
+            _need(),  # short title naming the target -> target ranks first
+        )
+        ranked = _ranked_modules(context)
+        assert ranked[0] == TARGET
+        listed = _listed_tests(context)
+        expected = set(repository_map.tests_for_module(TARGET, limit=1000))
+        assert listed and set(listed) <= expected
+
+    def test_unresolvable_declared_target_falls_back_to_ranking(
+        self, repository_map, kernel
+    ):
+        context = _context(
+            repository_map,
+            kernel.architecture_model(),
+            _long_need(target="no_such_declared_target_zzz"),
+        )
+        ranked = _ranked_modules(context)
+        assert ranked
+        # The fallback is the ranked evidence, and it is still real evidence.
+        listed = _listed_tests(context)
+        known = {module.path for module in repository_map.modules}
+        assert all(path in known for path in listed)
+
+    def test_no_declared_target_uses_ranked_evidence(self, repository_map, kernel):
+        context = _context(
+            repository_map, kernel.architecture_model(), _long_need(target=None)
+        )
+        ranked = _ranked_modules(context)
+        assert ranked
+        listed = _listed_tests(context)
+        known = {module.path for module in repository_map.modules}
+        assert all(path in known for path in listed)
+
+    def test_no_rankable_evidence_omits_the_blocks_entirely(self):
+        class _EmptyMap:
+            def rank_modules(self, query, limit=10):
+                return ()
+
+            def symbols_in_module(self, module):
+                return ()
+
+            modules: tuple = ()
+
+        context = ModelAssistedChangeSupplier(
+            authoring_model=lambda p: "{}", repository_map=_EmptyMap()
+        )._build_authoring_context(_long_need())
+        assert context == ""
+        assert "declared boundary for" not in context
+        assert "relevant test modules" not in context
+
+    def test_unresolvable_declared_target_helper_returns_none(self, repository_map):
+        from atlas.evolution.model_assisted_supplier import _declared_target_module
+
+        index = {module.module: module for module in repository_map.modules}
+        assert _declared_target_module(_long_need(), index) == TARGET
+        assert _declared_target_module(_long_need(target=TARGET_PATH), index) == TARGET
+        assert _declared_target_module(
+            _long_need(target="not_a_module"), index
+        ) is None
+        assert _declared_target_module(_long_need(target=""), index) is None
+        assert _declared_target_module(_long_need(target=None), index) is None
+
+    def test_anchoring_is_deterministic(self, repository_map, kernel):
+        architecture = kernel.architecture_model()
+        first = _context(repository_map, architecture, _long_need())
+        second = _context(repository_map, architecture, _long_need())
+        assert first == second
+        assert _listed_tests(first) == _listed_tests(second)
+
+    def test_source_import_and_symbol_evidence_is_preserved_for_the_long_request(
+        self, repository_map, kernel
+    ):
+        context = _context(repository_map, kernel.architecture_model(), _long_need())
+        assert "Repository context" in context
+        assert "    source" in context
+        assert "    symbols:" in context
+        assert "internal imports:" in context
+
+    def test_test_selection_is_unaffected_by_anchoring(self, repository_map):
+        derived = list(repository_map.tests_for_module(TARGET))
+        merged = select_relevant_tests(
+            [TARGET_PATH], [], max_tests=20, derived_tests=derived
+        )
+        assert merged == tuple(sorted(derived))
+        assert select_relevant_tests(
+            ["atlas/conversation/history.py"], ["tests/test_conversation_history.py"]
+        ) == ("tests/test_conversation_history.py",)
+

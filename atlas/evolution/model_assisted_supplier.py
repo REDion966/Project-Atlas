@@ -119,6 +119,33 @@ def _prefer_production(ranked: object) -> tuple:
     return tuple(production) + tuple(tests)
 
 
+def _declared_target_module(need: DevelopmentNeed, module_index: dict) -> str | None:
+    """The DECLARED development target, resolved to a real repository module.
+
+    ``DevelopmentNeed.target_components`` is Atlas's authoritative statement of
+    what the request is about, so it — not the BM25 top hit — decides which
+    module the projected boundary and relevant-test evidence describes. Each
+    declared value is accepted only when it names a module this repository
+    actually contains: an exact dotted module name, or a ``.py`` path converted
+    to one. Resolution is ordered by the declared list and fully deterministic;
+    nothing is guessed, so an unresolvable declaration yields ``None`` and the
+    caller falls back to the ranked evidence (or omits the block).
+    """
+    if not module_index:
+        return None
+    for raw in getattr(need, "target_components", ()) or ():
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        candidate = text
+        if candidate.lower().endswith(".py"):
+            candidate = candidate[:-3].replace("\\", "/").replace("/", ".")
+        candidate = candidate.strip(".")
+        if candidate in module_index:
+            return candidate
+    return None
+
+
 def _owning_component(architecture_model: Any, module: str) -> Any | None:
     """The registered component that owns ``module``, or ``None``.
 
@@ -380,23 +407,33 @@ class ModelAssistedChangeSupplier:
                 if signature:
                     line += f"{signature[:MAX_CONTEXT_SIGNATURE_CHARS]}"
                 lines.append(line)
-        lines.extend(self._target_boundary_lines(ranked[0]))
+        anchor = _declared_target_module(need, module_index)
+        if anchor is None:
+            # Ranking is fallback ONLY: it is used when the request declared no
+            # resolvable target, never to override one it did declare.
+            anchor = str(getattr(ranked[0], "module", "") or "")
+        if anchor:
+            lines.extend(self._target_boundary_lines(anchor))
         if len(lines) == 1:
             return ""
         return "\n".join(lines)
 
-    def _target_boundary_lines(self, entry: Any) -> list[str]:
-        """Bounded DECLARED-BOUNDARY and RELEVANT-TEST evidence for the target.
+    def _target_boundary_lines(self, module: str) -> list[str]:
+        """Bounded DECLARED-BOUNDARY and RELEVANT-TEST evidence for ``module``.
 
-        Both are deterministic PROJECTIONS of data Atlas already holds — the
-        owning component's declared boundary from the architecture model, and
-        the test modules that actually import the target from the repository
+        ``module`` is the DECLARED development target when one resolves — not
+        merely the highest-ranked module — so the projected evidence always
+        describes the module the request is actually about.
+
+        Both blocks are deterministic PROJECTIONS of data Atlas already holds —
+        the owning component's declared boundary from the architecture model,
+        and the test modules that actually import the target from the repository
         map's reverse-import index. Nothing is inferred, nothing is invented,
         and an unresolvable component (or an absent map/model) simply omits its
         block rather than guessing.
         """
         lines: list[str] = []
-        module = str(getattr(entry, "module", "") or "")
+        module = str(module or "")
         if not module:
             return lines
 
