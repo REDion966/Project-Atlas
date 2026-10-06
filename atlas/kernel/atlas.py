@@ -476,6 +476,8 @@ class Atlas:
         #: STEP 1 — the language foundation, projected on first use from the
         #: EXISTING authoritative vocabularies (cache-only; never a scan).
         self._language_service: Any | None = None
+        #: STEP 2 — the change-author router (cache-only; deterministic-first).
+        self._change_author_router: Any | None = None
 
         # --- Stage F: latest bounded research evidence (cache-only) ---
         self._last_research_evidence: dict | None = None
@@ -6351,6 +6353,41 @@ class Atlas:
             capability_model=self.capability_model(),
             repository_map=self._repository_map,
         )
+
+    def change_author_router(self):
+        """The STEP 2 change-author router over the EXISTING authors.
+
+        Deterministic-first and cache-only. The optional specialist author is
+        wired ONLY when ``[development] model_assisted_authoring`` is explicitly
+        enabled, exactly like the existing composite; with it off the router is
+        fully deterministic. Routing decides WHO authors — it grants no
+        authority, and every draft it returns still passes the unchanged
+        ``CodeChangeSet`` validation, sandbox, verification, approval and
+        promotion boundaries.
+        """
+        cached = self._change_author_router
+        if cached is not None:
+            return cached
+        from atlas.evolution.change_author_router import ChangeAuthorRouter
+
+        specialist = None
+        if bool(
+            self._config.get("development", "model_assisted_authoring", default=False)
+        ):
+            try:
+                from atlas.evolution.model_assisted_supplier import (
+                    ModelAssistedChangeSupplier,
+                )
+
+                specialist = ModelAssistedChangeSupplier(
+                    authoring_model=self._model_assisted_authoring_model,
+                    repository_map=self._repository_map,
+                    architecture_model=self._architecture_model_snapshot(),
+                )
+            except Exception:
+                specialist = None
+        self._change_author_router = ChangeAuthorRouter(specialist=specialist)
+        return self._change_author_router
 
     def language_service(self):
         """The language foundation, projected from Atlas's OWN vocabularies.

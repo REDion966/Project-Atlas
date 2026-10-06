@@ -466,6 +466,21 @@ class ModelAssistedChangeSupplier:
                     )
 
         repository_map = self._repository_map
+        dependents_of = getattr(repository_map, "dependents_of", None)
+        if callable(dependents_of):
+            # Reverse-dependency evidence: who imports the target. A change to the
+            # target is a change to THEM, so this is the evidence a
+            # compatibility-preserving edit needs. Bounded and deterministic.
+            try:
+                dependents = tuple(
+                    name for name in (dependents_of(module) or ())
+                    if not str(name).startswith("tests.")
+                )[:MAX_CONTEXT_IMPORTS]
+            except Exception:
+                dependents = ()
+            if dependents:
+                lines.append("    imported by (change impact): " + ", ".join(dependents))
+
         tests_for_module = getattr(repository_map, "tests_for_module", None)
         if callable(tests_for_module):
             try:
