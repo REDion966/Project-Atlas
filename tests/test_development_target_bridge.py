@@ -131,6 +131,36 @@ class TestTargetBridge:
             "atlas.evolution.development_gap",
         )
 
+    def test_an_explicitly_dotted_target_resolves(self, kernel):
+        """Identifier normalization is SYMMETRIC (defect fixed during investigation).
+
+        Module names are split on "_" before comparison, so the request must be
+        split the same way — otherwise a target the user named EXACTLY
+        ("atlas.evolution.failure_classification") could never match.
+        """
+        text = (
+            "Change atlas.evolution.failure_classification.classify_failure so that "
+            "it rejects empty input while preserving its signature."
+        )
+        assert kernel._development_target_components(text) == (
+            "atlas.evolution.failure_classification",
+        )
+
+    def test_underscored_and_slashed_forms_agree(self, kernel):
+        for text in (
+            "Improve atlas.evolution.development_gap.",
+            "Improve atlas/evolution/development_gap.py.",
+            "Improve the development_gap module.",
+        ):
+            assert kernel._development_target_components(text)[:1] in (
+                ("atlas.evolution.development_gap",),
+                (),
+            ), text
+        # The underscored and plain forms resolve identically.
+        assert kernel._development_target_components("Improve development_gap.") == (
+            "atlas.evolution.development_gap",
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. Integration: the need and the authoring context

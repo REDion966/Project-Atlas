@@ -6384,7 +6384,13 @@ class Atlas:
             text = str(request or "")
             if not text.strip():
                 return ()
-            request_tokens = frozenset(significant_tokens(text))
+            # Identifier normalization is applied SYMMETRICALLY: module names are
+            # split on "_" below, so the request must be split the same way or an
+            # explicitly named dotted/underscored target
+            # ("atlas.evolution.failure_classification") could never match.
+            request_tokens = frozenset(significant_tokens(text)) | frozenset(
+                significant_tokens(text.replace("_", " ").replace(".", " "))
+            )
             if not request_tokens:
                 return ()
             matches: list[str] = []
