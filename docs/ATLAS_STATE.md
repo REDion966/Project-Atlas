@@ -5961,6 +5961,53 @@ tests pass with 0 failures, all 22 pre-existing baseline failures unchanged.
 
 ---
 
+## 34.9 Development capability adjudication — corrected
+
+`assess_development_gap` decides whether a development request is already
+supported, a missing capability, or missing knowledge. Two bounded defects made
+that adjudication wrong for realistic requests.
+
+**Defect 1 — wrong capability-name source.** The kernel's development-driver wiring
+passed `_registered_capability_names()`, which reads the EXECUTION registry
+(`reasoning.*`, `toolchain.*`, `memory.*` — 24 internal handler names). That set
+omits **every** user-facing capability (`investigate`, `plan`, `verify`, `report`)
+while containing bare generic words (`conversation`, `analysis`). Consequently
+"Improve the investigation capability." fell through to `MISSING_KNOWLEDGE` and
+was sent to research even though investigation is a registered, wired capability.
+
+**Defect 2 — a generic token could decide equivalence.** `_is_equivalence_evidence`
+required only `overlap >= ceil(request_tokens / 3)`, which is **one token** for a
+short request. A single incidental generic word therefore established
+`ALREADY_SUPPORTED` — "Investigate the conversation service." matched a capability
+named `conversation` rather than the operation the user asked for.
+
+**Correction (bounded, Atlas-native).** The adjudication vocabulary is now the
+EXISTING operational capability catalogue
+(`atlas.self_knowledge.operational_capabilities`), which the unified capability
+model already recognises as `CapabilityKind.OPERATIONAL` — "something Atlas can
+actually be asked to do, grounded in an existing conversation route". A new
+fail-soft `Atlas._development_capability_names()` returns each capability's
+DECLARED names (id + aliases), so "investigation" resolves to the existing
+`investigate` capability. `_registered_capability_names()` is unchanged and still
+serves its other callers. `_is_equivalence_evidence` now additionally requires the
+overlap to contain a **distinguishing** token — one outside the small, closed
+`GENERIC_CAPABILITY_TOKENS` set — so a generic word can never by itself establish
+equivalence. No new `DevelopmentGapKind`, no new `DevelopmentDriveTerminal`, no
+new registry, and no change to governance, approval, sandbox, verification,
+promotion or activation.
+
+**Measured (real kernel, model OFF).** "Improve the investigation capability." →
+`already_supported`, `matched=('investigation',)` (was `missing_knowledge`);
+"Investigate the conversation service." → `already_supported`,
+`matched=('investigate',)` (no longer the generic `conversation`); "Improve the
+plan/verify/report capability." → `already_supported` on the real capability;
+"Export the conversation history as markdown." and "Check the conversation
+service." remain `missing_knowledge`; the driver terminal is `already_supported`
+with `pending_promotion_reviews() == []` and HEAD unchanged. Every previously
+pinned behaviour is preserved. 26 new focused tests plus 502 regression tests pass
+with 0 failures; the 7 failures in the wider development set are pre-existing and
+reproduce identically on pristine `64856e3`.
+
 ## 35. Current Position & Next Direction (evidence-driven — no new phase)
 
 **Position.** Phase C (C0 → C9) is frozen and has reached its evidence boundary:

@@ -59,6 +59,41 @@ MAX_SUBJECT_PROBES: int = 3
 #: "reports"), so this keeps an unknown entity from being read as a known one.
 MIN_SUBJECT_SHARED_TOKENS: int = 3
 
+#: Non-distinguishing tokens of the capability vocabulary.
+#:
+#: A capability match must rest on a token that IDENTIFIES the capability, never
+#: on a word that merely talks about capabilities in general or that only ever
+#: appears as a structural qualifier inside a capability name. Without this, the
+#: share rule below accepts a single generic word on a short request and reports
+#: a capability Atlas does not actually have — "Investigate the conversation
+#: service." matching a capability named ``conversation`` rather than the
+#: operation the user asked for, or "Improve the investigation capability."
+#: matching ``capability_detail`` on the word "capability".
+#:
+#: The set is deliberately small and closed: it removes generic vocabulary, it
+#: never adds a capability, and it can only make a match HARDER — an unmatched
+#: request falls through to the existing MISSING_* branches (fail-closed).
+GENERIC_CAPABILITY_TOKENS: frozenset[str] = frozenset(
+    {
+        "capability",
+        "capabilities",
+        "conversation",
+        "service",
+        "system",
+        "analysis",
+        "support",
+        "task",
+        "model",
+        "chat",
+        "operation",
+        # Structural qualifiers: these only ever appear as the qualifier inside a
+        # capability-vocabulary name (``capability_detail``), so they identify no
+        # capability on their own.
+        "detail",
+        "details",
+    }
+)
+
 
 class DevelopmentGapKind(str, Enum):
     """The adjudicated nature of a development request."""
@@ -99,13 +134,25 @@ def _capability_tokens(name: Any) -> set[str]:
 def _is_equivalence_evidence(overlap: set[str], request_token_count: int) -> bool:
     """Whether a capability-name ``overlap`` is strong enough evidence.
 
-    Deterministic and bounded: the shared tokens must account for at least
-    ``MIN_OVERLAP_NUMERATOR / MIN_OVERLAP_DENOMINATOR`` of the request's
-    significant tokens. This keeps genuine matches ("memory search" against
-    ``memory_search``) while refusing to read one incidental shared word inside
-    a longer request as functional equivalence.
+    Deterministic and bounded. TWO conditions must both hold:
+
+    1. **A distinguishing token.** The overlap must contain at least one token
+       that actually IDENTIFIES the capability — a token that is not in
+       :data:`GENERIC_CAPABILITY_TOKENS`. Lexical overlap is necessary but never
+       sufficient on its own, so a generic word ("capability", "conversation",
+       "service") can never by itself establish functional equivalence. This is
+       what keeps a short request from being read as "Atlas already does this"
+       merely because it mentions capabilities or a service.
+    2. **A substantial share.** The shared tokens must account for at least
+       ``MIN_OVERLAP_NUMERATOR / MIN_OVERLAP_DENOMINATOR`` of the request's
+       significant tokens. This keeps genuine matches ("memory search" against
+       ``memory_search``, "run the research pipeline" against ``research.query``)
+       while refusing to read one incidental shared word inside a longer request
+       as functional equivalence.
     """
     if not overlap:
+        return False
+    if not (overlap - GENERIC_CAPABILITY_TOKENS):
         return False
     return (
         len(overlap) * MIN_OVERLAP_DENOMINATOR

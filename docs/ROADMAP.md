@@ -367,6 +367,26 @@ disagreements install nothing and preserve the active objective; a genuinely new
 correction still applies. 549 correction/engine/intent tests pass with 0 failures.
 Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §11.
 
+**Development capability adjudication — CORRECTED (evidence, NOT a phase;
+2026-10-06).** Two bounded defects made `assess_development_gap` wrong for
+realistic development requests: (1) the driver wiring supplied the EXECUTION
+registry's 24 internal handler names, which omit every user-facing capability
+(`investigate`, `plan`, `verify`, `report`) while containing bare generic words
+(`conversation`, `analysis`), so "Improve the investigation capability." fell
+through to `MISSING_KNOWLEDGE` and was sent to research; (2) the equivalence rule
+accepted a single generic token on a short request, so "Investigate the
+conversation service." matched a capability named `conversation` rather than the
+operation asked for. The adjudication vocabulary is now the EXISTING operational
+capability catalogue (which the unified capability model already recognises as
+`CapabilityKind.OPERATIONAL`), exposed by a fail-soft
+`Atlas._development_capability_names()` returning id + declared aliases, and
+`_is_equivalence_evidence` additionally requires a **distinguishing** token outside
+a small closed generic-word set. No new `DevelopmentGapKind`, no new
+`DevelopmentDriveTerminal`, no new registry; governance, approval, sandbox,
+verification, promotion and activation are untouched. 26 new focused tests plus
+502 regression tests pass with 0 failures; the 7 failures in the wider development
+set are pre-existing. Evidence: `docs/ATLAS_STATE.md` §34.9.
+
 ---
 
 ## Current position and next direction — evidence-driven development

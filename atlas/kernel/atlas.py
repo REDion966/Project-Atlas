@@ -3084,6 +3084,44 @@ class Atlas:
             pass
         return tuple(name for name in names if name)
 
+    def _development_capability_names(self) -> tuple[str, ...]:
+        """The capability vocabulary for DEVELOPMENT-GAP adjudication.
+
+        Deterministic, read-only and fail-soft (``()`` on any failure, which the
+        caller treats as "no capability matched" — the fail-closed direction).
+
+        The capabilities Atlas can actually be asked to do are the OPERATIONAL
+        capabilities (``atlas.self_knowledge.operational_capabilities``), which
+        the unified capability model already recognises as
+        ``CapabilityKind.OPERATIONAL`` — "something Atlas can actually be asked
+        to do, grounded in an existing conversation route". Each capability
+        contributes its DECLARED names: the id and its declared aliases, so a
+        user phrasing such as "investigation" resolves to the existing
+        ``investigate`` capability.
+
+        The EXECUTION-registry names are deliberately NOT used here. They are
+        internal handlers (``reasoning.*``, ``toolchain.*``, ``memory.*``), they
+        omit every user-facing capability (``investigate``, ``plan``, ``verify``,
+        ``report``), and they contain bare generic words (``conversation``,
+        ``analysis``) that let ordinary request vocabulary decide that a request
+        was already supported. This uses the EXISTING operational catalogue
+        rather than a new parallel registry.
+        """
+        names: list[str] = []
+        try:
+            from atlas.self_knowledge.operational_capabilities import (
+                all_operational_capabilities,
+            )
+
+            for capability in all_operational_capabilities():
+                for surface in (capability.id, *capability.aliases):
+                    text = str(surface or "").strip()
+                    if text and text not in names:
+                        names.append(text)
+        except Exception:
+            return ()
+        return tuple(names)
+
     def _pending_approval_request_id(self, proposal_id: str) -> str:
         """The EXISTING ApprovalManager's pending request id for ``proposal_id``.
 
@@ -3668,7 +3706,7 @@ class Atlas:
         kernel = self
 
         def _capability_names() -> tuple[str, ...]:
-            return kernel._registered_capability_names()
+            return kernel._development_capability_names()
 
         def _knowledge_retriever():
             try:
