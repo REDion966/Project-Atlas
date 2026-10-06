@@ -268,6 +268,191 @@ corrected in place; investigation-first compounds, plain investigation and all
 existing negatives are unchanged, and no new module, state, memory or authority
 was added. Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §7.
 
+**Open Step 10/11 failure set — RESOLVED (evidence, NOT a phase).** The five
+real-kernel failures recorded as "pre-existing" above were two independent
+problems, both now closed. (1) The Step 10/11 real-kernel tests asserted an
+orchestration contract that the newer compound-clause delegation decision
+(`95a18d2`) deliberately superseded; the OWNER adjudicated that **per-clause
+delegation is authoritative**, and the four tests were rewritten to assert that
+contract *more* strictly (both lifecycles recorded, user order preserved, nothing
+unhandled, orchestration bridge explicitly not used) — no production code changed
+and no test was weakened. (2) `test_send_stream_parity` was a genuine
+determinism defect: the investigation proposal id embedded `datetime.now()`, so
+identical evidence produced different conversational text on every run. It is now
+derived deterministically from the evidence the proposal represents. Measured
+provenance (the assertions were never reliably green, even at their own commit)
+and full evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §8. Recorded
+remaining gap: the sibling `DEV-CONV-` / `PROP-` id generators share the pattern
+but are not on the failing path, so they were deliberately not changed.
+
+**Model-OFF live interaction trial — Gap 1 (demonstrative correction) CLOSED
+(evidence, NOT a phase).** A fresh live trial through `python main.py` with model
+assistance OFF found that `"I did not mean that."` installed the word "that" as a
+new literal subject and superseded the retained investigation. Root cause read from
+the implementation: `corrected_subject()` extracts the post-marker tail with no
+referent-type filter, and the correction consumer rejected a reading only when it
+was empty or matched the ordinal pattern. Atlas already modelled the case — the
+`SemanticFrame.reference` signal was already computed and carried end to end, and
+the consumer simply ignored it — so **no `semantic_frame.py` change was needed**.
+One bounded guard in `_maybe_handle_correction` reusing the EXISTING canonical
+`REFERENCE_WORDS` now defers such a reading to Atlas's existing fail-closed
+reference/ordinal surfaces: `conversation_service.py` **+14 / −1**, no new module,
+state, vocabulary, or authority, and no external technology (every needed capability
+already existed). Verified: 31 new regression tests plus 400 correction/reference,
+356 broader-conversation and 500 wider conversation/investigation tests — **1,287
+passed, 0 failed**; re-verified 399 passed; deterministic across 5 fresh runs per
+case; and confirmed end-to-end through the real CLI with the named correction and
+every control unchanged. Two findings are recorded and **not** implemented: a
+discourse marker over-split as a separate intent (`"Okay, investigate …"`) and
+honest decline of Romanized-Bangla, which is **not** treated as a capability gap.
+Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §9.
+
+**Gap 2 (discourse-marker over-split) CLOSED (evidence, NOT a phase).** The
+acknowledgement-led form `"Okay, investigate the remaining problem."` was
+represented as two intents because `_operation_comma_index` treats a bare comma as
+a compound-intent boundary when both sides name a bounded operation, and
+`interpret("Okay")`/`interpret("Hello")` already return the operations
+`acknowledge`/`greet`. That guard is load-bearing (it is what keeps an enumerative
+subject unsplit), so the correction does not weaken it: it now skips a HEAD that
+Atlas's OWN whole-turn classification already reads as a conversational marker
+(`acknowledgement-class` / `greeting-class` evidence), reusing existing concepts
+rather than introducing any vocabulary. Change is confined to
+`atlas/conversation/semantic_frame.py` — a `_is_discourse_marker` helper plus one
+guard — with no new module, parser, vocabulary, conversation state, dialogue-act
+system, semantic router, coreference system, or model. Verified: 39 new regression
+tests, 497 intent/decomposition tests (1 pre-existing skip) and 775 broader
+conversation tests, all passing with 0 failures, and confirmed end to end through
+`python main.py` with model assistance OFF — the discourse-led request is answered
+as one investigation, genuine compounds still report "I answered 2 of 2", the
+enumerative-subject guard still holds, and standalone acknowledgements are unchanged.
+Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §9.4.
+
+**Goal-2 bounded source-aware authoring context (DELIVERED — evidence, NOT a phase;
+2026-10-05).** The completed authoring evaluation measured a structural mismatch:
+`CodeChangeSet.content` asks a provider for FULL replacement content, but the
+authoring context contained only module paths and symbol/signature structure —
+**0 implementation source bodies**, verified as 0/6 distinctive lines from the real
+88-line `atlas/conversation/history.py`. The gap was closed by retaining, in
+`ModuleInfo`, a bounded `source_excerpt` taken from the file text the repository-map
+builder **already read** to parse the AST — so no additional I/O, parser, dependency,
+index, embedding or retrieval architecture was introduced. The context now emits
+bounded source (explicitly labelled when truncated), bounded internal imports, and the
+existing signatures, under a global source budget spent in ranked order with the
+declared target moved first. Measured after: `history.py` is now the **complete file**
+(12/12 evenly-sampled distinctive lines, was 0/6) and `memory_service.py` likewise;
+medium modules (739 / 582 lines) get a bounded excerpt plus the full signature list
+(3/12); the 8,675-line `conversation_service.py` gets a capped 4,000-char excerpt
+(1/12). **Structural limitation, stated explicitly:** bounded source context cannot
+reconstruct a very large module under the existing full-file-replacement contract —
+the representation is deliberately NOT redesigned here. Provider stays OFF by
+default and OFF remains fully isolated; `CodeChangeSet` validation, `PromotionGate`,
+approval, sandbox and governance are untouched. Evidence:
+`docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §10.
+
+**Correction-state integrity (DELIVERED — evidence, NOT a phase; 2026-10-06).** Final
+conversation capability of this work. A bare disagreement after any prior correction
+("I meant the cache layer." then "Sorry, that's wrong.") REPLAYED the superseded
+correction indefinitely, and a meta-correction ("That's not what I meant.") installed
+the WHOLE utterance as the corrected subject, overwriting the active objective. Two
+coordinated defects implemented one missing rule: a correction installs — and is
+consumed as — a subject only when the turn itself names a bounded replacement
+subject. The consumer now reads the turn's OWN `semantic_intake.corrections` (an
+existing per-turn projection) rather than the accumulated `state.corrections`
+history, and the engine no longer falls back to the whole utterance, additionally
+rejecting a subject made entirely of reference words via the EXISTING
+`REFERENCE_WORDS` predicate. No new state, carrier, vocabulary list, parser, module,
+model or authority; no sentence-specific case. Real-kernel model-OFF evidence: the
+stale acknowledgement is emitted exactly once and never replayed; bare
+disagreements install nothing and preserve the active objective; a genuinely new
+correction still applies. 549 correction/engine/intent tests pass with 0 failures.
+Evidence: `docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §11.
+
+---
+
+## Current position and next direction — evidence-driven development
+
+### Current position
+
+Phase C (C0 → C9) remains **frozen and authoritative** and is not reopened,
+reordered, renamed or extended. It has reached its established evidence boundary:
+**C0–C7 COMPLETE**, and **C8 / C9 closed with no evidence-backed gap** (see the
+Phase C status table in `docs/ATLAS_STATE.md` §31). The **C3 principle is in force
+for all ongoing work** — *from C3 onward, development must be driven by validated
+real-world capability gaps*. The conversational and authoring boundary reached in
+this phase is closed and verified; the conversation layer is **not** reopened for
+open-ended sentence-level bug hunting. See
+`docs/DEVELOPMENT_INTERFACE_PILOT_EVIDENCE.md` §9–§11.
+
+**No new phase is defined or authorized.** No C10, no G4, no L11, and no further
+mandatory phase may be inferred from this document or from any research material.
+
+### The two strategic goals
+
+* **Goal A — broad natural human conversation.** Atlas should increasingly understand
+  and route realistic natural language: casual conversation, questions, commands,
+  multi-turn follow-ups, corrections, references, compound requests, investigations
+  and development requests, and eventually broad/open-ended understanding.
+* **Goal B — self-understanding and eventual self-development.** Atlas should
+  increasingly understand its own architecture, contracts and capability model, and
+  eventually develop and evolve itself through the governed process it already
+  enforces: research → design → implementation → verification → OWNER approval →
+  promotion.
+
+Both goals advance **only** through validated capability gaps. Neither is a
+scheduling commitment, and neither authorizes new mandatory architecture.
+
+### Research context — a research inventory is NOT an implementation checklist
+
+Consolidated external research (previously performed with four independent research
+models and repository/web research) produced an **inventory of candidate mechanisms**
+that *may* be relevant to Goals A and B. Recorded candidates include: explicit
+information state; coreference/reference resolution; structural repository
+understanding and ranked repository context; Aider Repo Map principles; Tree-sitter;
+ast-grep; LibCST; surgical/structural code modification; structured model outputs;
+targeted verification; mutation testing; fault localization; worktree isolation;
+stronger sandboxing; durable task state / task ledger; multilingual (incl.
+Romanized-Bangla) capability; specialized small models; and research-driven
+technology acquisition.
+
+**This inventory is context, not a plan.** It is deliberately recorded as a list of
+*candidates*, not as a backlog, dependency set, or approved direction. The three
+levels must not be conflated:
+
+1. **Research inventory** — things that exist and might help. No authority, no
+   obligation, no schedule.
+2. **Validated capability gap** — a gap demonstrated against the real Atlas with
+   reproducible evidence, and classified as a genuine capability (not vocabulary or
+   paraphrase) limitation.
+3. **Implementation requirement** — only a **validated gap**, separately authorized
+   by the OWNER, becomes work. An inventory item never becomes a requirement merely
+   because it was found.
+
+Correspondingly, no item above is installed, integrated, pinned or otherwise made a
+dependency by this document. Where a mechanism is used, Atlas prefers an
+Atlas-native implementation or an adaptation of the *principle*, and external
+projects and external AI models remain **optional tools/resources, never Atlas's
+core authority**.
+
+### Authorized sources and the evaluation loop
+
+Future research/evolution work may discover small, purpose-built mechanisms from
+authorized sources (the internet, GitHub, Hugging Face, technical documentation,
+papers, and other authorized repositories/resources). Discovery is followed by
+explicit evaluation, never by automatic adoption:
+
+> research → candidate discovery → candidate understanding → Atlas compatibility
+> analysis → dependency/security/license/performance analysis → controlled
+> experiment → baseline comparison → adapt the useful mechanism → Atlas-native
+> integration where practical → verification → evidence → **accept/reject decision**
+
+### Invariants that do not change
+
+Atlas remains **model-independent**, **deterministic-first**, **human-approved**
+(OWNER), **governed**, **sandbox-verified**, **fail-closed**, and
+**evidence-driven**, with external AI models and external projects as optional
+resources rather than authority. These are the same invariants recorded under
+**Boundaries (unchanged)** below and in `docs/ATLAS_STATE.md` §0, §16, §26, §32.7.
+
 ---
 
 ## Additive language roadmap — L0 → L10
@@ -348,14 +533,27 @@ in `docs/ATLAS_STATE.md` §32 (and §30 for conversational development intake).
   requires an explicit pipeline review).
 - Startup re-discovery of previously activated capabilities; durable
   (cross-process) promotion artifacts and authorizations.
-- WS3b (sandbox repository snapshot) and WS4 (deeper self-knowledge integration
-  into development reasoning).
+- WS3b (sandbox repository snapshot).
 - BootActivation re-verification semantics (owner decision pending).
 
 **DELIVERED (was deferred here):** conversational routing of
 `DEVELOPMENT_REQUEST`s through the `DevelopmentDriver` — implemented by
 target-state gate **G3** (see `docs/ATLAS_STATE.md` §33.3). The kernel API and
 `atlas postcore drive` remain the direct-evolution surfaces and are unchanged.
+
+**DELIVERED (was deferred here, corrected 2026-10-04):** WS4 — deeper
+self-knowledge integration into development reasoning. A read-only verification
+found WS4 already **implemented and kernel-wired**: the `DevelopmentPlanner`
+`architecture_model_provider` seam builds bounded, read-only architecture evidence
+for a plan's affected targets from Atlas's EXISTING authoritative sources, and the
+kernel wires it cache-only so it never triggers a scan. The evidence is advisory and
+can never authorize, execute, or promote, and no competing architecture authority was
+introduced. **Do not re-derive WS4 as missing work.** Two current limitations are
+recorded and NOT implemented: (1) the produced `architecture_evidence` is attached to
+plans but **not yet consumed by any planning decision** — `compute_decision_quality()`
+reads `planning_context` and `repository_validation` only; (2) `ArchitectureModel`
+carries no freshness/version/source-hash field, bounded today by the post-activation
+repository-map refresh. Details and evidence: `docs/ATLAS_STATE.md` §32.9.
 
 ---
 

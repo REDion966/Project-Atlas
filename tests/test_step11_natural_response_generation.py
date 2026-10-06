@@ -258,16 +258,34 @@ class TestRealKernel:
                 "Investigate the memory service and also research the knowledge decision service."
             )
             content = message.content
-            assert "Done. Steps completed: 2/2." in content
-            assert "- Investigate (memory service): completed" in content
-            assert "- Research (knowledge decision service): completed" in content
+            # Compound clause delegation is authoritative for this turn (see
+            # test_step10_multi_intent_multi_step.TestRealKernel): each clause is
+            # answered by the EXISTING authoritative handler a standalone turn
+            # uses, so there is no orchestration step report to realize. The Step
+            # 11 contract that still applies is the presentation one — a natural,
+            # truthful report that leaks no internal identifiers and answers every
+            # clause. The superseded "Done. Steps completed: 2/2." /
+            # orchestration.status assertions contradicted that decision.
+            metadata = message.metadata or {}
+            assert metadata.get("orchestration") is None
+            multi = metadata["multi_intent"]
+            assert multi["unhandled"] == []
+            assert len(multi["handled"]) == 2
+
+            # Both clauses are genuinely answered.
+            assert "I answered 2 of 2" in content
+            assert "Investigate the memory service" in content
+            assert "knowledge decision service" in content
             # No internal implementation detail leaks.
             assert "step-0000" not in content
             assert "Executed as" not in content
+            # The result is presented, not summarized away.
+            assert "## Investigation" in content
             # Audit metadata is intact.
-            assert message.metadata["orchestration"]["status"] == "completed"
-            assert len(message.metadata["orchestration"]["steps"]) == 2
-            assert message.metadata["multi_step"]["ordered"] is False
+            state = atlas._conversation.state_manager.state
+            assert state.last_operation.kind == "investigation_request"
+            assert bool(state.latest_result) is True
+            assert bool(state.last_knowledge) is True
         finally:
             atlas.shutdown()
 
@@ -278,8 +296,14 @@ class TestRealKernel:
                 "First investigate the storage layer, then research the knowledge decision service."
             )
             content = message.content
-            assert content.index("- Investigate") < content.index("- Research (knowledge")
-            assert message.metadata["multi_step"]["ordered"] is True
+            # The user's explicit "first ... then ..." order is preserved in the
+            # report, and the investigation clause is presented before research.
+            assert content.index("First investigate the storage layer") < content.index(
+                "knowledge decision service"
+            )
+            multi = (message.metadata or {})["multi_intent"]
+            assert multi["unhandled"] == []
+            assert multi["handled"][0].lower().startswith("first investigate")
         finally:
             atlas.shutdown()
 

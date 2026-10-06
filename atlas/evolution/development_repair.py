@@ -78,6 +78,10 @@ class RepairChangeSupplier:
         repair_model: Optional duck-typed callable ``prompt -> str|dict|AIResponse``
             used ONLY to author a corrective change after a failure. ``None``
             (the default) disables repair entirely.
+        repository_map: Optional read-only ``RepositoryMap``-like object used to
+            build BOUNDED, deterministically-ranked repository context for the
+            repair prompt. Optional and evidence-only: with no map the prompt is
+            byte-identical to before.
     """
 
     def __init__(
@@ -85,10 +89,14 @@ class RepairChangeSupplier:
         *,
         baseline: BaselineSupplier | None = None,
         repair_model: RepairModel | None = None,
+        repository_map: Any | None = None,
     ) -> None:
         self._baseline = baseline
         self._repair_model = repair_model
-        self._supplier = ModelAssistedChangeSupplier(authoring_model=repair_model)
+        self._repository_map = repository_map
+        self._supplier = ModelAssistedChangeSupplier(
+            authoring_model=repair_model, repository_map=repository_map
+        )
 
     @property
     def repair_enabled(self) -> bool:

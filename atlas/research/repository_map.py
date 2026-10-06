@@ -29,10 +29,12 @@ Pure logic. No AI. No gateway. No storage. No kernel access.
 from __future__ import annotations
 
 import ast
+import re
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
+from math import log
 from pathlib import Path
 
 from atlas.research.source_catalog import LANGUAGE_BY_EXTENSION
@@ -76,6 +78,131 @@ MAX_SIGNATURE_CHARS: int = 120
 MAX_SYMBOL_MATCHES: int = 50
 MAX_CONTEXT_SYMBOLS: int = 40
 MAX_REFERENCES: int = 1_000_000
+
+#: Bounded SOURCE excerpt retained per module, captured from the file text the
+#: builder has ALREADY read (no extra I/O). It exists because the downstream
+#: authoring contract asks for full replacement content, so a symbol list alone
+#: cannot support authoring; a small module's whole source fits here, and a large
+#: module keeps a bounded, explicitly-truncated preamble.
+MAX_SOURCE_EXCERPT_CHARS: int = 4000
+
+# --- Bounded lexical ranking (BM25-style) -------------------------------
+# Standard Okapi BM25 free parameters, fixed at module level (never per
+# request) so a ranking is reproducible and auditable.
+_RANK_K1: float = 1.5
+_RANK_B: float = 0.75
+#: How many times a module's IDENTITY terms (dotted path / basename) are
+#: counted. Identity is what the module is; symbol names are incidental evidence
+#: and are capped per module, so raw term counts would otherwise rank a large
+#: verbose module above the one actually named after the query.
+_RANK_IDENTITY_WEIGHT: int = 3
+DEFAULT_RANK_LIMIT: int = 10
+MAX_RANK_LIMIT: int = 50
+#: Terms too generic to discriminate one module from another. These are
+#: ordinary English/Atlas words, never repository facts; a query made only of
+#: them yields nothing rather than an arbitrary ordering.
+_RANK_STOP_TERMS: frozenset[str] = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do",
+        "does", "for", "from", "how", "i", "if", "in", "into", "is", "it",
+        "its", "me", "of", "on", "or", "that", "the", "their", "them", "then",
+        "there", "these", "this", "those", "to", "was", "we", "were", "what",
+        "when", "where", "which", "who", "why", "will", "with", "you", "your",
+    }
+)
+
+#: Separator runs inside a dotted path / identifier.
+_RANK_SPLIT_RE = re.compile(r"[^0-9A-Za-z]+")
+#: camelCase / PascalCase boundary (the same rule the target resolver uses).
+_RANK_CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _rank_log(value: float) -> float:
+    """``log`` kept as a named seam so the ranking formula reads clearly."""
+    return log(value)
+
+
+def _tokenize_for_ranking(text: object) -> tuple[str, ...]:
+    """Deterministic, de-duplicated, order-preserving ranking terms."""
+    if not isinstance(text, str) or not text.strip():
+        return ()
+    parts: list[str] = []
+    for chunk in _RANK_SPLIT_RE.split(text.strip()):
+        if not chunk:
+            continue
+        for piece in _RANK_CAMEL_RE.split(chunk):
+            lowered = piece.strip().lower()
+            if lowered and lowered not in _RANK_STOP_TERMS:
+                parts.append(lowered)
+    return tuple(dict.fromkeys(parts))
+
+
+def _ranking_terms(info: ModuleInfo) -> tuple[str, ...]:
+    """Searchable terms for one module, from data the map already holds.
+
+    Deliberately NOT source text: no file is read and no body is concatenated.
+    The corpus is the structural identity Atlas already knows — the dotted path,
+    the basename, and symbol names (which for Python are already split on their
+    own word boundaries).
+
+    The MODULE IDENTITY terms are repeated so an exact name match outweighs the
+    incidental repetition of a common word across many symbols. Without this a
+    large module that merely mentions "service" in forty symbol names outranks
+    the module actually NAMED ``conversation_service`` — the symbol cap makes
+    raw term counts a poor proxy for identity, not for relevance.
+    """
+    identity: list[str] = []
+    for part in _RANK_SPLIT_RE.split(info.module):
+        if part:
+            identity.append(part.lower())
+    basename = info.module.rsplit(".", 1)[-1]
+    for part in _RANK_CAMEL_RE.split(basename):
+        lowered = part.strip().lower()
+        if lowered:
+            identity.append(lowered)
+
+    body: list[str] = []
+    for symbol in info.symbols:
+        for part in _RANK_SPLIT_RE.split(symbol.name):
+            if part:
+                body.append(part.lower())
+
+    # Identity is what the module IS; body is incidental evidence. Identity terms
+    # are repeated (NOT deduplicated) so a module actually NAMED
+    # ``conversation_service`` outranks one that merely says "service" in many
+    # symbol names. Body terms are deduplicated so verbosity cannot accumulate.
+    weighted = identity * _RANK_IDENTITY_WEIGHT + list(
+        dict.fromkeys(body)
+    )
+    return tuple(weighted)
+
+
+def _matched_terms(terms: tuple[str, ...]) -> tuple[str, ...]:
+    """The query terms this module actually matched (explainability)."""
+    return tuple(terms)
+
+
+@dataclass(frozen=True)
+class RankedModule:
+    """One ranked module with the evidence behind its rank."""
+
+    module: str
+    path: str
+    score: float
+    matched_terms: tuple[str, ...] = ()
+    symbol_count: int = 0
+    line_count: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "module": self.module,
+            "path": self.path,
+            "score": self.score,
+            "matched_terms": list(self.matched_terms),
+            "symbol_count": self.symbol_count,
+            "line_count": self.line_count,
+        }
+
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +258,11 @@ class ModuleInfo:
     internal_imports: tuple[str, ...] = ()
     external_imports: tuple[str, ...] = ()
     symbols: tuple[SymbolInfo, ...] = ()
+    #: Bounded SOURCE excerpt (derived from the file text already read at build).
+    #: Empty when the file was unreadable. ``source_truncated`` records honestly
+    #: whether the excerpt omits part of the file.
+    source_excerpt: str = ""
+    source_truncated: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -142,6 +274,8 @@ class ModuleInfo:
             "internal_imports": list(self.internal_imports),
             "external_imports": list(self.external_imports),
             "symbols": [s.to_dict() for s in self.symbols],
+            "source_excerpt": self.source_excerpt,
+            "source_truncated": self.source_truncated,
         }
 
 
@@ -283,6 +417,80 @@ class RepositoryMap:
     def module_count(self) -> int:
         return len(self.modules)
 
+    # ------------------------------------------------------------------
+    # Bounded lexical ranking (BM25-style) over the EXISTING map data
+    # ------------------------------------------------------------------
+
+    def rank_modules(
+        self, query: str, limit: int = DEFAULT_RANK_LIMIT
+    ) -> tuple[RankedModule, ...]:
+        """Rank this repository's modules against ``query`` (BM25-style).
+
+        A deterministic, read-only LEXICAL ranking over material this map
+        already holds — dotted module path, module basename, symbol names and
+        bounded signatures. No embeddings, no model, no randomness, no I/O:
+        identical input yields an identical ordering, and every returned
+        module is one this map actually contains.
+
+        Ranking is evidence-only. It orders candidates; it never asserts that a
+        module is the right place to make a change — that remains a governed
+        decision made elsewhere.
+        """
+        terms = _tokenize_for_ranking(query)
+        if not terms or not self.modules:
+            return ()
+
+        corpus = [(info, _ranking_terms(info)) for info in self.modules]
+        total_docs = len(corpus)
+        avg_len = sum(len(terms_) for _info, terms_ in corpus) / total_docs or 1.0
+
+        document_frequency: Counter[str] = Counter()
+        for _info, terms_ in corpus:
+            document_frequency.update(set(terms_))
+
+        scored: list[tuple[float, str, ModuleInfo, tuple[str, ...]]] = []
+        for info, terms_ in corpus:
+            counts = Counter(terms_)
+            length = len(terms_) or 1
+            score = 0.0
+            for term in terms:
+                tf = counts.get(term, 0)
+                if not tf:
+                    continue
+                df = document_frequency.get(term, 0)
+                # Okapi BM25 idf, floored at a small positive value so a term
+                # present in EVERY document contributes 0 rather than a
+                # negative score (which would invert the ordering).
+                idf = max(
+                    0.0,
+                    _rank_log(
+                        1.0
+                        + (total_docs - df + 0.5) / (df + 0.5)
+                    ),
+                )
+                denominator = tf + _RANK_K1 * (
+                    1.0 - _RANK_B + _RANK_B * length / avg_len
+                )
+                if denominator > 0:
+                    score += idf * (tf * (_RANK_K1 + 1.0)) / denominator
+            if score > 0.0:
+                # Deterministic tie-break: module name, never registry order.
+                scored.append((score, info.module, info, _matched_terms(terms_)))
+
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        bounded = max(1, min(int(limit or DEFAULT_RANK_LIMIT), MAX_RANK_LIMIT))
+        return tuple(
+            RankedModule(
+                module=info.module,
+                path=info.path,
+                score=round(score, 6),
+                matched_terms=matched,
+                symbol_count=len(info.symbols),
+                line_count=info.line_count,
+            )
+            for score, _module, info, matched in scored[:bounded]
+        )
+
     def edge_count(self) -> int:
         return sum(len(info.internal_imports) for info in self.modules)
 
@@ -373,6 +581,11 @@ class RepositoryMapBuilder:
                 language=LANGUAGE_BY_EXTENSION.get(relative.suffix.lower(), ""),
                 is_package=relative.name == "__init__.py",
                 line_count=len(text.splitlines()),
+                # Captured from the text ALREADY read above — no extra I/O. A
+                # small module's whole source fits; a large module keeps a
+                # bounded preamble and records the truncation honestly.
+                source_excerpt=text[:MAX_SOURCE_EXCERPT_CHARS],
+                source_truncated=len(text) > MAX_SOURCE_EXCERPT_CHARS,
             )
             parsed.append((info, tree))
 

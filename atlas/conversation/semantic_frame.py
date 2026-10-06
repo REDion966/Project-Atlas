@@ -1038,6 +1038,28 @@ def _greeting_frame(lemmas: frozenset[str]) -> SemanticFrame | None:
     )
 
 
+def _is_discourse_marker(frame: SemanticFrame) -> bool:
+    """True when ``frame`` is a whole-turn conversational MARKER, not a request.
+
+    Reuses the EXISTING whole-turn classifications rather than any new
+    vocabulary: an ACKNOWLEDGEMENT (acknowledgement-class, "Okay", "Thanks") and
+    a CASUAL greeting (greeting-class, "Hello") are discourse framing. They name
+    no actionable object, so they can never be one side of a compound intent
+    join. The evidence token is read rather than the operation string so this
+    stays keyed to the architecture's own classification evidence.
+
+    A marker is only recognised when it is the WHOLE head: any head carrying a
+    content word of its own (an enumerative subject, a real second operation) is
+    not a marker and keeps its existing reading.
+    """
+    if not isinstance(frame, SemanticFrame):
+        return False
+    return any(
+        token in ("acknowledgement-class", "greeting-class")
+        for token in frame.evidence
+    )
+
+
 def _status_frame(
     order: tuple[str, ...], lemmas: frozenset[str], raw: str
 ) -> SemanticFrame | None:
@@ -1193,7 +1215,21 @@ def _operation_comma_index(lowered: str, remainder: str) -> int | None:
             continue
         if tail.split(" ", 1)[0].lower() in _INTENT_COORDINATORS:
             continue
-        if (interpret(head).operation or "").strip() and (
+        head_frame = interpret(head)
+        if _is_discourse_marker(head_frame):
+            # A whole-turn ACKNOWLEDGEMENT or GREETING is discourse framing, not
+            # an independently actionable intent ("Okay, investigate X." /
+            # "Hello, investigate X."). Its own reading already carries a
+            # bounded operation, so the BOTH-sides test below would otherwise
+            # treat the marker as a second intent and describe one request as
+            # multi-intent. Reusing the EXISTING whole-turn roles keeps the
+            # function's purpose intact: it still joins two ACTIONABLE sides
+            # ("Investigate A, research B") and still never splits an
+            # enumerative subject ("investigate the memory service, the cache
+            # layer"). A standalone acknowledgement is unaffected — it is only
+            # ever a HEAD of a join, never silenced.
+            continue
+        if (head_frame.operation or "").strip() and (
             interpret(tail).operation or ""
         ).strip():
             return match.start()

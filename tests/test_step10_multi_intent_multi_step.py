@@ -404,13 +404,31 @@ class TestRealKernel:
             message = atlas.chat(
                 "Investigate the storage layer and also research the knowledge decision service."
             )
-            assert message.metadata["orchestration"]["status"] == "completed"
-            kinds = [
-                s["kind"] for s in message.metadata["orchestration"]["steps"]
-            ]
-            assert kinds == ["investigation", "knowledge"]
-            representation = message.metadata["multi_step"]
-            assert representation["ordered"] is False
+            # Compound clause delegation (95a18d2) is the AUTHORITATIVE contract
+            # for a compound whose clauses are each owned by an existing surface:
+            # each clause runs through the SAME handler a standalone turn uses, so
+            # the investigation and knowledge lifecycles record themselves exactly
+            # once and the orchestration bridge never becomes the conversational
+            # source of truth. This REPLACES the superseded orchestration
+            # assertion (orchestration.status == "completed"), which contradicted
+            # that decision. Both clauses must still be genuinely answered.
+            metadata = message.metadata or {}
+            assert metadata.get("orchestration") is None
+            multi = metadata["multi_intent"]
+            assert multi["unhandled"] == []
+            assert len(multi["handled"]) == 2
+            assert "## Investigation" in message.content
+
+            # Both EXISTING lifecycles recorded themselves, in the user's order.
+            state = atlas._conversation.state_manager.state
+            assert state.last_operation.kind == "investigation_request"
+            assert bool(state.latest_result) is True
+            assert bool(state.last_knowledge) is True
+
+            # The explicit ordering the user wrote is preserved in the answer.
+            assert multi["handled"][0].lower().startswith("investigate")
+            assert "research" in multi["handled"][1].lower()
+
             assert atlas.pending_promotion_reviews() == []
         finally:
             atlas.shutdown()
@@ -421,10 +439,20 @@ class TestRealKernel:
             message = atlas.chat(
                 "First investigate the storage layer, then research the knowledge decision service."
             )
-            assert message.metadata["orchestration"]["status"] == "completed"
-            representation = message.metadata["multi_step"]
-            assert representation["ordered"] is True
-            assert [s["order"] for s in representation["steps"]] == [0, 1]
+            # The "First ... then ..." ordering is still honoured, and the
+            # investigation clause is executed before the knowledge clause.
+            metadata = message.metadata or {}
+            assert metadata.get("orchestration") is None
+            multi = metadata["multi_intent"]
+            assert multi["unhandled"] == []
+            handled = multi["handled"]
+            assert "First investigate the storage layer" in message.content
+            assert "knowledge decision service" in message.content
+            assert handled[0].lower().startswith("first investigate")
+
+            state = atlas._conversation.state_manager.state
+            assert state.last_operation.kind == "investigation_request"
+            assert bool(state.last_knowledge) is True
             assert atlas.pending_promotion_reviews() == []
         finally:
             atlas.shutdown()

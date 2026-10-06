@@ -1368,6 +1368,7 @@ class Atlas:
         capability: str = "",
         ambiguous: bool = False,
         execution_failed: bool = False,
+        target_surface: str = "",
     ):
         """Step 23 — a bounded, reviewable capability specification (read-only).
 
@@ -1378,6 +1379,16 @@ class Atlas:
         and the EXISTING advisory mechanism — plus an explicit split between what
         the evidence establishes and what remains unresolved, with alternatives
         listed rather than chosen.
+
+        ``target_surface`` is the ALREADY-UNDERSTOOD target expression the
+        language pipeline produced for this utterance (the EXISTING L3
+        ``utterance_meaning.target``). It is resolved by the EXISTING
+        deterministic ``ArchitectureTargetResolver`` and passed to the
+        specification builder, so architecture grounding can address the named
+        component instead of guessing from bare tokens. The resolver performs NO
+        language interpretation: it only maps a target expression the pipeline
+        already understood onto a canonical identity, and an AMBIGUOUS or
+        UNRESOLVED target simply grounds nothing.
 
         Non-gaps (a supported capability, temporary unavailability, a governance
         boundary, a knowledge need, an ambiguity, an execution failure) are
@@ -1398,7 +1409,59 @@ class Atlas:
             gap,
             capability_model=self.capability_model(),
             architecture_model=self._architecture_model_snapshot(),
+            resolved_target=self._resolve_architectural_target(target_surface),
         )
+
+    @staticmethod
+    def _utterance_target_surface(spec: Any) -> str:
+        """The EXISTING L3 target expression for this utterance, or ``""``.
+
+        Reads ``TaskSpec.context["utterance_meaning"]["target"]`` — the bounded,
+        deterministic target expression the language pipeline already produced
+        for the CURRENT turn. No language interpretation happens here: an absent,
+        empty or malformed block simply yields ``""``, and the specification
+        builder then grounds from raw tokens exactly as it did before.
+
+        Deliberately NOT consulted: ``ConversationState.current_subject`` (stale
+        across topic switches) and ``current_investigation``. A stale carried-over
+        subject must never override the target the user just named.
+        """
+        if spec is None:
+            return ""
+        context = getattr(spec, "context", None)
+        if not isinstance(context, dict):
+            return ""
+        meaning = context.get("utterance_meaning")
+        if not isinstance(meaning, dict):
+            return ""
+        target = meaning.get("target")
+        return target if isinstance(target, str) else ""
+
+    def _resolve_architectural_target(self, target_surface: str):
+        """Resolve an ALREADY-UNDERSTOOD target expression to a canonical identity.
+
+        Additive, read-only and fail-soft: a blank surface, an absent model or a
+        raising resolver all yield ``None``, which the specification builder treats
+        as "no resolved target" and grounds from raw tokens exactly as before.
+
+        No ``expected_type`` is supplied: the caller does not reliably know which
+        identity type it wants, and guessing one would hide genuine ambiguity. A
+        cross-type collision therefore stays AMBIGUOUS and grounds nothing, which
+        is the safe outcome.
+        """
+        if not isinstance(target_surface, str) or not target_surface.strip():
+            return None
+        try:
+            from atlas.self_knowledge.architecture_resolver import (
+                ArchitectureTargetResolver,
+            )
+
+            resolver = ArchitectureTargetResolver(
+                self._architecture_model_snapshot()
+            )
+            return resolver.resolve(target_surface)
+        except Exception:  # fail-soft: resolution never breaks the turn
+            return None
 
     def specification_development(
         self,
@@ -1979,7 +2042,11 @@ class Atlas:
             from atlas.evolution.development_repair import RepairChangeSupplier
 
             return RepairChangeSupplier(
-                repair_model=self._model_assisted_authoring_model
+                repair_model=self._model_assisted_authoring_model,
+                # Read-only authoring context for the optional draft producer.
+                # The map is the EXISTING cache-only repository self-knowledge;
+                # an absent map leaves the prompt byte-identical to before.
+                repository_map=self._repository_map,
             )
         except Exception:
             return None
@@ -1992,17 +2059,52 @@ class Atlas:
         parsing seam is wired in — bounded to turns the deterministic intake
         cannot type and to the closed, non-governed task-type vocabulary. Any
         wiring failure falls back to the deterministic intake (fail-closed).
+
+        The intake is also given the EXISTING architectural target resolver, so a
+        development request can be recognized because it names an ADDRESSABLE
+        Atlas identity rather than because it contains a word from a maintained
+        noun list. The resolver is INJECTED (the conversation layer never
+        constructs or imports one), it stays deterministic and model-free, and it
+        only answers identity/type — never intent. With no resolver the intake
+        behaves exactly as before.
         """
         from atlas.conversation.task_intake import TaskIntake
 
         try:
+            resolver = self._architectural_target_resolver()
             if not bool(getattr(self._ai_manager, "external_providers", False)):
-                return TaskIntake()
+                return TaskIntake(target_resolver=resolver)
             from atlas.conversation.model_intent_parser import ModelIntentParser
 
-            return TaskIntake(parser=ModelIntentParser(model=self._intent_assist_model))
+            return TaskIntake(
+                parser=ModelIntentParser(model=self._intent_assist_model),
+                target_resolver=resolver,
+            )
         except Exception:
             return TaskIntake()
+
+    def _architectural_target_resolver(self):
+        """The EXISTING architectural target resolver, or ``None``.
+
+        Built over the same read-only self-knowledge the rest of the development
+        path uses. Returns ``None`` when it cannot be built, which leaves the
+        intake exactly as it was before typed-target gating existed.
+        """
+        try:
+            from atlas.self_knowledge.architecture_resolver import (
+                ArchitectureTargetResolver,
+            )
+
+            # A PROVIDER, not a snapshot: the kernel builds the conversation
+            # before the repository map exists, so a snapshot taken now would
+            # address only component/capability identities and silently miss the
+            # module identities that become addressable later. The provider is the
+            # same read-only, cache-only self-knowledge used elsewhere.
+            return ArchitectureTargetResolver(
+                self._architecture_model_snapshot
+            )
+        except Exception:
+            return None
 
     @property
     def development_controller(self):
@@ -3074,7 +3176,11 @@ class Atlas:
         design_lines = list(
             self._development_request_knowledge_lines(request, source_text=utterance)
         )
-        design_lines += list(self._development_request_adjudication_lines(request))
+        design_lines += list(
+            self._development_request_adjudication_lines(
+                request, self._utterance_target_surface(spec)
+            )
+        )
         if design_lines:
             design_lines.append("")
         lines = design_lines + [
@@ -3133,7 +3239,9 @@ class Atlas:
             metadata={"development_driver": result.to_dict()},
         )
 
-    def _development_request_adjudication_lines(self, request: str) -> tuple[str, ...]:
+    def _development_request_adjudication_lines(
+        self, request: str, target_surface: str = ""
+    ) -> tuple[str, ...]:
         """Temporary Roadmap Step 3 — the EXISTING adjudication of a dev request.
 
         Reports, ADDITIVELY and read-only: the Step-22 verdict for the request
@@ -3142,6 +3250,11 @@ class Atlas:
         the EXISTING Step-23 surface produced one — the bounded design (what the
         capability is for, its operations, the areas it would touch, how it must
         be verified and the governance boundary it must respect).
+
+        ``target_surface`` is the EXISTING L3 ``utterance_meaning.target`` for
+        this utterance, passed through so architecture grounding can address the
+        named component deterministically. It is advisory: an absent, ambiguous
+        or unresolvable target changes nothing about the verdict.
 
         It never replaces the governed development route, never authorizes,
         executes or promotes anything, and never reads lexical overlap as
@@ -3169,11 +3282,17 @@ class Atlas:
                     "- Requires: " + ", ".join(f"`{item}`" for item in requires)
                 )
 
-        specification = self.capability_specification(request)
+        specification = self.capability_specification(
+            request, target_surface=target_surface
+        )
         if bool(getattr(specification, "is_specified", False)):
             if lines:
                 lines.append("")
-            lines.extend(self._development_request_specification_lines(request))
+            lines.extend(
+                self._development_request_specification_lines(
+                    request, target_surface
+                )
+            )
         return tuple(lines)
 
     @staticmethod
@@ -3195,15 +3314,22 @@ class Atlas:
                 return text[len(prefix) :].strip()
         return text
 
-    def _development_request_specification_lines(self, request: str) -> tuple[str, ...]:
+    def _development_request_specification_lines(
+        self, request: str, target_surface: str = ""
+    ) -> tuple[str, ...]:
         """Temporary Roadmap Step 3 — the bounded DESIGN of a genuine gap.
 
         Projects the EXISTING Step-23 specification (what the capability is for,
         its operations, the areas it would touch, how it must be verified and the
         governance boundary it must respect) plus the truthful next governed step.
         Returns ``()`` when the request is not a specified, reviewable design.
+
+        ``target_surface`` is the EXISTING L3 target expression, forwarded so the
+        reported areas are the ones the named component actually owns.
         """
-        specification = self.capability_specification(request)
+        specification = self.capability_specification(
+            request, target_surface=target_surface
+        )
         if not bool(getattr(specification, "is_specified", False)):
             return ()
         lines = [

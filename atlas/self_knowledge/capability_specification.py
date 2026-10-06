@@ -259,14 +259,27 @@ def _refuse(gap: Any, kind: str, reason: str, *, evidence: tuple[str, ...] = ())
 
 
 def _architecture_grounding(
-    tokens: tuple[str, ...], architecture_model: Any
+    tokens: tuple[str, ...],
+    architecture_model: Any,
+    resolved_identity: Any | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """``(affected_areas, dependencies, candidate packages)`` from the model.
 
     Uses the EXISTING ``ArchitectureModel.locate()`` and component entries; an
     unresolved token contributes nothing (never guessed).
+
+    ``resolved_identity`` is the EXISTING deterministic architectural target
+    resolution result (see :mod:`atlas.self_knowledge.architecture_resolver`).
+    When it RESOLVED to a code-owning identity it is attempted FIRST, because
+    a resolved target names the architecture far more precisely than a bare
+    token can. The raw-token loop is retained UNCHANGED as the fallback and
+    still runs whenever there is no resolved identity — so every existing
+    behaviour, including all fail-closed reporting, is preserved.
+
+    An AMBIGUOUS or UNRESOLVED target contributes NOTHING: it is never guessed
+    into an architectural area.
     """
-    if architecture_model is None or not tokens:
+    if architecture_model is None:
         return (), (), ()
     locate = getattr(architecture_model, "locate", None)
     if not callable(locate):
@@ -275,16 +288,12 @@ def _architecture_grounding(
         _clean(getattr(entry, "name", ""), 120): entry
         for entry in (getattr(architecture_model, "components", ()) or ())
     }
+
     areas: list[str] = []
     dependencies: list[str] = []
     packages: list[str] = []
-    for token in tokens:
-        try:
-            result = locate(token)
-        except Exception:  # fail-soft: an unlocatable token is left unresolved
-            continue
-        if not getattr(result, "found", False):
-            continue
+
+    def _absorb(result: Any) -> None:
         for pkg in getattr(result, "packages", ()) or ():
             text = _clean(pkg, 160)
             if text and text not in packages:
@@ -303,6 +312,29 @@ def _architecture_grounding(
                 text = _clean(dep, 120)
                 if text and text not in dependencies:
                     dependencies.append(text)
+
+    # Resolved target first — precise, deterministic, and authoritative-backed.
+    if (
+        resolved_identity is not None
+        and getattr(resolved_identity, "is_resolved", False)
+        and _clean(getattr(resolved_identity, "canonical_id", ""), 200)
+    ):
+        try:
+            located = locate(_clean(resolved_identity.canonical_id, 200))
+        except Exception:  # fail-soft: an unusable target keeps the fallback
+            located = None
+        if located is not None and getattr(located, "found", False):
+            _absorb(located)
+
+    # EXISTING raw-token fallback, unchanged.
+    for token in tokens or ():
+        try:
+            result = locate(token)
+        except Exception:  # fail-soft: an unlocatable token is left unresolved
+            continue
+        if not getattr(result, "found", False):
+            continue
+        _absorb(result)
     return (
         tuple(areas[:_MAX_ITEMS]),
         tuple(dependencies[:_MAX_ITEMS]),
@@ -359,12 +391,19 @@ def build_capability_specification(
     *,
     capability_model: Any | None = None,
     architecture_model: Any | None = None,
+    resolved_target: Any | None = None,
 ) -> CapabilitySpecification:
     """Turn a confirmed GENUINE capability gap into a bounded specification.
 
     Pure, deterministic and fail-closed: anything that is not a genuine,
     evidence-backed capability gap is REFUSED with a reason, and a design field
     the architecture cannot justify is reported as unresolved rather than filled.
+
+    ``resolved_target`` is an optional EXISTING architectural target-resolution
+    result (:mod:`atlas.self_knowledge.architecture_resolver`). When it RESOLVED,
+    architecture grounding attempts that canonical identity before the raw-token
+    fallback. It is advisory evidence only: it changes no route, grants no
+    authority, and an AMBIGUOUS/UNRESOLVED target is simply not used.
     """
     if gap is None or not isinstance(getattr(gap, "kind", None), CapabilityGapKind):
         return _refuse(
@@ -394,7 +433,9 @@ def build_capability_specification(
         )
 
     tokens = _tokens(request)
-    areas, dependencies, packages = _architecture_grounding(tokens, architecture_model)
+    areas, dependencies, packages = _architecture_grounding(
+        tokens, architecture_model, resolved_target
+    )
     strategy = _strategy_for(gap, capability_model)
     mechanism, prerequisites, verification = _advisory(strategy)
     capability = _clean(getattr(gap, "capability", ""), 120) or _slug(request)
@@ -521,10 +562,14 @@ def capability_specification(  # convenience alias, mirroring the module name
     *,
     capability_model: Any | None = None,
     architecture_model: Any | None = None,
+    resolved_target: Any | None = None,
 ) -> CapabilitySpecification:
     """Convenience alias for :func:`build_capability_specification`."""
     return build_capability_specification(
-        gap, capability_model=capability_model, architecture_model=architecture_model
+        gap,
+        capability_model=capability_model,
+        architecture_model=architecture_model,
+        resolved_target=resolved_target,
     )
 
 

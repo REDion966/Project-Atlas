@@ -30,6 +30,7 @@ from atlas.conversation.conversation_state import (
     ConversationState,
     Correction,
 )
+from atlas.conversation.lexicon import REFERENCE_WORDS, tokens
 from atlas.conversation.semantic_intake import (
     SemanticIntake,
     build_semantic_intake,
@@ -226,10 +227,23 @@ class ConversationEngine:
         lowered = text.lower()
         if not any(marker in lowered for marker in _CORRECTION_MARKERS):
             return ()
-        corrected = corrected_subject(text) or _bounded(
-            spec.intent or text, _MAX_OBJECTIVE_CHARS
-        )
+        # A correction installs a bounded replacement SUBJECT, and nothing else.
+        # A turn that carries a correction cue but names no replacement subject —
+        # a bare disagreement such as "That's not what I meant." — is dissent, not
+        # a new subject. Falling back to ``spec.intent or text`` would install the
+        # WHOLE utterance as the corrected subject and overwrite the active
+        # objective with a meta-utterance. Such a turn records nothing, so the
+        # active objective is preserved and the existing honest surfaces own it.
+        corrected = corrected_subject(text)
         if not corrected:
+            return ()
+        # A bounded replacement subject must NAME something. A corrected reading
+        # made up ENTIRELY of a bare reference pointer ("I didn't mean that." ->
+        # "that") names no subject: installing it would overwrite the active
+        # objective with a pointer word. This is the SAME predicate the
+        # conversation layer already applies to the same class, reused from the
+        # existing lexicon rather than a new list.
+        if set(tokens(corrected)) <= REFERENCE_WORDS:
             return ()
         return (
             Correction(

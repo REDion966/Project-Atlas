@@ -85,7 +85,7 @@ from atlas.conversation.meaning import (
     build_atlas_meaning,
 )
 from atlas.conversation.dialogue_state import outcome_from
-from atlas.conversation.lexicon import tokens
+from atlas.conversation.lexicon import REFERENCE_WORDS, tokens
 from atlas.conversation.communicative_function import (
     FUNCTION_COMPARE,
     FUNCTION_QUERY_CAUSE,
@@ -2046,11 +2046,26 @@ class ConversationService:
         if role != self._CORRECTION_ROLE:
             return None
         state = self._state_manager.state
-        corrections = tuple(getattr(state, "corrections", ()) or ())
-        if not corrections:
+        # Act ONLY on the correction THIS turn produced. The accumulated
+        # ``state.corrections`` history is not evidence about the CURRENT turn: a
+        # later turn that reads as a correction but names no replacement subject
+        # ("Sorry, that's wrong.") would otherwise replay an already-superseded
+        # correction indefinitely, reinstalling a stale subject on every such turn.
+        # The turn's own corrections already ride the existing semantic-intake
+        # projection on the meaning, so no new state or carrier is introduced.
+        turn_corrections = tuple(
+            getattr(getattr(meaning, "semantic_intake", None), "corrections", ()) or ()
+        )
+        if not turn_corrections:
             return None
-        record = corrections[-1]
-        corrected = str(getattr(record, "corrected", "") or "").strip()
+        record = turn_corrections[-1]
+
+        def _field(name: str) -> str:
+            if isinstance(record, dict):
+                return str(record.get(name, "") or "")
+            return str(getattr(record, name, "") or "")
+
+        corrected = _field("corrected").strip()
         if not corrected:
             return None
         # The corrected reading must NAME a result ("the previous result"): that
@@ -2061,6 +2076,18 @@ class ConversationService:
             # investigation lingers. An earlier-item / ordinal corrected reading
             # keeps its existing (fail-closed) surface untouched.
             if self._ORDINAL_REFERENCE_RE.search(corrected) or not tokens(corrected):
+                return None
+            # A corrected reading made up ENTIRELY of a bare reference pointer
+            # ("that" / "this" / "it" — "I did not mean that.") names no subject:
+            # the EXISTING ``SemanticFrame.reference`` the turn already carries
+            # classifies it as a reference, and the EXISTING bounded reference
+            # resolution already answers such a pointer fail-closed. Installing
+            # the pointer as a LITERAL subject would overwrite a real active
+            # subject with a word and supersede the retained investigation, so
+            # this defers to those existing surfaces instead. A correction that
+            # also names something ("I did not mean that, I meant the storage
+            # layer") is unaffected: its tokens are not entirely reference words.
+            if set(tokens(corrected)) <= REFERENCE_WORDS:
                 return None
             # A corrected reading that still carries a NEW-operation directive is
             # not a subject-only correction: defer so the existing operation route
@@ -2086,7 +2113,7 @@ class ConversationService:
                 ),
                 metadata={
                     "correction": {
-                        "previous": str(getattr(record, "previous", "") or ""),
+                        "previous": _field("previous"),
                         "corrected": corrected,
                         "target_kind": "subject",
                     },
@@ -2110,7 +2137,7 @@ class ConversationService:
             ),
             metadata={
                 "correction": {
-                    "previous": str(getattr(record, "previous", "") or ""),
+                    "previous": _field("previous"),
                     "corrected": corrected,
                     "target_kind": decision.target_kind,
                     "target_referent_id": decision.target_referent_id,

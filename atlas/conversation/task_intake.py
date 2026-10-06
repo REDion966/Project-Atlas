@@ -1094,9 +1094,30 @@ def build_utterance_meaning(normalized: str) -> UtteranceMeaning:
     )
 
 
-def _leading_operation_is_research(meaning: UtteranceMeaning | None) -> bool:
-    """True when L3 determined the LEADING requested operation is research."""
-    return meaning is not None and meaning.operation is Operation.RESEARCH
+def _leading_operation_is_read_only(meaning: UtteranceMeaning | None) -> bool:
+    """True when the LEADING requested operation is read-only evidence gathering.
+
+    The architecture rule (unchanged since the compound-intake fix) is that the
+    LEADING requested operation outranks a later development cue: in
+    "Research how Atlas could improve scheduling", ``improve`` describes the
+    SUBJECT of the research rather than a directive, so the turn is research.
+
+    Atlas owns exactly two read-only evidence-gathering operations —
+    ``RESEARCH`` and ``INVESTIGATE``. The rule previously covered only
+    ``RESEARCH``, so a turn whose LEADING operation was investigation was
+    wrongly claimed by the development branch whenever a development cue
+    appeared later ("Could you investigate what's missing, research possible
+    ways to implement it, and develop it…"). Covering BOTH read-only operations
+    applies the existing rule uniformly instead of singling out one verb class.
+
+    Mutating operations are deliberately NOT included: a directive that LEADS
+    with a development/action cue keeps its development route even when an
+    investigation clause follows ("Add a test. Investigate the implementation.").
+    """
+    return meaning is not None and meaning.operation in (
+        Operation.RESEARCH,
+        Operation.INVESTIGATE,
+    )
 
 
 def _utterance_is_question(meaning: UtteranceMeaning | None) -> bool:
@@ -1382,11 +1403,27 @@ class TaskIntake:
             present, its output is treated as untrusted, validated, and used
             only to fill the spec fields; any failure falls back to the
             deterministic result.
+        target_resolver: Optional duck-typed architectural target resolver
+            exposing ``resolve(surface, expected_type=None)`` and returning a
+            result with ``is_resolved`` / ``identity_type`` (see
+            :class:`atlas.self_knowledge.architecture_resolver.ArchitectureTargetResolver`).
+            When present it lets a development request be recognized because it
+            names an ADDRESSABLE architectural identity, instead of because it
+            happens to contain one word from a maintained noun list. The
+            resolver is INJECTED (never imported and never constructed here), so
+            the conversation layer keeps no architectural authority of its own.
+            Absent (the default) or raising, behaviour is exactly as before.
     """
 
-    def __init__(self, parser: IntentParser | None = None, now: datetime | None = None) -> None:
+    def __init__(
+        self,
+        parser: IntentParser | None = None,
+        now: datetime | None = None,
+        target_resolver: Any | None = None,
+    ) -> None:
         self._parser = parser
         self._now = now
+        self._target_resolver = target_resolver
 
     def intake(self, text: str, history_length: int = 0) -> TaskSpec:
         """Parse one instruction into a bounded, deterministic-first TaskSpec.
@@ -1486,6 +1523,37 @@ class TaskIntake:
     # ------------------------------------------------------------------
     # Deterministic classification / extraction
     # ------------------------------------------------------------------
+
+    def _names_resolved_architectural_target(
+        self, meaning: UtteranceMeaning | None
+    ) -> bool:
+        """True when this turn's target RESOLVES to a canonical Atlas identity.
+
+        Uses the INJECTED architectural target resolver — the existing
+        authority for architectural identity and type. This method decides
+        nothing about intent: the development CUE is still required, and the
+        resolver only answers "is the named target addressable?".
+
+        Fail-closed in every direction:
+
+        * no resolver injected (the default) → ``False``, exactly as before;
+        * no/blank target expression → ``False``;
+        * an AMBIGUOUS target (one surface, two distinct identities) → ``False``,
+          so Atlas never guesses which architecture the user meant;
+        * an UNRESOLVED target → ``False``;
+        * any failure in the resolver → ``False``.
+        """
+        resolver = self._target_resolver
+        if resolver is None or meaning is None:
+            return False
+        surface = getattr(meaning, "target", "")
+        if not isinstance(surface, str) or not surface.strip():
+            return False
+        try:
+            result = resolver.resolve(surface)
+        except Exception:
+            return False
+        return bool(getattr(result, "is_resolved", False))
 
     def _classify(
         self,
@@ -1634,6 +1702,15 @@ class TaskIntake:
             # self-target does. The cue is still required, so this cannot make
             # an ordinary sentence a development request.
             or _first_hit(lowered, _DEVELOPMENT_CODE_TARGETS, word_boundary=True)
+            # Typed-target gating: the EXISTING architectural target resolver
+            # decides whether the utterance names an addressable Atlas identity,
+            # so "Improve the conversation service/component/subsystem" is a
+            # development request because the target RESOLVES, not because the
+            # word is on a maintained list. The development cue is still
+            # required, the resolver only qualifies the TARGET, and an
+            # ambiguous or unresolved target contributes NOTHING — so an
+            # ordinary sentence that merely mentions a component is unaffected.
+            or self._names_resolved_architectural_target(meaning)
         )
         # Real-world development-intake gap: this decision used to be evaluated
         # AFTER the investigation branch, so any turn that also carried an
@@ -1645,7 +1722,7 @@ class TaskIntake:
         # request keeps its own route while a plain investigation request, an
         # investigation-first compound, and every other existing precedence rule
         # keep their current behaviour.
-        if development and not _leading_operation_is_research(meaning):
+        if development and not _leading_operation_is_read_only(meaning):
             return TaskType.DEVELOPMENT_REQUEST
 
         # Explicit planning phrases are checked next. They indicate the user

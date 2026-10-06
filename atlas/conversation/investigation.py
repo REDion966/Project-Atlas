@@ -706,6 +706,27 @@ class InvestigationProposalGenerator:
     def __init__(self) -> None:
         self._proposal_counter = 0
 
+    @staticmethod
+    def _content_digest(report: InvestigationReport) -> str:
+        """Deterministic identity of the EVIDENCE a proposal was derived from.
+
+        The proposal id must be reproducible for identical evidence: it is
+        rendered into conversational output, so a wall-clock component made the
+        same investigation yield different text on every run (and broke
+        ``send``/``stream`` parity). Hashing only what the proposal actually
+        represents keeps the id stable and still distinct per subject.
+        """
+        content = "|".join(
+            [
+                str(report.target or ""),
+                str(report.diagnosis or ""),
+                str(tuple(report.components or ())),
+                str(tuple(str(f) for f in (report.findings or ()))),
+                str(tuple(report.affected_files or ())),
+            ]
+        )
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
     def generate_proposal(
         self,
         report: InvestigationReport,
@@ -717,8 +738,7 @@ class InvestigationProposalGenerator:
             return None
 
         self._proposal_counter += 1
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        proposal_id = f"INV-PROP-{timestamp}-{self._proposal_counter:04d}"
+        proposal_id = f"INV-PROP-{self._content_digest(report)}-{self._proposal_counter:04d}"
 
         title = self._derive_title(report)
         evidence_summary = self._synthesize_evidence(report)

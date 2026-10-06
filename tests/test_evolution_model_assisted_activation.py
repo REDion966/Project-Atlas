@@ -16,7 +16,8 @@ Proves the kernel-level OPT-IN activation policy for
   * SHARED COMPOSITION (Task 2): the F9 ``DevelopmentCycleController`` and the
     conversational P17 authoring seam receive the SAME authoritative
     ``CompositeChangeSupplier`` instance — there is exactly one composition,
-    with the fixed order Deterministic -> Scaffold -> Model.
+    with the fixed order Deterministic -> Scaffold -> Evidence -> Model (the
+    model-free ``EvidenceChangeSupplier`` sits before the optional model member).
   * GOVERNANCE: the cycle STOPS at PENDING_APPROVAL; approval, execution, and
     promotion are never called automatically.
   * FAIL-CLOSED: a failing/malformed model produces a supplier failure and no
@@ -211,18 +212,21 @@ class TestOffByDefault:
         from atlas.evolution.development_scaffold_supplier import (
             ScaffoldChangeSupplier,
         )
+        from atlas.evolution.evidence_development import EvidenceChangeSupplier
 
         _config_flag(False)
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             # Phase 5.2 — the controller receives the authoritative
-            # deterministic-first composition: Deterministic then Scaffold, and
-            # NO model member when the flag is off.
+            # deterministic-first composition: Deterministic then Scaffold, then
+            # the model-free Evidence member, and NO model member when the flag
+            # is off.
             supplier = _authoritative_supplier(atlas)
             assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
             assert isinstance(supplier.suppliers[1], ScaffoldChangeSupplier)
+            assert isinstance(supplier.suppliers[2], EvidenceChangeSupplier)
             assert _model_member(supplier) is None
-            assert len(supplier.suppliers) == 2
+            assert len(supplier.suppliers) == 3
         finally:
             atlas.shutdown()
 
@@ -266,6 +270,7 @@ class TestExplicitOptIn:
         from atlas.evolution.development_scaffold_supplier import (
             ScaffoldChangeSupplier,
         )
+        from atlas.evolution.evidence_development import EvidenceChangeSupplier
         from atlas.evolution.model_assisted_supplier import (
             ModelAssistedChangeSupplier,
         )
@@ -274,14 +279,16 @@ class TestExplicitOptIn:
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             # Phase 5.2 — the model supplier is composed as the LAST member of
-            # the authoritative deterministic-first composition.
+            # the authoritative deterministic-first composition, after the
+            # model-free Deterministic, Scaffold and Evidence members.
             supplier = _authoritative_supplier(atlas)
             assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
             assert isinstance(supplier.suppliers[1], ScaffoldChangeSupplier)
+            assert isinstance(supplier.suppliers[2], EvidenceChangeSupplier)
             member = _model_member(supplier)
             assert isinstance(member, ModelAssistedChangeSupplier)
             assert supplier.suppliers[-1] is member
-            assert len(supplier.suppliers) == 3
+            assert len(supplier.suppliers) == 4
         finally:
             atlas.shutdown()
 

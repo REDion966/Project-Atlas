@@ -50,6 +50,28 @@ from atlas.evolution.promotion_gate import ARCHITECTURE_SENSITIVE_PREFIXES
 #: ["change_origin"]`` and stamps ``content_status="unverified-draft"``.
 ORIGIN_MODEL_ASSISTED_DRAFT: str = "model-assisted-draft"
 
+# --- Bounded authoring context -------------------------------------------
+# The verified Goal-2 bottleneck: the prompt carried only development metadata
+# and target NAMES, so a draft author was asked to write code it could not see.
+# These caps keep the repository context small, deterministic and safe to place
+# in a prompt. They are fixed module constants, never per-request.
+MAX_CONTEXT_MODULES: int = 5
+#: How many ranked modules are requested before the production/test preference is
+#: applied. A test module may legitimately outrank a production one lexically,
+#: so a wider slice is taken first and then narrowed.
+MAX_CONTEXT_RANK_LIMIT: int = 12
+MAX_CONTEXT_SYMBOLS: int = 40
+MAX_CONTEXT_SIGNATURE_CHARS: int = 160
+MAX_CONTEXT_QUERY_CHARS: int = 200
+#: GLOBAL budget for SOURCE content across the whole authoring context. The
+#: change contract asks for full replacement content, so a symbol list alone is
+#: not authorable; bounded source is included instead of an unbounded dump. The
+#: target module is served first, so a large target cannot be starved by
+#: secondary modules.
+MAX_CONTEXT_SOURCE_CHARS: int = 16000
+#: Bounded internal-import evidence per module (dependency context).
+MAX_CONTEXT_IMPORTS: int = 12
+
 #: Bound applied to ``notes`` (the model's rationale). Matches the downstream
 #: ``_build_proposal`` truncation of ``supplier_notes``.
 _MAX_NOTES_CHARS: int = 500
@@ -59,6 +81,83 @@ _MAX_NOTES_CHARS: int = 500
 _SUPPORTED_FIELDS: frozenset[str] = frozenset(
     {"code_changes", "test_files", "rationale", "confidence"}
 )
+
+
+def _is_test_module(module: str) -> bool:
+    """True for a test module, by module name or file path."""
+    if not isinstance(module, str) or not module:
+        return False
+    normalized = module.replace("/", ".").replace("\\", ".")
+    parts = [p for p in normalized.split(".") if p]
+    return any(
+        part == "tests"
+        or part == "test"
+        or part.startswith("test_")
+        or part.endswith("_test")
+        for part in parts
+    )
+
+
+def _prefer_production(ranked: object) -> tuple:
+    """Order a ranking so production modules come before test modules.
+
+    Purely an ordering preference over the EXISTING ranking (stable within each
+    group, so the ranker's own ordering is preserved). Drafting code benefits
+    from the implementation; tests are still included afterwards when there is
+    room, because they show the contract.
+    """
+    entries = tuple(ranked or ())
+    if not entries:
+        return ()
+    production = [e for e in entries if not _is_test_module(str(getattr(e, "module", "") or ""))]
+    tests = [e for e in entries if _is_test_module(str(getattr(e, "module", "") or ""))]
+    return tuple(production) + tuple(tests)
+
+
+def _prioritise_declared_target(ranked: object, need: DevelopmentNeed) -> tuple:
+    """Move a DECLARED target component to the front of the ranking.
+
+    The need already names the target(s) it is about; the ranking is evidence,
+    not instruction, so honouring the declared target first is safe and keeps the
+    shared source budget pointed at the thing being changed. Purely an ordering
+    step over the EXISTING ranking: the ranker's order is preserved within each
+    group and no module is added or removed.
+    """
+    entries = tuple(ranked or ())
+    if not entries:
+        return ()
+    declared = {
+        c for c in (getattr(need, "target_components", ()) or ())
+        if isinstance(c, str) and c.strip()
+    }
+    if not declared:
+        return entries
+    targets = [e for e in entries if str(getattr(e, "module", "") or "") in declared]
+    rest = [e for e in entries if str(getattr(e, "module", "") or "") not in declared]
+    return tuple(targets) + tuple(rest)
+
+
+def _context_query(need: DevelopmentNeed) -> str:
+    """The lexical query used to rank repository modules for a need.
+
+    Built ONLY from fields the need already carries (title, summary, rationale,
+    target components). No language interpretation and no extra vocabulary: the
+    ranking layer decides relevance, this only supplies the text to rank.
+    """
+    parts: list[str] = []
+    for value in (
+        getattr(need, "title", ""),
+        getattr(need, "summary", ""),
+        getattr(need, "rationale", ""),
+    ):
+        text = value.strip() if isinstance(value, str) else ""
+        if text:
+            parts.append(text)
+    for component in getattr(need, "target_components", ()) or ():
+        text = component.strip() if isinstance(component, str) else ""
+        if text:
+            parts.append(text)
+    return " ".join(parts)[:MAX_CONTEXT_QUERY_CHARS].strip()
 
 
 class ModelAssistedChangeSupplier:
@@ -74,10 +173,20 @@ class ModelAssistedChangeSupplier:
                 ``AIResponse`` shape, without importing ``atlas.ai``).
             ``None`` (the default) means no authoring is available, so
             :meth:`supply_changes` returns ``None``.
+        repository_map: Optional duck-typed ``RepositoryMap``-like object
+            exposing ``rank_modules(query, limit)`` and
+            ``symbols_in_module(module)``. Optional: with no map the prompt is
+            byte-identical to what it was before, so every existing caller keeps
+            its current behaviour.
     """
 
-    def __init__(self, authoring_model: Callable[[str], Any] | None = None) -> None:
+    def __init__(
+        self,
+        authoring_model: Callable[[str], Any] | None = None,
+        repository_map: Any | None = None,
+    ) -> None:
         self._authoring_model = authoring_model
+        self._repository_map = repository_map
         self._policy = DevelopmentCyclePolicy()
 
     # -- ChangeSupplier protocol ---------------------------------------------
@@ -108,7 +217,14 @@ class ModelAssistedChangeSupplier:
     # -- internals -----------------------------------------------------------
 
     def _build_prompt(self, need: DevelopmentNeed) -> str:
-        """Render a bounded authoring prompt from the need."""
+        """Render a bounded authoring prompt from the need.
+
+        When a repository map is available the prompt also carries a BOUNDED,
+        deterministically-ranked slice of the repository (modules, paths and
+        bounded symbol signatures the map already records). The context is
+        evidence only: it never asserts where a change belongs, never
+        authorizes anything, and is omitted entirely when no ranking exists.
+        """
         parts: list[str] = [
             "Author bounded code changes for a governed development request.",
             f"Title: {need.title}",
@@ -122,6 +238,10 @@ class ModelAssistedChangeSupplier:
             parts.append(
                 "Target components: " + ", ".join(need.target_components)
             )
+        context = self._build_authoring_context(need)
+        if context:
+            parts.append("")
+            parts.append(context)
         parts.append(
             "Return ONLY one JSON object with exactly these keys: "
             '"code_changes" (list of {"path": "relative/path", "content": '
@@ -130,6 +250,102 @@ class ModelAssistedChangeSupplier:
             "0.0..1.0). No prose, no markdown fences, no extra keys."
         )
         return "\n".join(parts)
+
+    def _build_authoring_context(self, need: DevelopmentNeed) -> str:
+        """Bounded repository context for the prompt, or ``""``.
+
+        Read-only and deterministic: candidates come from the EXISTING
+        ``RepositoryMap.rank_modules`` lexical ranking, and symbols from
+        ``symbols_in_module``. Nothing is read from disk here, nothing is
+        invented, and an absent/blank/raising map yields ``""`` so the prompt is
+        exactly what it was before this capability existed.
+        """
+        repository_map = self._repository_map
+        if repository_map is None:
+            return ""
+        rank = getattr(repository_map, "rank_modules", None)
+        if not callable(rank):
+            return ""
+        query = _context_query(need)
+        if not query:
+            return ""
+        try:
+            ranked = rank(query, limit=MAX_CONTEXT_RANK_LIMIT)
+        except Exception:
+            return ""
+        ranked = _prioritise_declared_target(
+            _prefer_production(ranked), need
+        )[:MAX_CONTEXT_MODULES]
+        if not ranked:
+            return ""
+
+        symbols_in_module = getattr(repository_map, "symbols_in_module", None)
+        module_index = {
+            str(getattr(info, "module", "") or ""): info
+            for info in (getattr(repository_map, "modules", ()) or ())
+        }
+        lines = [
+            "Repository context (bounded, ranked; evidence only, not an "
+            "instruction about where to change anything):"
+        ]
+        source_budget = MAX_CONTEXT_SOURCE_CHARS
+        for index, entry in enumerate(ranked, start=1):
+            module = str(getattr(entry, "module", "") or "")
+            path = str(getattr(entry, "path", "") or "")
+            if not module:
+                continue
+            lines.append(f"- {index}. {module} ({path})")
+            info = module_index.get(module)
+
+            # Dependency evidence: the module's own resolved internal imports.
+            dependencies = tuple(
+                getattr(info, "internal_imports", ()) or ()
+            )[:MAX_CONTEXT_IMPORTS]
+            if dependencies:
+                lines.append("    internal imports: " + ", ".join(dependencies))
+
+            # Bounded SOURCE. The target is ranked first, so it is served from
+            # the budget before any secondary module. Truncation is stated
+            # explicitly rather than silently cutting the excerpt.
+            excerpt = str(getattr(info, "source_excerpt", "") or "")
+            if excerpt and source_budget > 0:
+                allowed = min(len(excerpt), source_budget)
+                piece = excerpt[:allowed]
+                source_budget -= allowed
+                cut = bool(getattr(info, "source_truncated", False)) or (
+                    allowed < len(excerpt)
+                )
+                total_lines = getattr(info, "line_count", 0) or 0
+                shown_lines = len(piece.splitlines())
+                header = "    source"
+                if cut:
+                    header += (
+                        f" (truncated: first {shown_lines} of {total_lines} lines)"
+                    )
+                lines.append(header + ":")
+                lines.extend("        " + line for line in piece.splitlines())
+
+            if not callable(symbols_in_module):
+                continue
+            try:
+                symbols = tuple(symbols_in_module(module) or ())[:MAX_CONTEXT_SYMBOLS]
+            except Exception:
+                continue
+            if symbols:
+                lines.append("    symbols:")
+            for symbol in symbols:
+                name = str(getattr(symbol, "name", "") or "")
+                if not name:
+                    continue
+                kind = getattr(getattr(symbol, "kind", None), "value", "")
+                signature = str(getattr(symbol, "signature", "") or "")
+                line = f"        - {kind} {name}".rstrip()
+                if signature:
+                    line += f"{signature[:MAX_CONTEXT_SIGNATURE_CHARS]}"
+                lines.append(line)
+        if len(lines) == 1:
+            return ""
+        return "\n".join(lines)
 
     def _validate_and_build(self, payload: dict[str, Any]) -> SuppliedChanges | None:
         """Structurally validate, bound, and path/policy-check the payload."""
