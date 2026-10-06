@@ -473,6 +473,9 @@ class Atlas:
         except Exception:
             self._repository_map_builder = None
         self._repository_map: Any | None = None
+        #: STEP 1 — the language foundation, projected on first use from the
+        #: EXISTING authoritative vocabularies (cache-only; never a scan).
+        self._language_service: Any | None = None
 
         # --- Stage F: latest bounded research evidence (cache-only) ---
         self._last_research_evidence: dict | None = None
@@ -6348,6 +6351,96 @@ class Atlas:
             capability_model=self.capability_model(),
             repository_map=self._repository_map,
         )
+
+    def language_service(self):
+        """The language foundation, projected from Atlas's OWN vocabularies.
+
+        STEP 1 integration. Deterministic, read-only and cache-only: it never
+        triggers a repository scan and never consults a model or the network.
+        The vocabulary is the SAME authoritative data Atlas already declares —
+        the operational capability catalogue (ids + aliases), the registered
+        component names, and the unified capability model — so no second source
+        of truth is created and nothing is invented.
+
+        Fail-soft: any failure yields a service whose lexicon is partial (or
+        empty), in which case every resolution is honestly ``UNRESOLVED`` rather
+        than guessed. The service is advisory evidence only; it grants no
+        authority.
+        """
+        from atlas.language import LanguageService
+
+        cached = self._language_service
+        if cached is not None:
+            return cached
+
+        sources: dict[str, tuple[str, ...]] = {}
+
+        try:
+            from atlas.self_knowledge.operational_capabilities import (
+                all_operational_capabilities,
+            )
+
+            names: list[str] = []
+            for capability in all_operational_capabilities():
+                for surface in (capability.id, *capability.aliases):
+                    text = str(surface or "").strip()
+                    if text and text not in names:
+                        names.append(text)
+            if names:
+                sources["operational_capability"] = tuple(names)
+        except Exception:
+            pass
+
+        try:
+            registry = getattr(self, "_component_registry", None)
+            getter = getattr(registry, "get_all", None)
+            names = []
+            for component in (getter() if callable(getter) else ()) or ():
+                text = str(getattr(component, "name", "") or "").strip()
+                if text and text not in names:
+                    names.append(text)
+            if names:
+                sources["component"] = tuple(names)
+        except Exception:
+            pass
+
+        try:
+            names = []
+            for model_entry in self.capability_model().entries:
+                text = str(getattr(model_entry, "name", "") or "").strip()
+                if text and text not in names:
+                    names.append(text)
+            if names:
+                sources["capability"] = tuple(names)
+        except Exception:
+            pass
+
+        try:
+            service = LanguageService.from_sources(sources)
+        except Exception:
+            service = None
+        self._language_service = service
+        return service
+
+    def language_analysis(self, text: str) -> dict:
+        """Bounded linguistic annotation of ``text`` (read-only evidence only).
+
+        Returns ``{}`` when the foundation is unavailable — an honest empty
+        result, never a fabricated annotation. Understanding a sentence here
+        authorizes nothing: no approval, execution or promotion is reachable
+        from this call.
+        """
+        service = None
+        try:
+            service = self.language_service()
+        except Exception:
+            service = None
+        if service is None:
+            return {}
+        try:
+            return service.analyse(text).to_dict()
+        except Exception:
+            return {}
 
     def _knowledge_state_snapshot(self, query: str):
         """Temporary Roadmap Step 1 — the state of Atlas's OWN retained knowledge.
