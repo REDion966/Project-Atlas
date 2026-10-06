@@ -3198,6 +3198,11 @@ class Atlas:
         if scaffold is not None:
             metadata["scaffold"] = scaffold
 
+        # STEP 2 bridge — carry the module the request NAMES onto the need.
+        target_components = self._development_target_components(request)
+        if target_components:
+            metadata["target_components"] = target_components
+
         result = self.run_development_driver(request, metadata=metadata or None)
 
         # Temporary Roadmap Step 3 — report the EXISTING adjudication of the
@@ -6353,6 +6358,52 @@ class Atlas:
             capability_model=self.capability_model(),
             repository_map=self._repository_map,
         )
+
+    def _development_target_components(self, request: Any) -> tuple[str, ...]:
+        """The module a development request NAMES, or ``()`` (deterministic).
+
+        STEP 2 bridge. The conversational path produced a ``DevelopmentNeed`` with
+        an EMPTY ``target_components``, so localization and the authoring context
+        silently fell back to the BM25 top hit. This derives the target from the
+        request's own words using the EXISTING repository map and the EXISTING
+        tokenizer — no new representation, no guess:
+
+          * every token of a module's NAME (its basename, split on underscores)
+            must appear in the request's significant tokens, so a generic word
+            such as "service" can never select a module on its own;
+          * the module name must carry at least two tokens;
+          * EXACTLY ONE module must match — several candidates are genuinely
+            ambiguous and yield ``()`` (fail-closed) rather than a guess.
+
+        Returns at most one dotted module name. Read-only, bounded, deterministic
+        and fail-soft (any failure yields ``()``).
+        """
+        try:
+            from atlas.research._text import significant_tokens
+
+            text = str(request or "")
+            if not text.strip():
+                return ()
+            request_tokens = frozenset(significant_tokens(text))
+            if not request_tokens:
+                return ()
+            matches: list[str] = []
+            for info in self.repository_map.modules:
+                module = str(getattr(info, "module", "") or "")
+                if not module or module.startswith("tests."):
+                    continue
+                name_tokens = frozenset(
+                    significant_tokens(module.rsplit(".", 1)[-1].replace("_", " "))
+                )
+                if len(name_tokens) < 2:
+                    continue
+                if name_tokens <= request_tokens:
+                    matches.append(module)
+            if len(matches) != 1:
+                return ()
+            return (matches[0],)
+        except Exception:
+            return ()
 
     def change_author_router(self):
         """The STEP 2 change-author router over the EXISTING authors.
