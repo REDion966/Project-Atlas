@@ -1922,6 +1922,12 @@ class Atlas:
         ):
             model_supplier = ModelAssistedChangeSupplier(
                 authoring_model=self._model_assisted_authoring_model,
+                # Read-only context for the optional draft producer: the
+                # EXISTING cached repository self-knowledge and the EXISTING
+                # architecture projection (component boundary + relevant tests).
+                # Both are cache-only; an absent one simply omits its block.
+                repository_map=self._repository_map,
+                architecture_model=self._architecture_model_snapshot(),
             )
 
         # Phase 5.2 — deterministic-first authoring over the EXISTING
@@ -2047,6 +2053,7 @@ class Atlas:
                 # The map is the EXISTING cache-only repository self-knowledge;
                 # an absent map leaves the prompt byte-identical to before.
                 repository_map=self._repository_map,
+                architecture_model=self._architecture_model_snapshot(),
             )
         except Exception:
             return None

@@ -90,12 +90,15 @@ class RepairChangeSupplier:
         baseline: BaselineSupplier | None = None,
         repair_model: RepairModel | None = None,
         repository_map: Any | None = None,
+        architecture_model: Any | None = None,
     ) -> None:
         self._baseline = baseline
         self._repair_model = repair_model
         self._repository_map = repository_map
         self._supplier = ModelAssistedChangeSupplier(
-            authoring_model=repair_model, repository_map=repository_map
+            authoring_model=repair_model,
+            repository_map=repository_map,
+            architecture_model=architecture_model,
         )
 
     @property

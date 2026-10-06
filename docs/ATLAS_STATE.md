@@ -6008,6 +6008,46 @@ pinned behaviour is preserved. 26 new focused tests plus 502 regression tests pa
 with 0 failures; the 7 failures in the wider development set are pre-existing and
 reproduce identically on pristine `64856e3`.
 
+## 34.10 Authoring context — contracts and relevant tests projected
+
+The authoring context previously carried request/target/source/import/symbol
+evidence but **no declared boundary and no test linkage**; the only test linkage
+was a filename convention that returned **0** tests for real change sets where the
+repository's import graph identified 18–161 test dependents.
+
+Two DETERMINISTIC PROJECTIONS over existing data now close that gap. No new
+registry, no `is_test` classification, no dependency, and no behavioural inference.
+
+* **`RepositoryMap.tests_for_module(module, limit)`** — the test modules that
+  directly import `module`, derived from the EXISTING reverse-import index
+  (`dependents_of`) restricted to discovered modules whose dotted name begins with
+  `tests.`. Returns their real `ModuleInfo.path`, bounded
+  (`DEFAULT_MAX_TESTS = 20`); an unknown module yields `()`. Measured:
+  `atlas.evolution.development_gap` → **18** test modules,
+  `atlas.research.repository_map` → **20**, `atlas.services.memory_service` → 0.
+* **Authoring context** (`ModelAssistedChangeSupplier`) gained two bounded blocks
+  for the target module, both optional and omitted rather than guessed when their
+  source is unavailable: a **declared boundary** block projected from the owning
+  `ArchitectureModel` component (`responsibility`, `declared_dependencies`,
+  `provided_capabilities`, bounded by `MAX_CONTEXT_CONTRACT_ITEMS = 8`), and a
+  **relevant test modules** block (bounded by `MAX_CONTEXT_TESTS = 8`, explicit
+  `truncated: first N of M`, labelled *import-derived repository evidence, not a
+  guarantee of behavioural coverage*). The projection is offered to both the
+  governed model supplier and the repair supplier.
+* **`select_relevant_tests(..., derived_tests=...)`** — caller-supplied
+  import-derived candidates now participate alongside the existing name-convention
+  matches (merged, de-duplicated, bounded, sorted). With no derived candidates the
+  result is byte-identical to before. Measured on the real case:
+  `0 → 18` candidates for `atlas/evolution/development_gap.py`.
+
+Ownership is resolved by the component whose declared `package`/`module_path` most
+specifically covers the module; because 760 of 1,142 modules are currently unowned,
+that block is often coarse or absent — it omits rather than fabricates.
+Governance is untouched: provider OFF still yields zero invocations, malformed
+output still fails closed, and approval, sandbox, verification, promotion and
+activation are unchanged. 27 new focused tests plus 509 regression tests pass with
+0 failures. `docs/ROADMAP.md` is deliberately unchanged.
+
 ## 35. Current Position & Next Direction (evidence-driven — no new phase)
 
 **Position.** Phase C (C0 → C9) is frozen and has reached its evidence boundary:

@@ -71,6 +71,11 @@ MAX_CONTEXT_QUERY_CHARS: int = 200
 MAX_CONTEXT_SOURCE_CHARS: int = 16000
 #: Bounded internal-import evidence per module (dependency context).
 MAX_CONTEXT_IMPORTS: int = 12
+#: Bounded declared-architecture items (declared dependencies / provided
+#: capabilities) exposed for the target module's owning component.
+MAX_CONTEXT_CONTRACT_ITEMS: int = 8
+#: Bounded relevant-test modules exposed for the target module.
+MAX_CONTEXT_TESTS: int = 8
 
 #: Bound applied to ``notes`` (the model's rationale). Matches the downstream
 #: ``_build_proposal`` truncation of ``supplier_notes``.
@@ -112,6 +117,36 @@ def _prefer_production(ranked: object) -> tuple:
     production = [e for e in entries if not _is_test_module(str(getattr(e, "module", "") or ""))]
     tests = [e for e in entries if _is_test_module(str(getattr(e, "module", "") or ""))]
     return tuple(production) + tuple(tests)
+
+
+def _owning_component(architecture_model: Any, module: str) -> Any | None:
+    """The registered component that owns ``module``, or ``None``.
+
+    Read-only and deterministic: a component owns a module when its declared
+    ``package`` equals the module or is a dotted prefix of it, or when its
+    declared ``module_path`` is the module. The MOST SPECIFIC (longest package)
+    match wins; ties break on the component name. Nothing is inferred — an
+    unowned module yields ``None`` and the caller omits the boundary block.
+    """
+    if architecture_model is None or not module:
+        return None
+    candidates: list[tuple[int, str, Any]] = []
+    for component in getattr(architecture_model, "components", ()) or ():
+        package = str(getattr(component, "package", "") or "")
+        declared_path = str(getattr(component, "module_path", "") or "")
+        specificity = -1
+        if package and (module == package or module.startswith(package + ".")):
+            specificity = len(package)
+        elif declared_path and declared_path == module:
+            specificity = len(declared_path)
+        if specificity >= 0:
+            candidates.append(
+                (specificity, str(getattr(component, "name", "") or ""), component)
+            )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][2]
 
 
 def _prioritise_declared_target(ranked: object, need: DevelopmentNeed) -> tuple:
@@ -184,9 +219,11 @@ class ModelAssistedChangeSupplier:
         self,
         authoring_model: Callable[[str], Any] | None = None,
         repository_map: Any | None = None,
+        architecture_model: Any | None = None,
     ) -> None:
         self._authoring_model = authoring_model
         self._repository_map = repository_map
+        self._architecture_model = architecture_model
         self._policy = DevelopmentCyclePolicy()
 
     # -- ChangeSupplier protocol ---------------------------------------------
@@ -343,9 +380,76 @@ class ModelAssistedChangeSupplier:
                 if signature:
                     line += f"{signature[:MAX_CONTEXT_SIGNATURE_CHARS]}"
                 lines.append(line)
+        lines.extend(self._target_boundary_lines(ranked[0]))
         if len(lines) == 1:
             return ""
         return "\n".join(lines)
+
+    def _target_boundary_lines(self, entry: Any) -> list[str]:
+        """Bounded DECLARED-BOUNDARY and RELEVANT-TEST evidence for the target.
+
+        Both are deterministic PROJECTIONS of data Atlas already holds — the
+        owning component's declared boundary from the architecture model, and
+        the test modules that actually import the target from the repository
+        map's reverse-import index. Nothing is inferred, nothing is invented,
+        and an unresolvable component (or an absent map/model) simply omits its
+        block rather than guessing.
+        """
+        lines: list[str] = []
+        module = str(getattr(entry, "module", "") or "")
+        if not module:
+            return lines
+
+        component = _owning_component(self._architecture_model, module)
+        if component is not None:
+            name = str(getattr(component, "name", "") or "")
+            responsibility = str(getattr(component, "responsibility", "") or "")
+            dependencies = tuple(
+                str(d) for d in (getattr(component, "declared_dependencies", ()) or ())
+                if str(d)
+            )[:MAX_CONTEXT_CONTRACT_ITEMS]
+            provided = tuple(
+                str(c) for c in (getattr(component, "provided_capabilities", ()) or ())
+                if str(c)
+            )[:MAX_CONTEXT_CONTRACT_ITEMS]
+            if name or responsibility or dependencies or provided:
+                lines.append(
+                    f"    declared boundary for {name or module} "
+                    "(existing architecture metadata; evidence only):"
+                )
+                if responsibility:
+                    lines.append(f"        responsibility: {responsibility[:200]}")
+                if dependencies:
+                    lines.append(
+                        "        declared dependencies: " + ", ".join(dependencies)
+                    )
+                if provided:
+                    lines.append(
+                        "        provided capabilities: " + ", ".join(provided)
+                    )
+
+        repository_map = self._repository_map
+        tests_for_module = getattr(repository_map, "tests_for_module", None)
+        if callable(tests_for_module):
+            try:
+                tests = tuple(tests_for_module(module) or ())
+            except Exception:
+                tests = ()
+            if tests:
+                shown = tests[:MAX_CONTEXT_TESTS]
+                cut = len(tests) > len(shown)
+                header = (
+                    "    relevant test modules (import-derived repository "
+                    "evidence, not a guarantee of behavioural coverage"
+                )
+                header += (
+                    f"; truncated: first {len(shown)} of {len(tests)})"
+                    if cut
+                    else ")"
+                )
+                lines.append(header + ":")
+                lines.extend(f"        {test}" for test in shown)
+        return lines
 
     def _validate_and_build(self, payload: dict[str, Any]) -> SuppliedChanges | None:
         """Structurally validate, bound, and path/policy-check the payload."""

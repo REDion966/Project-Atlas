@@ -83,6 +83,7 @@ def select_relevant_tests(
     changed_files: Iterable[object],
     available_tests: Sequence[object] = (),
     max_tests: int = DEFAULT_MAX_TESTS,
+    derived_tests: Sequence[object] = (),
 ) -> tuple[str, ...]:
     """Return the candidate tests that concern ``changed_files``.
 
@@ -90,13 +91,22 @@ def select_relevant_tests(
         changed_files: Repo-relative paths of the changed ``.py`` files.
         available_tests: Candidate test paths the caller can actually run
             (e.g. the sandbox workload's seeded test files). Only these are
-            ever returned — the selector never fabricates a test path.
+            ever returned by the NAME convention — the selector never
+            fabricates a test path.
         max_tests: Hard cap on the number of returned tests.
+        derived_tests: Additional candidates the CALLER has already derived and
+            validated as relevant and runnable — typically the import-derived
+            test dependents of the changed modules (see
+            ``RepositoryMap.tests_for_module``). They are merged AFTER the
+            name-convention matches, de-duplicated and bounded by the same cap.
+            The selector still invents nothing: it only orders and bounds what
+            the caller supplies. Passing nothing leaves the result byte-identical
+            to the name-only behaviour.
 
     Returns:
         A sorted, de-duplicated tuple of at most ``max_tests`` test paths
-        (the exact strings supplied in ``available_tests``). Empty when there
-        is nothing relevant — an honest empty result, never a guess.
+        (the exact strings supplied by the caller). Empty when there is nothing
+        relevant — an honest empty result, never a guess.
     """
     try:
         cap = int(max_tests)
@@ -119,6 +129,17 @@ def select_relevant_tests(
         if not test_stem.startswith(TEST_FILE_PREFIX):
             continue
         if not any(_related(test_stem, stem) for stem in module_stems):
+            continue
+        key = str(test)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(key)
+
+    # Import-derived candidates participate alongside the name-convention
+    # matches. Only paths the caller supplied are ever considered.
+    for test in derived_tests or ():
+        if _normalized_parts(test) is None:
             continue
         key = str(test)
         if key in seen:

@@ -98,6 +98,14 @@ _RANK_B: float = 0.75
 _RANK_IDENTITY_WEIGHT: int = 3
 DEFAULT_RANK_LIMIT: int = 10
 MAX_RANK_LIMIT: int = 50
+
+#: Dotted-name prefix of every test module discovered by this map. Test modules
+#: are ordinary repository modules here (no ``is_test`` classification exists or
+#: is added); the prefix is only used by the bounded projection below.
+TEST_MODULE_PREFIX: str = "tests."
+
+#: Default cap on the test modules returned for one module (boundedness).
+DEFAULT_MAX_TESTS: int = 20
 #: Terms too generic to discriminate one module from another. These are
 #: ordinary English/Atlas words, never repository facts; a query made only of
 #: them yields nothing rather than an arbitrary ordering.
@@ -310,6 +318,39 @@ class RepositoryMap:
     def dependents_of(self, module: str) -> tuple[str, ...]:
         """Internal modules that directly import ``module``."""
         return self._reverse_index().get(module, ())
+
+    def tests_for_module(
+        self, module: str, limit: int = DEFAULT_MAX_TESTS
+    ) -> tuple[str, ...]:
+        """Repo-relative test paths that directly import ``module``.
+
+        A DETERMINISTIC PROJECTION over the EXISTING reverse-import index — the
+        same data ``dependents_of`` already exposes — restricted to modules this
+        repository actually contains whose dotted name begins with ``tests.``.
+        Returns their real ``ModuleInfo.path`` (POSIX, repo-relative), so a
+        caller never has to reconstruct a path and no path is ever invented: an
+        unknown module, no importer, or a non-positive ``limit`` yields ``()``.
+
+        Nothing is inferred from a filename. A test module is one this map
+        discovered that imports the module; the naming convention is not
+        consulted, and no ``is_test`` classification is introduced.
+        """
+        try:
+            cap = int(limit)
+        except (TypeError, ValueError):
+            cap = DEFAULT_MAX_TESTS
+        if cap < 1:
+            return ()
+        module_index = self._module_index()
+        paths: list[str] = []
+        for dependent in self.dependents_of(module):
+            if not dependent.startswith(TEST_MODULE_PREFIX):
+                continue
+            info = module_index.get(dependent)
+            path = str(getattr(info, "path", "") or "")
+            if path and path not in paths:
+                paths.append(path)
+        return tuple(paths[:cap])
 
     def impact_set(
         self,
