@@ -105,6 +105,28 @@ class DevelopmentSettings:
 
 
 @dataclass(slots=True)
+class SpecialistsSettings:
+    """Optional bounded specialist configuration (Command 3B).
+
+    Explicit opt-in ONLY. Safe default ``enabled=False``: no specialist provider
+    is constructed and the deterministic authoring path is byte-for-byte
+    unchanged. When enabled, the kernel builds the bounded specialist ->
+    authoring producer over the EXISTING Atlas-owned seam and the configured
+    LOCAL transport. The provider identity, model and endpoint are configuration,
+    never Atlas architecture, so the runtime/model can be substituted without
+    touching any other module. Specialist output remains UNTRUSTED: it still
+    passes Atlas validation, the sandbox, verification, OWNER approval and
+    promotion.
+    """
+
+    enabled: bool = False
+    provider_id: str = "ollama.code"
+    model: str = "qwen2.5-coder:7b"
+    host: str = "http://127.0.0.1:11434"
+    timeout_seconds: float = 180.0
+
+
+@dataclass(slots=True)
 class AuthoritySettings:
     """Owner/authority foundation configuration (P1/B1.1).
 
@@ -135,5 +157,7 @@ class AtlasSettings:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     # Optional governed development settings; safe default False.
     development: DevelopmentSettings = field(default_factory=DevelopmentSettings)
+    # Optional bounded specialist settings; safe default disabled.
+    specialists: SpecialistsSettings = field(default_factory=SpecialistsSettings)
     # Optional authority settings; safe default owner name.
     authority: AuthoritySettings = field(default_factory=AuthoritySettings)

@@ -53,6 +53,20 @@ history_limit = 20
 [development]
 model_assisted_authoring = false
 
+# Optional bounded specialist (Command 3B). OFF by default: when false, no
+# specialist provider is constructed and the deterministic authoring path is
+# byte-for-byte unchanged. When true, the kernel builds the bounded
+# specialist -> authoring producer over the EXISTING Atlas-owned seam and the
+# configured LOCAL transport (no vendored SDK, no hosted account). The
+# specialist output remains UNTRUSTED: it still passes Atlas validation, the
+# disposable sandbox, verification, OWNER approval and promotion.
+[specialists]
+enabled = false
+provider_id = "ollama.qwen2.5-coder-7b"
+model = "qwen2.5-coder:7b"
+host = "http://127.0.0.1:11434"
+timeout_seconds = 180.0
+
 [development.envelope]
 enabled = true
 allowed_operations = ["sandbox_development"]

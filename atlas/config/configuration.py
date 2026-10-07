@@ -15,7 +15,31 @@ from atlas.config.configuration_models import (
     DevelopmentSettings,
     LoggingSettings,
     ResearchSettings,
+    SpecialistsSettings,
 )
+
+
+def _specialists_settings(raw: object) -> SpecialistsSettings:
+    """Parse the optional ``[specialists]`` table with fail-safe defaults.
+
+    A malformed/absent table yields the disabled defaults, so a broken config
+    can never accidentally enable a model provider.
+    """
+    if not isinstance(raw, dict):
+        return SpecialistsSettings()
+    try:
+        timeout = float(raw.get("timeout_seconds", 180.0))
+    except (TypeError, ValueError):
+        timeout = 180.0
+    if timeout <= 0:
+        timeout = 180.0
+    return SpecialistsSettings(
+        enabled=bool(raw.get("enabled", False)),
+        provider_id=str(raw.get("provider_id") or "ollama.code"),
+        model=str(raw.get("model") or "qwen2.5-coder:7b"),
+        host=str(raw.get("host") or "http://127.0.0.1:11434"),
+        timeout_seconds=timeout,
+    )
 
 
 class Configuration:
@@ -92,6 +116,7 @@ class Configuration:
                     data.get("authority", {}).get("owner_name", "Owner")
                 ),
             ),
+            specialists=_specialists_settings(data.get("specialists")),
         )
 
     @property

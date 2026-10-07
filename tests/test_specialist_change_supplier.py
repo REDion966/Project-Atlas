@@ -127,6 +127,50 @@ class TestValidProposal:
 
 
 # ---------------------------------------------------------------------------
+# Plan-derived verification context is forwarded (bounded verification leg)
+# ---------------------------------------------------------------------------
+
+
+class TestVerificationForwarding:
+    def test_plan_tests_and_context_are_forwarded(self):
+        need = _need(
+            _proposal({TARGET: CONTENT}),
+            metadata={
+                "test_files": {"tests/test_x.py": "def test_x():\n    pass\n"},
+                "repository_context": {"atlas/x.py": "x = 1\n"},
+            },
+        )
+        supplied = SpecialistChangeSupplier().supply_changes(need)
+        assert supplied is not None
+        assert supplied.test_files == (
+            ("tests/test_x.py", "def test_x():\n    pass\n"),
+        )
+        assert supplied.repository_context == (("atlas/x.py", "x = 1\n"),)
+
+    def test_list_form_is_forwarded(self):
+        need = _need(
+            _proposal({TARGET: CONTENT}),
+            metadata={"test_files": [{"path": "tests/test_x.py", "content": "x"}]},
+        )
+        supplied = SpecialistChangeSupplier().supply_changes(need)
+        assert supplied is not None
+        assert supplied.test_files == (("tests/test_x.py", "x"),)
+
+    def test_absent_verification_context_stays_empty(self):
+        supplied = _supply(_proposal({TARGET: CONTENT}))
+        assert supplied.test_files == ()
+        assert supplied.repository_context == ()
+
+    @pytest.mark.parametrize(
+        "metadata",
+        [{"test_files": 123}, {"repository_context": 5}, {"test_files": "x"}],
+    )
+    def test_malformed_verification_payload_fails_closed(self, metadata):
+        need = _need(_proposal({TARGET: CONTENT}), metadata=metadata)
+        assert SpecialistChangeSupplier().supply_changes(need) is None
+
+
+# ---------------------------------------------------------------------------
 # 5-16. Fail-closed refusals (every refusal returns None, never raises)
 # ---------------------------------------------------------------------------
 

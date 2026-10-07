@@ -31,7 +31,10 @@ Contract
 It reads ``need.metadata["specialist_proposal"]`` (a dedicated key, disjoint
 from the existing ``code_changes`` / ``structural`` / ``scaffold`` /
 ``evidence_change`` conventions) and produces ONLY the existing bounded
-``SuppliedChanges`` ``code_changes`` representation. It is fail-closed: absent,
+``SuppliedChanges`` representation: exactly one ``code_changes`` entry plus,
+when the need carries them, the same plan-derived ``test_files`` /
+``repository_context`` every sibling supplier forwards (so the governed
+verification leg stays bounded). It is fail-closed: absent,
 malformed, wrong-capability, identity-less, missing/zero/multiple-file,
 invalid-content, internally-inconsistent, unsafe-path or out-of-target
 proposals all yield ``None``. It NEVER raises, so it can never change the
@@ -204,14 +207,66 @@ class SpecialistChangeSupplier:
         ):
             return None
 
+        # 8. The plan's ALREADY-SELECTED verification tests and bounded
+        #    test-support closure travel the SAME convention every sibling
+        #    supplier uses (``metadata["test_files"]`` /
+        #    ``metadata["repository_context"]``), so the governed verification
+        #    leg runs against the plan's bounded test target instead of
+        #    degrading to an unbounded whole-workspace collection. This is the
+        #    existing ``SuppliedChanges`` representation, not a new one; when
+        #    the need carries neither key the result is unchanged. Malformed
+        #    payloads fail closed (``None``), never partially.
+        try:
+            need_metadata = getattr(need, "metadata", None)
+            if not isinstance(need_metadata, dict):
+                need_metadata = {}
+            test_files = _pairs(need_metadata.get("test_files", {}))
+            repository_context = _pairs(
+                need_metadata.get("repository_context", {})
+            )
+        except ValueError:
+            return None
+
         note = payload.get("note")
         notes = str(note)[:_MAX_NOTES_CHARS] if isinstance(note, str) else ""
         return SuppliedChanges(
             code_changes=((path, content),),
+            test_files=test_files,
+            repository_context=repository_context,
             origin=self.origin,
             confidence=_clamp01(proposal.confidence),
             notes=notes,
         )
+
+
+def _pairs(raw: Any) -> tuple[tuple[str, str], ...]:
+    """Normalize ``{path: content}`` / ``[{path, content}]`` into pairs.
+
+    Mirrors the EXISTING convention the deterministic and structural suppliers
+    read. ``None``/empty yields ``()``; a malformed payload raises
+    ``ValueError`` so the caller fails the whole change closed.
+    """
+    if raw is None or raw == {} or raw == []:
+        return ()
+    if isinstance(raw, dict):
+        out: list[tuple[str, str]] = []
+        for path, content in raw.items():
+            if not isinstance(path, str) or not isinstance(content, str):
+                raise ValueError("malformed metadata payload")
+            out.append((path, content))
+        return tuple(out)
+    if isinstance(raw, list):
+        out = []
+        for item in raw:
+            if (
+                not isinstance(item, dict)
+                or "path" not in item
+                or "content" not in item
+            ):
+                raise ValueError("malformed metadata entry")
+            out.append((str(item["path"]), str(item["content"])))
+        return tuple(out)
+    raise ValueError("malformed metadata payload")
 
 
 __all__ = [

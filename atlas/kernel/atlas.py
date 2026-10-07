@@ -372,6 +372,10 @@ class Atlas:
 
         self._conversation: ConversationService | None = None
         self._proposal_change_supplier = None
+        #: Command 3B — the OPTIONAL bounded specialist -> authoring producer.
+        #: ``None`` unless ``[specialists].enabled`` is explicitly true AND a
+        #: provider is wired; deterministic-first behaviour is unchanged.
+        self._specialist_author = None
         self._memory_service: MemoryManagerService | None = None
         self._knowledge_manager: KnowledgeManager | None = None
         self._cognitive_loop: CognitiveLoop | None = None
@@ -2010,6 +2014,75 @@ class Atlas:
             self._development_envelope,
             usage_provider=lambda: self._development_envelope_usage,
         )
+
+        # Command 3B — OPT-IN ONLY: when ``[specialists].enabled`` is explicitly
+        # true, build the bounded specialist -> authoring producer over the
+        # EXISTING Atlas-owned seam (registry + transport-injected provider). It
+        # is consulted only when no deterministic authoring evidence exists, and
+        # its output is an UNTRUSTED proposal that still passes validation, the
+        # sandbox, verification, approval and promotion. Any wiring failure
+        # leaves it ``None`` (fail-closed) so the deterministic path is unchanged.
+        self._specialist_author = self._build_specialist_development_author()
+
+    def _build_specialist_development_author(self):
+        """Build the OPTIONAL bounded specialist author, or ``None``.
+
+        Deterministic, read-only and fail-closed: with ``[specialists].enabled``
+        false (the default) this returns ``None`` and no provider is constructed.
+        The provider is configured at this boundary (id/model/host/timeout) and
+        its transport is the EXISTING local runtime; the registry performs Atlas
+        validation. No new provider mechanism is introduced.
+        """
+        try:
+            if not bool(self._config.get("specialists", "enabled", default=False)):
+                return None
+            from atlas.evolution.specialist_development import (
+                SpecialistDevelopmentAuthor,
+            )
+            from atlas.specialist_providers import HttpCodeGenerationProvider
+            from atlas.specialist_transport import (
+                DEFAULT_HOST,
+                DEFAULT_MODEL,
+                DEFAULT_TIMEOUT_SECONDS,
+                ollama_transport,
+            )
+            from atlas.specialists import SpecialistRegistry
+
+            model = str(
+                self._config.get("specialists", "model", default=DEFAULT_MODEL)
+                or DEFAULT_MODEL
+            )
+            host = str(
+                self._config.get("specialists", "host", default=DEFAULT_HOST)
+                or DEFAULT_HOST
+            )
+            provider_id = str(
+                self._config.get(
+                    "specialists", "provider_id", default="ollama.code"
+                )
+                or "ollama.code"
+            )
+            timeout = float(
+                self._config.get(
+                    "specialists", "timeout_seconds", default=DEFAULT_TIMEOUT_SECONDS
+                )
+                or DEFAULT_TIMEOUT_SECONDS
+            )
+            registry = SpecialistRegistry()
+            registry.register(
+                HttpCodeGenerationProvider(
+                    transport=ollama_transport(
+                        model=model, host=host, timeout=timeout
+                    ),
+                    provider_id=provider_id,
+                    model_id=model,
+                )
+            )
+            return SpecialistDevelopmentAuthor(
+                registry, repository_map=lambda: self._repository_map
+            )
+        except Exception:
+            return None
 
     def _model_assisted_authoring_model(self, prompt: str):
         """Duck-typed authoring model backed by the EXISTING ``AIService``.
@@ -6508,20 +6581,28 @@ class Atlas:
         return context
 
     def development_authoring_request(self, request: str) -> dict:
-        """Carry an EXPLICITLY SUPPLIED edit into the EXISTING governed cycle.
+        """Carry a development request's change into the EXISTING governed cycle.
 
-        Composes the deterministic localization + supplied-edit bridge with the
-        EXISTING F9 development cycle: the validated structural edit becomes the
-        change the EXISTING ``ChangeSupplier`` seam authors, and the cycle STOPS
-        at the human approval boundary (``PENDING_APPROVAL``).
+        Two routes, deterministic-first:
+
+          * an EXPLICITLY SUPPLIED edit (a fenced code block naming a target
+            symbol) is authored by the EXISTING structural bridge — byte-for-byte
+            the previous behaviour; and
+          * when the request supplies NO code block and ``[specialists].enabled``
+            is true, the OPTIONAL bounded specialist producer authors the change
+            through the EXISTING Atlas-owned specialist seam.
+
+        Both routes compose the deterministic localization + the EXISTING F9
+        development cycle, and the cycle STOPS at the human approval boundary
+        (``PENDING_APPROVAL``).
 
         It authorizes nothing, approves nothing, executes nothing and promotes
         nothing — the returned proposal is a DRAFT, and the sandbox run still
         requires the EXISTING OWNER-gated ``run_development_execution`` on an
         APPROVED proposal. Nothing is written to the repository. Fail-soft
         (``{}``) when the surfaces are not wired; fail-closed (``ok=False`` with
-        the refusal reason) when the request is not a development request or the
-        supplied edit is refused.
+        the refusal reason) when the request is not a development request, a
+        supplied edit is refused, or no author can produce a change.
         """
         import dataclasses
 
@@ -6550,14 +6631,47 @@ class Atlas:
             "authorized": False,
             "executed": False,
         }
-        if not edit.get("ok") or not edit.get("entry"):
+        supplied_entry = edit.get("entry") if edit.get("ok") else None
+        authoring_metadata: dict = {}
+        specialist: dict | None = None
+        target = ""
+        target_declared: tuple = ()
+        if supplied_entry:
+            # Deterministic-first: an explicitly supplied edit always wins.
+            authoring_metadata[STRUCTURAL_KEY] = [supplied_entry]
+        elif "```" not in request:
+            # No explicit supplied edit: consult the OPTIONAL bounded specialist
+            # producer so the model MAY author the change the request describes.
+            # This is the ONLY model path here; it runs strictly AFTER the
+            # deterministic supplied-edit route, and the proposal it returns is
+            # an UNTRUSTED input that still passes Atlas validation, the sandbox,
+            # verification, approval and promotion. With no specialist wired
+            # (the default) it returns ``None`` and the request fails closed
+            # exactly as before.
+            produced = self._specialist_authoring_metadata(request)
+            if produced is None:
+                return refused
+            authoring_metadata = produced["metadata"]
+            specialist = produced["summary"]
+            target = produced["target"]
+            target_declared = produced["targets"]
+        else:
+            # A code block WAS supplied but the supplied-edit bridge refused it
+            # (e.g. the symbol does not belong to the target): fail closed.
             return refused
         try:
             need = task_spec_to_development_need(self._conversation._intake(request))
             if need is None:
                 return refused
             metadata = dict(getattr(need, "metadata", None) or {})
-            metadata[STRUCTURAL_KEY] = [edit["entry"]]
+            metadata.update(authoring_metadata)
+            target_components = tuple(getattr(need, "target_components", ()) or ())
+            if target_declared and not target_components:
+                # Declare the localized target so the specialist supplier's
+                # containment check enforces the EXACT authorized path. Both the
+                # repository path and its dotted module form are accepted, so a
+                # provider may return either canonical form and nothing else.
+                target_components = tuple(target_declared)
             # The plan's OWN bounded verification expectation is authoritative
             # for the governed verification leg: carry its already-selected
             # tests into the workload the EXISTING cycle builds
@@ -6583,7 +6697,9 @@ class Atlas:
                 context = self._verification_repository_context()
                 if context:
                     metadata["repository_context"] = context
-            need = dataclasses.replace(need, metadata=metadata)
+            need = dataclasses.replace(
+                need, target_components=target_components, metadata=metadata
+            )
             result = self.run_development_cycle(need)
         except Exception:
             return refused
@@ -6591,7 +6707,8 @@ class Atlas:
         return {
             "ok": bool(getattr(result, "ok", False)),
             "reason": "",
-            "entry": dict(edit["entry"]),
+            "entry": dict(supplied_entry) if supplied_entry else None,
+            "specialist": specialist,
             "proposal_id": str(getattr(result, "proposal_id", "") or ""),
             "proposal_status": str(getattr(result, "proposal_status", "") or ""),
             "approval_request_id": str(
@@ -6605,6 +6722,76 @@ class Atlas:
             "authorized": False,
             "executed": False,
         }
+
+    def _specialist_authoring_metadata(self, request: str) -> dict | None:
+        """Author a change through the OPTIONAL specialist seam, or ``None``.
+
+        Deterministic-first and fail-closed: returns ``None`` when no specialist
+        is wired, the request is not a development request, no target localizes,
+        or the provider produces nothing usable. The returned ``metadata`` is the
+        intake need's metadata with the VALIDATED proposal attached under the
+        seam's dedicated key; ``summary`` is bounded provenance for reporting.
+        It never executes, approves, promotes or writes.
+        """
+        author = getattr(self, "_specialist_author", None)
+        if author is None:
+            return None
+        try:
+            from atlas.conversation.development_intake import (
+                task_spec_to_development_need,
+            )
+
+            need = task_spec_to_development_need(self._conversation._intake(request))
+            if need is None:
+                return None
+            plan = self.development_change_plan(request)
+            raw_target = str(plan.get("target") or "").strip().replace("\\", "/")
+            if not raw_target:
+                return None
+            if raw_target.endswith(".py"):
+                path_target = raw_target
+                dotted_target = raw_target[:-3].replace("/", ".")
+            else:
+                dotted_target = raw_target.strip(".")
+                path_target = dotted_target.replace(".", "/") + ".py"
+            if not path_target or not dotted_target:
+                return None
+            tests = tuple(
+                str(path)
+                for path in (((plan.get("verification") or {}).get("tests")) or ())
+            )
+            produced = author.propose_with_metadata(
+                need,
+                target=path_target,
+                plan={
+                    "target": path_target,
+                    "target_kind": str(plan.get("target_kind") or ""),
+                    "route": "specialist_model",
+                    "constraints": list(plan.get("constraints") or ())[:8],
+                },
+                verification_tests=tests,
+            )
+            if produced is None:
+                return None
+            proposal, metadata = produced
+            summary = {
+                "provider_id": str(getattr(proposal, "provider_id", "") or ""),
+                "model_id": str(getattr(proposal, "model_id", "") or ""),
+                "capability": str(getattr(proposal, "capability", "") or ""),
+                "confidence": float(getattr(proposal, "confidence", 0.0) or 0.0),
+                "paths": list((proposal.payload or {}).get("paths") or ()),
+            }
+            return {
+                "metadata": metadata,
+                "summary": summary,
+                "target": path_target,
+                "targets": tuple(
+                    dict.fromkeys((path_target, dotted_target))
+                ),
+            }
+        except Exception:
+            return None
+
 
     def development_supplied_edit(self, request: str) -> dict:
         """Read an EXPLICITLY SUPPLIED structural edit out of a request.
