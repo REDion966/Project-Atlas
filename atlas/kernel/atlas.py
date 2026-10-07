@@ -6420,6 +6420,82 @@ class Atlas:
         except Exception:
             return ()
 
+    #: Bounded support closure for repository-level verification. Sized from
+    #: MEASUREMENT: the proven closure (atlas/** + tests/** + root config) is
+    #: ~1163 files / ~12.9 MB. A smaller bound fail-closes to an EMPTY context
+    #: and silently reproduces the original verification failure.
+    MAX_CONTEXT_FILES: int = 2000
+    MAX_CONTEXT_CHARS: int = 20_000_000
+
+    def _verification_repository_context(self) -> dict[str, str]:
+        """Bounded, deterministic TEST-SUPPORT closure for repository tests.
+
+        The selected repository tests import ``atlas...`` AND are collected
+        through ``tests/conftest.py``, which imports repository test-support
+        modules under ``tests/``. A workload-only sandbox lacks both, so
+        verification errored at conftest setup
+        (``ModuleNotFoundError: tests.safe_kernel_config``). This resolves the
+        proven closure: ``atlas/**/*.py`` + ``tests/**/*.py`` + the root
+        execution configs that actually exist.
+
+        Repository-rooted ONLY: every path resolves beneath the repository
+        root, an escaping symlink is skipped, ``__pycache__`` is excluded,
+        ordering is deterministic, and the payload is explicitly bounded. On a
+        bound violation or an unresolvable root it returns an EMPTY mapping
+        (fail closed) — never a partial closure, never a silent truncation,
+        and never a fallback that executes against the real repository.
+        """
+        try:
+            root = Path(__file__).resolve().parents[2]
+        except Exception:
+            return {}
+        candidates: list[Path] = []
+        try:
+            for package in ("atlas", "tests"):
+                directory = root / package
+                if directory.is_dir():
+                    candidates.extend(sorted(directory.rglob("*.py")))
+            for name in ("conftest.py", "pyproject.toml", "pytest.ini", "setup.cfg"):
+                candidate = root / name
+                if candidate.is_file():
+                    candidates.append(candidate)
+        except Exception:
+            return {}
+        try:
+            root_resolved = root.resolve()
+        except Exception:
+            return {}
+
+        context: dict[str, str] = {}
+        total = 0
+        for path in candidates:
+            if len(context) >= self.MAX_CONTEXT_FILES:
+                return {}
+            try:
+                if path.is_symlink():
+                    target = path.resolve()
+                    if (
+                        target != root_resolved
+                        and root_resolved not in target.parents
+                    ):
+                        continue
+                resolved = path.resolve()
+                if resolved != root_resolved and root_resolved not in resolved.parents:
+                    continue
+                relative = resolved.relative_to(root_resolved).as_posix()
+                if "__pycache__" in relative:
+                    continue
+                text = resolved.read_text(
+                    encoding="utf-8", errors="surrogateescape"
+                )
+            except Exception:
+                continue
+            total += len(text)
+            if total > self.MAX_CONTEXT_CHARS:
+                return {}
+            context[relative] = text
+        return context
+
     def development_authoring_request(self, request: str) -> dict:
         """Carry an EXPLICITLY SUPPLIED edit into the EXISTING governed cycle.
 
@@ -6493,6 +6569,9 @@ class Atlas:
                     continue
             if test_files:
                 metadata["test_files"] = test_files
+                context = self._verification_repository_context()
+                if context:
+                    metadata["repository_context"] = context
             need = dataclasses.replace(need, metadata=metadata)
             result = self.run_development_cycle(need)
         except Exception:

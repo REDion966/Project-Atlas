@@ -208,6 +208,14 @@ class DevelopmentNeed:
 # ---------------------------------------------------------------------------
 
 
+#: Explicit, fail-closed cap on support-context files carried into a sandbox
+#: workload. Sized from MEASUREMENT, not guesswork: the proven test-support
+#: closure of this repository is ~1163 files (~12.9 MB), so a smaller bound
+#: would fail closed to an EMPTY context and silently reproduce the original
+#: verification failure.
+MAX_REPOSITORY_CONTEXT_FILES: int = 2000
+
+
 @dataclass(frozen=True, slots=True)
 class SuppliedChanges:
     """Bounded change payload produced by a supplier (draft content only).
@@ -215,6 +223,8 @@ class SuppliedChanges:
     Attributes:
         code_changes: ``(path, content)`` pairs for non-test source files.
         test_files: ``(path, content)`` pairs for test files.
+        repository_context: ``(path, content)`` pairs of SUPPORT files the
+            selected tests need in order to import. Not test selection.
         origin: Provenance marker, e.g. ``deterministic`` or
             ``model-assisted-draft`` (never treated as verified knowledge).
         confidence: Supplier self-assessed confidence in [0.0, 1.0].
@@ -223,6 +233,7 @@ class SuppliedChanges:
 
     code_changes: tuple[tuple[str, str], ...] = ()
     test_files: tuple[tuple[str, str], ...] = ()
+    repository_context: tuple[tuple[str, str], ...] = ()
     origin: str = "deterministic"
     confidence: float = 0.0
     notes: str = ""
@@ -676,6 +687,12 @@ class DevelopmentCycleController:
                     for path, content in code_changes
                 ],
                 "test_files": {path: content for path, content in test_files},
+                "repository_context": {
+                    path: content
+                    for path, content in tuple(supplied.repository_context)[
+                        : MAX_REPOSITORY_CONTEXT_FILES
+                    ]
+                },
                 "development_cycle": {
                     "candidate_id": need.candidate_id,
                     "evidence_change_ids": list(need.evidence_change_ids),

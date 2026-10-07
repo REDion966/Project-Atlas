@@ -362,9 +362,26 @@ class StructuralChangeSupplier:
         elif raw_tests:
             raise ValueError("malformed test_files payload")
 
+        raw_context = metadata.get("repository_context", {})
+        context: list[tuple[str, str]] = []
+        if isinstance(raw_context, dict):
+            context = [(str(p), str(c)) for p, c in raw_context.items()]
+        elif isinstance(raw_context, list):
+            for item in raw_context:
+                if (
+                    not isinstance(item, dict)
+                    or "path" not in item
+                    or "content" not in item
+                ):
+                    raise ValueError("malformed repository_context entry")
+                context.append((str(item["path"]), str(item["content"])))
+        elif raw_context:
+            raise ValueError("malformed repository_context payload")
+
         return SuppliedChanges(
             code_changes=tuple(changes),
             test_files=tuple(tests),
+            repository_context=tuple(context),
             origin=self.origin,
             confidence=1.0,
             notes="deterministic structural edit",

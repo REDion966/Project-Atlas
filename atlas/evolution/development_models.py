@@ -172,6 +172,11 @@ class SandboxWorkload:
 
     code_changes: tuple[dict[str, Any], ...] = ()
     test_files: dict[str, str] = field(default_factory=dict)
+    #: Bounded, deterministic SUPPORT closure the selected tests need in order
+    #: to import (repository-rooted path -> content). NOT test selection:
+    #: ``test_files`` stays the authoritative selected-tests set. Empty by
+    #: default, so a workload-only run is byte-identical to before.
+    repository_context: dict[str, str] = field(default_factory=dict)
     verify_target: str = ""
 
 

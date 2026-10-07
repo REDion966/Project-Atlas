@@ -132,9 +132,15 @@ def metadata_change_supplier(
     test_files = proposal.metadata.get("test_files", {})
     if not isinstance(test_files, dict):
         test_files = {}
+    repository_context = proposal.metadata.get("repository_context", {})
+    if not isinstance(repository_context, dict):
+        repository_context = {}
     return SandboxWorkload(
         code_changes=changes,
         test_files={str(k): str(v) for k, v in test_files.items()},
+        repository_context={
+            str(k): str(v) for k, v in repository_context.items()
+        },
         verify_target=str(proposal.metadata.get("verify_target", "")),
     )
 
@@ -517,6 +523,19 @@ class SelfDevelopmentLoop:
 
             # Seed the test files for this workload.
             for rel_path, content in workload.test_files.items():
+                workspace.write_text(rel_path, content)
+
+            # Seed the bounded repository SUPPORT closure the selected tests
+            # need in order to import. Additive: written through the SAME
+            # workspace writer (so existing sandbox-root containment applies),
+            # never outside the disposable sandbox, and never over a file the
+            # change itself is about to apply.
+            applied_paths = {
+                str(change.get("path", "")) for change in workload.code_changes
+            }
+            for rel_path, content in workload.repository_context.items():
+                if rel_path in applied_paths:
+                    continue
                 workspace.write_text(rel_path, content)
 
             applied = False
