@@ -195,15 +195,15 @@ EXPECTED: dict[tuple[str, int], tuple[str, bool, tuple[str, ...], str, str | Non
     ("C2", 0): ("development_request", False, ("success",), "request", "develop"),
     ("C3", 0): ("conversation", False, (), "request", None),
     ("C4", 0): ("conversation", False, (), "statement", None),
-    ("C5", 0): ("action_request", False, ("success",), "request", "act"),
+    ("C5", 0): ("development_request", False, ("success",), "request", "develop"),
     ("C6", 0): ("conversation", False, (), "statement", None),
     ("D1", 0): ("action_request", False, ("success",), "request", "act"),
-    ("D1", 1): ("action_request", True, ("reference", "success"), "request", "act"),
+    ("D1", 1): ("action_request", True, ("reference", "success"), "request", "develop"),
     ("D1", 2): ("question", False, ("reference",), "statement", "explain"),
     ("D2", 0): ("development_request", False, ("success",), "request", "develop"),
     ("D2", 1): ("development_request", True, ("reference", "success"), "request", "develop"),
     ("D2", 2): ("question", False, ("reference",), "question", "develop"),
-    ("D2", 3): ("question", False, (), "question", None),
+    ("D2", 3): ("question", False, (), "question", "develop"),
     ("E1", 0): ("action_request", True, ("reference", "success"), "request", "develop"),
     ("E2", 0): ("conversation", False, ("reference",), "statement", None),
     ("E3", 0): ("development_request", True, ("reference", "success"), "request", "develop"),
@@ -212,10 +212,10 @@ EXPECTED: dict[tuple[str, int], tuple[str, bool, tuple[str, ...], str, str | Non
     ("E6", 0): ("action_request", False, ("success",), "request", "act"),
     ("E6", 1): ("action_request", True, ("reference", "success"), "request", "act"),
     ("F1", 0): ("conversation", False, (), "request", "develop"),
-    ("F2", 0): ("action_request", True, ("reference", "success"), "request", "act"),
+    ("F2", 0): ("action_request", True, ("reference", "success"), "request", "develop"),
     ("F3", 0): ("development_request", True, ("reference", "success"), "request", "develop"),
     ("F4", 0): ("action_request", True, ("reference", "success"), "request", "act"),
-    ("F5", 0): ("conversation", False, ("reference",), "statement", None),
+    ("F5", 0): ("conversation", False, ("reference",), "request", "develop"),
     ("G1", 0): ("question", False, (), "question", None),
     ("G2", 0): ("question", False, (), "question", "explain"),
     ("G3", 0): ("conversation", False, (), "statement", None),
@@ -256,7 +256,7 @@ EXPECTED: dict[tuple[str, int], tuple[str, bool, tuple[str, ...], str, str | Non
     ("M1", 0): ("development_request", False, ("success",), "request", "develop"),
     ("M1", 1): ("question", False, ("reference",), "question", "develop"),
     ("M2", 0): ("information_request", False, (), "request", "research"),
-    ("M2", 1): ("question", False, (), "question", None),
+    ("M2", 1): ("question", False, (), "question", "develop"),
     ("M2", 2): ("conversation", False, (), "statement", None),
     ("M3", 0): ("investigation_request", False, (), "request", "investigate"),
     ("M3", 1): ("question", False, ("reference",), "statement", "explain"),
@@ -269,7 +269,7 @@ EXPECTED: dict[tuple[str, int], tuple[str, bool, tuple[str, ...], str, str | Non
 }
 
 #: Fingerprint of the whole corpus contract (see :func:`corpus_rows`).
-CORPUS_DIGEST = "adee784e450d570b"
+CORPUS_DIGEST = "a8f23d834ccd1c56"
 
 #: Task types whose handlers own the turn outright: cognition must never
 #: receive one of these (Phase 3-5 / governed lifecycle isolation).

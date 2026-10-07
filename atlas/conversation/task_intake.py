@@ -146,14 +146,20 @@ _DEVELOPMENT_CUE_FORMS: frozenset[str] = frozenset(
         "add",
         "build",
         "rebuild",
+        "change",
         "create a capability",
         "create a module",
+        "delete",
         "extend",
         "fix",
         "implement",
         "improve",
+        "insert",
+        "make",
         "modify",
         "refactor",
+        "replace",
+        "update",
     }
 )
 
@@ -189,6 +195,18 @@ _DEVELOPMENT_CODE_TARGETS: frozenset[str] = frozenset(
         "readme",
         "docstring",
         "unit test",
+        # Code-STRUCTURE units a developer names directly ("the helper", "this
+        # function", "the method", "the class"). These are ordinary code units,
+        # NOT architectural identities: service/component/subsystem are
+        # deliberately ABSENT so naming an architectural identity still relies on
+        # the EXISTING resolver rather than a maintained noun list. The
+        # development cue is still REQUIRED, so naming a unit is never enough.
+        "helper",
+        "function",
+        "method",
+        "class",
+        "file",
+        "files",
     }
 )
 
@@ -1555,6 +1573,36 @@ class TaskIntake:
             return False
         return bool(getattr(result, "is_resolved", False))
 
+    def _is_development_framed(self, lowered: str, meaning: Any) -> bool:
+        """Whether the utterance is explicitly framed as a development request.
+
+        The EXISTING development gate, extracted unchanged so the SAME predicate
+        is used everywhere a development-framed request must be recognised — and
+        so one authoritative implementation exists: a development cue (whole-word,
+        not negated) AND a recognized target (self-target, "capability"/"module", a
+        code unit, or an architectural identity the EXISTING resolver resolves).
+        """
+        cue_hit = _first_hit(
+            lowered, _DEVELOPMENT_CUE_FORMS, word_boundary=True
+        ) or _first_hit(lowered, _DEVELOPMENT_VERB_CUES, word_boundary=True)
+        occurrences = tuple(
+            cue
+            for cue in (*_DEVELOPMENT_CUE_FORMS, *_DEVELOPMENT_VERB_CUES)
+            if _word_cue_present(lowered, cue)
+        )
+        negated = bool(occurrences) and all(
+            _word_cue_is_negated(lowered, cue) for cue in occurrences
+        )
+        if not (cue_hit and not negated):
+            return False
+        return bool(
+            _first_hit(lowered, _SELF_TARGETS)
+            or "capability" in lowered
+            or "module" in lowered
+            or _first_hit(lowered, _DEVELOPMENT_CODE_TARGETS, word_boundary=True)
+            or self._names_resolved_architectural_target(meaning)
+        )
+
     def _classify(
         self,
         normalized: str,
@@ -1605,6 +1653,14 @@ class TaskIntake:
                 _REJECTION_MENTION_CUES,
                 _REJECTION_CUES - _REJECTION_MENTION_CUES,
             )
+            # "reject" names a lifecycle decision ONLY when the utterance is not
+            # framed as a code change. "Make the helper reject empty input."
+            # requests a BEHAVIOUR, while "Reject the proposal." rejects a
+            # lifecycle object. The same principle this module already applies to
+            # investigation is applied here; the development gate is unchanged,
+            # so a bare "reject …" with no development cue and no recognized
+            # target keeps its existing governance classification.
+            or self._is_development_framed(lowered, meaning)
         ):
             return TaskType.REJECTION_REQUEST
 
@@ -1681,37 +1737,16 @@ class TaskIntake:
         # only when EVERY development cue it carries is negated, so a genuine
         # development request that merely carries a trailing constraint survives
         # with that constraint intact.
-        development_cue_hit = _first_hit(
-            lowered, _DEVELOPMENT_CUE_FORMS, word_boundary=True
-        ) or _first_hit(lowered, _DEVELOPMENT_VERB_CUES, word_boundary=True)
-        development_cue_occurrences = tuple(
-            cue
-            for cue in (*_DEVELOPMENT_CUE_FORMS, *_DEVELOPMENT_VERB_CUES)
-            if _word_cue_present(lowered, cue)
-        )
-        development_negated = bool(development_cue_occurrences) and all(
-            _word_cue_is_negated(lowered, cue)
-            for cue in development_cue_occurrences
-        )
-        development = (development_cue_hit and not development_negated) and (
-            _first_hit(lowered, _SELF_TARGETS)
-            or "capability" in lowered
-            or "module" in lowered
-            # Real-world development-interface pilot: an explicit code/test/
-            # repository work target qualifies the request exactly like a
-            # self-target does. The cue is still required, so this cannot make
-            # an ordinary sentence a development request.
-            or _first_hit(lowered, _DEVELOPMENT_CODE_TARGETS, word_boundary=True)
-            # Typed-target gating: the EXISTING architectural target resolver
-            # decides whether the utterance names an addressable Atlas identity,
-            # so "Improve the conversation service/component/subsystem" is a
-            # development request because the target RESOLVES, not because the
-            # word is on a maintained list. The development cue is still
-            # required, the resolver only qualifies the TARGET, and an
-            # ambiguous or unresolved target contributes NOTHING — so an
-            # ordinary sentence that merely mentions a component is unaffected.
-            or self._names_resolved_architectural_target(meaning)
-        )
+        # Repository-impact requests ask WHAT a change would affect ("What would
+        # be affected if I change X?"). Their predicate is independent of the
+        # development cue vocabulary, so it MUST be evaluated before the generic
+        # development decision: otherwise the development cue "change" swallows
+        # the turn and the impact handler never runs. Investigation keeps its own
+        # precedence above this; every higher-priority branch is untouched.
+        if looks_like_repository_impact_request(normalized):
+            return TaskType.REPOSITORY_IMPACT_REQUEST
+
+        development = self._is_development_framed(lowered, meaning)
         # Real-world development-intake gap: this decision used to be evaluated
         # AFTER the investigation branch, so any turn that also carried an
         # investigation cue ("Add a regression test. First investigate the
@@ -1769,8 +1804,10 @@ class TaskIntake:
         # repository target token are both present; otherwise this falls
         # through to the existing question/fallback behavior. No general
         # natural-language understanding and no reference resolution.
-        if looks_like_repository_impact_request(normalized):
-            return TaskType.REPOSITORY_IMPACT_REQUEST
+        #
+        # NOTE: the impact decision itself is made EARLIER (immediately before the
+        # development decision) so that a development cue such as "change" cannot
+        # swallow an impact request first. It is deliberately not repeated here.
 
         research = _first_hit(lowered, _RESEARCH_CUES)
         greeting = bool(_GREETING_RE.search(lowered))
