@@ -228,3 +228,89 @@ class TestDeterminism:
     def test_plan_json_is_stable(self, kernel):
         plan = kernel.development_change_plan(PRESERVING)
         assert sorted(plan) == sorted(kernel.development_change_plan(PRESERVING))
+
+
+# ---------------------------------------------------------------------------
+# 5. Verification expectations (evidence for a LATER change, not authorization)
+# ---------------------------------------------------------------------------
+
+
+class TestVerificationExpectations:
+    def test_resolved_module_has_verification_expectations(self, kernel):
+        plan = kernel.development_change_plan(PRESERVING)
+        verification = plan["verification"]
+        assert verification["verification_target"] == "atlas.evolution.development_gap"
+        assert verification["tests"], "the repository-derived tests must survive"
+        assert verification["provenance"]
+
+    def test_expectations_are_not_authorization(self, kernel):
+        verification = kernel.development_change_plan(PRESERVING)["verification"]
+        assert verification["executed"] is False
+        assert verification["authorized"] is False
+        assert verification["baseline"] == "not_executed"
+        assert kernel.development_change_plan(PRESERVING)["actionable"] is False
+
+    def test_relevant_tests_are_bounded_and_deterministic(self, kernel):
+        verification = kernel.development_change_plan(PRESERVING)["verification"]
+        assert len(verification["tests"]) <= 8
+        assert list(verification["tests"]) == sorted(set(verification["tests"]))
+        assert verification["tests"] == (
+            kernel.development_change_plan(PRESERVING)["verification"]["tests"]
+        )
+
+    def test_expectation_tests_come_from_the_repository(self, kernel):
+        plan = kernel.development_change_plan(PRESERVING)
+        known = {module.path for module in kernel.repository_map.modules}
+        assert set(plan["verification"]["tests"]) <= known
+        assert plan["verification"]["verification_target"] in {
+            module.module for module in kernel.repository_map.modules
+        }
+
+    def test_file_path_target_also_yields_expectations(self, kernel):
+        text = "Change atlas/evolution/development_gap.py to reject empty input."
+        plan = kernel.development_change_plan(text)
+        assert plan["localized"] is True
+        assert plan["verification"]["verification_target"] == "atlas.evolution.development_gap"
+
+    def test_symbol_target_keeps_the_module_verification_target(self, kernel):
+        text = "Update atlas.research.repository_map.RepositoryMap.tests_for_module."
+        plan = kernel.development_change_plan(text)
+        assert plan["target_kind"] == "symbol"
+        assert plan["verification"]["verification_target"] == "atlas.research.repository_map"
+
+    def test_ambiguous_or_unresolved_has_no_expectations(self, kernel):
+        for text in (
+            "Update the helper that validates empty input.",
+            "Improve the zzz nonexistent widget subsystem.",
+            "Change it.",
+        ):
+            plan = kernel.development_change_plan(text)
+            assert plan in ({},) or (plan["verification"] is None), text
+            if plan:
+                assert plan["localized"] is False
+
+    def test_non_development_requests_produce_no_plan_or_expectations(self, kernel):
+        for text in (
+            "Investigate the development gap helper.",
+            "What would be affected if I change atlas/memory/manager.py?",
+            "Hello there.",
+        ):
+            assert kernel.development_change_plan(text) == {}, text
+
+    def test_missing_evidence_declares_goals_unavailable_rather_than_guessing(self):
+        from atlas.evolution.change_author_router import verification_expectations
+
+        empty = verification_expectations("atlas.some.where", ())
+        assert empty.tests == ()
+        assert "unavailable" in empty.expectation
+        assert empty.executed is False and empty.authorized is False
+
+    def test_expectations_never_carry_a_patch(self, kernel):
+        verification = kernel.development_change_plan(PRESERVING)["verification"]
+        for forbidden in ("patch", "diff", "content", "source", "code"):
+            assert forbidden not in verification
+
+    def test_expectations_do_not_run_anything(self, kernel):
+        before = len(kernel.pending_promotion_reviews())
+        kernel.development_change_plan(PRESERVING)
+        assert len(kernel.pending_promotion_reviews()) == before

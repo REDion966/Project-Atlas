@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any
+from typing import Any, Iterable
 
 from atlas.evolution.development_cycle import (
     ChangeSupplier,
@@ -86,6 +86,9 @@ _METADATA_ROUTES: tuple[tuple[str, AuthorRoute], ...] = (
     ("evidence_change", AuthorRoute.EVIDENCE),
 )
 
+#: Bounded verification expectations (never the whole test suite).
+MAX_VERIFICATION_TESTS: int = 8
+
 
 @dataclass(frozen=True, slots=True)
 class ChangePlan:
@@ -119,6 +122,10 @@ class ChangePlan:
     #: Bounded relevant repository context: modules, symbols, tests, dependencies,
     #: dependents. Never the whole repository.
     context: dict[str, Any] = field(default_factory=dict)
+    #: Bounded verification expectations — the deterministic evidence a LATER
+    #: authored change will be judged by. Never an instruction to execute, never
+    #: an approval, and never a patch.
+    verification: "VerificationExpectation | None" = None
 
     @property
     def actionable(self) -> bool:
@@ -140,6 +147,7 @@ class ChangePlan:
             "evidence": list(self.evidence),
             "provenance": list(self.provenance),
             "context": dict(self.context),
+            "verification": self.verification.to_dict() if self.verification else None,
             "localization_status": self.localization_status,
             "risk": self.risk,
             "deterministic": self.deterministic,
@@ -240,6 +248,75 @@ def plan_change(need: Any, *, specialist_available: bool = False) -> ChangePlan:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class VerificationExpectation:
+    """Deterministic evidence a LATER authored change will be judged by.
+
+    This is NOT authorization, NOT approval, NOT a patch, and NOT an instruction
+    to execute. Nothing runs because this object exists: ``executed`` and
+    ``authorized`` are always False, and the expectations only say which existing
+    repository tests the change must not break.
+    """
+
+    verification_target: str = ""
+    tests: tuple[str, ...] = ()
+    expectation: str = ""
+    #: ``not_executed`` — planning never runs anything.
+    baseline: str = "not_executed"
+    provenance: tuple[str, ...] = ()
+    deterministic: bool = True
+    executed: bool = False
+    authorized: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "verification_target": self.verification_target,
+            "tests": list(self.tests),
+            "expectation": self.expectation,
+            "baseline": self.baseline,
+            "provenance": list(self.provenance),
+            "deterministic": self.deterministic,
+            "executed": self.executed,
+            "authorized": self.authorized,
+        }
+
+
+def verification_expectations(
+    target: str,
+    tests: Iterable[str] = (),
+    *,
+    provenance: Iterable[str] = (),
+) -> VerificationExpectation:
+    """Bounded, deterministic verification expectations for ``target``.
+
+    The tests are the ones the repository ALREADY relates to the target (the
+    import-derived test relation the map computes) — no test is invented and no
+    behavioural requirement is claimed that repository evidence does not state.
+    The expectation is the standard preservation discipline: those existing tests
+    must still pass afterwards. Absent evidence, goals are declared unavailable
+    rather than guessed.
+    """
+    bounded = tuple(sorted({str(item) for item in tests if str(item).strip()}))
+    bounded = bounded[:MAX_VERIFICATION_TESTS]
+    if bounded:
+        expectation = (
+            "the selected existing tests must continue to pass after the change"
+        )
+        reasons = tuple(provenance) or ("import-derived repository test relation",)
+    else:
+        expectation = (
+            "no repository-derived test target was found; verification "
+            "expectations are unavailable"
+        )
+        reasons = ("no repository-derived test relation",)
+    return VerificationExpectation(
+        verification_target=str(target or ""),
+        tests=bounded,
+        expectation=expectation,
+        provenance=reasons,
+    )
+
+
 def plan_development_change(
     need: Any,
     localization: Any = None,
@@ -299,6 +376,9 @@ def plan_development_change(
             str(item) for item in (getattr(localization, "evidence", ()) or ())
         ),
         context=bounded,
+        verification=verification_expectations(
+            target, getattr(context, "tests", ()) or ()
+        ),
     )
 
 
