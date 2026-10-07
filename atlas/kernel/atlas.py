@@ -6411,6 +6411,28 @@ class Atlas:
         except Exception:
             return ()
 
+    def development_localization(self, request: str) -> dict:
+        """Deterministic localization of a development request (evidence only).
+
+        Returns the bounded localization of ``request`` to a repository target,
+        a symbol where one is deterministically identifiable, and the relevant
+        bounded context (symbols, tests, dependencies, dependents) — all derived
+        from the EXISTING repository map, with provenance for every selection.
+
+        Read-only and fail-soft: ``{}`` when unavailable. A ranking score is not
+        truth — an ambiguous request yields candidates, never a chosen target —
+        and nothing here authorizes modification, approval, execution or
+        promotion.
+        """
+        try:
+            from atlas.evolution.development_localization import (
+                DevelopmentLocalizer,
+            )
+
+            return DevelopmentLocalizer(self.repository_map).localize(request).to_dict()
+        except Exception:
+            return {}
+
     def change_author_router(self):
         """The STEP 2 change-author router over the EXISTING authors.
 
