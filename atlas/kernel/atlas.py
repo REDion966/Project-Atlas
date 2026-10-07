@@ -6411,6 +6411,40 @@ class Atlas:
         except Exception:
             return ()
 
+    def development_supplied_edit(self, request: str) -> dict:
+        """Read an EXPLICITLY SUPPLIED structural edit out of a request.
+
+        The narrow plan -> authoring bridge: returns the
+        ``metadata["structural"]`` entry the EXISTING
+        :class:`~atlas.evolution.structural_editor.StructuralChangeSupplier`
+        already reads, ONLY when the request supplies its own replacement code
+        and the supplied symbol belongs to the resolved localization.
+
+        Read-only, fail-soft (``{}`` for a non-development request) and
+        fail-closed: an ambiguous or unresolved target, a missing code block, a
+        missing symbol or a target mismatch all yield ``ok=False`` with an
+        explicit reason and NO entry, so no authoring can happen. It authorizes
+        nothing — the resulting change still has to pass ``CodeChangeSet``
+        validation, the sandbox, verification, approval and promotion.
+        """
+        try:
+            from atlas.conversation.development_intake import (
+                task_spec_to_development_need,
+            )
+            from atlas.evolution.development_localization import (
+                DevelopmentLocalizer,
+            )
+            from atlas.evolution.supplied_edit_intake import (
+                supplied_structural_edit,
+            )
+
+            if task_spec_to_development_need(self._conversation._intake(request)) is None:
+                return {}
+            localization = DevelopmentLocalizer(self.repository_map).localize(request)
+            return supplied_structural_edit(request, localization).to_dict()
+        except Exception:
+            return {}
+
     def development_change_plan(self, request: str) -> dict:
         """Bounded, evidence-backed ChangePlan for a DEVELOPMENT request.
 

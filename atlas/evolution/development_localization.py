@@ -530,7 +530,15 @@ class DevelopmentLocalizer:
             target=target,
             target_kind=kind.value,
             symbol=symbol,
-            candidates=(LocalizationCandidate(target, kind, score=1.0, reasons=reasons),),
+            candidates=(
+                LocalizationCandidate(
+                    target,
+                    kind,
+                    path=self._path_for(target, by_module),
+                    score=1.0,
+                    reasons=reasons,
+                ),
+            ),
             symbol_candidates=(symbol,) if symbol is not None else (),
             context=self._context(target, symbol=symbol) if target else LocalizationContext(),
             evidence=reasons,
