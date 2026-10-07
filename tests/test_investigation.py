@@ -2190,12 +2190,13 @@ class TestAuthoringWiring:
         exists yet"). That premise was superseded by the committed change-supplier
         unification: the kernel now exposes ONE authoritative composition
         (``CompositeChangeSupplier([DeterministicChangeSupplier(),
-        ScaffoldChangeSupplier(), model_supplier])``) to BOTH the F9 development
-        controller and the conversational P17 authoring seam, with the model
-        supplier included only when ``development.model_assisted_authoring`` is
-        explicitly true. The obsolete assertion contradicted the current
-        contract, so it now asserts the current one: a bounded, deterministic-
-        first supplier is wired and no model supplier is present by default.
+        StructuralChangeSupplier(), ScaffoldChangeSupplier(), model_supplier])``)
+        to BOTH the F9 development controller and the conversational P17
+        authoring seam, with the model supplier included only when
+        ``development.model_assisted_authoring`` is explicitly true. The
+        obsolete assertion contradicted the current contract, so it now asserts
+        the current one: a bounded, deterministic-first supplier is wired and no
+        model supplier is present by default.
         """
         from atlas.evolution.development_cycle import DeterministicChangeSupplier
         from atlas.evolution.development_scaffold_supplier import (
@@ -2205,6 +2206,7 @@ class TestAuthoringWiring:
         from atlas.evolution.model_assisted_supplier import (
             ModelAssistedChangeSupplier,
         )
+        from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         atlas = self._make_atlas(tmp_path, monkeypatch)
         try:
@@ -2212,7 +2214,8 @@ class TestAuthoringWiring:
             assert isinstance(supplier, CompositeChangeSupplier)
             ordered = supplier.suppliers
             assert isinstance(ordered[0], DeterministicChangeSupplier)
-            assert isinstance(ordered[1], ScaffoldChangeSupplier)
+            assert isinstance(ordered[1], StructuralChangeSupplier)
+            assert isinstance(ordered[2], ScaffoldChangeSupplier)
             assert not any(
                 isinstance(entry, ModelAssistedChangeSupplier)
                 for entry in ordered

@@ -213,20 +213,24 @@ class TestOffByDefault:
             ScaffoldChangeSupplier,
         )
         from atlas.evolution.evidence_development import EvidenceChangeSupplier
+        from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         _config_flag(False)
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             # Phase 5.2 — the controller receives the authoritative
-            # deterministic-first composition: Deterministic then Scaffold, then
-            # the model-free Evidence member, and NO model member when the flag
-            # is off.
+            # deterministic-first composition: Deterministic, then the bounded
+            # model-free Structural author (AST-anchored edits of an EXISTING
+            # definition, keyed on ``metadata["structural"]``), then Scaffold,
+            # then the model-free Evidence member, and NO model member when the
+            # flag is off.
             supplier = _authoritative_supplier(atlas)
             assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
-            assert isinstance(supplier.suppliers[1], ScaffoldChangeSupplier)
-            assert isinstance(supplier.suppliers[2], EvidenceChangeSupplier)
+            assert isinstance(supplier.suppliers[1], StructuralChangeSupplier)
+            assert isinstance(supplier.suppliers[2], ScaffoldChangeSupplier)
+            assert isinstance(supplier.suppliers[3], EvidenceChangeSupplier)
             assert _model_member(supplier) is None
-            assert len(supplier.suppliers) == 3
+            assert len(supplier.suppliers) == 4
         finally:
             atlas.shutdown()
 
@@ -274,21 +278,23 @@ class TestExplicitOptIn:
         from atlas.evolution.model_assisted_supplier import (
             ModelAssistedChangeSupplier,
         )
+        from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         _config_flag(True)
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
             # Phase 5.2 — the model supplier is composed as the LAST member of
             # the authoritative deterministic-first composition, after the
-            # model-free Deterministic, Scaffold and Evidence members.
+            # model-free Deterministic, Structural, Scaffold and Evidence members.
             supplier = _authoritative_supplier(atlas)
             assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
-            assert isinstance(supplier.suppliers[1], ScaffoldChangeSupplier)
-            assert isinstance(supplier.suppliers[2], EvidenceChangeSupplier)
+            assert isinstance(supplier.suppliers[1], StructuralChangeSupplier)
+            assert isinstance(supplier.suppliers[2], ScaffoldChangeSupplier)
+            assert isinstance(supplier.suppliers[3], EvidenceChangeSupplier)
             member = _model_member(supplier)
             assert isinstance(member, ModelAssistedChangeSupplier)
             assert supplier.suppliers[-1] is member
-            assert len(supplier.suppliers) == 4
+            assert len(supplier.suppliers) == 5
         finally:
             atlas.shutdown()
 

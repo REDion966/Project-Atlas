@@ -1920,6 +1920,7 @@ class Atlas:
             ScaffoldChangeSupplier,
         )
         from atlas.evolution.evidence_development import EvidenceChangeSupplier
+        from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         model_supplier = None
         if bool(
@@ -1948,6 +1949,14 @@ class Atlas:
         change_supplier = CompositeChangeSupplier(
             [
                 DeterministicChangeSupplier(),
+                # The bounded STRUCTURAL author (AST-anchored edits of an EXISTING
+                # definition). Keyed on ``metadata["structural"]`` — disjoint from
+                # the ``code_changes`` / ``scaffold`` / ``evidence_change`` keys
+                # above — so the deterministic-first ordering and every existing
+                # behaviour are unchanged. It is the seam that carries an
+                # explicitly SUPPLIED structural edit into the EXISTING governed
+                # cycle; it mints no authority and never writes anything itself.
+                StructuralChangeSupplier(),
                 ScaffoldChangeSupplier(),
                 EvidenceChangeSupplier(),
                 model_supplier,
@@ -6410,6 +6419,80 @@ class Atlas:
             return (matches[0],)
         except Exception:
             return ()
+
+    def development_authoring_request(self, request: str) -> dict:
+        """Carry an EXPLICITLY SUPPLIED edit into the EXISTING governed cycle.
+
+        Composes the deterministic localization + supplied-edit bridge with the
+        EXISTING F9 development cycle: the validated structural edit becomes the
+        change the EXISTING ``ChangeSupplier`` seam authors, and the cycle STOPS
+        at the human approval boundary (``PENDING_APPROVAL``).
+
+        It authorizes nothing, approves nothing, executes nothing and promotes
+        nothing — the returned proposal is a DRAFT, and the sandbox run still
+        requires the EXISTING OWNER-gated ``run_development_execution`` on an
+        APPROVED proposal. Nothing is written to the repository. Fail-soft
+        (``{}``) when the surfaces are not wired; fail-closed (``ok=False`` with
+        the refusal reason) when the request is not a development request or the
+        supplied edit is refused.
+        """
+        import dataclasses
+
+        try:
+            from atlas.conversation.development_intake import (
+                task_spec_to_development_need,
+            )
+            from atlas.evolution.structural_editor import STRUCTURAL_KEY
+        except Exception:
+            return {}
+        if self._development_controller is None:
+            return {}
+
+        edit = self.development_supplied_edit(request)
+        # Not a development request at all: leave the turn's route untouched,
+        # exactly like every other development seam.
+        if not edit:
+            return {}
+        refused = {
+            "ok": False,
+            "reason": edit.get("reason", "not a development request"),
+            "entry": None,
+            "proposal_id": "",
+            "proposal_status": "",
+            "failures": [],
+            "authorized": False,
+            "executed": False,
+        }
+        if not edit.get("ok") or not edit.get("entry"):
+            return refused
+        try:
+            need = task_spec_to_development_need(self._conversation._intake(request))
+            if need is None:
+                return refused
+            metadata = dict(getattr(need, "metadata", None) or {})
+            metadata[STRUCTURAL_KEY] = [edit["entry"]]
+            need = dataclasses.replace(need, metadata=metadata)
+            result = self.run_development_cycle(need)
+        except Exception:
+            return refused
+
+        return {
+            "ok": bool(getattr(result, "ok", False)),
+            "reason": "",
+            "entry": dict(edit["entry"]),
+            "proposal_id": str(getattr(result, "proposal_id", "") or ""),
+            "proposal_status": str(getattr(result, "proposal_status", "") or ""),
+            "approval_request_id": str(
+                getattr(result, "approval_request_id", "") or ""
+            ),
+            "failures": [
+                [str(stage), str(message)]
+                for stage, message in tuple(getattr(result, "failures", ()) or ())
+            ][:5],
+            # A governed preparation is a DRAFT: never permission, never run.
+            "authorized": False,
+            "executed": False,
+        }
 
     def development_supplied_edit(self, request: str) -> dict:
         """Read an EXPLICITLY SUPPLIED structural edit out of a request.
