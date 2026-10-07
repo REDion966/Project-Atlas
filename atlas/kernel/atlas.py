@@ -6411,6 +6411,38 @@ class Atlas:
         except Exception:
             return ()
 
+    def development_change_plan(self, request: str) -> dict:
+        """Bounded, evidence-backed ChangePlan for a DEVELOPMENT request.
+
+        Composes the two existing pieces — deterministic localization and the
+        existing planner — so the plan carries the localized target, its kind, a
+        resolved symbol where one is justified, the constraints the request
+        actually states, the bounded relevant context and the localization's
+        provenance.
+
+        Returns ``{}`` for anything that is not a development request, so
+        repository-impact, investigation, conversation and fail-closed turns
+        never produce a development plan. The plan authorizes nothing: planning
+        is evidence, not permission, and the authoring route is still derived
+        from the need's own metadata evidence.
+        """
+        try:
+            from atlas.conversation.development_intake import (
+                task_spec_to_development_need,
+            )
+            from atlas.evolution.change_author_router import plan_development_change
+            from atlas.evolution.development_localization import (
+                DevelopmentLocalizer,
+            )
+
+            need = task_spec_to_development_need(self._conversation._intake(request))
+            if need is None:
+                return {}
+            localization = DevelopmentLocalizer(self.repository_map).localize(request)
+            return plan_development_change(need, localization).to_dict()
+        except Exception:
+            return {}
+
     def development_localization(self, request: str) -> dict:
         """Deterministic localization of a development request (evidence only).
 

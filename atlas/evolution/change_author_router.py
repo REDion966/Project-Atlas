@@ -16,7 +16,7 @@ boundaries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -89,7 +89,12 @@ _METADATA_ROUTES: tuple[tuple[str, AuthorRoute], ...] = (
 
 @dataclass(frozen=True, slots=True)
 class ChangePlan:
-    """A bounded, deterministic plan for one ``DevelopmentNeed``."""
+    """A bounded, deterministic plan for one ``DevelopmentNeed``.
+
+    A plan is an EVIDENCE-BACKED SPECIFICATION of the bounded work the request
+    describes. It is NOT permission to modify code, NOT a generated patch, and
+    NOT an approval.
+    """
 
     target: str = ""
     route: AuthorRoute = AuthorRoute.UNAVAILABLE
@@ -99,21 +104,47 @@ class ChangePlan:
     risk: str = "low"
     #: True when the selected route is a DETERMINISTIC author (no model needed).
     deterministic: bool = True
+    #: --- localization evidence (STEP: resolved localization -> bounded plan) --
+    #: The target's kind (``module`` / ``package`` / ``symbol``), empty when the
+    #: plan has no localized target.
+    target_kind: str = ""
+    #: The QUALIFIED symbol the localization resolved, when one was justified.
+    symbol: str = ""
+    #: The localization status the plan was derived from (``resolved`` /
+    #: ``ambiguous`` / ``unresolved``) — preserved so a non-resolved plan is
+    #: never mistaken for an authoritative one.
+    localization_status: str = ""
+    #: Why the localization selected this target (deterministic reason strings).
+    provenance: tuple[str, ...] = ()
+    #: Bounded relevant repository context: modules, symbols, tests, dependencies,
+    #: dependents. Never the whole repository.
+    context: dict[str, Any] = field(default_factory=dict)
 
     @property
     def actionable(self) -> bool:
         return self.route is not AuthorRoute.UNAVAILABLE
 
+    @property
+    def localized(self) -> bool:
+        """True only for a plan derived from a RESOLVED localization."""
+        return self.localization_status == "resolved" and bool(self.target)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
+            "target_kind": self.target_kind,
+            "symbol": self.symbol,
             "route": self.route.value,
             "reason": self.reason,
             "constraints": list(self.constraints),
             "evidence": list(self.evidence),
+            "provenance": list(self.provenance),
+            "context": dict(self.context),
+            "localization_status": self.localization_status,
             "risk": self.risk,
             "deterministic": self.deterministic,
             "actionable": self.actionable,
+            "localized": self.localized,
         }
 
 
@@ -206,6 +237,68 @@ def plan_change(need: Any, *, specialist_available: bool = False) -> ChangePlan:
         evidence=tuple(evidence[:MAX_CONSTRAINTS]),
         risk=risk,
         deterministic=route is not AuthorRoute.SPECIALIST_MODEL,
+    )
+
+
+def plan_development_change(
+    need: Any,
+    localization: Any = None,
+    *,
+    specialist_available: bool = False,
+) -> ChangePlan:
+    """Derive a bounded :class:`ChangePlan` from a RESOLVED localization.
+
+    The plan carries only EVIDENCE: the localized target, its kind, the resolved
+    symbol where one was justified, the constraints the request actually states,
+    the bounded relevant context and the localization's own provenance.
+
+    It authorizes nothing. The authoring route is still derived from the need's
+    EXISTING metadata evidence exactly as before, so a resolved localization can
+    never by itself make a plan actionable — planning and authorization stay
+    separate.
+
+    A localization that is not RESOLVED yields a plan with NO target and no
+    authoritative scope: ambiguity and unresolved targets are preserved, never
+    resolved by preference.
+    """
+    base = plan_change(need, specialist_available=specialist_available)
+    status = str(getattr(getattr(localization, "status", None), "value", "") or "")
+    target = str(getattr(localization, "target", "") or "") if localization is not None else ""
+    if localization is None or status != "resolved" or not target:
+        reason = (
+            "the target could not be localized with evidence ("
+            + (status or "unresolved")
+            + "); no authoritative scope is claimed"
+        )
+        return replace(
+            base,
+            localization_status=status or "unresolved",
+            reason=reason[:MAX_EVIDENCE_CHARS],
+            evidence=(*base.evidence, "localization is not resolved")[:MAX_CONSTRAINTS],
+        )
+
+    context = getattr(localization, "context", None)
+    symbol = getattr(localization, "symbol", None)
+    bounded = {
+        "modules": list(getattr(context, "modules", ()) or ()),
+        "symbols": [
+            str(getattr(item, "qualified", "") or "")
+            for item in (getattr(context, "symbols", ()) or ())
+        ],
+        "tests": list(getattr(context, "tests", ()) or ()),
+        "dependencies": list(getattr(context, "dependencies", ()) or ()),
+        "dependents": list(getattr(context, "dependents", ()) or ()),
+    }
+    return replace(
+        base,
+        target=target,
+        target_kind=str(getattr(localization, "target_kind", "") or ""),
+        symbol=str(getattr(symbol, "qualified", "") or "") if symbol is not None else "",
+        localization_status="resolved",
+        provenance=tuple(
+            str(item) for item in (getattr(localization, "evidence", ()) or ())
+        ),
+        context=bounded,
     )
 
 
