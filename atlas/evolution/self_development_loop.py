@@ -562,8 +562,18 @@ class SelfDevelopmentLoop:
                     # relevant test(s) selected deterministically from the
                     # change set instead of an arbitrary path. Bounded and
                     # fail-safe: no match keeps the existing default.
+                    #
+                    # The PLAN's own bounded verification set is authoritative:
+                    # ``VerificationExpectation.tests`` travel as
+                    # ``workload.test_files``. An empty target would omit the
+                    # pytest ``target`` parameter entirely and run the WHOLE
+                    # workspace — which, now that the sandbox carries the
+                    # repository support closure, is the entire repository test
+                    # suite. Prefer the plan's selected tests before the
+                    # change-derived default.
                     target: str = workload.verify_target or (
-                        self._default_verify_target(workload, workspace)
+                        self._plan_verify_target(workload, workspace)
+                        or self._default_verify_target(workload, workspace)
                     )
                     passed, test_outcome, test_message = self._verifier(
                         workspace.path, target)
@@ -658,6 +668,31 @@ class SelfDevelopmentLoop:
             getattr(diagnostic, "failure_class", None), "value", ""
         )
         return failure_class in ("governance", "objective", "capability")
+
+    @staticmethod
+    def _plan_verify_target(
+        workload: SandboxWorkload,
+        workspace: Any,
+    ) -> str:
+        """The PLAN's own bounded verification target (deterministic).
+
+        ``VerificationExpectation.tests`` are carried as ``workload.test_files``
+        and ARE the authoritative bounded verification set. Returning the first
+        selected test that exists in the sandbox keeps the pytest invocation
+        explicitly bounded and deterministic, instead of degrading to an
+        unbounded whole-workspace run.
+
+        Ordering is the plan's own order (deterministic); no test is invented,
+        no broader repository set is recomputed, and the workload's existing
+        test-file bound already limits the set. Returns ``""`` when the workload
+        carries no plan-derived tests, so the existing change-derived default
+        remains the fallback exactly as before.
+        """
+        exists = getattr(workspace, "exists", None)
+        for candidate in workload.test_files:
+            if not callable(exists) or exists(candidate):
+                return str(candidate)
+        return ""
 
     @staticmethod
     def _default_verify_target(
