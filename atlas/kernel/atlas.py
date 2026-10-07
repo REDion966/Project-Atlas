@@ -1920,6 +1920,9 @@ class Atlas:
             ScaffoldChangeSupplier,
         )
         from atlas.evolution.evidence_development import EvidenceChangeSupplier
+        from atlas.evolution.specialist_change_supplier import (
+            SpecialistChangeSupplier,
+        )
         from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         model_supplier = None
@@ -1959,6 +1962,14 @@ class Atlas:
                 StructuralChangeSupplier(),
                 ScaffoldChangeSupplier(),
                 EvidenceChangeSupplier(),
+                # Command 3A — the specialist -> authoring bridge. It consumes the
+                # dedicated ``metadata["specialist_proposal"]`` key (disjoint from
+                # every key above), turns a validated UNTRUSTED SpecialistProposal
+                # into the EXISTING bounded ``code_changes`` representation, and is
+                # completely inert (returns ``None``) when no proposal is present —
+                # so the deterministic-first ordering and every existing authoring
+                # path are unchanged. It mints no authority and never executes.
+                SpecialistChangeSupplier(),
                 model_supplier,
             ]
         )

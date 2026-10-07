@@ -213,6 +213,9 @@ class TestOffByDefault:
             ScaffoldChangeSupplier,
         )
         from atlas.evolution.evidence_development import EvidenceChangeSupplier
+        from atlas.evolution.specialist_change_supplier import (
+            SpecialistChangeSupplier,
+        )
         from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         _config_flag(False)
@@ -222,15 +225,18 @@ class TestOffByDefault:
             # deterministic-first composition: Deterministic, then the bounded
             # model-free Structural author (AST-anchored edits of an EXISTING
             # definition, keyed on ``metadata["structural"]``), then Scaffold,
-            # then the model-free Evidence member, and NO model member when the
+            # then the model-free Evidence member, then the Command 3A
+            # specialist -> authoring bridge (keyed on the dedicated
+            # ``metadata["specialist_proposal"]``), and NO model member when the
             # flag is off.
             supplier = _authoritative_supplier(atlas)
             assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
             assert isinstance(supplier.suppliers[1], StructuralChangeSupplier)
             assert isinstance(supplier.suppliers[2], ScaffoldChangeSupplier)
             assert isinstance(supplier.suppliers[3], EvidenceChangeSupplier)
+            assert isinstance(supplier.suppliers[4], SpecialistChangeSupplier)
             assert _model_member(supplier) is None
-            assert len(supplier.suppliers) == 4
+            assert len(supplier.suppliers) == 5
         finally:
             atlas.shutdown()
 
@@ -278,6 +284,9 @@ class TestExplicitOptIn:
         from atlas.evolution.model_assisted_supplier import (
             ModelAssistedChangeSupplier,
         )
+        from atlas.evolution.specialist_change_supplier import (
+            SpecialistChangeSupplier,
+        )
         from atlas.evolution.structural_editor import StructuralChangeSupplier
 
         _config_flag(True)
@@ -285,16 +294,18 @@ class TestExplicitOptIn:
         try:
             # Phase 5.2 — the model supplier is composed as the LAST member of
             # the authoritative deterministic-first composition, after the
-            # model-free Deterministic, Structural, Scaffold and Evidence members.
+            # model-free Deterministic, Structural, Scaffold, Evidence and
+            # Command 3A specialist-bridge members.
             supplier = _authoritative_supplier(atlas)
             assert isinstance(supplier.suppliers[0], DeterministicChangeSupplier)
             assert isinstance(supplier.suppliers[1], StructuralChangeSupplier)
             assert isinstance(supplier.suppliers[2], ScaffoldChangeSupplier)
             assert isinstance(supplier.suppliers[3], EvidenceChangeSupplier)
+            assert isinstance(supplier.suppliers[4], SpecialistChangeSupplier)
             member = _model_member(supplier)
             assert isinstance(member, ModelAssistedChangeSupplier)
             assert supplier.suppliers[-1] is member
-            assert len(supplier.suppliers) == 5
+            assert len(supplier.suppliers) == 6
         finally:
             atlas.shutdown()
 

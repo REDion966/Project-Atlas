@@ -1,0 +1,221 @@
+"""Atlas Evolution — the specialist -> authoring bridge (Command 3A).
+
+The one missing consumer of :class:`~atlas.specialists.SpecialistProposal`.
+
+The preceding steps established the Atlas-owned specialist seam and a real
+``code.generate`` provider that yields an UNTRUSTED
+:class:`~atlas.specialists.SpecialistProposal`. Nothing consumed it: a proposal
+could not reach the EXISTING governed development pipeline. This module is that
+consumer, and it is deliberately the smallest possible bridge:
+
+    SpecialistProposal
+        -> SpecialistChangeSupplier
+        -> existing SuppliedChanges / code_changes contract
+        -> existing CompositeChangeSupplier
+        -> existing governed development pipeline
+
+Placement
+---------
+This is a NEW sibling of the existing authoring suppliers
+(:mod:`atlas.evolution.structural_editor`,
+:mod:`atlas.evolution.development_scaffold_supplier`,
+:mod:`atlas.evolution.model_assisted_supplier`) in the same ``atlas/evolution``
+authoring area. It is not placed inside ``structural_editor`` because a full-file
+replacement authored by an untrusted provider is a different change class from an
+AST-anchored structural edit, and mixing them would blur both modules' stated
+responsibility. It mirrors the dedicated, optional ``model_assisted_supplier``
+module exactly.
+
+Contract
+--------
+It reads ``need.metadata["specialist_proposal"]`` (a dedicated key, disjoint
+from the existing ``code_changes`` / ``structural`` / ``scaffold`` /
+``evidence_change`` conventions) and produces ONLY the existing bounded
+``SuppliedChanges`` ``code_changes`` representation. It is fail-closed: absent,
+malformed, wrong-capability, identity-less, missing/zero/multiple-file,
+invalid-content, internally-inconsistent, unsafe-path or out-of-target
+proposals all yield ``None``. It NEVER raises, so it can never change the
+outcome of any pre-existing deterministic / structural / supplied-edit path:
+when no valid proposal is present it is completely inert.
+
+It does NOT execute, run tests, approve, promote, call a model, read the
+filesystem, or decide whether a provider is trustworthy. The produced draft
+still passes the unchanged ``CodeChangeSet`` validation, the sandbox,
+verification, approval and promotion boundaries. Standard library only.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from atlas.evolution.autonomy.code_sandbox import CodeChangeSet
+from atlas.evolution.development_cycle import (
+    DevelopmentCyclePolicy,
+    DevelopmentNeed,
+    SuppliedChanges,
+)
+from atlas.specialists import CODE_GENERATE, SpecialistProposal
+
+#: The dedicated metadata key this supplier consumes. Disjoint from the existing
+#: ``code_changes`` / ``structural`` / ``scaffold`` / ``evidence_change`` keys,
+#: so existing authoring behaviour is untouched.
+SPECIALIST_PROPOSAL_KEY: str = "specialist_proposal"
+
+#: Provenance marker stamped on specialist-authoring drafts (unverified draft).
+SPECIALIST_ORIGIN: str = "specialist-proposal"
+
+#: The ONLY proposal payload fields a code.change proposal may carry. Any other
+#: key (an action, an execution directive, an approval claim, ...) rejects the
+#: whole proposal — the adapter never honours an unauthorized field.
+_ALLOWED_PAYLOAD_FIELDS: frozenset[str] = frozenset({"paths", "files", "note"})
+
+#: Bound applied to ``notes`` (the provider's own note). Matches the downstream
+#: ``_build_proposal`` truncation of ``supplier_notes``.
+_MAX_NOTES_CHARS: int = 500
+
+
+def _declared_targets(need: DevelopmentNeed) -> tuple[str, ...]:
+    """The need's DECLARED target(s), normalized to repository-relative form.
+
+    ``DevelopmentNeed.target_components`` is Atlas's authoritative statement of
+    what the request is about. Entries are normalized to POSIX separators only;
+    nothing is inferred. An empty declaration means no containment claim is made
+    (the other checks still apply).
+    """
+    out: list[str] = []
+    for raw in getattr(need, "target_components", ()) or ():
+        text = str(raw or "").strip().replace("\\", "/")
+        if text:
+            out.append(text)
+    return tuple(out)
+
+
+def _matches_declared_target(path: str, declared: str) -> bool:
+    """Whether ``path`` names the DECLARED target, exactly.
+
+    Accepts the two canonical forms Atlas already uses for a module: the
+    repository-relative path (``atlas/x.py``) and its dotted module name
+    (``atlas.x``). No fuzzy matching, so a near-miss can never be accepted.
+    """
+    if path == declared:
+        return True
+    if path.endswith(".py"):
+        module = path[:-3].replace("/", ".")
+    else:
+        module = path.replace("/", ".")
+    return declared == module
+
+
+def _clamp01(value: Any) -> float:
+    """Coerce a value into [0.0, 1.0]; malformed/NaN -> 0.0."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number:  # NaN guard
+        return 0.0
+    return max(0.0, min(1.0, number))
+
+
+class SpecialistChangeSupplier:
+    """Fail-closed ``ChangeSupplier`` bridge over an untrusted proposal.
+
+    Reads ``need.metadata["specialist_proposal"]`` and returns a bounded
+    :class:`~atlas.evolution.development_cycle.SuppliedChanges` carrying exactly
+    one ``code_changes`` entry, or ``None`` for every refusal. It never raises
+    and never escalates authority.
+    """
+
+    def __init__(self, policy: DevelopmentCyclePolicy | None = None) -> None:
+        self._policy = policy or DevelopmentCyclePolicy()
+
+    @property
+    def origin(self) -> str:
+        """Provenance marker stamped on specialist-authored drafts."""
+        return SPECIALIST_ORIGIN
+
+    def supply_changes(self, need: DevelopmentNeed) -> SuppliedChanges | None:
+        """Bridge the proposal carried by ``need``, or ``None`` (fail-closed)."""
+        metadata = getattr(need, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        proposal = metadata.get(SPECIALIST_PROPOSAL_KEY)
+        if proposal is None:
+            return None
+        return self._build(proposal, need)
+
+    # -- validation (every refusal returns None) ---------------------------
+
+    def _build(self, proposal: Any, need: DevelopmentNeed) -> SuppliedChanges | None:
+        # 1. A proposal must be a real, identity-bearing code.generate proposal.
+        if not isinstance(proposal, SpecialistProposal):
+            return None
+        if not str(proposal.provider_id).strip():
+            return None
+        if str(proposal.capability) != CODE_GENERATE:
+            return None
+
+        # 2. The payload must be a bounded mapping carrying ONLY the allowed
+        #    fields (no action/execute/approve directives and no extra metadata).
+        payload = proposal.payload
+        if not isinstance(payload, dict) or not payload:
+            return None
+        if set(payload) - _ALLOWED_PAYLOAD_FIELDS:
+            return None
+
+        # 3. Exactly ONE file: non-empty, string path and string content.
+        files = payload.get("files")
+        if not isinstance(files, dict) or not files:
+            return None
+        if len(files) != 1:
+            return None
+        path, content = next(iter(files.items()))
+        if not isinstance(path, str) or not isinstance(content, str):
+            return None
+        path = path.strip()
+        if not path or not content.strip():
+            return None
+
+        # 4. The proposal's own declared target(s) must agree with its files.
+        declared = payload.get("paths")
+        if declared is not None:
+            if not isinstance(declared, (list, tuple)):
+                return None
+            if sorted(str(item).strip() for item in declared) != [path]:
+                return None
+
+        # 5. Path safety: reuse the EXISTING sandbox confinement validator
+        #    (absolute, drive prefix, ``..`` traversal, empty segments, length).
+        if len(path) > self._policy.max_path_chars:
+            return None
+        try:
+            CodeChangeSet.validate_path(path)
+        except Exception:  # noqa: BLE001 — any confinement violation is a refusal
+            return None
+
+        # 6. Content bound (reuse the existing development-cycle policy).
+        if len(content) > self._policy.max_content_chars:
+            return None
+
+        # 7. Containment in the need's DECLARED target, when one is declared.
+        targets = _declared_targets(need)
+        if targets and not any(
+            _matches_declared_target(path, target) for target in targets
+        ):
+            return None
+
+        note = payload.get("note")
+        notes = str(note)[:_MAX_NOTES_CHARS] if isinstance(note, str) else ""
+        return SuppliedChanges(
+            code_changes=((path, content),),
+            origin=self.origin,
+            confidence=_clamp01(proposal.confidence),
+            notes=notes,
+        )
+
+
+__all__ = [
+    "SPECIALIST_ORIGIN",
+    "SPECIALIST_PROPOSAL_KEY",
+    "SpecialistChangeSupplier",
+]
