@@ -6471,6 +6471,28 @@ class Atlas:
                 return refused
             metadata = dict(getattr(need, "metadata", None) or {})
             metadata[STRUCTURAL_KEY] = [edit["entry"]]
+            # The plan's OWN bounded verification expectation is authoritative
+            # for the governed verification leg: carry its already-selected
+            # tests into the workload the EXISTING cycle builds
+            # (need -> supplier -> SuppliedChanges.test_files -> proposal
+            # metadata -> SandboxWorkload), so execution verifies against THEM
+            # instead of collecting nothing from an empty sandbox default.
+            # Bounded by the controller's existing max_test_files, deterministic,
+            # read only from paths the plan already selected — no new scan, no
+            # test invented, no selection changed.
+            plan = self.development_change_plan(request)
+            selected = [
+                str(path)
+                for path in (((plan.get("verification") or {}).get("tests")) or ())
+            ][:8]
+            test_files: dict[str, str] = {}
+            for path in selected:
+                try:
+                    test_files[path] = Path(path).read_text(encoding="utf-8")
+                except Exception:
+                    continue
+            if test_files:
+                metadata["test_files"] = test_files
             need = dataclasses.replace(need, metadata=metadata)
             result = self.run_development_cycle(need)
         except Exception:

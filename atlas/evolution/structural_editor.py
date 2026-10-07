@@ -340,8 +340,31 @@ class StructuralChangeSupplier:
                 raise ValueError(f"structural edit refused for {path}: {result.reason}")
             changes.append((path, result.content))
 
+        # The plan's already-selected verification tests travel the SAME
+        # convention the deterministic sibling uses (``metadata["test_files"]``),
+        # so the governed verification leg receives the exact tests the plan
+        # selected instead of falling through to the empty sandbox default.
+        # Bounded by the controller's existing ``max_test_files``; malformed
+        # payloads raise so the whole change fails closed.
+        raw_tests = metadata.get("test_files", {})
+        tests: list[tuple[str, str]] = []
+        if isinstance(raw_tests, dict):
+            tests = [(str(path), str(content)) for path, content in raw_tests.items()]
+        elif isinstance(raw_tests, list):
+            for item in raw_tests:
+                if (
+                    not isinstance(item, dict)
+                    or "path" not in item
+                    or "content" not in item
+                ):
+                    raise ValueError("malformed test_files entry")
+                tests.append((str(item["path"]), str(item["content"])))
+        elif raw_tests:
+            raise ValueError("malformed test_files payload")
+
         return SuppliedChanges(
             code_changes=tuple(changes),
+            test_files=tuple(tests),
             origin=self.origin,
             confidence=1.0,
             notes="deterministic structural edit",
