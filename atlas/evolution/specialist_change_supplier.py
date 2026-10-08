@@ -67,10 +67,32 @@ SPECIALIST_PROPOSAL_KEY: str = "specialist_proposal"
 #: Provenance marker stamped on specialist-authoring drafts (unverified draft).
 SPECIALIST_ORIGIN: str = "specialist-proposal"
 
-#: The ONLY proposal payload fields a code.change proposal may carry. Any other
-#: key (an action, an execution directive, an approval claim, ...) rejects the
-#: whole proposal — the adapter never honours an unauthorized field.
-_ALLOWED_PAYLOAD_FIELDS: frozenset[str] = frozenset({"paths", "files", "note"})
+#: The FULL-FILE proposal form (Command 2 keeps ``"full_file"`` as the
+#: backward-compatible default when ``change`` is absent).
+CHANGE_FULL_FILE: str = "full_file"
+
+#: The STRUCTURAL proposal form (Command 2, W5): an AST-anchored edit of an
+#: existing module's named symbol, applied by the EXISTING structural editor.
+CHANGE_STRUCTURAL: str = "structural"
+
+#: The change forms this bridge understands. Any other value is refused
+#: fail-closed rather than guessed.
+SUPPORTED_CHANGES: frozenset[str] = frozenset({CHANGE_FULL_FILE, CHANGE_STRUCTURAL})
+
+#: The ONLY proposal payload fields each form may carry. Any other key (an
+#: action, an execution directive, an approval claim, ...) rejects the whole
+#: proposal — the adapter never honours an unauthorized field.
+_FULL_FILE_FIELDS: frozenset[str] = frozenset(
+    {"paths", "files", "note", "change"}
+)
+_STRUCTURAL_FIELDS: frozenset[str] = frozenset(
+    {"change", "path", "symbol", "kind", "source", "note"}
+)
+
+#: The structural transformations the EXISTING editor already implements.
+_STRUCTURAL_KINDS: frozenset[str] = frozenset(
+    {"replace", "insert_after", "delete"}
+)
 
 #: Bound applied to ``notes`` (the provider's own note). Matches the downstream
 #: ``_build_proposal`` truncation of ``supplier_notes``.
@@ -129,8 +151,22 @@ class SpecialistChangeSupplier:
     and never escalates authority.
     """
 
-    def __init__(self, policy: DevelopmentCyclePolicy | None = None) -> None:
+    def __init__(
+        self,
+        policy: DevelopmentCyclePolicy | None = None,
+        *,
+        root: Any | None = None,
+        base_source: Any | None = None,
+    ) -> None:
         self._policy = policy or DevelopmentCyclePolicy()
+        #: Command 2 (W6) — the repository root and an optional explicit base
+        #: source per path, forwarded UNCHANGED to the EXISTING structural
+        #: editor. Both default to ``None``, which is exactly today's behaviour
+        #: (the editor's own repository root and the on-disk source). A repair
+        #: passes the CURRENT failing content as ``base_source`` so an anchored
+        #: edit is applied to what actually failed.
+        self._root = root
+        self._base_source = base_source if isinstance(base_source, dict) else None
 
     @property
     def origin(self) -> str:
@@ -158,34 +194,39 @@ class SpecialistChangeSupplier:
         if str(proposal.capability) != CODE_GENERATE:
             return None
 
-        # 2. The payload must be a bounded mapping carrying ONLY the allowed
-        #    fields (no action/execute/approve directives and no extra metadata).
+        # 2. The payload must be a bounded mapping carrying ONLY the fields its
+        #    declared change form allows (no action/execute/approve directives
+        #    and no extra metadata). An absent ``change`` is the
+        #    backward-compatible ``full_file`` default; an UNKNOWN change value
+        #    is refused fail-closed rather than guessed.
         payload = proposal.payload
         if not isinstance(payload, dict) or not payload:
             return None
-        if set(payload) - _ALLOWED_PAYLOAD_FIELDS:
+        raw_change = payload.get("change")
+        if raw_change is None:
+            change = CHANGE_FULL_FILE
+        elif isinstance(raw_change, str):
+            change = raw_change.strip().lower()
+        else:
+            return None
+        if change == CHANGE_FULL_FILE:
+            allowed = _FULL_FILE_FIELDS
+        elif change == CHANGE_STRUCTURAL:
+            allowed = _STRUCTURAL_FIELDS
+        else:
+            return None
+        if set(payload) - allowed:
             return None
 
-        # 3. Exactly ONE file: non-empty, string path and string content.
-        files = payload.get("files")
-        if not isinstance(files, dict) or not files:
+        # 3. Both forms must resolve to exactly ONE (path, content) pair, so
+        #    every bound below applies identically to either form.
+        if change == CHANGE_FULL_FILE:
+            extracted = self._from_full_file(payload)
+        else:
+            extracted = self._from_structural(payload, need)
+        if extracted is None:
             return None
-        if len(files) != 1:
-            return None
-        path, content = next(iter(files.items()))
-        if not isinstance(path, str) or not isinstance(content, str):
-            return None
-        path = path.strip()
-        if not path or not content.strip():
-            return None
-
-        # 4. The proposal's own declared target(s) must agree with its files.
-        declared = payload.get("paths")
-        if declared is not None:
-            if not isinstance(declared, (list, tuple)):
-                return None
-            if sorted(str(item).strip() for item in declared) != [path]:
-                return None
+        path, content = extracted
 
         # 5. Path safety: reuse the EXISTING sandbox confinement validator
         #    (absolute, drive prefix, ``..`` traversal, empty segments, length).
@@ -238,6 +279,110 @@ class SpecialistChangeSupplier:
             notes=notes,
         )
 
+    # -- change forms ------------------------------------------------------
+
+    @staticmethod
+    def _from_full_file(payload: dict) -> tuple[str, str] | None:
+        """The backward-compatible full-file form: exactly ONE file."""
+        files = payload.get("files")
+        if not isinstance(files, dict) or not files:
+            return None
+        if len(files) != 1:
+            return None
+        path, content = next(iter(files.items()))
+        if not isinstance(path, str) or not isinstance(content, str):
+            return None
+        path = path.strip()
+        if not path or not content.strip():
+            return None
+        # The proposal's own declared target(s) must agree with its files.
+        declared = payload.get("paths")
+        if declared is not None:
+            if not isinstance(declared, (list, tuple)):
+                return None
+            if sorted(str(item).strip() for item in declared) != [path]:
+                return None
+        return path, content
+
+    def _from_structural(self, payload: dict, need: DevelopmentNeed) -> tuple[str, str] | None:
+        """The structural form: ONE anchored edit through the EXISTING editor.
+
+        No second editor is created. The proposal is translated into the
+        existing ``metadata["structural"]`` convention and delegated to
+        :class:`~atlas.evolution.structural_editor.StructuralChangeSupplier`,
+        which owns symbol resolution, AST validation, bounds and the
+        preservation of every byte outside the anchored span. Any refusal is a
+        ``None`` (fail-closed), never a partial change.
+        """
+        path = payload.get("path")
+        symbol = payload.get("symbol")
+        if not isinstance(path, str) or not isinstance(symbol, str):
+            return None
+        path = path.strip().replace("\\", "/")
+        symbol = symbol.strip()
+        if not path or not symbol:
+            return None
+        raw_kind = payload.get("kind", "replace")
+        if not isinstance(raw_kind, str):
+            return None
+        kind = raw_kind.strip().lower()
+        if kind not in _STRUCTURAL_KINDS:
+            return None
+        source = payload.get("source", "")
+        if not isinstance(source, str):
+            return None
+        if kind != "delete" and not source.strip():
+            return None
+        # An architecture-sensitive module is never structurally authored, even
+        # by an otherwise valid structural proposal.
+        try:
+            from atlas.evolution.promotion_gate import ARCHITECTURE_SENSITIVE_PREFIXES
+
+            dotted = (
+                path[:-3].replace("/", ".")
+                if path.endswith(".py")
+                else path.replace("/", ".")
+            )
+            if any(
+                dotted.startswith(prefix) for prefix in ARCHITECTURE_SENSITIVE_PREFIXES
+            ):
+                return None
+        except ImportError:  # pragma: no cover — the gate is always importable
+            return None
+
+        try:
+            from dataclasses import replace
+
+            from atlas.evolution.structural_editor import (
+                STRUCTURAL_KEY,
+                StructuralChangeSupplier,
+                structural_spec,
+            )
+
+            edit = structural_spec(path, symbol, source, kind=kind)
+            note = payload.get("note")
+            if isinstance(note, str) and note.strip():
+                edit["reason"] = note[:_MAX_NOTES_CHARS]
+            metadata = dict(getattr(need, "metadata", None) or {})
+            metadata[STRUCTURAL_KEY] = [edit]
+            supplied = StructuralChangeSupplier(
+                self._root, base_source=self._base_source
+            ).supply_changes(replace(need, metadata=metadata))
+        except Exception:  # noqa: BLE001 — any editor refusal is a refusal here
+            return None
+        if supplied is None:
+            return None
+        try:
+            changes = tuple(supplied.code_changes or ())
+        except Exception:  # noqa: BLE001
+            return None
+        if len(changes) != 1:
+            return None
+        result_path, content = changes[0]
+        if str(result_path) != path or not str(content).strip():
+            return None
+        return path, str(content)
+
 
 def _pairs(raw: Any) -> tuple[tuple[str, str], ...]:
     """Normalize ``{path: content}`` / ``[{path, content}]`` into pairs.
@@ -270,7 +415,10 @@ def _pairs(raw: Any) -> tuple[tuple[str, str], ...]:
 
 
 __all__ = [
+    "CHANGE_FULL_FILE",
+    "CHANGE_STRUCTURAL",
     "SPECIALIST_ORIGIN",
     "SPECIALIST_PROPOSAL_KEY",
+    "SUPPORTED_CHANGES",
     "SpecialistChangeSupplier",
 ]

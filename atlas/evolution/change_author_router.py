@@ -267,6 +267,11 @@ class VerificationExpectation:
     deterministic: bool = True
     executed: bool = False
     authorized: bool = False
+    #: Command 2 (A3) — True when ``tests`` is the HELD-OUT verification set: the
+    #: author/repair side must never see those tests' source, assertions,
+    #: fixtures, paths or derived excerpts (see ``held_out_context``). The
+    #: VERIFIER still runs them; only the AUTHOR is bounded by this flag.
+    held_out: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -278,6 +283,7 @@ class VerificationExpectation:
             "deterministic": self.deterministic,
             "executed": self.executed,
             "authorized": self.authorized,
+            "held_out": self.held_out,
         }
 
 
@@ -345,6 +351,9 @@ def verification_expectations(
         tests=bounded,
         expectation=expectation,
         provenance=reasons,
+        # Command 2 (A3): the plan's SELECTED verification tests are the set the
+        # authored change is judged by, so they are HELD OUT from that author.
+        held_out=bool(bounded),
     )
 
 

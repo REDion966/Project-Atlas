@@ -53,6 +53,11 @@ from typing import Any, Callable
 from atlas.evolution.autonomy.code_execution import CodeApplier
 from atlas.evolution.autonomy.code_sandbox import CodeChangeSet, CodeSandbox
 from atlas.evolution.autonomy.sandbox_tools import SandboxWorkspace, pytest_tool
+from atlas.evolution.change_guard import (
+    GUARD_FAILED_OUTCOME,
+    characterise_change,
+    guard_metadata,
+)
 from atlas.evolution.development_planner import DevelopmentPlanner, DevelopmentPlannerError
 from atlas.evolution.development_models import (
     DevelopmentOutcome,
@@ -613,6 +618,25 @@ class SelfDevelopmentLoop:
                 if step.phase == StepPhase.IMPLEMENT:
                     applied, changed_files, apply_message = self._implementer(
                         code_sandbox, proposal, workload, iteration)
+                    if applied:
+                        # Command 2 (W3/A2) — the DETERMINISTIC change guard runs
+                        # AFTER application and BEFORE pytest. A refused change
+                        # never reaches verification, so it receives no
+                        # verification verdict (the recorded baseline is cleared,
+                        # so it can never be attributed as pass_to_fail or
+                        # fail_to_fail) and can never be promoted.
+                        refusal = self._guard_change(workload)
+                        if refusal is not None:
+                            verification_metadata = {
+                                "verification_baseline": None,
+                                **guard_metadata(refusal),
+                            }
+                            applied = False
+                            test_outcome = GUARD_FAILED_OUTCOME
+                            apply_message = (
+                                "change guard refused the applied change: "
+                                + "; ".join(refusal.reasons)
+                            )
                     step.status = (
                         StepStatus.COMPLETED if applied else StepStatus.FAILED
                     )
@@ -724,6 +748,43 @@ class SelfDevelopmentLoop:
             getattr(diagnostic, "failure_class", None), "value", ""
         )
         return failure_class in ("governance", "objective", "capability")
+
+    @staticmethod
+    def _guard_change(workload: SandboxWorkload) -> Any:
+        """Characterise the applied change; return the refusal, or ``None``.
+
+        Command 2 (W3/A2). Pure, bounded and read-only: the PRE-change content is
+        the repository content the workload already carries (the baseline seed the
+        loop writes into the sandbox), so nothing is read from disk. Fail-soft:
+        any guard error returns ``None`` (no refusal), because the guard is an
+        additional safety/evidence layer and must never break an existing path.
+        """
+        try:
+            base: dict[str, str] = {}
+            applied: dict[str, str] = {}
+            for change in getattr(workload, "code_changes", ()) or ():
+                if not isinstance(change, dict):
+                    continue
+                path = str(change.get("path", "") or "")
+                if not path:
+                    continue
+                applied[path] = str(change.get("content") or "")
+                base[path] = str(
+                    (workload.repository_context or {}).get(path) or ""
+                )
+            target = next(iter(applied)) if len(applied) == 1 else ""
+            characterisation = characterise_change(
+                base=base, applied=applied, target=target
+            )
+        except Exception:  # noqa: BLE001 — a guard error must not break the loop
+            return None
+        # A no-op is REFUSED by the guard (``ok`` is False, ``no_op`` is True) but
+        # it is not a SAFETY violation: the existing verification attribution
+        # already reports it honestly as ``pass_to_pass``, so the loop records the
+        # characterisation without stopping the pipeline.
+        if characterisation.ok or characterisation.no_op:
+            return None
+        return characterisation
 
     @staticmethod
     def _plan_verify_target(

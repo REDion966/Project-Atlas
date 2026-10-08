@@ -85,6 +85,13 @@ def _is_repairable(outcome: Any) -> bool:
     """
     if _outcome_status(outcome) is not DevelopmentOutcomeStatus.FAILED:
         return False
+    if _was_guard_refused(outcome):
+        # Command 2 (W3) — the guard refused an APPLIED change, so no pytest
+        # verdict exists. That is an attributable AUTHORING/CHANGE defect (the
+        # change was illegal, not the tests), and bounded corrective authoring is
+        # the one legitimate response, so it IS repairable — without being
+        # reinterpreted as a verification transition.
+        return True
     if bool(getattr(outcome, "rollback_occurred", False)):
         return False
     if bool(getattr(outcome, "verification_passed", False)):
@@ -98,6 +105,57 @@ def _is_repairable(outcome: Any) -> bool:
         return False
     test_outcome = (getattr(outcome, "test_outcome", "") or "").strip().lower()
     return test_outcome in ("failed", "error")
+
+
+def _was_guard_refused(outcome: Any) -> bool:
+    """True when the deterministic change guard refused the applied change."""
+    from atlas.evolution.change_guard import was_guard_refused
+
+    try:
+        return bool(was_guard_refused(outcome))
+    except Exception:  # noqa: BLE001 — absent evidence is not a refusal
+        return False
+
+
+def _held_out_boundary(workload: Any) -> Any:
+    """The HELD-OUT verification boundary for a repair (or an empty one).
+
+    The workload's ``test_files`` ARE the plan's selected verification set, so
+    they are exactly the artifacts the corrective author is judged by and must
+    not see. An explicit ``held_out_tests`` declaration is honoured as well.
+    """
+    from atlas.evolution.held_out_context import HeldOutBoundary, boundary_of
+
+    files = {
+        str(path): str(content)
+        for path, content in ((getattr(workload, "test_files", None) or {}) or {}).items()
+    }
+    if not files:
+        return HeldOutBoundary()
+    return boundary_of(
+        metadata={"held_out_tests": sorted(files)},
+        sources=files,
+    )
+
+
+def _safe_author_context(sources: Any, boundary: Any) -> dict[str, str]:
+    """The held-out-filtered author context (never the raw mapping)."""
+    from atlas.evolution.held_out_context import safe_context
+
+    try:
+        return safe_context(dict(sources or {}), boundary)
+    except Exception:  # noqa: BLE001 — a failed filter yields NO context
+        return {}
+
+
+def _failure_category(failed: Any) -> str:
+    """The bounded ABSTRACT failure category an author may be told (Command 2 A3)."""
+    from atlas.evolution.held_out_context import abstract_failure_category
+
+    try:
+        return abstract_failure_category(failed)
+    except Exception:  # noqa: BLE001 — an unknown category is still bounded
+        return "unknown"
 
 
 def _workload_paths(workload: Any) -> list[str]:
@@ -231,14 +289,25 @@ class RepairChangeSupplier:
         Prefers the ACTIVE Atlas-owned specialist seam (``code.generate``); falls
         back to the EXISTING generic model supplier. Either way the corrective
         change is bounded, untrusted, and applied/verified by the existing loop.
+
+        Command 2 (A3) — ONE held-out verification boundary is derived from the
+        baseline workload's verification tests and is enforced on BOTH corrective
+        authors, so neither can see the artifacts it is judged by.
         """
-        corrected = self._author_specialist_correction(proposal, failed, baseline)
+        boundary = _held_out_boundary(baseline)
+        corrected = self._author_specialist_correction(
+            proposal, failed, baseline, boundary
+        )
         if corrected is not None:
             return corrected
-        return self._author_model_correction(proposal, failed, baseline)
+        return self._author_model_correction(proposal, failed, baseline, boundary)
 
     def _author_model_correction(
-        self, proposal: Any, failed: Any, baseline: SandboxWorkload | None
+        self,
+        proposal: Any,
+        failed: Any,
+        baseline: SandboxWorkload | None,
+        boundary: Any = None,
     ) -> SandboxWorkload | None:
         """Author ONE bounded corrective workload via the existing supplier.
 
@@ -249,7 +318,7 @@ class RepairChangeSupplier:
         """
         try:
             supplied = self._supplier.supply_changes(
-                self._build_need(proposal, failed)
+                self._build_need(proposal, failed, boundary=boundary)
             )
         except Exception:
             return None
@@ -275,7 +344,11 @@ class RepairChangeSupplier:
         )
 
     def _author_specialist_correction(
-        self, proposal: Any, failed: Any, baseline: SandboxWorkload | None
+        self,
+        proposal: Any,
+        failed: Any,
+        baseline: SandboxWorkload | None,
+        boundary: Any = None,
     ) -> SandboxWorkload | None:
         """Author the corrective change through the ACTIVE specialist seam.
 
@@ -307,21 +380,38 @@ class RepairChangeSupplier:
         if not base_content:
             return None
         try:
-            need = self._build_need(proposal, failed, target=target)
-            # The corrective author builds its OWN bounded repository context
-            # (the target module's CURRENT repository source) — the pre-change,
-            # known-good baseline the failing change regressed away from, which
-            # is the most useful evidence for a correction. The failure detail
-            # travels in the request, and the failing test sources are added so
-            # the model can see what the tests expect.
+            need = self._build_need(proposal, failed, target=target, boundary=boundary)
+            # Command 2 (W2) — the ONE reusable context builder selects the
+            # target's bounded symbol REGION (with its structural/dependency
+            # neighbours) from the read-only repository map.
+            context: dict[str, str] = {}
             try:
-                context: dict[str, str] = dict(
-                    _author_context(author, target) or {}
+                from atlas.evolution.context_builder import (
+                    RepositoryContextRequest,
+                    context_sources,
                 )
-            except Exception:
+
+                context = dict(
+                    context_sources(
+                        self._repository_map,
+                        RepositoryContextRequest(module=target),
+                    )
+                    or {}
+                )
+            except Exception:  # noqa: BLE001 — a failed selection is no context
                 context = {}
-            for path, content in (baseline.test_files or {}).items():
-                context.setdefault(str(path), str(content))
+            if not context:
+                # Fall back to the author's OWN bounded target source, which is
+                # the pre-change repository content the correction regresses to.
+                try:
+                    context = dict(_author_context(author, target) or {})
+                except Exception:  # noqa: BLE001
+                    context = {}
+            # Command 2 (A3) — the HELD-OUT verification boundary. The baseline
+            # verification test sources are NO LONGER added to the context (they
+            # are exactly the artifacts this correction is judged by), and any
+            # held-out content carried inside a surviving value is redacted.
+            context = _safe_author_context(context, boundary)
             candidate = author.propose(
                 need,
                 target=target,
@@ -329,16 +419,20 @@ class RepairChangeSupplier:
                     "target": target,
                     "route": "specialist_repair",
                     "failure": str(getattr(failed, "test_outcome", "") or "")[:64],
+                    "failure_category": _failure_category(failed),
                     "attribution": transition_of(failed).value,
                 },
-                verification_tests=tuple(
-                    str(path) for path in (baseline.test_files or {})
-                ),
+                # No held-out verification identity crosses the boundary: the
+                # author receives a bounded failure CATEGORY, never which tests
+                # judge it.
+                verification_tests=(),
                 context=context or None,
             )
         except Exception:
             return None
-        supplied = self._consume_specialist(candidate, need, target)
+        supplied = self._consume_specialist(
+            candidate, need, target, base_source={target: base_content}
+        )
         if supplied is None:
             return None
         changes = list(supplied.code_changes or ())
@@ -359,7 +453,11 @@ class RepairChangeSupplier:
         )
 
     def _consume_specialist(
-        self, candidate: Any, need: DevelopmentNeed, target: str
+        self,
+        candidate: Any,
+        need: DevelopmentNeed,
+        target: str,
+        base_source: Any = None,
     ) -> Any | None:
         """Run the candidate through the EXISTING proposal consumer seam.
 
@@ -389,13 +487,15 @@ class RepairChangeSupplier:
             repair_need = replace(
                 need, target_components=(target, dotted), metadata=metadata
             )
-            return SpecialistChangeSupplier().supply_changes(repair_need)
+            return SpecialistChangeSupplier(base_source=base_source).supply_changes(
+                repair_need
+            )
         except Exception:
             return None
 
     @staticmethod
     def _build_need(
-        proposal: Any, failed: Any, target: str = ""
+        proposal: Any, failed: Any, target: str = "", boundary: Any = None
     ) -> DevelopmentNeed:
         """Bounded failure context the model must reason about (untrusted input)."""
         status = _outcome_status(failed)
@@ -420,6 +520,14 @@ class RepairChangeSupplier:
             f"attribution={transition_of(failed).value}\n"
             f"failure={message}"
         )
+        if boundary is not None:
+            try:
+                # Command 2 (A3) — a held-out test's own source can be carried
+                # inside a pytest failure message, so the bounded failure text is
+                # redacted against the held-out sources before it is sent.
+                summary = boundary.redact(summary)
+            except Exception:  # noqa: BLE001 — keep the bounded text unchanged
+                pass
         return DevelopmentNeed(
             title=f"Repair failed development attempt: {title}"[:_MAX_TITLE_CHARS],
             summary=summary[:_MAX_SUMMARY_CHARS],

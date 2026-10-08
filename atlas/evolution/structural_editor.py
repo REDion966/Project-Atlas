@@ -271,8 +271,13 @@ class StructuralChangeSupplier:
     def origin(self) -> str:
         return STRUCTURAL_ORIGIN
 
-    def __init__(self, root: Any | None = None) -> None:
+    def __init__(self, root: Any | None = None, *, base_source: Any | None = None) -> None:
         self._root = root
+        #: Command 2 (W6) — optional explicit base source per path. When a path is
+        #: present here, ITS text is edited instead of the on-disk file, which is
+        #: what a REPAIR needs (the CURRENT failing content, not the pristine
+        #: repository content). Absent or empty keeps today's behaviour exactly.
+        self._base_source = base_source if isinstance(base_source, dict) else None
 
     def _repository_root(self):
         import pathlib
@@ -326,15 +331,25 @@ class StructuralChangeSupplier:
 
         changes: list[tuple[str, str]] = []
         for path in order:
-            target = (root / path).resolve()
-            try:
-                target.relative_to(root.resolve())
-            except ValueError as exc:
-                raise ValueError(f"path escapes the repository: {path}") from exc
-            try:
-                original = target.read_text(encoding="utf-8", errors="surrogateescape")
-            except OSError as exc:
-                raise ValueError(f"cannot read {path}: {type(exc).__name__}") from exc
+            explicit = (
+                self._base_source.get(path) if self._base_source is not None else None
+            )
+            if isinstance(explicit, str) and explicit.strip():
+                # An explicitly supplied base is authoritative: a REPAIR edits the
+                # CURRENT failing content, never the pristine repository file.
+                original = explicit
+            else:
+                target = (root / path).resolve()
+                try:
+                    target.relative_to(root.resolve())
+                except ValueError as exc:
+                    raise ValueError(f"path escapes the repository: {path}") from exc
+                try:
+                    original = target.read_text(
+                        encoding="utf-8", errors="surrogateescape"
+                    )
+                except OSError as exc:
+                    raise ValueError(f"cannot read {path}: {type(exc).__name__}") from exc
             result = apply_structural_edits(original, by_path[path])
             if not result.ok:
                 raise ValueError(f"structural edit refused for {path}: {result.reason}")

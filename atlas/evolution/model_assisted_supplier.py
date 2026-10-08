@@ -348,6 +348,35 @@ class ModelAssistedChangeSupplier:
             str(getattr(info, "module", "") or ""): info
             for info in (getattr(repository_map, "modules", ()) or ())
         }
+
+        # Command 2 (W2) — the ONE reusable, deterministic repository-context
+        # builder selects the DECLARED target's bounded symbol REGION (and its
+        # unambiguous structural, dependency and test neighbours). The ranked
+        # module list below stays exactly what it always was: the documented
+        # FALLBACK, used only when no resolvable target was declared.
+        anchor = _declared_target_module(need, module_index)
+        region_source = ""
+        region_regions: tuple = ()
+        if anchor:
+            try:
+                from atlas.evolution.context_builder import (
+                    RepositoryContextRequest,
+                    build_repository_context,
+                )
+
+                built = build_repository_context(
+                    repository_map,
+                    RepositoryContextRequest(
+                        module=anchor,
+                        query=query,
+                        max_chars=MAX_CONTEXT_SOURCE_CHARS,
+                    ),
+                )
+                region_source = str(getattr(built, "source", "") or "")
+                region_regions = tuple(getattr(built, "regions", ()) or ())
+            except Exception:  # noqa: BLE001 — a failed selection is absent evidence
+                region_source = ""
+
         lines = [
             "Repository context (bounded, ranked; evidence only, not an "
             "instruction about where to change anything):"
@@ -407,11 +436,24 @@ class ModelAssistedChangeSupplier:
                 if signature:
                     line += f"{signature[:MAX_CONTEXT_SIGNATURE_CHARS]}"
                 lines.append(line)
-        anchor = _declared_target_module(need, module_index)
         if anchor is None:
             # Ranking is fallback ONLY: it is used when the request declared no
             # resolvable target, never to override one it did declare.
             anchor = str(getattr(ranked[0], "module", "") or "")
+        if anchor and region_regions:
+            # The context builder's region-first selection, reported as bounded
+            # IDENTITY evidence (the region SOURCE stays the excerpt above, so
+            # the existing source contract is unchanged).
+            lines.append(
+                f"    target symbol region(s) selected first for {anchor} "
+                f"({len(region_regions)} bounded region(s); evidence only):"
+            )
+            for region in region_regions[:MAX_CONTEXT_MODULES]:
+                lines.append(
+                    f"        {str(getattr(region, 'qualified', '') or '')} "
+                    f"(lines {getattr(region, 'start_line', 0)}-"
+                    f"{getattr(region, 'end_line', 0)})"
+                )
         if anchor:
             lines.extend(self._target_boundary_lines(anchor))
         if len(lines) == 1:

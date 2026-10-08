@@ -189,6 +189,9 @@ class DevelopmentDiagnostic:
                 recoverable=None,
             )
 
+        if self._is_guard_refusal(last):
+            return self._guard_refusal_diagnosis(last, exhausted=True)
+
         if self._is_verification_failure(last):
             return DiagnosticResult(
                 failure_class=DiagnosticFailureClass.VERIFICATION,
@@ -241,6 +244,9 @@ class DevelopmentDiagnostic:
                 recoverable=None,
             )
 
+        if self._is_guard_refusal(last):
+            return self._guard_refusal_diagnosis(last, exhausted=False)
+
         if self._is_verification_failure(last):
             return DiagnosticResult(
                 failure_class=DiagnosticFailureClass.VERIFICATION,
@@ -277,6 +283,54 @@ class DevelopmentDiagnostic:
                 or "status=FAILED"
             ),
             recoverable=None,
+        )
+
+    @classmethod
+    def _is_guard_refusal(cls, outcome: Any) -> bool:
+        """True when the deterministic change guard refused the applied change.
+
+        Command 2 (W3): such a failure is an ATTRIBUTABLE authoring/change
+        defect — the change was illegal, not the tests — and it carries NO
+        verification verdict, so it is never reported as a verification
+        transition.
+        """
+        from atlas.evolution.change_guard import was_guard_refused
+
+        try:
+            return bool(was_guard_refused(outcome))
+        except Exception:  # noqa: BLE001 — absent evidence is not a refusal
+            return False
+
+    @classmethod
+    def _guard_refusal_diagnosis(cls, outcome: Any, exhausted: bool) -> DiagnosticResult:
+        """The bounded diagnosis of a guard-refused change."""
+        from atlas.evolution.change_guard import GUARD_FAILED_OUTCOME, guard_reasons
+
+        reasons = "; ".join(guard_reasons(outcome)) or "no bounded reason recorded"
+        if exhausted:
+            cause = (
+                "The bounded iteration budget was exhausted after the "
+                "deterministic change guard refused the applied change (an "
+                "attributable authoring/change defect); verification was never "
+                "executed."
+            )
+            prefix = "status=ITERATIONS_EXHAUSTED"
+        else:
+            cause = (
+                "The applied change was refused by the deterministic change "
+                "guard (an attributable authoring/change defect); verification "
+                "was never executed."
+            )
+            prefix = "status=FAILED"
+        return DiagnosticResult(
+            failure_class=DiagnosticFailureClass.IMPLEMENTATION,
+            confidence=DiagnosticConfidence.KNOWN,
+            cause=cause,
+            evidence=(
+                f"{prefix}; last.test_outcome={GUARD_FAILED_OUTCOME!r}; "
+                f"guard_reasons={reasons}"
+            ),
+            recoverable=True,
         )
 
     @classmethod
