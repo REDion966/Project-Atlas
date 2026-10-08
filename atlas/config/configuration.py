@@ -39,6 +39,14 @@ def _specialists_settings(raw: object) -> SpecialistsSettings:
         model=str(raw.get("model") or "qwen2.5-coder:7b"),
         host=str(raw.get("host") or "http://127.0.0.1:11434"),
         timeout_seconds=timeout,
+        # Command 3 — the optional semantic-similarity specialist. Safe default
+        # False: no embedding model is constructed and the deterministic
+        # ranking path is byte-for-byte unchanged.
+        embeddings_enabled=bool(raw.get("embeddings_enabled", False)),
+        embeddings_model=str(raw.get("embeddings_model") or "nomic-embed-text"),
+        embeddings_provider_id=str(
+            raw.get("embeddings_provider_id") or "ollama.embeddings"
+        ),
     )
 
 

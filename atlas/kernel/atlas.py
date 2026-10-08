@@ -376,6 +376,11 @@ class Atlas:
         #: ``None`` unless ``[specialists].enabled`` is explicitly true AND a
         #: provider is wired; deterministic-first behaviour is unchanged.
         self._specialist_author = None
+        #: Command 3 — the OPTIONAL bounded semantic-similarity specialist.
+        #: ``None`` unless ``[specialists].embeddings_enabled`` is explicitly
+        #: true AND a runtime is configured; deterministic-first behaviour is
+        #: unchanged and it can only contribute a similarity NUMBER.
+        self._embedding_model = None
         self._memory_service: MemoryManagerService | None = None
         self._knowledge_manager: KnowledgeManager | None = None
         self._cognitive_loop: CognitiveLoop | None = None
@@ -2023,6 +2028,68 @@ class Atlas:
         # sandbox, verification, approval and promotion. Any wiring failure
         # leaves it ``None`` (fail-closed) so the deterministic path is unchanged.
         self._specialist_author = self._build_specialist_development_author()
+        # Command 3 — OPT-IN ONLY and INDEPENDENT of the code provider: a narrow
+        # Atlas-owned semantic-similarity specialist. It is consulted only by
+        # read-only ranking surfaces that may re-order Atlas's own candidates.
+        self._embedding_model = self._build_embedding_model()
+
+    def _build_embedding_model(self):
+        """Build the OPTIONAL semantic-similarity specialist, or ``None``.
+
+        Command 3 — opt-in only (``[specialists].embeddings_enabled``, default
+        false) and independent of the code-generation provider. The specialist is
+        the narrow Atlas-owned adapter over an injected bounded transport; it
+        holds no state, is imported lazily, and never becomes an authority: it
+        can only contribute a similarity number to a deterministic Atlas policy.
+        Any wiring failure leaves it ``None``, so deterministic-first behaviour
+        is exactly what it was.
+        """
+        try:
+            if not bool(
+                self._config.get("specialists", "embeddings_enabled", default=False)
+            ):
+                return None
+            from atlas.semantic_similarity import SpecialistEmbeddingModel
+            from atlas.specialist_transport import (
+                DEFAULT_EMBEDDING_MODEL,
+                DEFAULT_HOST,
+                DEFAULT_TIMEOUT_SECONDS,
+                ollama_embedding_transport,
+            )
+
+            model = str(
+                self._config.get(
+                    "specialists", "embeddings_model", default=DEFAULT_EMBEDDING_MODEL
+                )
+                or DEFAULT_EMBEDDING_MODEL
+            )
+            host = str(
+                self._config.get("specialists", "host", default=DEFAULT_HOST)
+                or DEFAULT_HOST
+            )
+            timeout = float(
+                self._config.get(
+                    "specialists", "timeout_seconds", default=DEFAULT_TIMEOUT_SECONDS
+                )
+                or DEFAULT_TIMEOUT_SECONDS
+            )
+            provider_id = str(
+                self._config.get(
+                    "specialists",
+                    "embeddings_provider_id",
+                    default="ollama.embeddings",
+                )
+                or "ollama.embeddings"
+            )
+            return SpecialistEmbeddingModel(
+                transport=ollama_embedding_transport(
+                    model=model, host=host, timeout=timeout
+                ),
+                provider_id=provider_id,
+                model_id=model,
+            )
+        except Exception:  # noqa: BLE001 — fail-closed: no specialist, no change
+            return None
 
     def _build_specialist_development_author(self):
         """Build the OPTIONAL bounded specialist author, or ``None``.
@@ -6414,6 +6481,79 @@ class Atlas:
             operational_capabilities=self._operational_capabilities(),
             external_model_available=self._external_providers_enabled(),
         )
+
+    def semantic_similarity_available(self) -> bool:
+        """True when an OPTIONAL semantic-similarity specialist is wired.
+
+        Command 3. Read-only and model-free (it answers a wiring question, not a
+        model question). ``False`` is the deterministic-first default and means
+        every semantic surface returns Atlas's own ordering unchanged.
+        """
+        return bool(getattr(self._embedding_model, "available", False))
+
+    def semantic_module_search(self, query: str, *, limit: int = 10) -> dict:
+        """Atlas's own module ranking, OPTIONALLY re-ordered by a specialist.
+
+        Command 3. The deterministic lexical ranking decides WHICH modules are
+        candidates and the order they arrive in; the optional embedding
+        specialist may only RE-ORDER that candidate set, and only when its
+        semantic lead over Atlas's own top candidate exceeds the uncertainty
+        margin. It can never introduce or remove a candidate.
+
+        Read-only: it grants no authority, executes nothing, reads nothing from
+        disk beyond the already-cached repository map, and returns the
+        deterministic order unchanged (with an explicit ``reason``) whenever no
+        specialist is available or no signal is usable.
+        """
+        query = str(query or "")
+        try:
+            repository_map = self.repository_map
+        except Exception:  # noqa: BLE001 — an unavailable map is no candidates
+            repository_map = self._repository_map
+        if repository_map is None:
+            return {
+                "query": query,
+                "available": self.semantic_similarity_available(),
+                "applied": False,
+                "reason": "no repository map is available",
+                "deterministic_order": [],
+                "order": [],
+                "scores": [],
+                "provider_id": "",
+                "model_id": "",
+            }
+
+        try:
+            ranked = tuple(repository_map.rank_modules(query, limit=limit) or ())
+        except Exception:  # noqa: BLE001 — a failed ranking yields no candidates
+            ranked = ()
+
+        candidates: list[tuple[str, str]] = []
+        for entry in ranked:
+            module = str(getattr(entry, "module", "") or "")
+            if not module:
+                continue
+            # Bounded comparison text: the module identity plus its symbol names
+            # (data the map ALREADY holds — nothing is read from disk here).
+            text = module.replace(".", " ")
+            try:
+                symbols = tuple(repository_map.symbols_in_module(module) or ())[:12]
+                names = " ".join(
+                    str(getattr(symbol, "name", "") or "") for symbol in symbols
+                )
+                if names.strip():
+                    text = f"{text} {names}"
+            except Exception:  # noqa: BLE001 — symbols are optional evidence
+                pass
+            candidates.append((module, text[:2000]))
+
+        from atlas.evolution.semantic_ranking import rerank_candidates
+
+        ranking = rerank_candidates(candidates, query, self._embedding_model)
+        payload = ranking.to_dict()
+        payload["query"] = query
+        payload["available"] = self.semantic_similarity_available()
+        return payload
 
     def development_self_model(self):
         """The read-only Atlas DEVELOPMENT capability self-model (Command 6).

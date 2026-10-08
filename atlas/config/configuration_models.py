@@ -124,6 +124,14 @@ class SpecialistsSettings:
     model: str = "qwen2.5-coder:7b"
     host: str = "http://127.0.0.1:11434"
     timeout_seconds: float = 180.0
+    # Command 3 — the OPTIONAL semantic-similarity specialist (a compact local
+    # embedding model over the SAME runtime). INDEPENDENT of the code provider
+    # and OFF by default: with it disabled Atlas's own lexical ranking is used
+    # unchanged. When enabled it may only RE-ORDER Atlas's own candidate set —
+    # it can never add or remove a candidate, authorize, execute or promote.
+    embeddings_enabled: bool = False
+    embeddings_model: str = "nomic-embed-text"
+    embeddings_provider_id: str = "ollama.embeddings"
 
 
 @dataclass(slots=True)

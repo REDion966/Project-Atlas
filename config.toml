@@ -66,6 +66,14 @@ provider_id = "ollama.qwen2.5-coder-7b"
 model = "qwen2.5-coder:7b"
 host = "http://127.0.0.1:11434"
 timeout_seconds = 180.0
+# Command 3 — the OPTIONAL semantic-similarity specialist (a compact embedding
+# model over the SAME local runtime). Independent of the code provider and OFF
+# by default: with it disabled Atlas's lexical ranking is used unchanged. When
+# enabled it may only RE-ORDER Atlas's own candidate set and can never add or
+# remove a candidate, authorize, or decide anything.
+embeddings_enabled = false
+embeddings_model = "nomic-embed-text"
+embeddings_provider_id = "ollama.embeddings"
 
 [development.envelope]
 enabled = true

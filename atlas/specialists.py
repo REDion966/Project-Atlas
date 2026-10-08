@@ -42,6 +42,12 @@ CODE_GENERATE: str = "code.generate"
 CODE_REPAIR: str = "code.repair"
 CODE_REVIEW: str = "code.review"
 RESEARCH_ASSIST: str = "research.assist"
+#: Command 3 — a bounded semantic-similarity signal (an embedding of bounded
+#: text), the ONE capability Atlas has no native mechanism for at all: its
+#: repository ranking is lexical (BM25) and its reference resolution is lexical.
+#: A specialist that serves this may only CONTRIBUTE A NUMBER; it can never
+#: authorize, promote, or introduce/remove a candidate.
+SEMANTIC_SIMILARITY: str = "semantic.similarity"
 
 #: The closed set of capabilities a provider may declare or Atlas may request.
 SPECIALIST_CAPABILITIES: frozenset[str] = frozenset(
@@ -51,6 +57,7 @@ SPECIALIST_CAPABILITIES: frozenset[str] = frozenset(
         CODE_REPAIR,
         CODE_REVIEW,
         RESEARCH_ASSIST,
+        SEMANTIC_SIMILARITY,
     }
 )
 
@@ -294,6 +301,7 @@ __all__ = [
     "MAX_PROPOSAL_CHARS",
     "MAX_TASK_CHARS",
     "RESEARCH_ASSIST",
+    "SEMANTIC_SIMILARITY",
     "SPECIALIST_CAPABILITIES",
     "SpecialistProposal",
     "SpecialistProvider",

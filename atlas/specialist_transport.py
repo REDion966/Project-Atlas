@@ -80,10 +80,69 @@ def ollama_transport(
     return transport
 
 
+#: The default embedding specialist model. A compact, CPU-friendly encoder that
+#: is a PARAMETER (never an identity): any runtime that speaks the same bounded
+#: request/response envelope can replace it without touching Atlas.
+DEFAULT_EMBEDDING_MODEL: str = "nomic-embed-text"
+
+#: Embedding replies are NUMERIC and therefore far larger than a code proposal:
+#: one 768-dimension vector is a few kilobytes, so a bounded batch of 32 texts is
+#: a few hundred kilobytes. This is the transport's own size guard; the Atlas
+#: adapter applies the real structural bounds (count, dimension, finiteness).
+MAX_EMBEDDING_RESPONSE_CHARS: int = 2_000_000
+
+
+def ollama_embedding_transport(
+    *,
+    model: str = DEFAULT_EMBEDDING_MODEL,
+    host: str = DEFAULT_HOST,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    max_response_chars: int = MAX_EMBEDDING_RESPONSE_CHARS,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Build a bounded ``Transport`` for an embedding specialist (Command 3).
+
+    Same shape and same guarantees as :func:`ollama_transport`: one stateless
+    bounded call, no retry, no streaming, no tool use, no filesystem access. The
+    request is an already-bounded ``{"texts": [...]}`` mapping and the reply is
+    normalised to ``{"embeddings": [[...], ...]}``; every deviation (empty or
+    malformed input, a non-JSON or oversized body, a count that does not match
+    the request) yields an empty mapping, which the Atlas adapter turns into
+    ``None`` so callers continue on their deterministic path.
+    """
+
+    def transport(request: dict[str, Any]) -> dict[str, Any]:
+        texts = request.get("texts") if isinstance(request, dict) else None
+        if not isinstance(texts, (list, tuple)) or not texts:
+            return {}
+        payload = json.dumps(
+            {"model": model, "input": [str(text) for text in texts]}
+        ).encode("utf-8")
+        http_request = urllib.request.Request(
+            f"{host.rstrip('/')}/api/embed",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(http_request, timeout=timeout) as response:
+            body = json.loads(response.read())
+        if not isinstance(body, dict):
+            return {}
+        vectors = body.get("embeddings")
+        if not isinstance(vectors, list) or len(vectors) != len(texts):
+            return {}
+        if len(json.dumps(body)) > max_response_chars:
+            return {}
+        return {"embeddings": vectors}
+
+    return transport
+
+
 __all__ = [
+    "DEFAULT_EMBEDDING_MODEL",
     "DEFAULT_HOST",
     "DEFAULT_MODEL",
     "DEFAULT_TIMEOUT_SECONDS",
+    "MAX_EMBEDDING_RESPONSE_CHARS",
     "MAX_RESPONSE_CHARS",
+    "ollama_embedding_transport",
     "ollama_transport",
 ]
