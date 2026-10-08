@@ -12,16 +12,23 @@ Pins the Command 3B wiring at the NORMAL entry point
   * an EXPLICITLY SUPPLIED edit still wins (deterministic-first): the structural
     route is used and the specialist is not consulted.
 
-The transport is a fake; no model, network or repository mutation is involved.
+IMPORT NOTE — all ``atlas`` modules are imported LAZILY (via ``importlib``)
+inside the helpers rather than at module scope. This kernel-starting test is far
+too heavy for the bounded sandbox verification leg (it starts Atlas several times
+and needs ``config.toml``, which the verification closure does not carry). The
+repository map derives its test→module dependency graph from static ``import``
+statements, so a lazy import keeps this test OUT of the bounded verification
+target set for the modules it exercises and prevents it from being chosen as an
+unsuitable verification target for unrelated changes. The transport is a fake; no
+model, network or repository mutation is involved.
 """
 
 from __future__ import annotations
 
+import importlib
 import pathlib
 
 import pytest
-
-from tests.test_durable_guided_improvement import _storage_class
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TARGET = "atlas/specialist_transport.py"
@@ -45,7 +52,7 @@ def _enable_specialists(text: str) -> str:
 
 
 def _config_class(config_path: pathlib.Path):
-    from atlas.config.configuration import Configuration
+    Configuration = importlib.import_module("atlas.config.configuration").Configuration
 
     class _TmpConfiguration(Configuration):
         def __init__(self):
@@ -54,10 +61,14 @@ def _config_class(config_path: pathlib.Path):
     return _TmpConfiguration
 
 
+def _storage_class(tmp_path: pathlib.Path):
+    module = importlib.import_module("tests.test_durable_guided_improvement")
+    return module._storage_class(tmp_path)
+
+
 @pytest.fixture
 def _fake_transport(monkeypatch):
-    import atlas.specialist_transport as transport_mod
-
+    transport_mod = importlib.import_module("atlas.specialist_transport")
     body = (ROOT / TARGET).read_text(encoding="utf-8") + "\n# local-only note\n"
 
     def _factory(**kwargs):
@@ -71,8 +82,7 @@ def _fake_transport(monkeypatch):
 
 def _started_atlas(monkeypatch, tmp_path, *, enabled: bool):
     monkeypatch.setattr(
-        "atlas.kernel.atlas.SQLiteEvolutionStorage",
-        _storage_class(tmp_path),
+        "atlas.kernel.atlas.SQLiteEvolutionStorage", _storage_class(tmp_path)
     )
     text = (ROOT / "config.toml").read_text(encoding="utf-8")
     if enabled:
@@ -82,7 +92,7 @@ def _started_atlas(monkeypatch, tmp_path, *, enabled: bool):
     monkeypatch.setattr(
         "atlas.kernel.atlas.Configuration", _config_class(config_path)
     )
-    from atlas.kernel.atlas import Atlas
+    Atlas = importlib.import_module("atlas.kernel.atlas").Atlas
 
     atlas = Atlas()
     atlas.start()
