@@ -38,6 +38,10 @@ from atlas.evolution.development_models import (
     SandboxWorkload,
 )
 from atlas.evolution.model_assisted_supplier import ModelAssistedChangeSupplier
+from atlas.evolution.verification_attribution import (
+    VerificationTransition,
+    transition_of,
+)
 
 #: Bounds applied to the bounded failure-context prompt built for the model.
 _MAX_SUMMARY_CHARS: int = 2600
@@ -72,16 +76,25 @@ def _is_repairable(outcome: Any) -> bool:
     """True only for an ATTRIBUTABLE verification failure (repair candidate).
 
     A failure is repairable when the change was actually APPLIED (no rollback)
-    and a targeted test genuinely failed/errored. Environment signals (a
-    verification timeout), rollbacks, governance/objective/capability refusals
-    and unknown failures are NOT repairable — they are not code-defect problems
-    the model can author a correction for.
+    and a targeted test genuinely failed/errored. Command 4 makes attribution
+    PRECISE when a pre-change BASELINE was recorded: a failure that also occurs
+    WITHOUT the change (``fail_to_fail``) is not the change's fault, so no
+    corrective change is authored for it. Environment signals (a verification
+    timeout), rollbacks, governance/objective/capability refusals and unknown
+    failures are likewise NOT repairable.
     """
     if _outcome_status(outcome) is not DevelopmentOutcomeStatus.FAILED:
         return False
     if bool(getattr(outcome, "rollback_occurred", False)):
         return False
     if bool(getattr(outcome, "verification_passed", False)):
+        return False
+    transition = transition_of(outcome)
+    if transition in (
+        VerificationTransition.ALREADY_FAILING,
+        VerificationTransition.FIXED,
+        VerificationTransition.STILL_PASSING,
+    ):
         return False
     test_outcome = (getattr(outcome, "test_outcome", "") or "").strip().lower()
     return test_outcome in ("failed", "error")
@@ -316,6 +329,7 @@ class RepairChangeSupplier:
                     "target": target,
                     "route": "specialist_repair",
                     "failure": str(getattr(failed, "test_outcome", "") or "")[:64],
+                    "attribution": transition_of(failed).value,
                 },
                 verification_tests=tuple(
                     str(path) for path in (baseline.test_files or {})
@@ -403,6 +417,7 @@ class RepairChangeSupplier:
             f"status={status_name} test_outcome={test_outcome} "
             f"verification_passed={verification_passed} rollback={rollback}\n"
             f"changed_files={', '.join(changed) or '-'}\n"
+            f"attribution={transition_of(failed).value}\n"
             f"failure={message}"
         )
         return DevelopmentNeed(

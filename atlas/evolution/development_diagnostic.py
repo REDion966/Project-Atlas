@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
 
+from atlas.evolution.verification_attribution import transition_of
+
 
 # ---------------------------------------------------------------------------
 # Diagnostic classifications
@@ -197,10 +199,11 @@ class DevelopmentDiagnostic:
                 ),
                 evidence=(
                     f"status=ITERATIONS_EXHAUSTED; "
+                    f"transition={transition_of(last).value}; "
                     f"last.test_outcome={getattr(last, 'test_outcome', '')!r}; "
                     f"last.verification_passed={getattr(last, 'verification_passed', False)!r}"
                 ),
-                recoverable=self._is_recoverable_verification(last),
+                recoverable=None,
             )
 
         if self._is_implementation_failure(last):
@@ -244,11 +247,12 @@ class DevelopmentDiagnostic:
                 confidence=DiagnosticConfidence.KNOWN,
                 cause="Verification did not pass.",
                 evidence=(
+                    f"transition={transition_of(last).value}; "
                     f"last.test_outcome={getattr(last, 'test_outcome', '')!r}; "
                     f"last.verification_passed={getattr(last, 'verification_passed', False)!r}; "
                     f"last.message={getattr(last, 'message', '')!r}"
                 ),
-                recoverable=self._is_recoverable_verification(last),
+                recoverable=None,
             )
 
         if self._is_implementation_failure(last):
@@ -287,17 +291,3 @@ class DevelopmentDiagnostic:
     def _is_implementation_failure(cls, outcome: Any) -> bool:
         """True when outcome evidence indicates an implementation failure."""
         return bool(getattr(outcome, "rollback_occurred", False))
-
-    @classmethod
-    def _is_recoverable_verification(cls, outcome: Any) -> bool:
-        """True only when a verification failure is ATTRIBUTABLE to the change.
-
-        A bounded repair is warranted only when the change was actually APPLIED
-        (no rollback) and a targeted test genuinely failed/errored. A rollback
-        (the change could not be applied) or a verification timeout (an
-        environment signal) is NOT a recoverable code-defect problem.
-        """
-        if bool(getattr(outcome, "rollback_occurred", False)):
-            return False
-        test_outcome = (getattr(outcome, "test_outcome", "") or "").strip().lower()
-        return test_outcome in ("failed", "error")

@@ -538,6 +538,8 @@ class SelfDevelopmentLoop:
         """
         code_sandbox: CodeSandbox | None = None
         sandbox_path = ""
+        #: Command 4 — bounded pre/post verification-attribution evidence.
+        verification_metadata: dict = {}
         try:
             code_sandbox = CodeSandbox(base_dir=self._base_dir)
             workspace = SandboxWorkspace.from_code_sandbox(code_sandbox)
@@ -560,6 +562,34 @@ class SelfDevelopmentLoop:
                     continue
                 workspace.write_text(rel_path, content)
 
+            # Command 4 — seed the PRE-CHANGE (original) content of each changed
+            # path so a bounded BASELINE verification probe can run BEFORE the
+            # apply. The apply overwrites it, so the post-change state is
+            # unchanged; this only makes a pre-change reference available, which
+            # lets Atlas distinguish a change-caused failure from a pre-existing
+            # one. Deterministic, bounded, sandbox-only.
+            for rel_path in sorted(applied_paths):
+                original = workload.repository_context.get(rel_path)
+                if original is not None:
+                    workspace.write_text(rel_path, original)
+
+            # The bounded verification target (the plan's selected test when
+            # present) is resolved BEFORE the apply, so the SAME target is
+            # probed both before and after the change.
+            verify_target: str = workload.verify_target or (
+                self._plan_verify_target(workload, workspace)
+                or self._default_verify_target(workload, workspace)
+            )
+            baseline_passed: bool | None = None
+            if verify_target:
+                try:
+                    baseline_passed, _, _ = self._verifier(
+                        workspace.path, verify_target
+                    )
+                except Exception:  # noqa: BLE001 — an unknown baseline is not a fact
+                    baseline_passed = None
+            verification_metadata = {"verification_baseline": baseline_passed}
+
             applied = False
             passed = False
             changed_files: list[str] = []
@@ -580,25 +610,14 @@ class SelfDevelopmentLoop:
                     if not applied:
                         step.status = StepStatus.SKIPPED
                         continue
-                    # Phase 4.2 — when the workload names no target, run the
-                    # relevant test(s) selected deterministically from the
-                    # change set instead of an arbitrary path. Bounded and
-                    # fail-safe: no match keeps the existing default.
-                    #
                     # The PLAN's own bounded verification set is authoritative:
                     # ``VerificationExpectation.tests`` travel as
-                    # ``workload.test_files``. An empty target would omit the
-                    # pytest ``target`` parameter entirely and run the WHOLE
-                    # workspace — which, now that the sandbox carries the
-                    # repository support closure, is the entire repository test
-                    # suite. Prefer the plan's selected tests before the
-                    # change-derived default.
-                    target: str = workload.verify_target or (
-                        self._plan_verify_target(workload, workspace)
-                        or self._default_verify_target(workload, workspace)
-                    )
+                    # ``workload.test_files`` and the target was resolved BEFORE
+                    # the apply (so the SAME bounded target is measured before
+                    # and after the change). An empty target would otherwise omit
+                    # the pytest ``target`` parameter and run the WHOLE workspace.
                     passed, test_outcome, test_message = self._verifier(
-                        workspace.path, target)
+                        workspace.path, verify_target)
                     step.status = (
                         StepStatus.COMPLETED if passed else StepStatus.FAILED
                     )
@@ -623,6 +642,7 @@ class SelfDevelopmentLoop:
                     verification_passed=True,
                     test_outcome=test_outcome,
                     effectiveness_proxy=1.0,
+                    metadata=verification_metadata,
                 ), sandbox_path
 
             return self._make_outcome(
@@ -633,12 +653,14 @@ class SelfDevelopmentLoop:
                 verification_passed=False,
                 rollback_occurred=not applied,
                 test_outcome=test_outcome or "error",
+                metadata=verification_metadata,
             ), sandbox_path
         except Exception as exc:  # fail closed on infrastructure errors
             return self._make_outcome(
                 DevelopmentOutcomeStatus.FAILED,
                 proposal, plan, iteration,
                 message=f"iteration failed closed: {exc}",
+                metadata=verification_metadata,
             ), sandbox_path
         finally:
             if code_sandbox is not None:
@@ -656,6 +678,7 @@ class SelfDevelopmentLoop:
         rollback_occurred: bool = False,
         test_outcome: str = "",
         effectiveness_proxy: float = 0.0,
+        metadata: dict | None = None,
     ) -> DevelopmentOutcome:
         """Build a bounded, secret-free DevelopmentOutcome."""
         return DevelopmentOutcome(
@@ -669,6 +692,7 @@ class SelfDevelopmentLoop:
             rollback_occurred=rollback_occurred,
             test_outcome=test_outcome,
             effectiveness_proxy=effectiveness_proxy,
+            metadata=dict(metadata or {}),
         )
 
     def _record_outcome(self, outcome: DevelopmentOutcome) -> None:
