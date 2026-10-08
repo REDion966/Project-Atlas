@@ -281,6 +281,29 @@ class VerificationExpectation:
         }
 
 
+def _related_verification_tests(
+    target: Any, tests: tuple[str, ...]
+) -> tuple[str, ...]:
+    """The ``test_<stem>.py`` tests that correspond to ``target`` (or ``()``).
+
+    Deterministic and evidence-only: it reuses the EXISTING change -> test
+    selector, so nothing is invented and no test is added that the repository did
+    not already relate to the target. A selector failure changes no ordering.
+    """
+    text = str(target or "").strip().replace("\\", "/")
+    if not text:
+        return ()
+    path = text if text.endswith(".py") else text.replace(".", "/") + ".py"
+    try:
+        from atlas.evolution.development_test_selection import (
+            select_relevant_tests,
+        )
+
+        return tuple(select_relevant_tests([path], list(tests)))
+    except Exception:  # noqa: BLE001 — a selector failure changes no ordering
+        return ()
+
+
 def verification_expectations(
     target: str,
     tests: Iterable[str] = (),
@@ -297,6 +320,14 @@ def verification_expectations(
     rather than guessed.
     """
     bounded = tuple(sorted({str(item) for item in tests if str(item).strip()}))
+    # Command 5 — the change-related FOCUSED test (the ``test_<stem>.py`` name
+    # convention for the target module) LEADS the bounded set, so a narrow,
+    # relevant test is measured first and is not dropped by the bound; every
+    # other import-derived test keeps its deterministic order.
+    related = _related_verification_tests(target, bounded)
+    if related:
+        keep = set(related)
+        bounded = tuple(related) + tuple(item for item in bounded if item not in keep)
     bounded = bounded[:MAX_VERIFICATION_TESTS]
     if bounded:
         expectation = (

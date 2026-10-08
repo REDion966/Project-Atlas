@@ -583,9 +583,19 @@ class SelfDevelopmentLoop:
             baseline_passed: bool | None = None
             if verify_target:
                 try:
-                    baseline_passed, _, _ = self._verifier(
+                    passed, baseline_outcome, _ = self._verifier(
                         workspace.path, verify_target
                     )
+                    if passed:
+                        baseline_passed = True
+                    elif str(baseline_outcome) == "failed":
+                        # A genuine pre-change test failure is a FACT.
+                        baseline_passed = False
+                    else:
+                        # A timeout / error / no-tests-collected outcome: the
+                        # pre-change status is UNKNOWN, never asserted as a
+                        # failure (a timeout is not "it was already broken").
+                        baseline_passed = None
                 except Exception:  # noqa: BLE001 — an unknown baseline is not a fact
                     baseline_passed = None
             verification_metadata = {"verification_baseline": baseline_passed}
@@ -720,22 +730,35 @@ class SelfDevelopmentLoop:
         workload: SandboxWorkload,
         workspace: Any,
     ) -> str:
-        """The PLAN's own bounded verification target (deterministic).
+        """The bounded verification target (deterministic; change-related first).
 
         ``VerificationExpectation.tests`` are carried as ``workload.test_files``
-        and ARE the authoritative bounded verification set. Returning the first
-        selected test that exists in the sandbox keeps the pytest invocation
-        explicitly bounded and deterministic, instead of degrading to an
-        unbounded whole-workspace run.
-
-        Ordering is the plan's own order (deterministic); no test is invented,
-        no broader repository set is recomputed, and the workload's existing
-        test-file bound already limits the set. Returns ``""`` when the workload
-        carries no plan-derived tests, so the existing change-derived default
-        remains the fallback exactly as before.
+        and ARE the authoritative bounded verification set. Command 5 — among that
+        bounded set, PREFER the test that directly corresponds to a changed module
+        (the ``test_<stem>.py`` name convention, via the EXISTING
+        :func:`~atlas.evolution.development_test_selection.select_relevant_tests`)
+        before falling back to the plan's own order: a focused, change-related
+        test is the most meaningful and the least likely to be unrelated, broad or
+        unrunnable. No test is invented; only the ORDER within the bounded set
+        changes. Returns ``""`` when the workload carries no plan-derived tests,
+        so the existing change-derived default remains the fallback exactly as
+        before.
         """
         exists = getattr(workspace, "exists", None)
-        for candidate in workload.test_files:
+        candidates = [str(candidate) for candidate in workload.test_files]
+        changed = [
+            str(change.get("path", ""))
+            for change in (getattr(workload, "code_changes", ()) or ())
+            if isinstance(change, dict)
+        ]
+        related: tuple[str, ...] = ()
+        if changed:
+            from atlas.evolution.development_test_selection import (
+                select_relevant_tests,
+            )
+
+            related = select_relevant_tests(changed, candidates)
+        for candidate in (*related, *candidates):
             if not callable(exists) or exists(candidate):
                 return str(candidate)
         return ""

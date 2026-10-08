@@ -7,6 +7,8 @@ use in repair eligibility. No external model is contacted.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from atlas.evolution.development_models import (
@@ -237,3 +239,109 @@ class TestRepairEligibility:
         supplier = _repair_supplier()
         workload = supplier(_proposal(), [_failed()])
         assert workload.code_changes == ({"path": "mod.py", "content": BROKEN},)
+
+
+# ---------------------------------------------------------------------------
+# Verification-target suitability (Command 5)
+# ---------------------------------------------------------------------------
+
+
+class TestTargetSelection:
+    def _workload(self, test_files):
+        return SimpleNamespace(
+            test_files=dict(test_files),
+            code_changes=({"path": "mod.py", "content": "VALUE = 1\n"},),
+        )
+
+    def test_prefers_the_change_related_test_over_the_plan_order(self):
+        # The focused test sorts LAST but directly corresponds to the change.
+        workload = self._workload(
+            {"tests/test_alpha.py": "", "tests/test_mod.py": ""}
+        )
+        workspace = SimpleNamespace(exists=lambda path: True)
+        assert (
+            SelfDevelopmentLoop._plan_verify_target(workload, workspace)
+            == "tests/test_mod.py"
+        )
+
+    def test_falls_back_to_the_plan_order_when_nothing_is_related(self):
+        workload = self._workload(
+            {"tests/test_alpha.py": "", "tests/test_beta.py": ""}
+        )
+        workspace = SimpleNamespace(exists=lambda path: True)
+        assert (
+            SelfDevelopmentLoop._plan_verify_target(workload, workspace)
+            == "tests/test_alpha.py"
+        )
+
+    def test_skips_candidates_absent_from_the_sandbox(self):
+        workload = self._workload(
+            {"tests/test_alpha.py": "", "tests/test_mod.py": ""}
+        )
+        workspace = SimpleNamespace(exists=lambda path: path.endswith("alpha.py"))
+        assert (
+            SelfDevelopmentLoop._plan_verify_target(workload, workspace)
+            == "tests/test_alpha.py"
+        )
+
+    def test_no_candidates_yields_empty(self):
+        workload = SimpleNamespace(test_files={}, code_changes=())
+        workspace = SimpleNamespace(exists=lambda path: True)
+        assert SelfDevelopmentLoop._plan_verify_target(workload, workspace) == ""
+
+
+# ---------------------------------------------------------------------------
+# Baseline probe precision (Command 5): a timeout is NOT "already failing"
+# ---------------------------------------------------------------------------
+
+
+def _workload_with_context() -> SandboxWorkload:
+    return SandboxWorkload(
+        code_changes=({"path": "mod.py", "content": BROKEN},),
+        test_files={"test_mod.py": TEST},
+        repository_context={"mod.py": ORIGINAL},
+        verify_target="test_mod.py",
+    )
+
+
+def _loop_with_verifier(results):
+    """A loop whose injected verifier returns ``results`` in call order."""
+    from itertools import count
+
+    counter = count()
+
+    def verifier(workspace, target, timeout=None):
+        index = next(counter)
+        return results[min(index, len(results) - 1)]
+
+    return SelfDevelopmentLoop(
+        change_supplier=lambda p, h: _workload_with_context(), verifier=verifier
+    )
+
+
+class TestBaselinePrecision:
+    def test_a_timed_out_baseline_is_unknown_not_failing(self):
+        loop = _loop_with_verifier(
+            [(False, "timeout", "timed out"), (False, "failed", "x")]
+        )
+        result = loop.run(_approved(), max_iterations=1)
+        outcome = result.outcomes[-1]
+        assert baseline_of(outcome) is None
+        assert transition_of(outcome) is VerificationTransition.UNKNOWN
+        assert is_attributable(transition_of(outcome)) is False
+
+    def test_a_collection_error_baseline_is_unknown(self):
+        loop = _loop_with_verifier(
+            [(False, "error", "collected 0"), (False, "failed", "x")]
+        )
+        result = loop.run(_approved(), max_iterations=1)
+        assert baseline_of(result.outcomes[-1]) is None
+
+    def test_a_genuine_baseline_failure_is_recorded_as_failing(self):
+        loop = _loop_with_verifier(
+            [(False, "failed", "assert"), (False, "failed", "x")]
+        )
+        result = loop.run(_approved(), max_iterations=1)
+        outcome = result.outcomes[-1]
+        assert baseline_of(outcome) is False
+        assert transition_of(outcome) is VerificationTransition.ALREADY_FAILING
