@@ -2152,6 +2152,14 @@ class Atlas:
                 # an absent map leaves the prompt byte-identical to before.
                 repository_map=self._repository_map,
                 architecture_model=self._architecture_model_snapshot(),
+                # Command 3 — corrective changes prefer the SAME ACTIVE
+                # Atlas-owned `code.generate` specialist seam used for initial
+                # generation (``[specialists].enabled``). One provider, one
+                # author, one validation path. Resolved LAZILY (the supplier is
+                # built before the specialist author exists) and ``None`` when
+                # disabled, in which case repair falls back to the existing
+                # generic model supplier.
+                repair_author=lambda: self._specialist_author,
             )
         except Exception:
             return None

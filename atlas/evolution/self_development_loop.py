@@ -67,6 +67,10 @@ from atlas.evolution.models import EvolutionProposal, ProposalStatus
 #: Default iteration budget when the caller passes ``None``.
 DEFAULT_MAX_ITERATIONS: int = 3
 
+#: Bound on the pytest failure detail carried into a development outcome message
+#: (so a bounded repair can reason about the real failure, read-only).
+_MAX_VERIFY_DETAIL_CHARS: int = 1200
+
 
 # ---------------------------------------------------------------------------
 # Run result
@@ -230,8 +234,26 @@ class SandboxVerifier:
         if timeout is not None:
             params["timeout_seconds"] = timeout
         result = pytest_tool().handler(params)
-        outcome = result.output.get("outcome", "error")
-        return result.success and outcome == "passed", outcome, result.error or ""
+        output = result.output or {}
+        outcome = output.get("outcome", "error")
+        passed = result.success and outcome == "passed"
+        message = str(result.error or "")
+        if not passed:
+            # Command 3 — carry the REAL pytest reason (the failing assertion /
+            # syntax error / collection error) as bounded evidence, so a bounded
+            # repair can reason about WHAT failed instead of a bare
+            # "pytest failed to start". Read-only, bounded, secret-free.
+            detail = "\n".join(
+                part
+                for part in (
+                    str(output.get("stdout", "") or ""),
+                    str(output.get("stderr", "") or ""),
+                )
+                if part.strip()
+            ).strip()
+            if detail:
+                message = (message + " | " + detail[-_MAX_VERIFY_DETAIL_CHARS:]).strip()
+        return passed, outcome, message
 
     def __call__(
         self,

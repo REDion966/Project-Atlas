@@ -262,18 +262,30 @@ class CodeSandbox:
         content: str,
         encoding: str = "utf-8",
     ) -> Path:
-        """Write text content to a sandboxed relative path."""
+        """Write text content to a sandboxed relative path.
+
+        Newline translation is DISABLED (``newline=""``) so the bytes written are
+        exactly ``content``: the E2 apply read-back verify compares the written
+        content to the requested content, so a translated ``\\n``/``\\r\\n`` would
+        make a valid change look like a mismatch (Command 3 finding).
+        """
         target = self.resolve(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding=encoding)
+        with target.open("w", encoding=encoding, newline="") as handle:
+            handle.write(content)
         return target
 
     def read_text(self, path: str, default: Any = None) -> Any:
-        """Read text content from a sandboxed path, or return default."""
+        """Read text content from a sandboxed path, or return default.
+
+        Newline translation is DISABLED (``newline=""``) so the read-back is
+        byte-faithful to what :meth:`write_text` wrote.
+        """
         target = self.resolve(path)
         if not target.exists():
             return default
-        return target.read_text(encoding="utf-8")
+        with target.open("r", encoding="utf-8", newline="") as handle:
+            return handle.read()
 
     def exists(self, path: str) -> bool:
         """Return True when the sandboxed path exists."""
