@@ -374,8 +374,18 @@ class TestRealKernel:
     def test_step12_catalogue_is_intact(self, monkeypatch, tmp_path):
         atlas = _started_atlas(monkeypatch, tmp_path)
         try:
+            from atlas.self_knowledge.development_capabilities import (
+                all_development_capabilities,
+            )
+
             model = atlas.capability_model()
-            assert model.operational_count == len(all_operational_capabilities())
+            # The kernel's operational surface is the Step 12 catalogue PLUS the
+            # Command 6 DEVELOPMENT capability catalogue: it equals exactly the
+            # DECLARED catalogues, so nothing is invented at runtime.
+            assert model.operational_count == (
+                len(all_operational_capabilities())
+                + len(all_development_capabilities())
+            )
             assert model.find("investigate") is not None
             assert model.find("plan").governing == "owner_approval"
         finally:

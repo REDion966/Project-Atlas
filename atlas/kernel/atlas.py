@@ -6344,10 +6344,17 @@ class Atlas:
             self._approval_manager is not None
             and self._development_execution_bridge is not None
         )
-        return project_operational_capabilities(
+        operational = project_operational_capabilities(
             external_provider=external_provider,
             governed_wired=governed_wired,
         )
+        # Command 6 — Atlas's DEVELOPMENT capabilities ride the SAME bounded,
+        # evidence-grounded operational surface, so the EXISTING self-knowledge
+        # answers ("what capabilities ...", "explain <name>", "is <name>
+        # available?", "which capabilities are governed?") cover them with no new
+        # conversation code. Availability is grounded in the current wiring.
+        development = self.development_self_model().to_operational_capabilities()
+        return operational + development
 
     def _external_providers_enabled(self) -> bool:
         """True when an optional external AI provider is configured (grounded).
@@ -6407,6 +6414,46 @@ class Atlas:
             operational_capabilities=self._operational_capabilities(),
             external_model_available=self._external_providers_enabled(),
         )
+
+    def development_self_model(self):
+        """The read-only Atlas DEVELOPMENT capability self-model (Command 6).
+
+        An evidence-backed, deterministic, queryable projection of Atlas's own
+        governed-development capabilities: localization, planning, specialist
+        ``code.generate``, governed authoring, sandbox verification, verification
+        attribution, bounded specialist repair, OWNER approval, governed execution
+        and the promotion boundary — each with its status, owner module, public
+        entry/interface, dependencies, governance boundaries, dependency class
+        (deterministic vs optional external model), validation state and an
+        evidence reference.
+
+        Grounded in the CURRENT wiring (specialist enabled / repair wired /
+        governed boundary wired). Read-only and model-free: it grants no authority
+        and cannot mutate Atlas, approve, execute, verify or promote anything.
+        """
+        from atlas.self_knowledge.development_capabilities import (
+            build_development_capability_model,
+        )
+
+        return build_development_capability_model(
+            specialist_enabled=self._specialist_author is not None,
+            repair_wired=self._self_development_loop is not None,
+            governed_wired=(
+                self._approval_manager is not None
+                and self._development_execution_bridge is not None
+            ),
+        )
+
+    def development_capability_boundary(self, name: str):
+        """The bounded development boundary for one capability (Command 6).
+
+        The authoritative self-knowledge -> development bridge: whether Atlas
+        already provides the capability, its grounded status, where it lives, its
+        interface, its governance and its dependencies — or ``{"found": False}``
+        for an undeclared capability (fail-closed). Read-only: it grants no
+        permission to change anything.
+        """
+        return self.development_self_model().boundary(name)
 
     def repository_symbol(self, query: str, limit: int = 20):
         """Deterministic, read-only lookup of a repository symbol (Stage A2).
