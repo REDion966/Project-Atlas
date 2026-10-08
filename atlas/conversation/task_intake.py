@@ -777,14 +777,26 @@ _SUCCESS_CUES: tuple[str, ...] = (
 _AMBIGUOUS_PRONOUN_RE = re.compile(r"\b(it|that|this|them|those)\b")
 
 #: Bounded relative/complementizer context for "that" (L6): a determiner or
-#: quantifier, one word, then "that" ("a module that tracks ..."). A "that"
-#: occurrence in this exact closed function-word context is a complementizer —
+#: quantifier, one or more words, then "that" ("a module that tracks ..."). A
+#: "that" occurrence in this closed function-word context is a complementizer —
 #: a different lexeme from a demonstrative/pronoun "that" — so it must not raise
 #: the reference ambiguity reason. No POS tagging, no parser, no content-word
 #: vocabulary: this is a bounded function-word pattern only.
+#:
+#: Command 4 (L6): the intervening noun phrase is allowed to be a MULTI-WORD
+#: phrase, because a real request names a long, specific subject ("a small
+#: bounded helper function to the repository relevance module that returns
+#: ..."). The earlier single-word form failed on exactly those, so a relative
+#: "that" was misread as an unresolved REFERENCE and a fully-specified request
+#: was wrongly held for clarification. The pattern stays closed (determiners +
+#: "that"); it merely stops assuming the subject is one word long.
 _RELATIVE_THAT_RE = re.compile(
-    r"\b(?:a|an|the|any|every|some|each|this|that)\s+\w+\s+(that)\b"
+    r"\b(?:a|an|the|any|every|some|each|this|that)(?:\s+[^\s;!?]+)+\s+(that)\b"
 )
+
+#: A sentence break inside a determiner -> "that" span means the "that" belongs
+#: to a NEW sentence and is therefore a demonstrative, not a complementizer.
+_SENTENCE_BREAK_RE = re.compile(r"[.!?]\s")
 
 #: Ambiguity score at or above which a governed request must be clarified first.
 #: Unchanged: this is the single global threshold, used both when the report is
@@ -959,13 +971,67 @@ def _has_reference_ambiguity(lowered: str) -> bool:
     reason contributed by its genuine reference, and unresolvable or
     demonstrative cases stay fail-closed exactly as before.
     """
-    complementizer_spans = {
-        match.start(1) for match in _RELATIVE_THAT_RE.finditer(lowered)
-    }
+    complementizer_spans: set[int] = set()
+    for match in _RELATIVE_THAT_RE.finditer(lowered):
+        # A sentence break between the determiner and "that" means the two belong
+        # to different sentences, so the "that" is a demonstrative reference.
+        if _SENTENCE_BREAK_RE.search(match.group(0)):
+            continue
+        complementizer_spans.add(match.start(1))
     for match in _AMBIGUOUS_PRONOUN_RE.finditer(lowered):
         if match.start(1) in complementizer_spans:
             continue
         return True
+    return False
+
+
+#: Fallback types the STRUCTURED change-request meaning may promote to
+#: DEVELOPMENT_REQUEST (Command 4: L1/L3). Deliberately narrow — the cue-based
+#: route already decided everything above this point, and two existing
+#: contracts are preserved exactly:
+#:   * ACTION_REQUEST is NOT generally upgradeable: a bare "Create a report." /
+#:     "Write the report." is an ordinary action, not a code change. It is
+#:     promoted only when the request names a CONCRETE code target or addresses
+#:     Atlas directly (see ``_meaning_upgrades_to_development``).
+#:   * INFORMATION_REQUEST (the research route) is never promoted, so
+#:     "Research how Atlas could improve X" keeps its existing route.
+_MEANING_UPGRADEABLE_TYPES: frozenset[TaskType] = frozenset(
+    {TaskType.CONVERSATION, TaskType.QUESTION, TaskType.UNKNOWN}
+)
+
+#: A direct addressee of the request (Atlas itself, or the assistant as "you").
+_MENTIONS_ATLAS_RE = re.compile(r"\b(?:you|atlas)\b")
+
+
+def _meaning_upgrades_to_development(
+    normalized: str, lowered: str, fallback: TaskType
+) -> bool:
+    """Whether STRUCTURED meaning promotes ``fallback`` to DEVELOPMENT_REQUEST.
+
+    Delegates to the Atlas-owned structured meaning layer
+    (:mod:`atlas.conversation.development_intent`), which decides from MODALITY +
+    ACTION CLASS + ADDRESSEE + NEGATION rather than from a surface phrase list,
+    so semantically equivalent requests converge on the same Atlas
+    representation. Fail-closed: a broken interpreter changes no route, so any
+    failure yields ``False`` and the existing classification stands unchanged.
+    """
+    try:
+        from atlas.conversation.development_intent import (
+            interpret_development_intent,
+        )
+
+        intent = interpret_development_intent(normalized)
+    except Exception:  # noqa: BLE001 — interpretation failure changes no route
+        return False
+    if not intent.is_change_request:
+        return False
+    if fallback in _MEANING_UPGRADEABLE_TYPES:
+        return True
+    if fallback is TaskType.ACTION_REQUEST:
+        # Only when the request itself shows it is about CODE (a named path /
+        # module / symbol) or is addressed to Atlas — never for a bare artifact
+        # action such as "Create a report.".
+        return bool(intent.concrete_targets) or bool(_MENTIONS_ATLAS_RE.search(lowered))
     return False
 
 
@@ -1818,17 +1884,6 @@ class TaskIntake:
             lowered, _ACTION_CUE_FORMS, word_boundary=True
         ) or _first_hit(lowered, _ACTION_COMPOUND_FORMS, word_boundary=True)
 
-        # Development wins over generic research/action because it names
-        # Atlas itself or its capabilities as the target. (The development
-        # decision itself is returned above, before the investigation check.)
-        # L3 — the LEADING requested operation outranks a later development cue:
-        # "Research how Atlas could improve ..." is research, not development.
-        if research:
-            return TaskType.INFORMATION_REQUEST
-        if greeting:
-            return TaskType.CONVERSATION
-        if question:
-            return TaskType.QUESTION
         # NLU-1 — a request for a bounded planning/assistance artifact (a plan,
         # checklist, roadmap, or process) is an ANSWERABLE request, not an
         # executable tool action. Routing it as a casual question keeps it out
@@ -1836,13 +1891,47 @@ class TaskIntake:
         # misread "no registered tool for this subject" as an Atlas
         # capability gap. Explicit self-development evidence above keeps
         # precedence, so "create a module/capability" remains DEVELOPMENT.
-        if action and not development and _has_word_cue(
-            lowered, _PLANNING_ARTIFACT_CUES
-        ):
-            return TaskType.QUESTION
-        if action:
-            return TaskType.ACTION_REQUEST
-        return TaskType.CONVERSATION
+        planning_artifact = bool(
+            action
+            and not development
+            and _has_word_cue(lowered, _PLANNING_ARTIFACT_CUES)
+        )
+
+        # Development wins over generic research/action because it names
+        # Atlas itself or its capabilities as the target. (The development
+        # decision itself is returned above, before the investigation check.)
+        # L3 — the LEADING requested operation outranks a later development cue:
+        # "Research how Atlas could improve ..." is research, not development.
+        if research:
+            fallback = TaskType.INFORMATION_REQUEST
+        elif greeting:
+            fallback = TaskType.CONVERSATION
+        elif question or planning_artifact:
+            fallback = TaskType.QUESTION
+        elif action:
+            fallback = TaskType.ACTION_REQUEST
+        else:
+            fallback = TaskType.CONVERSATION
+
+        # Command 4 (L1/L3) — STRUCTURED change-request meaning, consulted only
+        # for the FALLBACK types. Every precedence rule above is unchanged:
+        # governance, lifecycle, planning, investigation, repository-impact and
+        # the explicit development cues still return first, and a read-only
+        # leading operation ("Research how Atlas could improve X") is still not a
+        # development request because its modality resolves to a QUESTION rather
+        # than a request for action.
+        #
+        # What changes is that a request phrased with a DIFFERENT MODALITY but
+        # the same MEANING — "Can you implement X?", "I need X implemented.",
+        # "Please add X.", "I want Atlas to support X." — now converges on the
+        # same Atlas representation as "Implement X." instead of falling through
+        # to conversation or question. The decision is structural (modality +
+        # action class + addressee + negation), not a phrase match.
+        if _meaning_upgrades_to_development(
+            normalized, lowered, fallback
+        ) and not _leading_operation_is_read_only(meaning):
+            return TaskType.DEVELOPMENT_REQUEST
+        return fallback
 
     def _extract_objective(self, normalized: str) -> str:
         lowered = normalized.lower()

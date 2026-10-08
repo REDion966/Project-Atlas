@@ -6482,6 +6482,48 @@ class Atlas:
             external_model_available=self._external_providers_enabled(),
         )
 
+    def fault_localization(
+        self,
+        *,
+        changed_paths: Any = (),
+        changed_symbols: Any = (),
+        failure_category: str = "",
+        verify_target: str = "",
+        max_suspects: int = 8,
+    ) -> dict:
+        """Bounded, deterministic SUSPECT LOCATIONS for a failed change.
+
+        Command 4. Composes evidence Atlas ALREADY holds — the change guard's
+        changed paths, the plan's bounded verification target, and the existing
+        repository graph (symbol regions, unambiguous callers/callees, import
+        relations) — into a ranked suspect list where every entry carries the
+        evidence that produced it.
+
+        Read-only and model-free: it decides nothing, diagnoses nothing,
+        authorizes nothing, executes nothing and promotes nothing. It never
+        invents a suspect — with no change evidence the result is empty.
+        """
+        try:
+            from atlas.evolution.fault_localization import localize_fault
+        except Exception:  # noqa: BLE001 — an unavailable mechanism is no result
+            return {}
+        try:
+            repository_map = self.repository_map
+        except Exception:  # noqa: BLE001
+            repository_map = self._repository_map
+        try:
+            result = localize_fault(
+                repository_map=repository_map,
+                changed_paths=tuple(changed_paths or ()),
+                changed_symbols=tuple(changed_symbols or ()),
+                failure_category=str(failure_category or ""),
+                verify_target=str(verify_target or ""),
+                max_suspects=max_suspects,
+            )
+        except Exception:  # noqa: BLE001 — fail closed to no suspects
+            return {}
+        return result.to_dict()
+
     def semantic_similarity_available(self) -> bool:
         """True when an OPTIONAL semantic-similarity specialist is wired.
 
